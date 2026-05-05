@@ -528,9 +528,12 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
         field_id, metric_type, std::move(info.cache_index));
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
-    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
+    LOG_INFO("index_mem_size: {}", info.index_mem_size);
+    stats_.mem_size += info.index_mem_size;
+    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}. mem_size:{}, ",
              info.field_id,
-             id_);
+             id_,
+             stats_.mem_size.load());
 }
 
 void
@@ -1157,6 +1160,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            LOG_INFO("chunked_column_group->memory_size(): {}",
+                     chunked_column_group->memory_size());
             stats_.mem_size += chunked_column_group->memory_size();
         }
     }
@@ -4658,6 +4663,22 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             init_storage_v1_pk_index(field_id, column, data_type, is_replace);
         }
     }
+    if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
+        AssertInfo(field_id.get() != -1, "Primary key is -1");
+        AssertInfo(insert_record_.empty_pks(),
+                   "primary key records already exists, current field id {}",
+                   field_id.get());
+        insert_record_.insert_pks(data_type, column.get());
+        insert_record_.seal_pks();
+        size_t pk_index_size = insert_record_.pk2offset_->memory_size();
+        stats_.mem_size += pk_index_size;
+        LOG_INFO(
+            "Adding pk to offset index with size {} for segment {} , mem_size= "
+            "{}",
+            pk_index_size,
+            id_,
+            stats_.mem_size.load());
+    }
 
     // now interim index does not touch column warmup
     generate_interim_index(field_id, num_rows, op_ctx);
@@ -4732,6 +4753,10 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     insert_record_.init_timestamps_from_owned(std::move(timestamps),
                                               std::move(index));
     stats_.mem_size += sizeof(Timestamp) * num_rows;
+    LOG_INFO("Adding timestamps raw with size {} for segment {} , mem_size= {}",
+             timestamps.size() * sizeof(Timestamp),
+             id_,
+             stats_.mem_size.load());
 }
 
 void

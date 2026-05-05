@@ -375,6 +375,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         BuildValidDataFromBitmap(
             this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
     }
+    SetMemSize(index_.Size());
 }
 
 template <typename T>
