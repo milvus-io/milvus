@@ -341,6 +341,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                       KnowhereStatusString(stat));
         SetDim(index_.Dim());
     }
+    SetMemSize(index_.Size());
 
     LoadValidDataFromBinarySet(binary_set, this);
 }

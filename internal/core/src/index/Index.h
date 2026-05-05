@@ -145,6 +145,16 @@ class IndexBase {
         cached_byte_size_ = 0;
     }
 
+    virtual size_t
+    MemByteSize() const {
+        return mem_size_;
+    }
+
+    virtual void
+    SetMemSize(size_t mem_size) {
+        mem_size_ = mem_size;
+    }
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {
@@ -153,6 +163,7 @@ class IndexBase {
     IndexType index_type_ = "";
     cachinglayer::ResourceUsage cell_size_ = {0, 0};
     mutable int64_t cached_byte_size_ = 0;
+    size_t mem_size_ = 0;
 
     std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };

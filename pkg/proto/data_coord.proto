@@ -463,6 +463,7 @@ message SegmentInfo {
   // timestamps to commit_timestamp, then clears this field back to 0. L0 delete
   // compaction is excluded because it only compacts delete logs.
   uint64 commit_timestamp = 36;
+  int64 mem_size = 37;
 }
 
 message SegmentStartPosition {
