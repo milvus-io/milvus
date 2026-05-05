@@ -354,6 +354,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         auto dim = index_.Dim();
         SetDim(dim > 0 ? dim : GetDim());
     }
+    SetMemSize(index_.Size());
 }
 
 template <typename T>
