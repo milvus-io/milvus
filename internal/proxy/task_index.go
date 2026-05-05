@@ -473,7 +473,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return err
 			}
 		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) || vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType) {
 			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
