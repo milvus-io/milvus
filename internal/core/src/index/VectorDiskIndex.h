@@ -21,6 +21,7 @@
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
+#define KIOXIA_AIS
 
 namespace milvus::index {
 
@@ -130,9 +131,14 @@ class VectorDiskAnnIndex : public VectorIndex {
  private:
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
-    uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;
+#ifdef KIOXIA_AIS
+    uint32_t search_beamwidth_ = 1;
+    uint32_t search_vectors_beamwidth_ = 1;
+#else  /* KIOXIA_AIS */
+    uint32_t search_beamwidth_ = 8;
+#endif /* KIOXIA_AIS */
     std::vector<size_t> empty_emb_list_offsets_;
 };
 

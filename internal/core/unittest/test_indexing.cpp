@@ -77,6 +77,11 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/Timer.h"
+#include "storage/Util.h"
+#include <boost/filesystem.hpp>
+#include <sys/stat.h>
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -484,6 +489,7 @@ static const auto kIndexTestValues = ::testing::Values(
     std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
 #ifdef BUILD_DISK_ANN
     std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_AISAQ, knowhere::metric::L2),
 #endif
     std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2));
 
@@ -605,11 +611,158 @@ TEST_P(IndexTest, BuildAndQuery) {
         // for other metrics we can't verify the correctness unless we perform
         // brute force search to get the ground truth.
     }
-    if (!is_sparse) {
+    if (!is_sparse && index_type != knowhere::IndexEnum::INDEX_AISAQ) {
         // sparse doesn't support range search yet
         search_info.search_params_ = range_search_conf;
         vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
     }
+}
+
+void
+build_and_query(IndexType index_type,
+                knowhere::Json build_conf,
+                knowhere::Json search_conf,
+                std::string index_type_str) {
+    constexpr int N = 10000;
+    constexpr int TOPK = 10;
+
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = index_type;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    std::vector<knowhere::DataSetPtr> datasets;
+    std::vector<std::vector<float>> ftrashs;
+    auto raw = raw_data.data();
+    for (int beg = 0; beg < N; beg += TestChunkSize) {
+        auto end = beg + TestChunkSize;
+        if (end > N) {
+            end = N;
+        }
+        std::vector<float> ft(raw + DIM * beg, raw + DIM * end);
+
+        auto ds = knowhere::GenDataSet(end - beg, DIM, ft.data());
+        datasets.push_back(ds);
+        ftrashs.push_back(std::move(ft));
+    }
+
+    for (auto& ds : datasets) {
+        index->BuildWithDataset(ds, build_conf);
+    }
+
+    auto bitmap = BitsetType(N, false);
+    // exclude the first
+    for (int i = 0; i < N / 2; ++i) {
+        bitmap.set(i);
+    }
+
+    BitsetView view = bitmap;
+    auto query_ds = knowhere::GenDataSet(1, DIM, raw_data.data());
+
+    milvus::SearchInfo searchInfo;
+    searchInfo.topk_ = TOPK;
+    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.search_params_ = search_conf;
+    auto vec_index = dynamic_cast<index::VectorIndex*>(index.get());
+    SearchResult result;
+    vec_index->Query(query_ds, searchInfo, view, nullptr, result);
+    EXPECT_NO_THROW(
+        vec_index->Query(query_ds, searchInfo, view, nullptr, result));
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    int is_equal =
+        strcmp(vec_index->GetIndexType().c_str(), index_type_str.c_str());
+    EXPECT_EQ(is_equal, 0);
+
+    for (int i = 0; i < TOPK; ++i) {
+        ASSERT_FALSE(result.seg_offsets_[i] < N / 2);
+    }
+}
+
+TEST(Indexing, HNSWBuildAndQuery) {
+    auto build_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {knowhere::indexparam::HNSW_M, "16"},
+        {knowhere::indexparam::EFCONSTRUCTION, "500"},
+    };
+
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 40},
+    };
+    build_and_query(
+        knowhere::IndexEnum::INDEX_HNSW, build_conf, search_conf, "HNSW");
+}
+
+TEST(Indexing, FaissHNSWFlatBuildAndQuery) {
+    auto build_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {knowhere::indexparam::HNSW_M, "48"},
+        {knowhere::indexparam::EFCONSTRUCTION, "500"},
+    };
+
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 40},
+        {"seed_ef", 30},
+        {knowhere::indexparam::OVERVIEW_LEVELS, 3},
+        {"override_faiss_search", false},
+    };
+    build_and_query(
+        knowhere::IndexEnum::INDEX_HNSW, build_conf, search_conf, "HNSW");
+}
+
+TEST(Indexing, FaissHNSWPQBuildAndQuery) {
+    auto build_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {knowhere::indexparam::HNSW_M, "16"},
+        {knowhere::indexparam::EFCONSTRUCTION, "500"},
+        {knowhere::indexparam::NBITS, "10"},
+        {knowhere::indexparam::M, "8"},
+        {"refine", true},
+        {"refine_type", "FLAT"},
+    };
+
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 40},
+        {"seed_ef", 30},
+        {knowhere::indexparam::OVERVIEW_LEVELS, 3},
+        {"override_faiss_search", false},
+        {"refine_k", 1.5},
+    };
+    build_and_query(
+        knowhere::IndexEnum::INDEX_HNSW_PQ, build_conf, search_conf, "HNSW_PQ");
+}
+
+TEST(Indexing, FaissHNSWSQBuildAndQuery) {
+    auto build_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {knowhere::indexparam::HNSW_M, "16"},
+        {knowhere::indexparam::EFCONSTRUCTION, "500"},
+        {knowhere::indexparam::SQ_TYPE, "SQ6"},
+        {"refine", true},
+        {"refine_type", "FLAT"},
+    };
+
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 40},
+        {"seed_ef", 30},
+        {knowhere::indexparam::OVERVIEW_LEVELS, 3},
+        {"override_faiss_search", false},
+        {"refine_k", 1.5},
+    };
+    build_and_query(
+        knowhere::IndexEnum::INDEX_HNSW_SQ, build_conf, search_conf, "HNSW_SQ");
 }
 
 TEST_P(IndexTest, Mmap) {
@@ -701,6 +854,15 @@ TEST_P(IndexTest, GetVector) {
     index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
 
+    if (index_type == knowhere::IndexEnum::INDEX_AISAQ) {
+        build_conf[milvus::index::DISK_ANN_BUILD_THREAD_NUM] =
+            std::to_string(2);
+        build_conf[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] =
+            std::to_string(2);
+        build_conf[milvus::index::DISK_ANN_PQ_CODE_BUDGET] =
+            std::to_string(0.001);
+        build_conf[milvus::index::AISAQ_REARRANGE] = "false";
+    }
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
@@ -1359,6 +1521,88 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
 }
 
+TEST(Indexing, SearchAISAQWithInvalidParam) {
+    int64_t NB = 1000;
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(24)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(56)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+    };
+
+    // build disk ann index
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT);
+    FixedVector<float> xb_data =
+        dataset.get_col<float>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+
+    // serialize and load disk index, disk index can only be search after loading for now
+    auto create_index_result = index->Upload();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    auto index_files = create_index_result->GetIndexFiles();
+    auto load_conf = generate_load_conf(index_type, metric_type, NB);
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    load_conf["index_files"] = index_files;
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    // search disk index with search_list == limit
+    int query_offset = 100;
+    knowhere::DataSetPtr xq_dataset =
+        knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = K;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::DISK_ANN_QUERY_LIST, K - 1},
+    };
+    SearchResult result;
+    EXPECT_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result),
+        std::runtime_error);
+}
+
 TEST(Indexing, SearchDiskAnnWithBFloat16) {
     int64_t NB = 1000;
     int64_t NQ = 2;
@@ -1853,6 +2097,382 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
         [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 
     loaded_vec_index->CleanLocalData();
+}
+
+TEST(Indexing, SearchAISAQ_WithFloat16) {
+    int64_t NB = 1000;
+    int64_t NQ = 2;
+    int64_t K = 4;
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT16;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+    };
+
+    // build aisaq index
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    FixedVector<float16> xb_data =
+        dataset.get_col<float16>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+
+    // serialize and load disk index, disk index can only be search after loading for now
+    auto create_index_result = index->Upload();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    auto index_files = create_index_result->GetIndexFiles();
+    auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    load_conf["index_files"] = index_files;
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    // search disk index with search_list == limit
+    int query_offset = 100;
+    knowhere::DataSetPtr xq_dataset =
+        knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = K;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
+    };
+    SearchResult result;
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    int is_equal = strcmp(vec_index->GetIndexType().c_str(), "AISAQ");
+    EXPECT_EQ(is_equal, 0);
+}
+
+TEST(Indexing, SearchAISAQ_Inline_WithFloat16) {
+    int64_t NB = 1000;
+    int64_t NQ = 2;
+    int64_t K = 4;
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT16;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(24)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(56)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_PQ_DIMS, std::to_string(16)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::AISAQ_INLINE_PQ, std::to_string(12)},
+        {milvus::index::AISAQ_NUM_ENTRY_POINTS, std::to_string(100)},
+        {milvus::index::AISAQ_REARRANGE, "false"},
+    };
+
+    // build aisaq index
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    FixedVector<float16> xb_data =
+        dataset.get_col<float16>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+
+    // serialize and load disk index, disk index can only be search after loading for now
+    auto create_index_result = index->Upload();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    auto index_files = create_index_result->GetIndexFiles();
+    auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::index::AISAQ_PQ_CACHE_SIZE] = std::to_string(1024);
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    // search disk index with search_list == limit
+    int query_offset = 100;
+    knowhere::DataSetPtr xq_dataset =
+        knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = K;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::AISAQ_PQ_READ_PAGE_CACHE_SIZE,
+         std::to_string(10485760)},
+        {milvus::index::DISK_ANN_QUERY_BEAMWIDTH, std::to_string(4)},
+        {milvus::index::DISK_ANN_QUERY_PQ_BEAMWIDTH, std::to_string(2)},
+        {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
+    };
+    SearchResult result;
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    int is_equal = strcmp(vec_index->GetIndexType().c_str(), "AISAQ");
+    EXPECT_EQ(is_equal, 0);
+}
+
+TEST(Indexing, BuildAISAQWithNoDataset) {
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT16;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(24)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(56)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_PQ_DIMS, std::to_string(16)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::AISAQ_INLINE_PQ, std::to_string(2050)},
+    };
+
+    // build aisaq index
+    EXPECT_THROW(index->Build(build_conf), std::runtime_error);
+}
+
+TEST(Indexing, BuildAISAQ_InvalidInline) {
+    int64_t NB = 1000;
+    int64_t NQ = 2;
+    int64_t K = 4;
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT16;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(24)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(56)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_PQ_DIMS, std::to_string(16)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::AISAQ_INLINE_PQ, std::to_string(2050)},
+    };
+
+    // build aisaq index
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    FixedVector<float16> xb_data =
+        dataset.get_col<float16>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+
+    EXPECT_THROW(index->BuildWithDataset(xb_dataset, build_conf),
+                 std::runtime_error);
+}
+
+TEST(Indexing, SearchAISAQ_Rearrange_WithFloat16) {
+    int64_t NB = 1000;
+    int64_t NQ = 2;
+    int64_t K = 4;
+    IndexType index_type = knowhere::IndexEnum::INDEX_AISAQ;
+    MetricType metric_type = knowhere::metric::L2;
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT16;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    milvus::storage::FieldDataMeta field_data_meta{
+        collection_id, partition_id, segment_id, field_id};
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    auto build_conf = Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, std::to_string(DIM)},
+        {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(24)},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(56)},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
+        {milvus::index::DISK_ANN_PQ_DIMS, std::to_string(16)},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(2)},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+        {milvus::index::AISAQ_INLINE_PQ, std::to_string(0)},
+        {milvus::index::AISAQ_NUM_ENTRY_POINTS, std::to_string(1)},
+        {milvus::index::AISAQ_REARRANGE, "true"},
+    };
+
+    // build aisaq index
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
+    FixedVector<float16> xb_data =
+        dataset.get_col<float16>(milvus::FieldId(field_id));
+    knowhere::DataSetPtr xb_dataset =
+        knowhere::GenDataSet(NB, DIM, xb_data.data());
+
+    ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+
+    // serialize and load disk index, disk index can only be search after loading for now
+    auto create_index_result = index->Upload();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    auto index_files = create_index_result->GetIndexFiles();
+    auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::index::AISAQ_PQ_CACHE_SIZE] = std::to_string(1024);
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(vec_index->Count(), NB);
+
+    // search disk index with search_list == limit
+    int query_offset = 100;
+    knowhere::DataSetPtr xq_dataset =
+        knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = K;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::AISAQ_PQ_READ_PAGE_CACHE_SIZE,
+         std::to_string(10485760)},
+        {milvus::index::DISK_ANN_QUERY_LIST, K * 2},
+    };
+    SearchResult result;
+    EXPECT_NO_THROW(
+        vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result));
+    EXPECT_EQ(vec_index->GetDim(), DIM);
+    int is_equal = strcmp(vec_index->GetIndexType().c_str(), "AISAQ");
+    EXPECT_EQ(is_equal, 0);
 }
 
 #endif
