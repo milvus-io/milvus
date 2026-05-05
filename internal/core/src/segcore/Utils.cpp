@@ -1445,6 +1445,12 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         milvus::cachinglayer::Manager::GetInstance()
             .CreateCacheSlot<index::IIndexReaderBase>(std::move(translator),
                                                       op_ctx);
+
+    milvus::cachinglayer::CellAccessor accessor(
+        load_index_info->cache_index,
+        std::vector<milvus::cachinglayer::internal::ListNode::NodePin>());
+    size_t cell_size = accessor.get_cell_of(0)->MemByteSize();
+    load_index_info->index_mem_size = cell_size;
 }
 
 FieldDataPtr
