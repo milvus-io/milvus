@@ -383,6 +383,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                  disk_valid_data.bitmap.data(),
                                  offset_mapping_options);
     }
+    SetMemSize(index_.Size());
 }
 
 template <typename T>
