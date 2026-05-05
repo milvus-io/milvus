@@ -50,6 +50,7 @@ const (
 	IvfHNSW    IndexType = "IVF_HNSW"
 	AUTOINDEX  IndexType = "AUTOINDEX"
 	DISKANN    IndexType = "DISKANN"
+	AISAQ      IndexType = "AISAQ"
 	SCANN      IndexType = "SCANN"
 	MinHashLSH IndexType = "MINHASH_LSH"
 
