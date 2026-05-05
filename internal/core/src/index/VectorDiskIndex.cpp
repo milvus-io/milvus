@@ -405,6 +405,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                   "disk metadata-only load");
         }
     }
+    SetMemSize(index_.Size());
 }
 
 template <typename T>
