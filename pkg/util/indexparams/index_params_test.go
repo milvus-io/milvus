@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -36,6 +37,12 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		params.Save(params.CommonCfg.AiSAQCfg.InlinePQ.Key, "0")
+		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "512")
+		params.Save(params.CommonCfg.AiSAQCfg.Rearrange.Key, "true")
+		params.Save(params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.Key, "512")
+		params.Save(params.CommonCfg.AiSAQCfg.NumEntryPoints.Key, "100")
 		err := FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
@@ -49,7 +56,27 @@ func TestDiskIndexParams(t *testing.T) {
 
 		searchCacheBudgetRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.10, searchCacheBudgetRatio)
+		assert.Equal(t, 0.0, searchCacheBudgetRatio)
+
+		pqCacheSize, err := strconv.ParseInt(indexParams[PQCacheSizeKey], 10, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(536870912), pqCacheSize)
+
+		inlinePQ, err := strconv.ParseInt(indexParams[InlinePQKey], 10, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), inlinePQ)
+
+		numEntryPoints, err := strconv.ParseInt(indexParams[NumEntryPointsKey], 10, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), numEntryPoints)
+
+		rearrange, err := strconv.ParseBool(indexParams[RearrangeKey])
+		assert.NoError(t, err)
+		assert.True(t, rearrange)
+
+		pqReadPageCacheSize, err := strconv.ParseInt(indexParams[PQReadPageCacheSizeKey], 10, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(512), pqReadPageCacheSize)
 	})
 
 	t.Run("fill index params with auto index", func(t *testing.T) {
@@ -73,6 +100,7 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 
 		indexParams = make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
@@ -133,6 +161,12 @@ func TestDiskIndexParams(t *testing.T) {
 
 		indexParams = append(indexParams,
 			&commonpb.KeyValuePair{
+				Key:   common.IndexTypeKey,
+				Value: "DISKANN",
+			})
+
+		indexParams = append(indexParams,
+			&commonpb.KeyValuePair{
 				Key:   PQCodeBudgetRatioKey,
 				Value: "0.125",
 			})
@@ -151,7 +185,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		indexParams, err := UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.NoError(t, err)
-		assert.True(t, len(indexParams) == 4)
+		assert.True(t, len(indexParams) == 5)
 
 		val := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
 		cfgVal, cfgErr := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
@@ -225,19 +259,21 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[NumBuildThreadRatioKey] = "1.0"
 
 		indexParams[SearchCacheBudgetRatioKey] = "0.125"
-		err := SetDiskIndexBuildParams(indexParams, 100)
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		indexParams[common.DimKey] = "128"
+		err := SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
 
 		_, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
 
 		indexParams[SearchCacheBudgetRatioKey] = "aabb"
-		err = SetDiskIndexBuildParams(indexParams, 100)
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 
 		delete(indexParams, SearchCacheBudgetRatioKey)
 		delete(indexParams, SearchCacheBudgetKey)
-		err = SetDiskIndexBuildParams(indexParams, 100)
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
 
 		_, ok = indexParams[PQCodeBudgetKey]
@@ -254,6 +290,7 @@ func TestDiskIndexParams(t *testing.T) {
 		var params paramtable.ComponentParam
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
 
 		err := SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
@@ -318,6 +355,7 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 
 		indexParams := make(map[string]string)
+		indexParams[common.IndexTypeKey] = "DISKANN"
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
