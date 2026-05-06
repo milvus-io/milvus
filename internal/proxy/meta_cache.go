@@ -432,6 +432,14 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 		if collection, ok := db[collectionName]; ok {
 			return collection, collection.isCollectionCached()
 		}
+		// update() stores alias requests under the real collection name.
+		if aliasDB, ok := m.aliasInfo[database]; ok {
+			if entry, ok := aliasDB[collectionName]; ok && entry.collectionName != "" {
+				if collection, ok := db[entry.collectionName]; ok {
+					return collection, collection.isCollectionCached()
+				}
+			}
+		}
 	}
 
 	return nil, false
