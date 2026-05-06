@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -1069,6 +1070,26 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		})
 	}
 
+	// Load text indexes in parallel through LoadPool.
+	futures := make([]*conc.Future[any], 0, len(textIndexes))
+	for _, info := range textIndexes {
+		textIndexInfo := info
+		futures = append(futures, GetLoadPool().Submit(func() (any, error) {
+			return nil, segment.loadTextIndexCgo(ctx, textIndexInfo, schemaHelper)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return err
+	}
+	loadTextIndexesSpan := tr.RecordSpan()
+
+	// create index for unindexed text fields.
+	for fieldID := range unindexedTextFields {
+		if err := segment.CreateTextIndex(ctx, fieldID); err != nil {
+			return err
+		}
+	}
+
 	for fieldID, info := range jsonKeyStats {
 		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper, jsonBasePaths[fieldID]); err != nil {
 			return err
@@ -1085,6 +1106,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
+		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
 	)
 	return nil
