@@ -311,11 +311,6 @@ ParallelDegreeSplitStrategy::split(
         return continuous_blocks;
     };
 
-    // If row group size is less than parallel degree, split non-continuous groups
-    if (sorted_row_groups.size() <= actual_parallel_degree) {
-        return create_continuous_blocks();
-    }
-
     // Otherwise, split based on parallel degree
     size_t avg_block_size =
         (sorted_row_groups.size() + actual_parallel_degree - 1) /
