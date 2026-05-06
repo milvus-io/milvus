@@ -7,7 +7,7 @@
 package cgopb
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
