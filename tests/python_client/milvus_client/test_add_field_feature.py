@@ -7,6 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import DataType
+from pymilvus import AnnSearchRequest, RRFRanker
 import numpy as np
 
 prefix = "add_field"
@@ -450,6 +451,67 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
 
         # 9. cleanup
         self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_add_nullable_vector_field_hybrid_search(self):
+        """
+        target: test hybrid search after adding a nullable vector field
+        method: add nullable vector field, insert mixed old/new rows, index, reload, and hybrid search
+        expected: hybrid search on original and added nullable vector fields succeeds
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 32
+        base_vec_field = "embeddings"
+        new_vec_field = "embeddings_new"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(base_vec_field, DataType.FLOAT_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(base_vec_field, index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        base_vecs = cf.gen_vectors(default_nb * 2, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        old_rows = [
+            {default_primary_key_field_name: i, base_vec_field: base_vecs[i]}
+            for i in range(default_nb)
+        ]
+        self.insert(client, collection_name, old_rows)
+
+        self.add_collection_field(client, collection_name, field_name=new_vec_field,
+                                  data_type=DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        new_vecs = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        new_rows = [
+            {
+                default_primary_key_field_name: i + default_nb,
+                base_vec_field: base_vecs[i + default_nb],
+                new_vec_field: None if i % 2 == 0 else new_vecs[i],
+            }
+            for i in range(default_nb)
+        ]
+        self.insert(client, collection_name, new_rows)
+
+        new_index_params = self.prepare_index_params(client)[0]
+        new_index_params.add_index(new_vec_field, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, collection_name, new_index_params)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        query_vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        reqs = [
+            AnnSearchRequest(query_vectors, base_vec_field, {"metric_type": "COSINE"}, default_limit),
+            AnnSearchRequest(query_vectors, new_vec_field, {"metric_type": "COSINE"}, default_limit),
+        ]
+        self.hybrid_search(client, collection_name, reqs=reqs, ranker=RRFRanker(), limit=default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": 1,
+                                        "ids": list(range(default_nb * 2)),
+                                        "limit": default_limit,
+                                        "pk_name": default_primary_key_field_name})
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
