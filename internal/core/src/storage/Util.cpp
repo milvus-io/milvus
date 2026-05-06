@@ -79,6 +79,14 @@ std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"remote", ChunkManagerType::Remote},
     {"opendal", ChunkManagerType::OpenDAL}};
 
+static std::shared_ptr<arrow::Array>
+NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
+                             DataType data_type,
+                             int64_t dim,
+                             bool nullable,
+                             DataType element_type,
+                             const FieldMeta& field_meta);
+
 enum class CloudProviderType : int8_t {
     UNKNOWN = 0,
     AWS = 1,
@@ -1540,10 +1548,18 @@ GetFieldDatasFromManifest(
 
     bool nullable = field_meta.field_schema.nullable();
     bool is_external = !ext_field.empty();
+    std::optional<FieldMeta> normalize_field_meta;
+    if (is_external) {
+        auto schema = field_meta.field_schema;
+        if (schema.fieldid() == 0) {
+            schema.set_fieldid(field_meta.field_id);
+        }
+        normalize_field_meta.emplace(FieldMeta::ParseFrom(schema));
+    }
 
-    // External tables: schemaless reader — let the reader derive types from
+    // External tables: schemaless reader - let the reader derive types from
     // file metadata, then normalize Arrow types to Milvus internal format.
-    // Internal tables: explicit schema reader — the reader returns data in
+    // Internal tables: explicit schema reader - the reader returns data in
     // the exact Milvus-native Arrow types, no normalization needed.
     std::shared_ptr<arrow::Schema> reader_schema = nullptr;
     if (!is_external) {
@@ -1599,11 +1615,13 @@ GetFieldDatasFromManifest(
 
         auto raw_column = batch->GetColumnByName(column_name);
         if (is_external) {
-            raw_column = NormalizeExternalArrow(raw_column,
-                                                data_type.value(),
-                                                dim,
-                                                nullable,
-                                                element_type.value());
+            raw_column =
+                NormalizeExternalArrowByType(raw_column,
+                                             data_type.value(),
+                                             dim,
+                                             nullable,
+                                             element_type.value(),
+                                             normalize_field_meta.value());
         }
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
         auto field_data = CreateFieldData(
@@ -1692,16 +1710,25 @@ GetFieldIDList(FieldId column_group_id,
     return field_id_list;
 }
 
+std::string
+FieldErrorSuffix(const FieldMeta& field_meta) {
+    return fmt::format(" for field '{}' (external_field '{}')",
+                       field_meta.get_name().get(),
+                       field_meta.get_external_field());
+}
+
 void
 ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
                                    DataType data_type,
-                                   int dim) {
+                                   int dim,
+                                   const FieldMeta& field_meta) {
     auto fsb_array =
         std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
     AssertInfo(fsb_array->byte_width() == byte_width,
-               "vector byte width mismatch, expected {} bytes for "
+               "vector byte width mismatch{}, expected {} bytes for "
                "dim {}, actual {} bytes",
+               FieldErrorSuffix(field_meta),
                byte_width,
                dim,
                fsb_array->byte_width());
@@ -1710,7 +1737,8 @@ ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
 void
 ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
                           DataType data_type,
-                          int dim) {
+                          int dim,
+                          const FieldMeta& field_meta) {
     auto binary_array = std::static_pointer_cast<arrow::BinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
     for (int64_t i = 0; i < binary_array->length(); ++i) {
@@ -1719,8 +1747,9 @@ ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
         }
         auto actual_width = binary_array->value_length(i);
         AssertInfo(actual_width == byte_width,
-                   "vector byte width mismatch, expected {} bytes for "
+                   "vector byte width mismatch{}, expected {} bytes for "
                    "dim {}, actual {} bytes at row {}",
+                   FieldErrorSuffix(field_meta),
                    byte_width,
                    dim,
                    actual_width,
@@ -1745,7 +1774,8 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
 }
 
 arrow::Type::type
-ExpectedVectorListElementArrowType(DataType data_type) {
+ExpectedVectorListElementArrowType(DataType data_type,
+                                   const FieldMeta& field_meta) {
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return arrow::Type::FLOAT;
@@ -1756,11 +1786,13 @@ ExpectedVectorListElementArrowType(DataType data_type) {
         case DataType::VECTOR_BINARY:
         case DataType::VECTOR_BFLOAT16:
             ThrowInfo(ErrorCode::Unsupported,
-                      "vector list input is not supported for {}",
+                      "vector list input{} is not supported for {}",
+                      FieldErrorSuffix(field_meta),
                       data_type);
         default:
             ThrowInfo(ErrorCode::Unsupported,
-                      "unsupported vector list input for {}",
+                      "unsupported vector list input{} for {}",
+                      FieldErrorSuffix(field_meta),
                       data_type);
     }
 }
@@ -1781,10 +1813,14 @@ ArrowTypeName(arrow::Type::type type) {
 
 void
 ValidateVectorListElementType(
-    const std::shared_ptr<arrow::DataType>& actual_type, DataType data_type) {
-    auto expected_type = ExpectedVectorListElementArrowType(data_type);
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType data_type,
+    const FieldMeta& field_meta) {
+    auto expected_type =
+        ExpectedVectorListElementArrowType(data_type, field_meta);
     AssertInfo(actual_type->id() == expected_type,
-               "vector element type mismatch, expected {}, actual {}",
+               "vector element type mismatch{}, expected {}, actual {}",
+               FieldErrorSuffix(field_meta),
                ArrowTypeName(expected_type),
                actual_type->ToString());
 }
@@ -1792,7 +1828,8 @@ ValidateVectorListElementType(
 arrow::ArrayVector
 NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                                        DataType data_type,
-                                       int dim) {
+                                       int dim,
+                                       const FieldMeta& field_meta) {
     int byte_width = GetDataTypeSize(data_type, dim);
     auto fsb_type = arrow::fixed_size_binary(byte_width);
 
@@ -1802,7 +1839,8 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
     for (const auto& array : arrays) {
         auto type_id = array->type_id();
         if (type_id == arrow::Type::FIXED_SIZE_BINARY) {
-            ValidateFixedSizeBinaryVectorWidth(array, data_type, dim);
+            ValidateFixedSizeBinaryVectorWidth(
+                array, data_type, dim, field_meta);
             result.push_back(array);
             continue;
         }
@@ -1821,11 +1859,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
         if (type_id == arrow::Type::LIST) {
             auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
             auto values = list_array->values();
-            ValidateVectorListElementType(values->type(), data_type);
+            ValidateVectorListElementType(
+                values->type(), data_type, field_meta);
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "Vector list element must be fixed-width byte-aligned "
-                       "type, got bit_width={}",
+                       "vector list element{} must be fixed-width "
+                       "byte-aligned type, got bit_width={}",
+                       FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
             auto raw = reinterpret_cast<const uint8_t*>(
@@ -1835,8 +1875,9 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                     auto offset = list_array->value_offset(i);
                     auto actual_dim = list_array->value_offset(i + 1) - offset;
                     AssertInfo(actual_dim == dim,
-                               "vector dimension mismatch, expected {}, "
+                               "vector dimension mismatch{}, expected {}, "
                                "actual {} at row {}",
+                               FieldErrorSuffix(field_meta),
                                dim,
                                actual_dim,
                                i);
@@ -1851,15 +1892,18 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto fsl_array =
                 std::static_pointer_cast<arrow::FixedSizeListArray>(array);
             auto values = fsl_array->values();
-            ValidateVectorListElementType(values->type(), data_type);
+            ValidateVectorListElementType(
+                values->type(), data_type, field_meta);
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "Vector list element must be fixed-width byte-aligned "
-                       "type, got bit_width={}",
+                       "vector list element{} must be fixed-width "
+                       "byte-aligned type, got bit_width={}",
+                       FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
             AssertInfo(fsl_array->value_length() == dim,
-                       "vector dimension mismatch, expected {}, actual {}",
+                       "vector dimension mismatch{}, expected {}, actual {}",
+                       FieldErrorSuffix(field_meta),
                        dim,
                        fsl_array->value_length());
             auto raw = reinterpret_cast<const uint8_t*>(
@@ -1876,7 +1920,8 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             }
         } else {
             ThrowInfo(ErrorCode::Unsupported,
-                      "Unsupported arrow type for vector normalization: {}",
+                      "unsupported arrow type for vector normalization{}: {}",
+                      FieldErrorSuffix(field_meta),
                       array->type()->ToString());
         }
 
@@ -2185,7 +2230,7 @@ CoerceToList(const arrow::ArrayVector& arrays) {
 
 // Rebuild null bitmap as a fresh buffer at offset=0.
 // Required when constructing a new arrow::Array that does not share the
-// input's logical offset — direct reuse of `array->null_bitmap()` is
+// input's logical offset - direct reuse of `array->null_bitmap()` is
 // incorrect for sliced inputs (offset != 0) because callers will read the
 // bitmap starting at bit 0 instead of bit `array->offset()`.
 static std::shared_ptr<arrow::Buffer>
@@ -2210,8 +2255,8 @@ RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array) {
 // Single-source-of-truth view-variant elimination. Callers that ingest
 // vortex (or any schemaless reader that may emit *_VIEW / LARGE_* layouts)
 // route arrays through this helper before any type-id dispatch. Pure
-// type/layout normalization — no semantic conversion (no WKT→WKB,
-// no Timestamp→Int64, etc).
+// type/layout normalization - no semantic conversion (no WKT->WKB,
+// no Timestamp->Int64, etc).
 //
 //   STRING_VIEW / LARGE_STRING -> STRING
 //   BINARY_VIEW / LARGE_BINARY -> BINARY
@@ -2492,7 +2537,8 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
 }
 
 DataType
-ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values) {
+ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
+                             const FieldMeta& field_meta) {
     switch (values->type_id()) {
         case arrow::Type::BOOL:
             return DataType::BOOL;
@@ -2514,7 +2560,8 @@ ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values) {
             return DataType::STRING;
         default:
             ThrowInfo(ErrorCode::Unsupported,
-                      "unsupported array element arrow type: {}",
+                      "unsupported array element arrow type{}: {}",
+                      FieldErrorSuffix(field_meta),
                       values->type()->ToString());
     }
 }
@@ -2529,7 +2576,8 @@ IsCompatibleArrayElementType(DataType actual_type, DataType expected_type) {
 
 arrow::ArrayVector
 ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
-                            DataType element_type) {
+                            DataType element_type,
+                            const FieldMeta& field_meta) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
@@ -2539,10 +2587,11 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
         auto actual_element_type =
-            ArrowListElementTypeToMilvus(list_arr->values());
+            ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
         AssertInfo(
             IsCompatibleArrayElementType(actual_element_type, element_type),
-            "array element type mismatch, expected {}, actual {}",
+            "array element type mismatch{}, expected {}, actual {}",
+            FieldErrorSuffix(field_meta),
             element_type,
             actual_element_type);
         arrow::BinaryBuilder builder;
@@ -2575,7 +2624,8 @@ arrow::ArrayVector
 NormalizeVectorArrays(const arrow::ArrayVector& arrays,
                       DataType data_type,
                       int64_t dim,
-                      bool nullable) {
+                      bool nullable,
+                      const FieldMeta& field_meta) {
     if (arrays.empty()) {
         return arrays;
     }
@@ -2585,7 +2635,8 @@ NormalizeVectorArrays(const arrow::ArrayVector& arrays,
     for (const auto& array : arrays) {
         auto type_id = array->type_id();
         if (type_id == arrow::Type::BINARY && nullable) {
-            ValidateBinaryVectorWidth(array, data_type, static_cast<int>(dim));
+            ValidateBinaryVectorWidth(
+                array, data_type, static_cast<int>(dim), field_meta);
             result.push_back(array);
             continue;
         }
@@ -2593,11 +2644,11 @@ NormalizeVectorArrays(const arrow::ArrayVector& arrays,
         arrow::ArrayVector fsb;
         if (type_id == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(
-                array, data_type, static_cast<int>(dim));
+                array, data_type, static_cast<int>(dim), field_meta);
             fsb.push_back(array);
         } else {
             fsb = NormalizeVectorArraysToFixedSizeBinary(
-                {array}, data_type, static_cast<int>(dim));
+                {array}, data_type, static_cast<int>(dim), field_meta);
         }
 
         if (nullable) {
@@ -2613,7 +2664,8 @@ NormalizeVectorArrays(const arrow::ArrayVector& arrays,
 arrow::ArrayVector
 NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
                           DataType element_type,
-                          int64_t dim) {
+                          int64_t dim,
+                          const FieldMeta& field_meta) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
@@ -2625,13 +2677,18 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
         AssertInfo(list_arr->null_count() == 0,
                    "VECTOR_ARRAY does not support null rows");
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
-            ValidateFixedSizeBinaryVectorWidth(
-                list_arr->values(), element_type, static_cast<int>(dim));
+            ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
+                                               element_type,
+                                               static_cast<int>(dim),
+                                               field_meta);
             result.push_back(arr);
             continue;
         }
-        auto normalized = NormalizeVectorArraysToFixedSizeBinary(
-            {list_arr->values()}, element_type, static_cast<int>(dim));
+        auto normalized =
+            NormalizeVectorArraysToFixedSizeBinary({list_arr->values()},
+                                                   element_type,
+                                                   static_cast<int>(dim),
+                                                   field_meta);
         auto rebuilt =
             arrow::ListArray::FromArrays(*list_arr->offsets(), *normalized[0]);
         AssertInfo(rebuilt.ok(),
@@ -2655,8 +2712,8 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
     auto element_type = IsVectorArrayDataType(dt) || IsArrayDataType(dt)
                             ? field_meta.get_element_type()
                             : DataType::NONE;
-    return NormalizeExternalArrow(
-        array, dt, dim, field_meta.is_nullable(), element_type);
+    return NormalizeExternalArrowByType(
+        array, dt, dim, field_meta.is_nullable(), element_type, field_meta);
 }
 
 // Load path: batch wrapper.
@@ -2698,35 +2755,37 @@ ExpectedScalarArrowType(DataType data_type) {
 
 void
 ValidateScalarArrowType(DataType data_type,
-                        const std::shared_ptr<arrow::Array>& array) {
+                        const std::shared_ptr<arrow::Array>& array,
+                        const FieldMeta& field_meta) {
     auto expected_type = ExpectedScalarArrowType(data_type);
     if (expected_type == nullptr) {
         return;
     }
     AssertInfo(array->type()->Equals(*expected_type),
-               "field type mismatch, expected Arrow {}, actual Arrow {}",
+               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
+               FieldErrorSuffix(field_meta),
                expected_type->ToString(),
                array->type()->ToString());
 }
 
 void
-AssertExternalArrowType(DataType data_type,
-                        const std::shared_ptr<arrow::Array>& array,
-                        const std::string& expected) {
+AssertExternalArrowType(const std::shared_ptr<arrow::Array>& array,
+                        const std::string& expected,
+                        const FieldMeta& field_meta) {
     ThrowInfo(ErrorCode::Unsupported,
-              "field type mismatch for {}, expected Arrow {}, actual Arrow {}",
-              data_type,
+              "field type mismatch{}, expected Arrow {}, actual Arrow {}",
+              FieldErrorSuffix(field_meta),
               expected,
               array->type()->ToString());
 }
 
-// Overload for callers without FieldMeta.
-std::shared_ptr<arrow::Array>
-NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
-                       DataType data_type,
-                       int64_t dim,
-                       bool nullable,
-                       DataType element_type) {
+static std::shared_ptr<arrow::Array>
+NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
+                             DataType data_type,
+                             int64_t dim,
+                             bool nullable,
+                             DataType element_type,
+                             const FieldMeta& field_meta) {
     // Single view-variant elimination pass: STRING_VIEW/LARGE_STRING -> STRING,
     // BINARY_VIEW/LARGE_BINARY -> BINARY, LARGE_LIST/LIST_VIEW -> LIST
     // (recursive into list inner). Downstream branches only need to dispatch
@@ -2742,16 +2801,16 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
         if (type_id == arrow::Type::INT64) {
             return array;
         }
-        AssertExternalArrowType(data_type, array, "timestamp or int64");
+        AssertExternalArrowType(array, "timestamp or int64", field_meta);
     }
 
-    ValidateScalarArrowType(data_type, array);
+    ValidateScalarArrowType(data_type, array, field_meta);
 
     if (IsSparseFloatVectorDataType(data_type)) {
         if (type_id == arrow::Type::BINARY) {
             return array;
         }
-        AssertExternalArrowType(data_type, array, "binary");
+        AssertExternalArrowType(array, "binary", field_meta);
     }
 
     // Dense vectors
@@ -2760,25 +2819,28 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
         !IsVectorArrayDataType(data_type)) {
         if (type_id == arrow::Type::FIXED_SIZE_BINARY && !nullable) {
             ValidateFixedSizeBinaryVectorWidth(
-                array, data_type, static_cast<int>(dim));
+                array, data_type, static_cast<int>(dim), field_meta);
             return array;
         }
         if (type_id == arrow::Type::BINARY && nullable) {
-            ValidateBinaryVectorWidth(array, data_type, static_cast<int>(dim));
+            ValidateBinaryVectorWidth(
+                array, data_type, static_cast<int>(dim), field_meta);
             return array;
         }
-        auto result = NormalizeVectorArrays({array}, data_type, dim, nullable);
+        auto result = NormalizeVectorArrays(
+            {array}, data_type, dim, nullable, field_meta);
         return result[0];
     }
-    // VectorArray inner: List<List<scalar>> → List<FixedSizeBinary>
+    // VectorArray inner: List<List<scalar>> -> List<FixedSizeBinary>
     if (IsVectorArrayDataType(data_type)) {
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
         if (type_id == arrow::Type::LIST) {
-            auto result = NormalizeVectorArrayInner({array}, element_type, dim);
+            auto result = NormalizeVectorArrayInner(
+                {array}, element_type, dim, field_meta);
             return result[0];
         }
-        AssertExternalArrowType(data_type, array, "list");
+        AssertExternalArrowType(array, "list", field_meta);
     }
     // Geometry STRING input -> WKT, convert to WKB.
     // (View/large-string variants already canonicalized to STRING above.)
@@ -2791,7 +2853,7 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
         return array;
     }
     if (data_type == DataType::GEOMETRY) {
-        AssertExternalArrowType(data_type, array, "string or binary");
+        AssertExternalArrowType(array, "string or binary", field_meta);
     }
     // JSON/VARCHAR/STRING/TEXT: String -> Binary (canonical internal repr).
     // (View/large variants already canonicalized to STRING above; issue #49352.)
@@ -2806,18 +2868,19 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
         return array;
     }
     if (IsStringDataType(data_type) || data_type == DataType::JSON) {
-        AssertExternalArrowType(data_type, array, "string or binary");
+        AssertExternalArrowType(array, "string or binary", field_meta);
     }
-    // Array: List → Protobuf Binary
+    // Array: List -> Protobuf Binary
     if (data_type == DataType::ARRAY && type_id == arrow::Type::LIST) {
-        auto result = ConvertListToProtobufBinary({array}, element_type);
+        auto result =
+            ConvertListToProtobufBinary({array}, element_type, field_meta);
         return result[0];
     }
     if (data_type == DataType::ARRAY && type_id == arrow::Type::BINARY) {
         return array;
     }
     if (data_type == DataType::ARRAY) {
-        AssertExternalArrowType(data_type, array, "list or binary");
+        AssertExternalArrowType(array, "list or binary", field_meta);
     }
     return array;
 }
