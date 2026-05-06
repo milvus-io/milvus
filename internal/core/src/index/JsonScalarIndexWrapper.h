@@ -200,9 +200,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override {
         BaseIndex::Load(ctx, config);
-        if constexpr (kIsInverted) {
-            BuildExistsBitset(this->Count());
-        }
+        BuildExistsBitset(this->Count());
     }
 
     JsonCastType
