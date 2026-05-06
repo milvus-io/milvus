@@ -7,8 +7,8 @@
 package segcorepb
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
