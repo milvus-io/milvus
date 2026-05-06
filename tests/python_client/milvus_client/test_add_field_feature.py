@@ -20,6 +20,7 @@ exp_res = "exp_res"
 default_nb = ct.default_nb
 default_dim = 128
 default_limit = 10
+CONSISTENCY_STRONG = "Strong"
 
 
 class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
@@ -449,6 +450,202 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
 
         # 9. cleanup
         self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "vector_type,index_type,metric_type",
+        [
+            (DataType.BINARY_VECTOR, "BIN_FLAT", "HAMMING"),
+            (DataType.BINARY_VECTOR, "BIN_IVF_FLAT", "JACCARD"),
+            (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_INVERTED_INDEX", "IP"),
+            (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_WAND", "IP"),
+            (DataType.FLOAT16_VECTOR, "HNSW", "L2"),
+            (DataType.FLOAT16_VECTOR, "IVF_FLAT", "COSINE"),
+            (DataType.BFLOAT16_VECTOR, "HNSW", "IP"),
+            (DataType.BFLOAT16_VECTOR, "IVF_FLAT", "COSINE"),
+            (DataType.INT8_VECTOR, "HNSW", "COSINE"),
+            (DataType.INT8_VECTOR, "HNSW", "L2"),
+        ],
+    )
+    def test_milvus_client_add_vector_field_all_types(self, vector_type, index_type, metric_type):
+        """
+        target: test add nullable vector field for BINARY/SPARSE/FLOAT16/BFLOAT16/INT8 vector types
+        method: add a nullable vector field, insert mixed null/non-null values, index, reload, and search
+        expected: add field, index, load, search, and search-by-id work for all supported vector types
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        base_dim = 32
+        pk_name = default_primary_key_field_name
+        base_vec_field = "embeddings"
+        new_vec_field = "embeddings_new"
+        is_sparse = vector_type == DataType.SPARSE_FLOAT_VECTOR
+        new_dim = None if is_sparse else base_dim
+        search_dim = ct.default_dim if is_sparse else new_dim
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(pk_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(base_vec_field, DataType.FLOAT_VECTOR, dim=base_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(base_vec_field, index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=base_dim, schema=schema, index_params=index_params)
+
+        basic_rows = cf.gen_row_data_by_schema(nb=ct.default_nb // 2, schema=schema)
+        self.insert(client, collection_name, basic_rows)
+
+        add_kwargs = dict(field_name=new_vec_field, data_type=vector_type, nullable=True)
+        if not is_sparse:
+            add_kwargs["dim"] = new_dim
+        self.add_collection_field(client, collection_name, **add_kwargs)
+
+        half_nb = ct.default_nb // 2
+        all_new_vecs = cf.gen_vectors(half_nb, search_dim, vector_data_type=vector_type)
+        all_base_vecs = cf.gen_vectors(half_nb, base_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        new_rows = [
+            {
+                pk_name: i + half_nb,
+                base_vec_field: all_base_vecs[i],
+                new_vec_field: None if i % 2 == 0 else all_new_vecs[i],
+            }
+            for i in range(half_nb)
+        ]
+        self.insert(client, collection_name, new_rows)
+
+        search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
+        error = {ct.err_code: 999, ct.err_msg: f"field {new_vec_field} is not loaded, please reload the collection"}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field, limit=ct.default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.release_collection(client, collection_name)
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"there is no vector index on field: [{new_vec_field}], please create index first"}
+        self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
+        new_index_params = self.prepare_index_params(client)[0]
+        new_index_params.add_index(new_vec_field, index_type=index_type, metric_type=metric_type)
+        self.create_index(client, collection_name, new_index_params)
+        self.load_collection(client, collection_name)
+
+        search_params = ct.default_sparse_search_params if is_sparse else {}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field, limit=ct.default_limit,
+                    search_params=search_params, consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "metric": metric_type,
+                                 "pk_name": pk_name})
+
+        if not is_sparse:
+            null_pks = [0]
+            non_null_pks = [half_nb + i for i in range(1, half_nb, 2)][:3]
+            res = self.search(client, collection_name, ids=null_pks,
+                              anns_field=new_vec_field, limit=ct.default_limit)[0]
+            assert len(res) == len(null_pks)
+            assert all(len(r) == 0 for r in res), "null vector must return empty search result"
+            res = self.search(client, collection_name, ids=non_null_pks,
+                              anns_field=new_vec_field, limit=ct.default_limit)[0]
+            assert len(res) == len(non_null_pks)
+            assert all(len(r) > 0 for r in res), "non-null vector must return non-empty search result"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("insert_order", ["insert_before_index", "index_before_insert"])
+    @pytest.mark.parametrize(
+        "vector_type,index_type,metric_type",
+        [
+            (DataType.BINARY_VECTOR, "BIN_FLAT", "HAMMING"),
+            (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_INVERTED_INDEX", "IP"),
+            (DataType.FLOAT16_VECTOR, "HNSW", "L2"),
+            (DataType.BFLOAT16_VECTOR, "HNSW", "IP"),
+            (DataType.INT8_VECTOR, "HNSW", "COSINE"),
+        ],
+    )
+    def test_milvus_client_add_vector_field_index_insert_order(
+        self, vector_type, index_type, metric_type, insert_order
+    ):
+        """
+        target: test add nullable vector field with different create-index and insert orderings
+        method: cover add_field -> insert -> index and add_field -> index -> insert
+        expected: search on the newly added field succeeds and base vector search is unaffected
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        base_dim = 32
+        pk_name = default_primary_key_field_name
+        base_vec_field = "embeddings"
+        new_vec_field = "embeddings_new"
+        is_sparse = vector_type == DataType.SPARSE_FLOAT_VECTOR
+        new_dim = None if is_sparse else base_dim
+        search_dim = ct.default_dim if is_sparse else new_dim
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(pk_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(base_vec_field, DataType.FLOAT_VECTOR, dim=base_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(base_vec_field, index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=base_dim, schema=schema, index_params=index_params)
+
+        basic_rows = cf.gen_row_data_by_schema(nb=ct.default_nb // 2, schema=schema)
+        self.insert(client, collection_name, basic_rows)
+
+        add_kwargs = dict(field_name=new_vec_field, data_type=vector_type, nullable=True)
+        if not is_sparse:
+            add_kwargs["dim"] = new_dim
+        self.add_collection_field(client, collection_name, **add_kwargs)
+
+        def gen_new_rows(start_pk, nb):
+            new_vecs = cf.gen_vectors(nb, search_dim, vector_data_type=vector_type)
+            base_vecs = cf.gen_vectors(nb, base_dim, vector_data_type=DataType.FLOAT_VECTOR)
+            return [
+                {
+                    pk_name: start_pk + i,
+                    base_vec_field: base_vecs[i],
+                    new_vec_field: None if i % 2 == 0 else new_vecs[i],
+                }
+                for i in range(nb)
+            ]
+
+        new_index_params = self.prepare_index_params(client)[0]
+        new_index_params.add_index(new_vec_field, index_type=index_type, metric_type=metric_type)
+        half_nb = ct.default_nb // 2
+
+        if insert_order == "insert_before_index":
+            new_rows = gen_new_rows(half_nb, half_nb)
+            self.insert(client, collection_name, new_rows)
+            self.create_index(client, collection_name, new_index_params)
+            self.wait_for_index_ready(client, collection_name, new_vec_field)
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+        else:
+            self.create_index(client, collection_name, new_index_params)
+            new_rows = gen_new_rows(half_nb, half_nb)
+            self.insert(client, collection_name, new_rows)
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+
+        search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
+        search_params = ct.default_sparse_search_params if is_sparse else {}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field, limit=ct.default_limit,
+                    search_params=search_params, consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "metric": metric_type,
+                                 "pk_name": pk_name})
+
+        base_vecs = cf.gen_vectors(ct.default_nq, base_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, base_vecs, anns_field=base_vec_field, limit=ct.default_limit,
+                    consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "metric": "COSINE",
+                                 "pk_name": pk_name})
+
         self.drop_collection(client, collection_name)
 
 
