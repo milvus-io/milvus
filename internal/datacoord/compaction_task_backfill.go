@@ -259,13 +259,15 @@ func (t *backfillCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
-	if err != nil || result == nil {
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
-				log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-			}
+	if err != nil {
+		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
+			log.Warn("backfillCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
 		log.Warn("backfillCompactionTask failed to get compaction result", zap.Error(err))
+		return
+	}
+	if result == nil {
+		log.Warn("backfillCompactionTask failed to get compaction result")
 		return
 	}
 	switch result.GetState() {

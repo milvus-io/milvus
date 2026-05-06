@@ -443,30 +443,39 @@ func TestCluster_QueryTerminalEmptyPayloadReturnsError(t *testing.T) {
 
 	for _, tc := range testCases {
 		for _, state := range []taskcommon.State{taskcommon.Finished, taskcommon.Failed} {
-			t.Run(tc.name+"_"+state.String(), func(t *testing.T) {
-				mockNodeManager := NewMockNodeManager(t)
-				cluster := NewCluster(mockNodeManager)
+			for _, payloadCase := range []struct {
+				name    string
+				payload []byte
+			}{
+				{name: "nil_payload"},
+				{name: "empty_payload", payload: []byte{}},
+			} {
+				t.Run(tc.name+"_"+state.String()+"_"+payloadCase.name, func(t *testing.T) {
+					mockNodeManager := NewMockNodeManager(t)
+					cluster := NewCluster(mockNodeManager)
 
-				mockClient := mocks.NewMockDataNodeClient(t)
-				mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+					mockClient := mocks.NewMockDataNodeClient(t)
+					mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
-				properties := taskcommon.NewProperties(nil)
-				properties.AppendTaskState(state)
-				properties.AppendReason("result payload is empty")
-				mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
-					Status:     merr.Success(),
-					Properties: properties,
-				}, nil)
+					properties := taskcommon.NewProperties(nil)
+					properties.AppendTaskState(state)
+					properties.AppendReason("result payload is empty")
+					mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+						Status:     merr.Success(),
+						Properties: properties,
+						Payload:    payloadCase.payload,
+					}, nil)
 
-				var err error
-				assert.NotPanics(t, func() {
-					err = tc.queryFunc(cluster)
+					var err error
+					assert.NotPanics(t, func() {
+						err = tc.queryFunc(cluster)
+					})
+					assert.Error(t, err)
+					assert.Contains(t, err.Error(), tc.taskType)
+					assert.Contains(t, err.Error(), state.String())
+					assert.Contains(t, err.Error(), "result payload is empty")
 				})
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), string(tc.taskType))
-				assert.Contains(t, err.Error(), state.String())
-				assert.Contains(t, err.Error(), "result payload is empty")
-			})
+			}
 		}
 	}
 }
