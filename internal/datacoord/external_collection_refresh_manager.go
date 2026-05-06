@@ -213,7 +213,7 @@ func NewExternalCollectionRefreshManager(
 	// forgetJob cleans up the notifiedJobs dedup map when the checker GC's
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, mt, scheduler, allocator, closeChan)
-	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
@@ -301,6 +301,51 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 			zap.String("dir", exploreBaseDir),
 			zap.Error(err))
 	}
+}
+
+func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+	tasks := m.refreshMeta.GetTasksByJobID(job.GetJobId())
+	if len(tasks) == 0 {
+		return fmt.Errorf("job %d has no tasks to apply", job.GetJobId())
+	}
+
+	keptSet := make(map[int64]struct{})
+	updatedSet := make(map[int64]struct{})
+	keptSegments := make([]int64, 0)
+	updatedSegments := make([]*datapb.SegmentInfo, 0)
+	for _, task := range tasks {
+		if task.GetState() != indexpb.JobState_JobStateFinished {
+			return fmt.Errorf("job %d has non-finished task %d in state %s",
+				job.GetJobId(), task.GetTaskId(), task.GetState().String())
+		}
+		for _, segmentID := range task.GetKeptSegments() {
+			if _, ok := keptSet[segmentID]; ok {
+				continue
+			}
+			keptSet[segmentID] = struct{}{}
+			keptSegments = append(keptSegments, segmentID)
+		}
+		for _, segment := range task.GetUpdatedSegments() {
+			if segment == nil {
+				continue
+			}
+			if _, ok := updatedSet[segment.GetID()]; ok {
+				return fmt.Errorf("job %d has duplicate updated segment %d from task %d",
+					job.GetJobId(), segment.GetID(), task.GetTaskId())
+			}
+			updatedSet[segment.GetID()] = struct{}{}
+			updatedSegments = append(updatedSegments, segment)
+		}
+	}
+
+	return applyExternalCollectionSegmentUpdate(
+		ctx,
+		m.mt,
+		job.GetCollectionId(),
+		keptSegments,
+		updatedSegments,
+		zap.Int64("jobID", job.GetJobId()),
+	)
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
@@ -747,6 +792,29 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	return tasks, nil
 }
 
+func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state indexpb.JobState, progress int64) {
+	if state == indexpb.JobState_JobStateNone {
+		return
+	}
+
+	switch job.GetState() {
+	case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
+		return
+	}
+
+	if state == indexpb.JobState_JobStateFinished {
+		job.State = indexpb.JobState_JobStateInProgress
+		if progress > 99 {
+			progress = 99
+		}
+		job.Progress = progress
+		return
+	}
+
+	job.State = state
+	job.Progress = progress
+}
+
 // GetJobProgress returns the job info for the given job_id
 func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, jobID int64) (*datapb.ExternalCollectionRefreshJob, error) {
 	job := m.refreshMeta.GetJob(jobID)
@@ -756,11 +824,7 @@ func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, j
 
 	// Aggregate state and progress from tasks
 	state, progress := m.refreshMeta.AggregateJobStateFromTasks(jobID)
-	// Only update if tasks exist. If state is None (no tasks yet), keep persisted state.
-	if state != indexpb.JobState_JobStateNone {
-		job.State = state
-		job.Progress = progress
-	}
+	normalizeRefreshJobProgress(job, state, progress)
 	return job, nil
 }
 
@@ -778,11 +842,7 @@ func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collect
 	for _, job := range jobs {
 		// Aggregate state and progress from tasks
 		state, progress := m.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
-		// Only update if tasks exist. If state is None (no tasks yet), keep persisted state.
-		if state != indexpb.JobState_JobStateNone {
-			job.State = state
-			job.Progress = progress
-		}
+		normalizeRefreshJobProgress(job, state, progress)
 		result = append(result, job)
 	}
 

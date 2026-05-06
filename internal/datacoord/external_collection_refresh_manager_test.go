@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -62,6 +63,159 @@ func testCollectionGetter(mt *meta) func(ctx context.Context, collectionID int64
 		}
 		return coll, nil
 	}
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		KeptSegments:    []int64{1},
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+	}))
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1002,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		KeptSegments:    []int64{1},
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 7}},
+	}))
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 100,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    5,
+	}})
+	segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           2,
+		CollectionID: 100,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    6,
+	}})
+	mt := &meta{
+		catalog:     catalog,
+		segments:    segments,
+		collections: newTestCollections(100),
+	}
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.NoError(t, err)
+
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(1).GetState())
+	assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(2).GetState())
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
+	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(20).GetState())
+	assert.Equal(t, int64(7), mt.segments.GetSegment(10).GetNumOfRows())
+	assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFinishedTask(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+	}))
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       1002,
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateInProgress,
+	}))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	updateCalls := 0
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+		updateCalls++
+		return nil
+	}).Build()
+	defer mockUpdate.UnPatch()
+
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "non-finished task")
+	assert.Equal(t, 0, updateCalls)
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplicateUpdatedSegment(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+	}))
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1002,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 8}},
+	}))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	updateCalls := 0
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+		updateCalls++
+		return nil
+	}).Build()
+	defer mockUpdate.UnPatch()
+
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate updated segment")
+	assert.Equal(t, 0, updateCalls)
 }
 
 // ==================== Test Functions ====================
@@ -401,6 +555,50 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
 	})
 
+	t.Run("finished_tasks_do_not_expose_finished_before_job_persisted", func(t *testing.T) {
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInProgress,
+			Progress:     80,
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+			{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, job.GetState())
+		assert.Equal(t, int64(99), job.GetProgress())
+	})
+
+	t.Run("persisted_failed_job_not_overwritten_by_finished_tasks", func(t *testing.T) {
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFailed,
+			Progress:     80,
+			FailReason:   "apply failed",
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+			{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
+
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
+		assert.Equal(t, int64(80), job.GetProgress())
+		assert.Equal(t, "apply failed", job.GetFailReason())
+	})
+
 	t.Run("job_not_found", func(t *testing.T) {
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{}
@@ -463,6 +661,26 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		assert.Len(t, result, 1)
 		// When no tasks exist, should keep the persisted state (Init), not overwrite to None
 		assert.Equal(t, indexpb.JobState_JobStateInit, result[0].GetState())
+	})
+
+	t.Run("finished_tasks_do_not_expose_finished_before_job_persisted", func(t *testing.T) {
+		now := time.Now().UnixMilli()
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80, StartTime: now},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+			{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		refreshMeta := createTestRefreshMetaWithJobs(t, jobs, tasks)
+
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+
+		result, err := manager.ListJobs(ctx, 100)
+		assert.NoError(t, err)
+		assert.Len(t, result, 1)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, result[0].GetState())
+		assert.Equal(t, int64(99), result[0].GetProgress())
 	})
 
 	t.Run("empty_list", func(t *testing.T) {
