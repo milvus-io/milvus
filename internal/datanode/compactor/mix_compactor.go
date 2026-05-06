@@ -167,11 +167,7 @@ func (t *mixCompactionTask) mergeSplit(
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 
-	// For V3 manifest storage, filter out RowID since manifest doesn't store it
 	writerSchema := t.plan.GetSchema()
-	if t.compactionParams.StorageVersion == storage.StorageV3 {
-		writerSchema = storage.FilterRowIDFromSchema(writerSchema)
-	}
 
 	// build writer options
 	writerOpts := []storage.RwOption{
