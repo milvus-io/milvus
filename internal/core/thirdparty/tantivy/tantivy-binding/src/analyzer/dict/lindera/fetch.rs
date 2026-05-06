@@ -131,10 +131,13 @@ async fn download_with_retry(
         for url in urls {
             match client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let content = resp
-                        .bytes()
-                        .await
-                        .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+                    let content = match resp.bytes().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("Failed to read body from {}: {}", url, e);
+                            continue;
+                        }
+                    };
 
                     // Calculate MD5 hash
                     let mut context = Context::new();
