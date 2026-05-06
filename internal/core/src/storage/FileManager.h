@@ -190,7 +190,7 @@ class FileManagerImpl : public milvus::FileManager {
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+        auto remote_file_path = is_index_file ? GetStorageV2IndexFilePrefix()
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         auto remote_file = fs_->OpenInputFile(remote_file_path);
@@ -206,7 +206,7 @@ class FileManagerImpl : public milvus::FileManager {
     OpenOutputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
         auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+        auto remote_file_path = is_index_file ? GetStorageV2IndexFilePrefix()
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         // Ensure parent directory exists before opening the output stream.
@@ -238,7 +238,7 @@ class FileManagerImpl : public milvus::FileManager {
             auto cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
             if (cipher_plugin) {
                 auto local_file_name = GetFileName(filename);
-                auto remote_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                auto remote_path = is_index_file ? GetStorageV2IndexFilePrefix()
                                                  : GetRemoteTextLogPrefix();
                 remote_path += "/" + local_file_name;
                 return std::make_unique<IndexEntryEncryptedLocalWriter>(
@@ -305,6 +305,14 @@ class FileManagerImpl : public milvus::FileManager {
         } else {
             return NormalizePath(bucket / v1_prefix);
         }
+    }
+
+    std::string
+    GetStorageV2IndexFilePrefix() const {
+        if (fs_->type_name() == "local") {
+            return GetRemoteIndexObjectPrefixV2();
+        }
+        return GetRemoteIndexFilePrefixV2();
     }
 
     virtual std::string
