@@ -277,10 +277,12 @@ class JsonScalarIndexWrapper : public BaseIndex {
             if (!sliced.empty()) {
                 auto datas = this->file_manager_->LoadIndexToMemory(
                     sliced, load_priority);
-                auto compact = CompactIndexDatas(datas);
-                auto& codecs =
-                    compact.at(INDEX_NON_EXIST_OFFSET_FILE_NAME).codecs_;
-                for (auto&& c : codecs) {
+                auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
+                auto non_exist_codecs = CompactIndexDatasByKey(
+                    INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                    std::move(slice_meta),
+                    datas);
+                for (auto&& c : non_exist_codecs.codecs_) {
                     fill(c->PayloadData(), c->PayloadSize());
                 }
                 return;

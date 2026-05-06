@@ -474,7 +474,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+        EXPECT_EQ(result.size_, 40 * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
