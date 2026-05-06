@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -170,7 +172,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 6: output field already exists (field1 created by createCollectionForTest)
+	// case 7: output field already exists (field1 created by createCollectionForTest)
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -189,7 +191,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 7: output field points to an existing field while FieldInfos adds a different field
+	// case 8: output field points to an existing field while FieldInfos adds a different field
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -258,7 +260,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	require.False(t, schema.GetDoPhysicalBackfill())
 	require.EqualValues(t, 3, schema.GetVersion())
 
-	// case 7: function already exists (same name "bm25_fn")
+	// case 9: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -277,7 +279,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 8: input field not found
+	// case 10: input field not found
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -296,7 +298,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 
-	// case 9: output field not found (function references "ghost_output" but FieldInfos has "sparse_output4")
+	// case 11: output field not found (function references "ghost_output" but FieldInfos has "sparse_output4")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -405,6 +407,84 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
+}
+
+func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	addResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         getFieldSchema("field2"),
+	})
+	require.NoError(t, merr.CheckRPCCall(addResp, err))
+	assertFieldExists(t, ctx, core, dbName, collectionName, "field2", 101)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	barrierErr := errors.New("proxy version barrier")
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err := core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: "field2"},
+				},
+			},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	require.Contains(t, resp.GetAlterStatus().GetDetail(), "failed to wait until schema drop ready")
+	assertFieldExists(t, ctx, core, dbName, collectionName, "field2", 101)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+}
+
+func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	varcharFieldSchema := &schemapb.FieldSchema{
+		Name:     "text_input",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "256"},
+		},
+	}
+	varcharBytes, err := proto.Marshal(varcharFieldSchema)
+	require.NoError(t, err)
+	addFieldResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         varcharBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn"))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 }
 
 func assertFieldNotExists(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string) {
