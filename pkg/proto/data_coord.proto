@@ -1471,6 +1471,8 @@ message ExternalCollectionRefreshTask {
   string explore_manifest_path = 12;  // S3 manifest path for this job
   int64 file_index_begin = 13;        // File range start for this task
   int64 file_index_end = 14;          // File range end for this task
+  repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
+  repeated SegmentInfo updated_segments = 16;  // New segments created by this task result
 }
 
 message GetRefreshExternalCollectionProgressResponse {

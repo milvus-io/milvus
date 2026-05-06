@@ -150,6 +150,20 @@ func (m *externalCollectionRefreshMeta) removeFromJobTasks(jobID int64, taskID i
 	}
 }
 
+func cloneProtoSegments(segments []*datapb.SegmentInfo) []*datapb.SegmentInfo {
+	if len(segments) == 0 {
+		return nil
+	}
+	cloned := make([]*datapb.SegmentInfo, 0, len(segments))
+	for _, segment := range segments {
+		if segment == nil {
+			continue
+		}
+		cloned = append(cloned, proto.Clone(segment).(*datapb.SegmentInfo))
+	}
+	return cloned
+}
+
 // ==================== Job Operations ====================
 
 // AddJob adds a new job to meta
@@ -357,6 +371,85 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 			zap.String("state", state.String()))
 	}
 	return applied, err
+}
+
+// UpdateJobStateWithPreApply runs preApply and persists the requested state
+// while holding the collection-scoped job lock. It is used for Finished
+// refresh jobs so concurrent eager checker paths cannot apply segment results
+// more than once before the job reaches a terminal state.
+func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
+	jobID int64,
+	state indexpb.JobState,
+	failReason string,
+	preApply func(*datapb.ExternalCollectionRefreshJob) error,
+) (bool, error) {
+	job, ok := m.jobs.Get(jobID)
+	if !ok {
+		return false, fmt.Errorf("job %d not found", jobID)
+	}
+
+	m.jobLock.Lock(job.GetCollectionId())
+	defer m.jobLock.Unlock(job.GetCollectionId())
+
+	// Re-fetch after lock so a concurrent eager path that already persisted a
+	// terminal state owns the one-time side effects.
+	job, ok = m.jobs.Get(jobID)
+	if !ok {
+		return false, fmt.Errorf("job %d not found", jobID)
+	}
+	if job.GetState() == indexpb.JobState_JobStateFinished ||
+		job.GetState() == indexpb.JobState_JobStateFailed {
+		log.Info("skip update job state with pre-apply, already in terminal state",
+			zap.Int64("jobID", jobID),
+			zap.String("currentState", job.GetState().String()),
+			zap.String("requestedState", state.String()))
+		return false, nil
+	}
+
+	if preApply != nil {
+		if err := preApply(job); err != nil {
+			cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+			cloneJob.State = indexpb.JobState_JobStateFailed
+			cloneJob.FailReason = err.Error()
+			cloneJob.EndTime = time.Now().UnixMilli()
+			if saveErr := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); saveErr != nil {
+				log.Warn("update job state after pre-apply failed",
+					zap.Int64("jobID", jobID),
+					zap.Error(saveErr))
+				return false, fmt.Errorf("pre-apply failed: %w; additionally failed to persist Failed job state: %v", err, saveErr)
+			}
+			m.jobs.Insert(jobID, cloneJob)
+			m.addToCollectionJobs(cloneJob)
+			log.Info("update job state success",
+				zap.Int64("jobID", jobID),
+				zap.String("state", indexpb.JobState_JobStateFailed.String()))
+			return true, err
+		}
+	}
+
+	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+	cloneJob.State = state
+	cloneJob.FailReason = failReason
+	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+		cloneJob.EndTime = time.Now().UnixMilli()
+		if state == indexpb.JobState_JobStateFinished {
+			cloneJob.Progress = 100
+		}
+	}
+
+	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
+		log.Warn("update job state with pre-apply failed",
+			zap.Int64("jobID", jobID),
+			zap.Error(err))
+		return false, err
+	}
+
+	m.jobs.Insert(jobID, cloneJob)
+	m.addToCollectionJobs(cloneJob)
+	log.Info("update job state success",
+		zap.Int64("jobID", jobID),
+		zap.String("state", state.String()))
+	return true, nil
 }
 
 // UpdateJobProgress updates job progress
@@ -575,6 +668,64 @@ func (m *externalCollectionRefreshMeta) UpdateTaskProgress(taskID int64, progres
 		return false, nil
 	})
 	return err
+}
+
+// UpdateTaskResult persists the terminal worker response for job-level aggregation.
+func (m *externalCollectionRefreshMeta) UpdateTaskResult(
+	taskID int64,
+	state indexpb.JobState,
+	failReason string,
+	keptSegments []int64,
+	updatedSegments []*datapb.SegmentInfo,
+) error {
+	applied, cloned, err := m.mutateTask(taskID, "update task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		task.State = state
+		task.FailReason = failReason
+		task.KeptSegments = append([]int64(nil), keptSegments...)
+		task.UpdatedSegments = cloneProtoSegments(updatedSegments)
+		if state == indexpb.JobState_JobStateFinished {
+			task.Progress = 100
+		}
+		return false, nil
+	})
+	if applied {
+		log.Info("update task result success",
+			zap.Int64("taskID", taskID),
+			zap.String("state", state.String()),
+			zap.Int("keptSegments", len(cloned.GetKeptSegments())),
+			zap.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
+	}
+	return err
+}
+
+// ClearTaskResult clears stored task result payload after the owning job has
+// persisted Finished. The task state/progress remain intact for progress and
+// history queries until the job retention GC drops the task.
+func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
+	applied, cloned, err := m.mutateTask(taskID, "clear task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if len(task.GetKeptSegments()) == 0 && len(task.GetUpdatedSegments()) == 0 {
+			return true, nil
+		}
+		task.KeptSegments = nil
+		task.UpdatedSegments = nil
+		return false, nil
+	})
+	if applied {
+		log.Info("clear task result success",
+			zap.Int64("taskID", taskID),
+			zap.String("state", cloned.GetState().String()))
+	}
+	return err
+}
+
+func (m *externalCollectionRefreshMeta) ClearTaskResultsByJobID(jobID int64) error {
+	tasks := m.GetTasksByJobID(jobID)
+	for _, task := range tasks {
+		if err := m.ClearTaskResult(task.GetTaskId()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateTaskVersion updates task version and nodeID
