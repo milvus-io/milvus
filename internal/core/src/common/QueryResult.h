@@ -28,9 +28,7 @@
 #include <NamedType/named_type.hpp>
 
 #include "common/FieldMeta.h"
-#include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
-#include "query/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 

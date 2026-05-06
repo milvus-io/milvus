@@ -529,14 +529,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage
     EstimateSegmentResourceUsage() const;
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
-        auto it = array_offsets_map_.find(field_id);
-        if (it != array_offsets_map_.end()) {
-            return it->second;
-        }
-        return nullptr;
-    }
     struct ValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
