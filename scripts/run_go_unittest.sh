@@ -26,6 +26,12 @@ if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
 fi
 
+# Azurite default credentials for internal/storage TestAzureObjectStorage.
+# Honor any caller-provided value so CI can override with real credentials.
+if [[ -z "${AZURE_STORAGE_CONNECTION_STRING}" ]]; then
+    export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+fi
+
 # ignore MinIO,S3 unittests
 MILVUS_DIR="${ROOT_DIR}/internal/"
 PKG_DIR="${ROOT_DIR}/pkg/"
