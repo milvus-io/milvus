@@ -554,7 +554,8 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
 			case schemapb.DataType_VarChar:
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
-			} else if isVectorType && tt.dataType != schemapb.DataType_SparseFloatVector {
+			}
+			if isVectorType && tt.dataType != schemapb.DataType_SparseFloatVector {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
 			}
 
