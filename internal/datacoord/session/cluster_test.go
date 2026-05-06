@@ -294,7 +294,10 @@ func TestCluster_Import(t *testing.T) {
 		// Mock response
 		properties := taskcommon.NewProperties(nil)
 		properties.AppendTaskState(taskcommon.Finished)
-		expectedResult := &datapb.QueryPreImportResponse{}
+		expectedResult := &datapb.QueryPreImportResponse{
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Completed,
+		}
 		payload, _ := proto.Marshal(expectedResult)
 		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
 			Status:     merr.Success(),
@@ -319,7 +322,10 @@ func TestCluster_Import(t *testing.T) {
 		// Mock response
 		properties := taskcommon.NewProperties(nil)
 		properties.AppendTaskState(taskcommon.Finished)
-		expectedResult := &datapb.QueryImportResponse{}
+		expectedResult := &datapb.QueryImportResponse{
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Completed,
+		}
 		payload, _ := proto.Marshal(expectedResult)
 		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
 			Status:     merr.Success(),
