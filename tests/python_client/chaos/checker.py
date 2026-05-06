@@ -2864,7 +2864,13 @@ class NullVectorSearchChecker(Checker):
 
 
 class NullVectorQueryChecker(Checker):
-    """check query operations on nullable vector fields, validate null/non-null ratio consistency"""
+    """check query operations on nullable vector fields.
+
+    Dynamically-added new_vec_* fields are excluded because older sealed
+    segments legitimately contain all-null values for those fields. For original
+    nullable vector fields, sample PKs with non-null values and verify those
+    values stay queryable under chaos.
+    """
 
     def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
         if collection_name is None:
@@ -2874,17 +2880,59 @@ class NullVectorQueryChecker(Checker):
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
-        # Collect nullable dense vector field names
+        # Collect nullable dense vector field names from the original schema.
         self.nullable_vector_fields = []
         for field in self.schema.fields:
             if field.dtype in ct.all_dense_vector_types and getattr(field, 'nullable', False):
-                self.nullable_vector_fields.append(field.name)
+                if not field.name.startswith("new_vec_"):
+                    self.nullable_vector_fields.append(field.name)
         self.term_expr = f"{self.int64_field_name} > 0"
+        self._non_null_pk_samples = self._collect_non_null_pk_samples()
+
+    def _collect_non_null_pk_samples(self, sample_size=20):
+        samples = {}
+        for field_name in self.nullable_vector_fields:
+            try:
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=self.term_expr,
+                    output_fields=[self.int64_field_name, field_name],
+                    limit=500,
+                    timeout=query_timeout
+                )
+                non_null_pks = [r[self.int64_field_name] for r in res if r.get(field_name) is not None]
+                samples[field_name] = non_null_pks[:sample_size]
+                log.info(f"[NullVectorQueryChecker] field='{field_name}': sampled "
+                         f"{len(samples[field_name])} non-null PKs")
+            except Exception as e:
+                log.warning(f"[NullVectorQueryChecker] failed to sample non-null PKs for '{field_name}': {e}")
+                samples[field_name] = []
+        return samples
 
     @trace()
     def query(self):
         try:
             vec_field = random.choice(self.nullable_vector_fields)
+            pks = self._non_null_pk_samples.get(vec_field, [])
+
+            if pks:
+                sample_pks = random.sample(pks, min(10, len(pks)))
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f"{self.int64_field_name} in {sample_pks}",
+                    output_fields=[self.int64_field_name, vec_field],
+                    timeout=query_timeout
+                )
+                if not res:
+                    return f"no rows found for known non-null PKs of field '{vec_field}'", False
+                null_rows = [r for r in res if r.get(vec_field) is None]
+                if null_rows:
+                    return (f"{len(null_rows)}/{len(res)} rows returned null for field '{vec_field}' "
+                            f"despite known non-null PKs"), False
+                log.debug(f"[NullVectorQueryChecker] field='{vec_field}': "
+                          f"{len(res)}/{len(sample_pks)} non-null rows verified")
+                return res, True
+
             res = self.milvus_client.query(
                 collection_name=self.c_name,
                 filter=self.term_expr,
@@ -2892,12 +2940,10 @@ class NullVectorQueryChecker(Checker):
                 limit=50,
                 timeout=query_timeout
             )
-            # Validate: all-null results indicate possible data corruption
-            null_count = sum(1 for r in res if r.get(vec_field) is None)
-            non_null_count = len(res) - null_count
-            log.debug(f"[NullVectorQueryChecker] field='{vec_field}': "
-                      f"{len(res)} results, {null_count} null, {non_null_count} non-null")
-            if len(res) > 10 and null_count == len(res):
+            non_null_rows = [r for r in res if r.get(vec_field) is not None]
+            log.debug(f"[NullVectorQueryChecker] fallback field='{vec_field}': "
+                      f"{len(non_null_rows)}/{len(res)} non-null")
+            if res and not non_null_rows:
                 return (f"all {len(res)} vectors are null for field '{vec_field}', "
                         f"possible data corruption"), False
             return res, True
