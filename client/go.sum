@@ -229,6 +229,8 @@ github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta h1:1dRO3ctqYYSTFqL0Tl2m+e9vB1OK9tRpReZbEOB7K80=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta.0.20260506094605-445ffe015a5d h1:HSz/3DfFzdDK0QM/7YB3nuTqifwyjL0duC/h3h426MA=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta.0.20260506094605-445ffe015a5d/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/minio/md5-simd v1.1.2 h1:Gdi1DZK69+ZVMoNHRXJyNcxrMA4dSxoYHZSQbirFg34=
 github.com/minio/md5-simd v1.1.2/go.mod h1:MzdKDxYpY2BT9XQFocsiZf/NKVtR7nkE4RoEpN+20RM=
 github.com/minio/minio-go/v7 v7.0.73 h1:qr2vi96Qm7kZ4v7LLebjte+MQh621fFWnv93p12htEo=

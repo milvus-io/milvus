@@ -3217,6 +3217,7 @@ func refreshExternalCollectionJobInfoToMap(jobInfo *milvuspb.RefreshExternalColl
 	detail["state"] = jobInfo.GetState().String()
 	detail["progress"] = jobInfo.GetProgress()
 	detail["externalSource"] = jobInfo.GetExternalSource()
+	detail["externalSpec"] = jobInfo.GetExternalSpec()
 	detail["startTime"] = jobInfo.GetStartTime()
 	detail["endTime"] = jobInfo.GetEndTime()
 	if jobInfo.GetReason() != "" {

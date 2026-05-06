@@ -7,7 +7,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta.0.20260506094605-445ffe015a5d
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23

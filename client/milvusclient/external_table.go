@@ -104,6 +104,7 @@ func convertToEntityJobInfo(info *milvuspb.RefreshExternalCollectionJobInfo) *en
 		Progress:       info.GetProgress(),
 		Reason:         info.GetReason(),
 		ExternalSource: info.GetExternalSource(),
+		ExternalSpec:   info.GetExternalSpec(),
 		StartTime:      info.GetStartTime(),
 		EndTime:        info.GetEndTime(),
 	}
