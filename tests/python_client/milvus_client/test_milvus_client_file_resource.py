@@ -959,6 +959,37 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_refcount_released_after_collection_drop(self, file_resource_env):
+        """
+        target: resource referenced by a collection is protected until the collection is dropped
+        method: add -> create col -> remove fails -> drop col -> remove succeeds
+        expected: resource cannot be deleted while referenced, then is released after drop
+        """
+        client = self._client()
+        res_name = cf.gen_unique_str(prefix)
+        col_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
+        self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
+
+        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, col_name)
+
+        def _remove_ok():
+            try:
+                self.remove_file_resource(client, res_name)
+                return True
+            except Exception as exc:
+                if "is still in use" in str(exc):
+                    return False
+                raise
+
+        assert self.wait_until(_remove_ok, timeout=30, interval=1), (
+            f"{res_name} still marked in-use after referencing collection dropped"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_multi_ref_partial_drop(self, file_resource_env):
         """
         target: resource referenced by 2 collections; dropping 1 still blocks removal
