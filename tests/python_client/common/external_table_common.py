@@ -181,6 +181,25 @@ def _binary_vectors_bytes(ids, dim):
     return arr
 
 
+def _vector_byte_width(vec_dtype, dim):
+    if vec_dtype == DataType.FLOAT_VECTOR:
+        return dim * 4
+    if vec_dtype in (DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+        return dim * 2
+    if vec_dtype == DataType.INT8_VECTOR:
+        return dim
+    if vec_dtype == DataType.BINARY_VECTOR:
+        return dim // 8
+    raise ValueError(f"unsupported vec dtype {vec_dtype}")
+
+
+def _fixed_size_binary_vector_array(raw_rows, byte_width):
+    return pa.array(
+        [np.ascontiguousarray(row).tobytes() for row in raw_rows],
+        type=pa.binary(byte_width),
+    )
+
+
 def gen_parquet_bytes(num_rows, start_id, scalar_name, arrow_type, value_fn, dim=ct.default_dim):
     """Generate a Parquet file with columns: id, <scalar_name>, embedding (float_vec)."""
     ids = list(range(start_id, start_id + num_rows))
@@ -273,19 +292,14 @@ def gen_vector_variant_parquet_bytes(num_rows, start_id, vec_field, vec_dtype, d
         arr = _float_vectors(ids, dim)
         parquet_col = pa.FixedSizeListArray.from_arrays(arr.flatten(), list_size=dim)
     elif vec_dtype == DataType.FLOAT16_VECTOR:
-        # pyarrow cannot write float16 to Parquet, so store raw 16-bit bits as uint16.
-        # Milvus reads this back as float16 by reinterpreting the uint16 buffer.
-        arr = _float16_vectors(ids, dim).view(np.uint16)
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()),
-            list_size=dim,
+        parquet_col = _fixed_size_binary_vector_array(
+            _float16_vectors(ids, dim),
+            _vector_byte_width(vec_dtype, dim),
         )
     elif vec_dtype == DataType.BFLOAT16_VECTOR:
-        arr = _bfloat16_vectors(ids, dim)
-        # Store as uint16; Milvus reader must interpret as bfloat16 raw bits.
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()),
-            list_size=dim,
+        parquet_col = _fixed_size_binary_vector_array(
+            _bfloat16_vectors(ids, dim),
+            _vector_byte_width(vec_dtype, dim),
         )
     elif vec_dtype == DataType.INT8_VECTOR:
         arr = _int8_vectors(ids, dim)
@@ -294,10 +308,9 @@ def gen_vector_variant_parquet_bytes(num_rows, start_id, vec_field, vec_dtype, d
             list_size=dim,
         )
     elif vec_dtype == DataType.BINARY_VECTOR:
-        arr = _binary_vectors_bytes(ids, dim)
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint8()),
-            list_size=dim // 8,
+        parquet_col = _fixed_size_binary_vector_array(
+            _binary_vectors_bytes(ids, dim),
+            _vector_byte_width(vec_dtype, dim),
         )
     else:
         raise ValueError(f"unsupported vec_dtype {vec_dtype}")
@@ -345,15 +358,15 @@ def gen_multi_vector_parquet_bytes(num_rows, start_id, dim=ct.default_dim):
     """Parquet with two vector fields (float + binary) + id + scalar."""
     ids = list(range(start_id, start_id + num_rows))
     float_arr = _float_vectors(ids, dim)
-    bin_arr = _binary_vectors_bytes(ids, ct.default_dim)
+    bin_arr = _binary_vectors_bytes(ids, dim)
     table = pa.table(
         {
             "id": pa.array(ids, type=pa.int64()),
             "value": pa.array([float(i) for i in ids], type=pa.float32()),
             "dense_vec": pa.FixedSizeListArray.from_arrays(float_arr.flatten(), list_size=dim),
-            "bin_vec": pa.FixedSizeListArray.from_arrays(
-                pa.array(bin_arr.flatten(), type=pa.uint8()),
-                list_size=ct.default_dim // 8,
+            "bin_vec": _fixed_size_binary_vector_array(
+                bin_arr,
+                _vector_byte_width(DataType.BINARY_VECTOR, dim),
             ),
         }
     )
@@ -560,15 +573,13 @@ def _full_matrix_arrow_columns(
         columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
 
     # Vectors. Layout per type:
-    #   FloatVector / Int8Vector  -> FixedSizeList<element, dim>
-    #   Float16Vector             -> FixedSizeList<uint16, dim> (raw bits)
-    #   BFloat16Vector            -> FixedSizeList<uint16, dim> (raw bits)
-    #   BinaryVector              -> FixedSizeList<uint8,  dim/8>
+    #   FloatVector / Int8Vector        -> FixedSizeList<element, dim>
+    #   Float16/BFloat16/BinaryVector   -> fixed_size_binary raw bytes
     fv_arr = _float_vectors(ids, dim).flatten()
-    f16_arr = _float16_vectors(ids, dim).view(np.uint16).flatten()
-    bf16_arr = _bfloat16_vectors(ids, dim).flatten()
+    f16_arr = _float16_vectors(ids, dim)
+    bf16_arr = _bfloat16_vectors(ids, dim)
     i8_arr = _int8_vectors(ids, dim).flatten()
-    bin_arr = _binary_vectors_bytes(ids, bin_dim).flatten()
+    bin_arr = _binary_vectors_bytes(ids, bin_dim)
 
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         if name in excluded:
@@ -579,14 +590,14 @@ def _full_matrix_arrow_columns(
                 list_size=vdim,
             )
         elif vtype == DataType.FLOAT16_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(f16_arr, type=pa.uint16()),
-                list_size=vdim,
+            columns[name] = _fixed_size_binary_vector_array(
+                f16_arr,
+                _vector_byte_width(vtype, vdim),
             )
         elif vtype == DataType.BFLOAT16_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bf16_arr, type=pa.uint16()),
-                list_size=vdim,
+            columns[name] = _fixed_size_binary_vector_array(
+                bf16_arr,
+                _vector_byte_width(vtype, vdim),
             )
         elif vtype == DataType.INT8_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
@@ -594,9 +605,9 @@ def _full_matrix_arrow_columns(
                 list_size=vdim,
             )
         elif vtype == DataType.BINARY_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bin_arr, type=pa.uint8()),
-                list_size=vdim // 8,
+            columns[name] = _fixed_size_binary_vector_array(
+                bin_arr,
+                _vector_byte_width(vtype, vdim),
             )
         else:
             raise ValueError(f"unsupported vector dtype {vtype}")
@@ -962,10 +973,9 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
     to file:// then uploaded, those URIs would be unreachable from the
     Milvus reader.
 
-    Vector encoding: each row stores its vector as a single binary blob of
-    dim * sizeof(float) bytes. The Milvus iceberg reader path returns it as
-    arrow.binary, and external_field=embedding is mapped to a FloatVector
-    field; NormalizeExternalArrow reinterprets the raw bytes as float32.
+    Vector encoding: each row stores its vector as a fixed-size binary blob of
+    dim * sizeof(float) bytes. Milvus maps external_field=embedding to a
+    FloatVector field and reinterprets the raw bytes as float32.
 
     Note: list<float32> looks more natural but pyarrow >=15 promotes long
     lists to large_list, which the vector normalizer rejects
@@ -984,7 +994,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
 
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema as IbgSchema
-    from pyiceberg.types import BinaryType, FloatType, LongType, NestedField
+    from pyiceberg.types import FixedType, FloatType, LongType, NestedField
 
     tmp = tempfile.mkdtemp(prefix="ibg_cat_")
     try:
@@ -1005,13 +1015,13 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
         ibg_schema = IbgSchema(
             NestedField(1, "id", LongType(), required=False),
             NestedField(2, "value", FloatType(), required=False),
-            NestedField(3, "embedding", BinaryType(), required=False),
+            NestedField(3, "embedding", FixedType(_vector_byte_width(DataType.FLOAT_VECTOR, dim)), required=False),
         )
         arrow_schema = pa.schema(
             [
                 pa.field("id", pa.int64(), nullable=True),
                 pa.field("value", pa.float32(), nullable=True),
-                pa.field("embedding", pa.binary(), nullable=True),
+                pa.field("embedding", pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim)), nullable=True),
             ]
         )
         tbl = cat.create_table("ext.t", schema=ibg_schema)
@@ -1023,7 +1033,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
                 {
                     "id": pa.array(ids, type=pa.int64()),
                     "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-                    "embedding": pa.array(vec_bytes, type=pa.binary()),
+                    "embedding": pa.array(vec_bytes, type=pa.binary(_vector_byte_width(DataType.FLOAT_VECTOR, dim))),
                 },
                 schema=arrow_schema,
             )
@@ -1094,6 +1104,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
         BinaryType,
         BooleanType,
         DoubleType,
+        FixedType,
         FloatType,
         IntegerType,
         ListType,
@@ -1155,7 +1166,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
     arrow_fields.append(pa.field("geo", pa.binary(), nullable=True))
     arrow_columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
 
-    # Vector fields -> BinaryType blobs of dim*sizeof(elem) bytes.
+    # Vector fields -> FixedType blobs of dim*sizeof(elem) bytes.
     fv_arr = _float_vectors(ids, dim)
     f16_arr = _float16_vectors(ids, dim).view(np.uint16)
     bf16_arr = _bfloat16_vectors(ids, dim)  # already raw uint16-equivalent
@@ -1176,9 +1187,10 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
         raise ValueError(f"unsupported vec type {vtype}")
 
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        nested_fields.append(NestedField(fid(), name, BinaryType(), required=False))
-        arrow_fields.append(pa.field(name, pa.binary(), nullable=True))
-        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim), type=pa.binary())
+        byte_width = _vector_byte_width(vtype, vdim)
+        nested_fields.append(NestedField(fid(), name, FixedType(byte_width), required=False))
+        arrow_fields.append(pa.field(name, pa.binary(byte_width), nullable=True))
+        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim), type=pa.binary(byte_width))
 
     ibg_schema = IbgSchema(*nested_fields)
     arrow_schema = pa.schema(arrow_fields)
