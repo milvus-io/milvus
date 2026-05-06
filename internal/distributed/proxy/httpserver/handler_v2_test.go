@@ -1658,34 +1658,36 @@ func (m *externalCollectionRESTProxy) RefreshExternalCollection(ctx context.Cont
 
 func (m *externalCollectionRESTProxy) GetRefreshExternalCollectionProgress(ctx context.Context, request *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
 	m.progressReq = request
+	jobInfo := &milvuspb.RefreshExternalCollectionJobInfo{
+		JobId:          request.GetJobId(),
+		CollectionName: "external_books",
+		State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+		Progress:       42,
+		ExternalSource: "s3://bucket/books",
+		ExternalSpec:   `{"format":"parquet"}`,
+		StartTime:      10,
+	}
 	return &milvuspb.GetRefreshExternalCollectionProgressResponse{
-		Status: commonSuccessStatus,
-		JobInfo: &milvuspb.RefreshExternalCollectionJobInfo{
-			JobId:          request.GetJobId(),
-			CollectionName: "external_books",
-			State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
-			Progress:       42,
-			ExternalSource: "s3://bucket/books",
-			StartTime:      10,
-		},
+		Status:  commonSuccessStatus,
+		JobInfo: jobInfo,
 	}, nil
 }
 
 func (m *externalCollectionRESTProxy) ListRefreshExternalCollectionJobs(ctx context.Context, request *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
 	m.listReq = request
+	jobInfo := &milvuspb.RefreshExternalCollectionJobInfo{
+		JobId:          1001,
+		CollectionName: request.GetCollectionName(),
+		State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
+		Progress:       100,
+		ExternalSource: "s3://bucket/books",
+		ExternalSpec:   `{"format":"parquet"}`,
+		StartTime:      10,
+		EndTime:        20,
+	}
 	return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 		Status: commonSuccessStatus,
-		Jobs: []*milvuspb.RefreshExternalCollectionJobInfo{
-			{
-				JobId:          1001,
-				CollectionName: request.GetCollectionName(),
-				State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
-				Progress:       100,
-				ExternalSource: "s3://bucket/books",
-				StartTime:      10,
-				EndTime:        20,
-			},
-		},
+		Jobs:   []*milvuspb.RefreshExternalCollectionJobInfo{jobInfo},
 	}, nil
 }
 
@@ -1871,6 +1873,7 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(1001), proxy.progressReq.GetJobId())
 	assert.Contains(t, w.Body.String(), `"progress":42`)
+	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, ListAction), bytes.NewReader([]byte(`{"collectionName": "external_books"}`)))
 	w = httptest.NewRecorder()
@@ -1878,6 +1881,7 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "external_books", proxy.listReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"state":"RefreshCompleted"`)
+	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 }
 
 func TestExternalCollectionJobDescribeRequiresJobIDRESTV2(t *testing.T) {
