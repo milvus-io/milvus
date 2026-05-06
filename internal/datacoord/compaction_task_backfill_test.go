@@ -299,6 +299,16 @@ func (s *BackfillCompactionTaskSuite) TestQueryTaskOnWorker() {
 		s.Equal(int64(-1), task.GetTaskProto().GetNodeID())
 	})
 
+	s.Run("QueryTaskOnWorker, query error", func() {
+		task := s.generateBasicTask()
+		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, errors.New("query task result payload is empty")).Once()
+		task.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		s.Equal(int64(-1), task.GetTaskProto().GetNodeID())
+	})
+
 	s.Run("QueryTaskOnWorker, result is nil", func() {
 		task := s.generateBasicTask()
 		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
