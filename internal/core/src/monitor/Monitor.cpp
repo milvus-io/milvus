@@ -433,4 +433,55 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low,
                           internal_storage_pool_task_completed_total,
                           lowPoolLabel);
 
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_storage_pool_queue_duration_seconds,
+    "[cpp]storage thread pool task queue duration");
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_queue_duration_seconds_high,
+    internal_storage_pool_queue_duration_seconds,
+    highPoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_queue_duration_seconds_middle,
+    internal_storage_pool_queue_duration_seconds,
+    middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_queue_duration_seconds_low,
+    internal_storage_pool_queue_duration_seconds,
+    lowPoolLabel,
+    secondsBuckets);
+
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_storage_pool_execute_duration_seconds,
+    "[cpp]storage thread pool task execute duration");
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_execute_duration_seconds_high,
+    internal_storage_pool_execute_duration_seconds,
+    highPoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_execute_duration_seconds_middle,
+    internal_storage_pool_execute_duration_seconds,
+    middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_execute_duration_seconds_low,
+    internal_storage_pool_execute_duration_seconds,
+    lowPoolLabel,
+    secondsBuckets);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_arrow_io_pool_capacity,
+                               "[cpp]arrow io thread pool capacity");
+DEFINE_PROMETHEUS_GAUGE(internal_arrow_io_pool_capacity_all,
+                        internal_arrow_io_pool_capacity,
+                        {});
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(
+    internal_arrow_io_pool_tasks_total,
+    "[cpp]arrow io thread pool tasks running or queued");
+DEFINE_PROMETHEUS_GAUGE(internal_arrow_io_pool_tasks_total_all,
+                        internal_arrow_io_pool_tasks_total,
+                        {});
+
 }  // namespace milvus::monitor
