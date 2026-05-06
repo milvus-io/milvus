@@ -508,6 +508,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropSnapshotsByCollectionMessageHeader",
+                "BodyType": "messagespb.DropSnapshotsByCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropSnapshotsByCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.AlterWALMessageHeader",
                 "BodyType": "messagespb.AlterWALMessageBody"
             },

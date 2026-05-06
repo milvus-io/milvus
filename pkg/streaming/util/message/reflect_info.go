@@ -72,6 +72,7 @@ const (
 	MessageTypeCreateSnapshot            MessageType = MessageType(messagespb.MessageType_CreateSnapshot)
 	MessageTypeDropSnapshot              MessageType = MessageType(messagespb.MessageType_DropSnapshot)
 	MessageTypeRestoreSnapshot           MessageType = MessageType(messagespb.MessageType_RestoreSnapshot)
+	MessageTypeDropSnapshotsByCollection MessageType = MessageType(messagespb.MessageType_DropSnapshotsByCollection)
 	MessageTypeAlterWAL                  MessageType = MessageType(messagespb.MessageType_AlterWAL)
 	MessageTypeBatchUpdateManifest       MessageType = MessageType(messagespb.MessageType_BatchUpdateManifest)
 	MessageTypeRefreshExternalCollection MessageType = MessageType(messagespb.MessageType_RefreshExternalCollection)
@@ -189,6 +190,8 @@ type (
 	DropSnapshotMessageBody                = messagespb.DropSnapshotMessageBody
 	RestoreSnapshotMessageHeader           = messagespb.RestoreSnapshotMessageHeader
 	RestoreSnapshotMessageBody             = messagespb.RestoreSnapshotMessageBody
+	DropSnapshotsByCollectionMessageHeader = messagespb.DropSnapshotsByCollectionMessageHeader
+	DropSnapshotsByCollectionMessageBody   = messagespb.DropSnapshotsByCollectionMessageBody
 	AlterWALMessageHeader                  = messagespb.AlterWALMessageHeader
 	AlterWALMessageBody                    = messagespb.AlterWALMessageBody
 	BatchUpdateManifestMessageHeader       = messagespb.BatchUpdateManifestMessageHeader
@@ -2192,6 +2195,48 @@ var MustAsBroadcastRestoreSnapshotMessageV2 = MustAsSpecializedBroadcastMessage[
 // NewRestoreSnapshotMessageBuilderV2 creates a new message builder for RestoreSnapshotMessageV2
 var NewRestoreSnapshotMessageBuilderV2 = newMutableMessageBuilder[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
 
+// Type aliases for DropSnapshotsByCollectionMessageV2
+type (
+	MutableDropSnapshotsByCollectionMessageV2         = specializedMutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+	ImmutableDropSnapshotsByCollectionMessageV2       = SpecializedImmutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+	BroadcastDropSnapshotsByCollectionMessageV2       = SpecializedBroadcastMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+	BroadcastResultDropSnapshotsByCollectionMessageV2 = BroadcastResult[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+	AckResultDropSnapshotsByCollectionMessageV2       = AckResult[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+)
+
+// MessageTypeWithVersion for DropSnapshotsByCollectionMessageV2
+var MessageTypeDropSnapshotsByCollectionV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeDropSnapshotsByCollection,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for DropSnapshotsByCollectionMessageV2
+var SpecializedTypeDropSnapshotsByCollectionV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*DropSnapshotsByCollectionMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*DropSnapshotsByCollectionMessageHeader)(nil)),
+}
+
+// AsMutableDropSnapshotsByCollectionMessageV2 converts a BasicMessage to MutableDropSnapshotsByCollectionMessageV2
+var AsMutableDropSnapshotsByCollectionMessageV2 = asSpecializedMutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// MustAsMutableDropSnapshotsByCollectionMessageV2 converts a BasicMessage to MutableDropSnapshotsByCollectionMessageV2, panics on error
+var MustAsMutableDropSnapshotsByCollectionMessageV2 = mustAsSpecializedMutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// AsImmutableDropSnapshotsByCollectionMessageV2 converts an ImmutableMessage to ImmutableDropSnapshotsByCollectionMessageV2
+var AsImmutableDropSnapshotsByCollectionMessageV2 = asSpecializedImmutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// MustAsImmutableDropSnapshotsByCollectionMessageV2 converts an ImmutableMessage to ImmutableDropSnapshotsByCollectionMessageV2, panics on error
+var MustAsImmutableDropSnapshotsByCollectionMessageV2 = MustAsSpecializedImmutableMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// AsBroadcastDropSnapshotsByCollectionMessageV2 converts a BasicMessage to BroadcastDropSnapshotsByCollectionMessageV2
+var AsBroadcastDropSnapshotsByCollectionMessageV2 = asSpecializedBroadcastMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// MustAsBroadcastDropSnapshotsByCollectionMessageV2 converts a BasicMessage to BroadcastDropSnapshotsByCollectionMessageV2, panics on error
+var MustAsBroadcastDropSnapshotsByCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
+// NewDropSnapshotsByCollectionMessageBuilderV2 creates a new message builder for DropSnapshotsByCollectionMessageV2
+var NewDropSnapshotsByCollectionMessageBuilderV2 = newMutableMessageBuilder[*DropSnapshotsByCollectionMessageHeader, *DropSnapshotsByCollectionMessageBody]
+
 // Type aliases for AlterWALMessageV2
 type (
 	MutableAlterWALMessageV2         = specializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
@@ -2355,6 +2400,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.DropResourceGroupMessageHeader{}):         MessageTypeDropResourceGroup,
 	reflect.TypeOf(&messagespb.DropRoleMessageHeader{}):                  MessageTypeDropRole,
 	reflect.TypeOf(&messagespb.DropSnapshotMessageHeader{}):              MessageTypeDropSnapshot,
+	reflect.TypeOf(&messagespb.DropSnapshotsByCollectionMessageHeader{}): MessageTypeDropSnapshotsByCollection,
 	reflect.TypeOf(&messagespb.DropUserMessageHeader{}):                  MessageTypeDropUser,
 	reflect.TypeOf(&messagespb.DropUserRoleMessageHeader{}):              MessageTypeDropUserRole,
 	reflect.TypeOf(&messagespb.FlushAllMessageHeader{}):                  MessageTypeFlushAll,
@@ -2426,6 +2472,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeDropResourceGroupV2:         SpecializedTypeDropResourceGroupV2,
 	MessageTypeDropRoleV2:                  SpecializedTypeDropRoleV2,
 	MessageTypeDropSnapshotV2:              SpecializedTypeDropSnapshotV2,
+	MessageTypeDropSnapshotsByCollectionV2: SpecializedTypeDropSnapshotsByCollectionV2,
 	MessageTypeDropUserRoleV2:              SpecializedTypeDropUserRoleV2,
 	MessageTypeDropUserV2:                  SpecializedTypeDropUserV2,
 	MessageTypeFlushAllV2:                  SpecializedTypeFlushAllV2,
@@ -2481,6 +2528,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeDropResourceGroupV2:         MessageTypeDropResourceGroupV2,
 	SpecializedTypeDropRoleV2:                  MessageTypeDropRoleV2,
 	SpecializedTypeDropSnapshotV2:              MessageTypeDropSnapshotV2,
+	SpecializedTypeDropSnapshotsByCollectionV2: MessageTypeDropSnapshotsByCollectionV2,
 	SpecializedTypeDropUserRoleV2:              MessageTypeDropUserRoleV2,
 	SpecializedTypeDropUserV2:                  MessageTypeDropUserV2,
 	SpecializedTypeFlushAllV2:                  MessageTypeFlushAllV2,
