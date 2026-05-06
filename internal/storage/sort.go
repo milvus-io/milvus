@@ -18,14 +18,21 @@ package storage
 
 import (
 	"container/heap"
+	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/ipc"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // SortTimings holds phase-level timing information from the Sort function.
@@ -46,16 +53,161 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		ri int
 		i  int
 	}
+	phaseStart := time.Now()
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	tmpDir, err := os.MkdirTemp(rootPath, "milvus-sort-*")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	// remove entire tmpDir at the end
+	defer os.RemoveAll(tmpDir)
+
+	// how many rows per run we allow in memory (you requested 1,000,000)
+	const runRowLimit = 1000000
+
 	indices := make([]*index, 0)
 
-	// release cgo records
-	defer func() {
+	runRows := 0
+	// keep a list of temp file paths (each holds a sorted run)
+	tmpFiles := make([]string, 0)
+
+	// current run builder + pk values
+	alloc := memory.NewGoAllocator()
+
+	flushRun := func() error {
+		if runRows == 0 {
+			return nil
+		}
+		type keyCmp func(x, y *index) int
+		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
+		if len(sortByFieldIDs) > 0 {
+			for _, fid := range sortByFieldIDs {
+				switch records[0].Column(fid).(type) {
+				case *array.Int64:
+					f := func(x, y *index) int {
+						xVal := records[x.ri].Column(fid).(*array.Int64).Value(x.i)
+						yVal := records[y.ri].Column(fid).(*array.Int64).Value(y.i)
+						if xVal < yVal {
+							return -1
+						}
+						if xVal > yVal {
+							return 1
+						}
+						return 0
+					}
+					comparators = append(comparators, f)
+				case *array.String:
+					f := func(x, y *index) int {
+						xVal := records[x.ri].Column(fid).(*array.String).Value(x.i)
+						yVal := records[y.ri].Column(fid).(*array.String).Value(y.i)
+						if xVal < yVal {
+							return -1
+						}
+						if xVal > yVal {
+							return 1
+						}
+						return 0
+					}
+					comparators = append(comparators, f)
+				default:
+					return merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+				}
+			}
+		}
+
+		if len(comparators) > 0 {
+			sort.Slice(indices, func(i, j int) bool {
+				x := indices[i]
+				y := indices[j]
+				for _, cmp := range comparators {
+					c := cmp(x, y)
+					if c < 0 {
+						return true
+					}
+					if c > 0 {
+						return false
+					}
+				}
+				return false
+			})
+		}
+		// open a temp file to write the sorted run
+		tmpFile, err := os.CreateTemp(tmpDir, "run-*.arrow")
+		if err != nil {
+			return err
+		}
+		defer tmpFile.Close()
+		var ipcWriter *ipc.FileWriter
+		// helper to write an Arrow record to the file
+		writeRecordToFile := func(rec Record) error {
+			sar, ok := rec.(*simpleArrowRecord)
+			if !ok {
+				return fmt.Errorf("unexpected Record type")
+			}
+			arrowRec := sar.r
+			if ipcWriter == nil {
+				ipcWriter, err = ipc.NewFileWriter(tmpFile, ipc.WithSchema(arrowRec.Schema()))
+				if err != nil {
+					return err
+				}
+			}
+			if err := ipcWriter.Write(arrowRec); err != nil {
+				ipcWriter.Close()
+				return err
+			}
+			return nil
+		}
+
+		outRB := NewRecordBuilder(schema)
+
+		// append rows in sorted order
+		for _, idx := range indices {
+			if err := outRB.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
+				return err
+			}
+
+			// flush to file if batchSize reached
+			if outRB.GetSize() >= batchSize {
+				tmpRec := outRB.Build()
+				if err := writeRecordToFile(tmpRec); err != nil {
+					tmpRec.Release()
+					return err
+				}
+				tmpRec.Release()
+				outRB = NewRecordBuilder(schema)
+			}
+		}
+
+		// flush any remaining rows
+		if outRB.GetRowNum() > 0 {
+			tmpRec := outRB.Build()
+			if err := writeRecordToFile(tmpRec); err != nil {
+				tmpRec.Release()
+				return err
+			}
+			tmpRec.Release()
+		}
+		if ipcWriter != nil {
+			err = ipcWriter.Close()
+			if err != nil {
+				return err
+			}
+		}
+		// save temp file path
+		tmpFiles = append(tmpFiles, tmpFile.Name())
+		// release cgo records
 		for _, rec := range records {
 			rec.Release()
 		}
-	}()
 
-	phaseStart := time.Now()
+		// reset builder and pk arrays
+		indices = make([]*index, 0)
+		runRows = 0
+		records = make([]Record, 0)
+		return nil
+	}
+
+	var totalRecords int64 = 0
 	for _, r := range rr {
 		for {
 			rec, err := r.Next()
@@ -64,8 +216,17 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				ri := len(records)
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
-					if predicate(rec, ri, i) {
-						indices = append(indices, &index{ri, i})
+					if !predicate(rec, ri, i) {
+						continue
+					}
+					indices = append(indices, &index{ri, i})
+					runRows++
+				}
+				totalRecords++
+				// if run reached limit, flush it
+				if runRows >= runRowLimit {
+					if err := flushRun(); err != nil {
+						return 0, nil, err
 					}
 				}
 			} else if err == io.EOF {
@@ -75,104 +236,131 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			}
 		}
 	}
+	if runRows > 0 {
+		if err := flushRun(); err != nil {
+			return 0, nil, err
+		}
+	}
 	readCost := time.Since(phaseStart)
 
-	if len(records) == 0 {
+	if totalRecords == 0 {
 		return 0, &SortTimings{ReadCost: readCost}, nil
 	}
 
-	phaseStart = time.Now()
-	if len(sortByFieldIDs) > 0 {
-		type keyCmp func(x, y *index) int
-		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
-		for _, fid := range sortByFieldIDs {
-			switch records[0].Column(fid).(type) {
-			case *array.Int64:
-				f := func(x, y *index) int {
-					xVal := records[x.ri].Column(fid).(*array.Int64).Value(x.i)
-					yVal := records[y.ri].Column(fid).(*array.Int64).Value(y.i)
-					if xVal < yVal {
-						return -1
-					}
-					if xVal > yVal {
-						return 1
-					}
-					return 0
-				}
-				comparators = append(comparators, f)
-			case *array.String:
-				f := func(x, y *index) int {
-					xVal := records[x.ri].Column(fid).(*array.String).Value(x.i)
-					yVal := records[y.ri].Column(fid).(*array.String).Value(y.i)
-					if xVal < yVal {
-						return -1
-					}
-					if xVal > yVal {
-						return 1
-					}
-					return 0
-				}
-				comparators = append(comparators, f)
-			default:
-				return 0, nil, merr.WrapErrStorageMsg("unsupported type for sorting key")
+	rdrs := make([]RecordReader, 0, len(tmpFiles))
+	for _, p := range tmpFiles {
+		rdr, err := newIPCFileRecordReader(p, alloc, schema)
+		if err != nil {
+			// close already opened readers
+			for _, rrdr := range rdrs {
+				rrdr.Close()
 			}
-		}
-
-		sort.Slice(indices, func(i, j int) bool {
-			x := indices[i]
-			y := indices[j]
-			for _, cmp := range comparators {
-				c := cmp(x, y)
-				if c < 0 {
-					return true
-				}
-				if c > 0 {
-					return false
-				}
-			}
-			return false
-		})
-	}
-	sortCost := time.Since(phaseStart)
-
-	phaseStart = time.Now()
-	rb := NewRecordBuilder(schema)
-	writeRecord := func() error {
-		rec := rb.Build()
-		defer rec.Release()
-		if rec.Len() > 0 {
-			return rw.Write(rec)
-		}
-		return nil
-	}
-
-	for _, idx := range indices {
-		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
 			return 0, nil, err
 		}
-
-		// Write when accumulated data size reaches batchSize
-		if rb.GetSize() >= batchSize {
-			if err := writeRecord(); err != nil {
-				return 0, nil, err
-			}
-		}
+		rdrs = append(rdrs, rdr)
 	}
+	defer func() {
+		for _, rrdr := range rdrs {
+			rrdr.Close()
+		}
+	}()
 
-	// write the last batch
-	if err := writeRecord(); err != nil {
+	phaseStart = time.Now()
+	// MergeSort handles both 1 or many readers
+	numRows, err := MergeSort(batchSize, schema, rdrs, rw, predicate, sortByFieldIDs)
+	if err != nil {
 		return 0, nil, err
 	}
+	sortCost := time.Since(phaseStart)
 	writeCost := time.Since(phaseStart)
 
 	timings := &SortTimings{
 		ReadCost:   readCost,
 		SortCost:   sortCost,
 		WriteCost:  writeCost,
-		NumBatches: len(records),
-		NumRows:    len(indices),
+		NumBatches: int(totalRecords),
+		NumRows:    numRows,
 	}
-	return len(indices), timings, nil
+	return numRows, timings, nil
+}
+
+type ipcFileRecordReader struct {
+	f            *os.File
+	fr           *ipc.FileReader
+	schema       *schemapb.CollectionSchema
+	batchIdx     int
+	totalBatches int
+}
+
+// newIPCFileRecordReader opens the temp file and prepares for sequential batch reading
+func newIPCFileRecordReader(path string, alloc memory.Allocator, schema *schemapb.CollectionSchema) (RecordReader, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	fr, err := ipc.NewFileReader(f, ipc.WithAllocator(alloc))
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &ipcFileRecordReader{
+		f:            f,
+		fr:           fr,
+		schema:       schema,
+		batchIdx:     0,
+		totalBatches: fr.NumRecords(),
+	}, nil
+}
+
+// Next returns the next Arrow Record batch, or io.EOF if all batches are consumed
+func (r *ipcFileRecordReader) Next() (Record, error) {
+	if r.batchIdx >= r.totalBatches {
+		return nil, io.EOF
+	}
+
+	arrowRec, err := r.fr.Record(r.batchIdx)
+	if err != nil {
+		return nil, err
+	}
+	r.batchIdx++
+
+	// build FieldID -> column index mapping
+	field2col := make(map[FieldID]int)
+	nameToFieldID := map[string]FieldID{}
+	if r.schema != nil {
+		for _, f := range r.schema.GetFields() {
+			nameToFieldID[f.GetName()] = f.GetFieldID()
+		}
+		for _, sf := range r.schema.GetStructArrayFields() {
+			for _, f := range sf.GetFields() {
+				nameToFieldID[f.GetName()] = f.GetFieldID()
+			}
+		}
+	}
+
+	for colIdx, f := range arrowRec.Schema().Fields() {
+		if id, err := strconv.Atoi(f.Name); err == nil {
+			field2col[FieldID(id)] = colIdx
+			continue
+		}
+		if fid, ok := nameToFieldID[f.Name]; ok {
+			field2col[fid] = colIdx
+		}
+	}
+
+	return NewSimpleArrowRecord(arrowRec, field2col), nil
+}
+
+// SetNeededFields is a no-op for consistency
+func (r *ipcFileRecordReader) SetNeededFields(_ typeutil.Set[int64]) {}
+
+// Close closes both the file reader and the underlying file
+func (r *ipcFileRecordReader) Close() error {
+	if err := r.fr.Close(); err != nil {
+		r.f.Close()
+		return err
+	}
+	return r.f.Close()
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
@@ -281,7 +469,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				return 0
 			})
 		default:
-			return 0, merr.WrapErrStorageMsg("unsupported type for sorting key")
+			return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
 		}
 	}
 
