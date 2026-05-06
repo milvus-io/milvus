@@ -1014,6 +1014,216 @@ TEST(Expr, TestArrayContains) {
     }
 }
 
+// Behavior coverage for ExecArrayContains across single- and multi-target
+// invocations and across INT64 / VARCHAR element types. Exercises the typed
+// cached set path (no MultiElement / variant round-trip).
+TEST(Expr, TestArrayContainsTargetCoverage) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    auto string_array_fid = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
+    int num_iters = 1;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_string_array_col =
+            raw_data.get_col<ScalarFieldProto>(string_array_fid);
+        array_cols["long"].insert(array_cols["long"].end(),
+                                  new_long_array_col.begin(),
+                                  new_long_array_col.end());
+        array_cols["string"].insert(array_cols["string"].end(),
+                                    new_string_array_col.begin(),
+                                    new_string_array_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // --- Single-target Contains on INT64 ---
+    {
+        int64_t target = 10;
+        auto check = [target](const std::vector<int64_t>& values) {
+            return std::find(values.begin(), values.end(), target) !=
+                   values.end();
+        };
+        proto::plan::GenericValue gen_val;
+        gen_val.set_int64_val(target);
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            std::vector<proto::plan::GenericValue>{gen_val});
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final_bits =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        EXPECT_EQ(final_bits.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto array = milvus::Array(array_cols["long"][i]);
+            std::vector<int64_t> res;
+            for (int j = 0; j < array.length(); ++j) {
+                res.push_back(array.get_data<int64_t>(j));
+            }
+            ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
+        }
+    }
+
+    // --- Single-target Contains on VARCHAR ---
+    {
+        std::string target = "1sads";
+        auto check = [&target](const std::vector<std::string_view>& values) {
+            return std::find(values.begin(), values.end(), target) !=
+                   values.end();
+        };
+        proto::plan::GenericValue gen_val;
+        gen_val.set_string_val(target);
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(
+                string_array_fid, DataType::ARRAY, DataType::VARCHAR),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            std::vector<proto::plan::GenericValue>{gen_val});
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final_bits =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        EXPECT_EQ(final_bits.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto array = milvus::Array(array_cols["string"][i]);
+            std::vector<std::string_view> res;
+            for (int j = 0; j < array.length(); ++j) {
+                res.push_back(array.get_data<std::string_view>(j));
+            }
+            ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
+        }
+    }
+
+    // --- ContainsAny with a one-element target list ---
+    {
+        int64_t target = 100;
+        auto check = [target](const std::vector<int64_t>& values) {
+            return std::find(values.begin(), values.end(), target) !=
+                   values.end();
+        };
+        proto::plan::GenericValue gen_val;
+        gen_val.set_int64_val(target);
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+            true,
+            std::vector<proto::plan::GenericValue>{gen_val});
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final_bits =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        EXPECT_EQ(final_bits.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto array = milvus::Array(array_cols["long"][i]);
+            std::vector<int64_t> res;
+            for (int j = 0; j < array.length(); ++j) {
+                res.push_back(array.get_data<int64_t>(j));
+            }
+            ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
+        }
+    }
+
+    // --- Multi-target ContainsAny on INT64 (no element should match all
+    //     three targets, but each row may match any of them). ---
+    {
+        std::vector<int64_t> targets = {10, 100, 1000};
+        auto check = [&targets](const std::vector<int64_t>& values) {
+            for (auto t : targets) {
+                if (std::find(values.begin(), values.end(), t) !=
+                    values.end()) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::vector<proto::plan::GenericValue> vals;
+        for (auto t : targets) {
+            proto::plan::GenericValue gv;
+            gv.set_int64_val(t);
+            vals.push_back(gv);
+        }
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+            true,
+            vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final_bits =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        EXPECT_EQ(final_bits.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto array = milvus::Array(array_cols["long"][i]);
+            std::vector<int64_t> res;
+            for (int j = 0; j < array.length(); ++j) {
+                res.push_back(array.get_data<int64_t>(j));
+            }
+            ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
+        }
+    }
+
+    // --- Multi-target ContainsAny on VARCHAR. ---
+    {
+        std::vector<std::string> targets = {"1sads", "10dsf", "100"};
+        auto check = [&targets](const std::vector<std::string_view>& values) {
+            for (auto const& t : targets) {
+                if (std::find(values.begin(), values.end(), t) !=
+                    values.end()) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::vector<proto::plan::GenericValue> vals;
+        for (const auto& t : targets) {
+            proto::plan::GenericValue gv;
+            gv.set_string_val(t);
+            vals.push_back(gv);
+        }
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(
+                string_array_fid, DataType::ARRAY, DataType::VARCHAR),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+            true,
+            vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final_bits =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        EXPECT_EQ(final_bits.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto array = milvus::Array(array_cols["string"][i]);
+            std::vector<std::string_view> res;
+            for (int j = 0; j < array.length(); ++j) {
+                res.push_back(array.get_data<std::string_view>(j));
+            }
+            ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
+        }
+    }
+}
+
 TEST(Expr, TestArrayContainsEmptyValues) {
     auto schema = std::make_shared<Schema>();
     auto int_array_fid =
