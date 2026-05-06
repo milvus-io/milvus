@@ -18,15 +18,51 @@ package etcd
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"os"
 	"path"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// freePort grabs a random unused TCP port. There's a small TOCTOU window
+// between Close and the subsequent bind, but for unit tests it's acceptable.
+func freePort(t *testing.T) int {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+	return port
+}
+
 func TestEtcd(t *testing.T) {
-	err := InitEtcdServer(true, "", "/tmp/data", "stdout", "info")
+	// Use random free ports so the embedded etcd does not collide with any
+	// already-running etcd on the dev machine (e.g. docker-compose etcd
+	// holding 2379/2380).
+	clientPort, peerPort := freePort(t), freePort(t)
+	dataDir, err := os.MkdirTemp("", "test-etcd-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dataDir)
+	cfgFile, err := os.CreateTemp("", "test-etcd-*.yaml")
+	require.NoError(t, err)
+	defer os.Remove(cfgFile.Name())
+	_, err = fmt.Fprintf(cfgFile, `name: default
+data-dir: %s
+listen-client-urls: http://127.0.0.1:%d
+advertise-client-urls: http://127.0.0.1:%d
+listen-peer-urls: http://127.0.0.1:%d
+initial-advertise-peer-urls: http://127.0.0.1:%d
+initial-cluster: default=http://127.0.0.1:%d
+initial-cluster-state: new
+`, dataDir, clientPort, clientPort, peerPort, peerPort, peerPort)
+	require.NoError(t, err)
+	require.NoError(t, cfgFile.Close())
+
+	err = InitEtcdServer(true, cfgFile.Name(), dataDir, "stdout", "info")
 	assert.NoError(t, err)
 	defer StopEtcdServer()
 
