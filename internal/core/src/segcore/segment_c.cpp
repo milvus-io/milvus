@@ -664,6 +664,38 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
 }
 
 CStatus
+LoadTextIndex(CSegmentInterface c_segment,
+              const uint8_t* serialized_load_text_index_info,
+              const uint64_t len,
+              CLoadCancellationSource source) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+
+        auto info_proto =
+            std::make_shared<milvus::proto::indexcgo::LoadTextIndexInfo>();
+        info_proto->ParseFromArray(serialized_load_text_index_info, len);
+
+        if (source) {
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            milvus::OpContext op_ctx(cancellation_source->getToken());
+            segment->LoadTextIndex(&op_ctx, std::move(info_proto));
+        } else {
+            segment->LoadTextIndex(nullptr, std::move(info_proto));
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialized_load_json_key_index_info,
@@ -839,6 +871,32 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
 
     auto segment = reinterpret_cast<milvus::segcore::SegmentSealed*>(c_segment);
     segment->RemoveFieldFile(milvus::FieldId(field_id));
+}
+
+CStatus
+CreateTextIndex(CSegmentInterface c_segment,
+                int64_t field_id,
+                CLoadCancellationSource source) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
+        if (source) {
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            milvus::OpContext op_ctx(cancellation_source->getToken());
+            segment_interface->CreateTextIndex(milvus::FieldId(field_id),
+                                               &op_ctx);
+        } else {
+            segment_interface->CreateTextIndex(milvus::FieldId(field_id),
+                                               nullptr);
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }
 
 CStatus
