@@ -486,6 +486,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	analyzerExtraInfo := ""
 	for _, field := range st.req.GetSchema().GetFields() {
 		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)

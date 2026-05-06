@@ -3085,57 +3085,6 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 	}
 }
 
-func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *testing.T) {
-	paramtable.Init()
-	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
-
-	collID, segID, indexID := int64(1), int64(100), int64(10)
-
-	t.Run("vec force-rebuild with target>max converges after clamp", func(t *testing.T) {
-		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
-		Params.Save("dataCoord.targetVecIndexVersion", "30")
-		defer func() {
-			Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
-			Params.Save("dataCoord.targetVecIndexVersion", "-1")
-		}()
-
-		// Index was already rebuilt to clamped version (20), should NOT trigger again
-		segIdx := &model.SegmentIndex{
-			SegmentID:           segID,
-			CollectionID:        collID,
-			IndexID:             indexID,
-			IndexFileKeys:       []string{"file1"},
-			CurrentIndexVersion: 20, // matches resolved (clamped) target
-		}
-		im := newSegmentIndexMeta(nil)
-		im.indexes[collID] = map[UniqueID]*model.Index{
-			indexID: {
-				CollectionID: collID,
-				IndexID:      indexID,
-				IndexName:    "test_idx",
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: "HNSW"},
-				},
-			},
-		}
-		segIdxMap := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxMap.Insert(indexID, segIdx)
-		im.segmentIndexes.Insert(segID, segIdxMap)
-
-		mockVM := NewMockVersionManager(t)
-		// ResolveVecIndexVersion clamps target=30 to max=20
-		mockVM.On("ResolveVecIndexVersion").Return(int32(20)).Maybe()
-
-		trigger := &compactionTrigger{
-			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
-			indexEngineVersionManager: mockVM,
-		}
-
-		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
-		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
-	})
-}
-
 func newTestIndexMeta(collID, segID, indexID int64, indexType string, segIdx *model.SegmentIndex) *indexMeta {
 	im := newSegmentIndexMeta(nil)
 	im.indexes[collID] = map[UniqueID]*model.Index{

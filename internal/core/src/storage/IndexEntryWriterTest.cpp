@@ -253,14 +253,13 @@ TEST_F(IndexEntryWriterV3Test, FdEntryRoundtrip) {
     auto data = GeneratePattern(entry_size);
 
     std::string tmp_relative = "fd_source.bin";
-    std::string tmp_absolute = GetRootPath() + "/" + tmp_relative;
     {
         auto tmp_out = CreateOutputStream(tmp_relative);
         tmp_out->Write(data.data(), data.size());
         tmp_out->Close();
     }
 
-    int fd = ::open(tmp_absolute.c_str(), O_RDONLY);
+    int fd = ::open(tmp_relative.c_str(), O_RDONLY);
     ASSERT_NE(fd, -1) << "Failed to open temp file: " << strerror(errno);
 
     {
@@ -277,6 +276,7 @@ TEST_F(IndexEntryWriterV3Test, FdEntryRoundtrip) {
 
     auto entry = reader->ReadEntry("fd_entry");
     VerifyPattern(entry.data, entry_size);
+    ::unlink(tmp_relative.c_str());
 }
 
 TEST_F(IndexEntryWriterV3Test, MultipleEntriesRoundtrip) {
@@ -886,14 +886,13 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
 
     // Write source file
     std::string tmp_relative = "enc_fd_source.bin";
-    std::string tmp_absolute = GetRootPath() + "/" + tmp_relative;
     {
         auto tmp_out = CreateOutputStream(tmp_relative);
         tmp_out->Write(data.data(), data.size());
         tmp_out->Close();
     }
 
-    int fd = ::open(tmp_absolute.c_str(), O_RDONLY);
+    int fd = ::open(tmp_relative.c_str(), O_RDONLY);
     ASSERT_NE(fd, -1);
 
     {
@@ -913,5 +912,5 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
 
-    ::unlink(tmp_absolute.c_str());
+    ::unlink(tmp_relative.c_str());
 }

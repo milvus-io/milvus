@@ -341,6 +341,7 @@ class SegmentLoadInfo {
         : info_(other.info_),
           schema_(other.schema_),
           column_groups_(other.column_groups_),
+          fields_filled_with_default_(other.fields_filled_with_default_),
           created_text_indexes_(other.created_text_indexes_) {
         BuildCache();
     }
@@ -356,6 +357,8 @@ class SegmentLoadInfo {
               std::move(other.converted_field_index_cache_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)),
+          fields_filled_with_default_(
+              std::move(other.fields_filled_with_default_)),
           created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
@@ -369,6 +372,7 @@ class SegmentLoadInfo {
             info_ = other.info_;
             schema_ = other.schema_;
             column_groups_ = other.column_groups_;
+            fields_filled_with_default_ = other.fields_filled_with_default_;
             created_text_indexes_ = other.created_text_indexes_;
             BuildCache();
         }
@@ -388,6 +392,8 @@ class SegmentLoadInfo {
                 std::move(other.converted_field_index_cache_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            fields_filled_with_default_ =
+                std::move(other.fields_filled_with_default_);
             created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
@@ -948,6 +954,12 @@ class SegmentLoadInfo {
     void
     ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    ComputeDiffDefaultFields(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    void
+    ComputeDiffTextIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
+
     ProtoType info_;
 
     SchemaPtr schema_;
@@ -960,6 +972,9 @@ class SegmentLoadInfo {
 
     // set of field ids that corresponding index has raw data
     std::set<FieldId> field_index_has_raw_data_;
+
+    // set of field ids that have been filled with default values
+    std::set<FieldId> fields_filled_with_default_;
 
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
