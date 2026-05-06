@@ -5058,6 +5058,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
+        bool has_child_fields = field_binlog.child_fields_size() > 0;
         auto fields_to_load = field_ids;
         AssertInfo(!fields_to_load.empty(),
                    "load field data with empty field list");
@@ -5128,6 +5129,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Build FieldBinlogInfo
         FieldBinlogInfo field_binlog_info;
         field_binlog_info.field_id = group_id;
+        if (has_child_fields) {
+            field_binlog_info.child_field_ids.reserve(fields_to_load.size());
+            for (const auto& field_id : fields_to_load) {
+                field_binlog_info.child_field_ids.push_back(field_id.get());
+            }
+        }
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
