@@ -1775,8 +1775,6 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     // Check for cancellation before starting
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::LoadTextIndex()");
 
-    std::unique_lock lck(mutex_);
-
     milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
                                                    info_proto->partitionid(),
                                                    this->get_segment_id(),
@@ -1825,6 +1823,11 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     auto cache_slot =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
+
+    // CreateCacheSlot may synchronously warm up the text index. Keep that work
+    // outside the segment mutex so multiple text indexes can load in parallel.
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::LoadTextIndex()");
+    std::unique_lock lck(mutex_);
     text_indexes_[field_id] = std::move(cache_slot);
 }
 

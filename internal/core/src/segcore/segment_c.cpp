@@ -820,6 +820,7 @@ CreateTextIndex(CSegmentInterface c_segment,
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
         if (source) {
             auto cancellation_source =
                 static_cast<folly::CancellationSource*>(source);

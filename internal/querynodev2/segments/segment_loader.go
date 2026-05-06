@@ -958,11 +958,16 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		})
 	}
 
-	// load text indexes.
+	// Load text indexes in parallel through LoadPool.
+	futures := make([]*conc.Future[any], 0, len(textIndexes))
 	for _, info := range textIndexes {
-		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
-			return err
-		}
+		textIndexInfo := info
+		futures = append(futures, GetLoadPool().Submit(func() (any, error) {
+			return nil, segment.loadTextIndexCgo(ctx, textIndexInfo, schemaHelper)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return err
 	}
 	loadTextIndexesSpan := tr.RecordSpan()
 
