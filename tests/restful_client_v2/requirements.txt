@@ -10,12 +10,15 @@ pymilvus
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
 minio==7.2.0
-tenacity==8.1.0
+tenacity>=8.2.3
 # for bf16 datatype
 ml-dtypes==0.2.0
 loguru==0.7.3
 bm25s==0.2.13
 jieba==0.42.1
 pyarrow==21.0.0
+# for external collection formats
+pylance==3.0.1
+pyiceberg[sql-sqlite]==0.8.1
 # for geometry data type
 shapely>=2.0.0
