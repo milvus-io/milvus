@@ -1381,7 +1381,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs) {
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows /*=0*/,
+                           size_t offset /*=0*/) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
@@ -1464,7 +1466,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-
+    size_t total_num_rows = 0;
+    bool is_full = false;
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
@@ -1478,11 +1481,38 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                    "[StorageV2] Failed to create file row group reader: " +
                        result.status().ToString());
         auto reader = result.ValueOrDie();
+        auto row_group_meta_data_vector =
+            reader->file_metadata()->GetRowGroupMetadataVector();
+        auto row_group_num = row_group_meta_data_vector.size();
+        LOG_DEBUG("[StorageV2] row_group_num: {}", row_group_num);
 
-        auto row_group_num =
-            reader->file_metadata()->GetRowGroupMetadataVector().size();
         std::vector<int64_t> all_row_groups(row_group_num);
-        std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        if (max_rows == 0) {
+            std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        } else {
+            all_row_groups.clear();
+            size_t total_rows = 0;
+            size_t start_row_group = (size_t)std::ceil(
+                (double)offset /
+                (double)row_group_meta_data_vector.Get(0).row_num());
+            if (start_row_group >= row_group_num) {
+                LOG_DEBUG(
+                    "[StorageV2] start_row_group {} is beyond group num {}",
+                    start_row_group,
+                    row_group_num);
+                return field_data_list;
+            }
+            LOG_DEBUG("[StorageV2] starting in row group: {}", start_row_group);
+            for (int i = start_row_group; i < row_group_num; i++) {
+                size_t num_rows = row_group_meta_data_vector.Get(i).row_num();
+                total_rows += num_rows;
+                all_row_groups.push_back(i);
+                if (total_rows >= max_rows) {
+                    LOG_DEBUG("[StorageV2] ending in row group: {}", i);
+                    break;
+                }
+            }
+        }
         row_group_lists.push_back(all_row_groups);
 
         // create a schema with only the field id
@@ -1525,6 +1555,17 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 field_data->FillFieldData(chunked_array);
             }
             field_data_list.push_back(field_data);
+            total_num_rows += num_rows;
+            if (max_rows > 0 && total_num_rows > max_rows) {
+                LOG_DEBUG("[StorageV2] max_rows: {} reached, total rows: {}",
+                          max_rows,
+                          total_num_rows);
+                is_full = true;
+                break;
+            }
+        }
+        if (is_full) {
+            break;
         }
         // access underlying feature to get exception if any
         load_future.get();
