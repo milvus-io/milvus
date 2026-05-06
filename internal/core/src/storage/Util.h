@@ -319,7 +319,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs);
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows = 0,
+                           size_t offset = 0);
 
 // Streams the field's data out of a storage-v3 manifest batch by batch,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
