@@ -28,6 +28,7 @@ import (
 const (
 	versionChecker260 = "<2.6.0-dev"
 	versionChecker265 = "<2.6.6-dev"
+	versionChecker300 = "<3.0.0-beta"
 )
 
 // RecoverBalancer recover the balancer working.
@@ -194,6 +195,12 @@ func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
 		return err
 	}
 	return b.channelMetaManager.MarkWALBasedDDLEnabled(ctx)
+}
+
+// WaitUntilSchemaDropReady waits until every Proxy can attach schema version
+// to insert messages, so schema-drop DDL cannot race with legacy writes.
+func (b *balancerImpl) WaitUntilSchemaDropReady(ctx context.Context) error {
+	return b.blockUntilRoleGreaterThanVersion(ctx, typeutil.ProxyRole, versionChecker300)
 }
 
 // WatchChannelAssignments watches the balance result.

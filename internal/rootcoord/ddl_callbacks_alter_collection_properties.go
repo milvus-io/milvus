@@ -208,18 +208,30 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	if len(req.GetProperties()) != 1 {
 		return merr.WrapErrParameterInvalidMsg("cannot alter dynamic schema with other properties at the same time")
 	}
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
 
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}
+	if coll.EnableDynamicField == targetValue {
+		return errIgnoredAlterCollection
+	}
+	if !targetValue {
+		if err := waitUntilSchemaDropReady(ctx); err != nil {
+			return err
+		}
+	}
 
-	// return nil for no-op
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
 	if coll.EnableDynamicField == targetValue {
 		return errIgnoredAlterCollection
 	}

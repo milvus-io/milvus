@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -37,19 +36,30 @@ import (
 
 // broadcastAlterCollectionSchema broadcasts the alter collection schema message to all channels.
 func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
+	action := req.GetAction()
+	if action == nil {
+		return merr.WrapErrParameterInvalidMsg("action is nil")
 	}
-	defer broadcaster.Close()
+
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}
+	if _, ok := action.GetOp().(*milvuspb.AlterCollectionSchemaRequest_Action_DropRequest); ok {
+		if err := waitUntilSchemaDropReady(ctx); err != nil {
+			return err
+		}
+	}
 
-	action := req.GetAction()
-	if action == nil {
-		return merr.WrapErrParameterInvalidMsg("action is nil")
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
 	}
 
 	switch action.GetOp().(type) {

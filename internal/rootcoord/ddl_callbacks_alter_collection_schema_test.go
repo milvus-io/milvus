@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -416,6 +418,84 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
+}
+
+func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	addResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         getFieldSchema("field2"),
+	})
+	require.NoError(t, merr.CheckRPCCall(addResp, err))
+	assertFieldExists(t, ctx, core, dbName, collectionName, "field2", 101)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	barrierErr := errors.New("proxy version barrier")
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err := core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: "field2"},
+				},
+			},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	require.Contains(t, resp.GetAlterStatus().GetDetail(), "failed to wait until schema drop ready")
+	assertFieldExists(t, ctx, core, dbName, collectionName, "field2", 101)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+}
+
+func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	varcharFieldSchema := &schemapb.FieldSchema{
+		Name:     "text_input",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "256"},
+		},
+	}
+	varcharBytes, err := proto.Marshal(varcharFieldSchema)
+	require.NoError(t, err)
+	addFieldResp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         varcharBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn", false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 }
 
 func assertFieldNotExists(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string) {

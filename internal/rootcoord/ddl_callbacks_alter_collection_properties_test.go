@@ -28,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -467,6 +469,41 @@ func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	require.True(t, dynamicField.IsDynamic)
 	require.Equal(t, int64(102), dynamicField.FieldID)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 102)
+}
+
+func TestDDLCallbacksAlterCollectionPropertiesDisableDynamicFieldWaitsForSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
+	resp, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	barrierErr := errors.New("proxy version barrier")
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "false"}},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Contains(t, resp.GetDetail(), "failed to wait until schema drop ready")
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *testing.T) {
