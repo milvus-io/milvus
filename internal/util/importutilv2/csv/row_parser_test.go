@@ -712,9 +712,16 @@ func (suite *RowParserSuite) TestParseError() {
 	suite.Nil(parser)
 
 	// field value missed
+	nonNullableSchema := suite.createAllTypesSchema()
+	for _, field := range nonNullableSchema.GetFields() {
+		if field.GetName() == "float_vector" {
+			field.Nullable = false
+			break
+		}
+	}
 	content = suite.genAllTypesRowData("x", "2", "float_vector")
-	header, _ = suite.genRowContent(schema, content)
-	parser, err = NewRowParser(schema, header, suite.nullKey)
+	header, _ = suite.genRowContent(nonNullableSchema, content)
+	parser, err = NewRowParser(nonNullableSchema, header, suite.nullKey)
 	suite.Error(err)
 	suite.Nil(parser)
 
