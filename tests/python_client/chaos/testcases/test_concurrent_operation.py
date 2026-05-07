@@ -16,6 +16,11 @@ from chaos.checker import (InsertChecker,
                            GeoQueryChecker,
                            DeleteChecker,
                            AddFieldChecker,
+                           SnapshotChecker,
+                           SnapshotRestoreChecker,
+                           NullVectorSearchChecker,
+                           NullVectorQueryChecker,
+                           AddVectorFieldChecker,
                            Op,
                            ResultAnalyzer
                            )
@@ -108,6 +113,11 @@ class TestOperations(TestBase):
             Op.geo_query: GeoQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.add_field: AddFieldChecker(collection_name=c_name),
+            Op.snapshot: SnapshotChecker(collection_name=c_name),
+            Op.restore_snapshot: SnapshotRestoreChecker(),
+            Op.null_vector_search: NullVectorSearchChecker(collection_name=c_name),
+            Op.null_vector_query: NullVectorQueryChecker(collection_name=c_name),
+            Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
         }
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers

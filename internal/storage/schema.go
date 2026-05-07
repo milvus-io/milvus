@@ -38,7 +38,27 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 		}
 
 		arrowType := serdeMap[field.DataType].arrowType(dim, elementType)
+
+		if field.GetNullable() {
+			switch field.DataType {
+			case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
+				arrowType = arrow.BinaryTypes.Binary
+			}
+		}
+
 		arrowField := ConvertToArrowField(field, arrowType, useFieldID)
+
+		if field.GetNullable() {
+			switch field.DataType {
+			case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
+				arrowField.Metadata = arrow.NewMetadata(
+					[]string{packed.ArrowFieldIdMetadataKey, "dim"},
+					[]string{strconv.Itoa(int(field.GetFieldID())), strconv.Itoa(dim)},
+				)
+			}
+		}
 
 		// Add extra metadata for ArrayOfVector
 		if field.DataType == schemapb.DataType_ArrayOfVector {

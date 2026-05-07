@@ -572,6 +572,35 @@ BuildFloatVecIndex(CIndex index,
 }
 
 CStatus
+BuildFloatVecIndexWithValidData(CIndex index,
+                                int64_t float_value_num,
+                                const float* vectors,
+                                const bool* valid_data,
+                                int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(index,
+                   "failed to build float vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = float_value_num / dim;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds, valid_data, valid_data_len);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
 BuildFloat16VecIndex(CIndex index,
                      int64_t float16_value_num,
                      const uint8_t* vectors) {
@@ -590,6 +619,36 @@ BuildFloat16VecIndex(CIndex index,
         auto row_nums = float16_value_num / dim / 2;
         auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+BuildFloat16VecIndexWithValidData(CIndex index,
+                                  int64_t float16_value_num,
+                                  const uint8_t* vectors,
+                                  const bool* valid_data,
+                                  int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build float16 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = float16_value_num / dim / 2;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -628,6 +687,36 @@ BuildBFloat16VecIndex(CIndex index,
 }
 
 CStatus
+BuildBFloat16VecIndexWithValidData(CIndex index,
+                                   int64_t bfloat16_value_num,
+                                   const uint8_t* vectors,
+                                   const bool* valid_data,
+                                   int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build bfloat16 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = bfloat16_value_num / dim / 2;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds, valid_data, valid_data_len);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -644,6 +733,36 @@ BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
         auto row_nums = (data_size * 8) / dim;
         auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+BuildBinaryVecIndexWithValidData(CIndex index,
+                                 int64_t data_size,
+                                 const uint8_t* vectors,
+                                 const bool* valid_data,
+                                 int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build binary vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = (data_size * 8) / dim;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -682,6 +801,36 @@ BuildSparseFloatVecIndex(CIndex index,
 }
 
 CStatus
+BuildSparseFloatVecIndexWithValidData(CIndex index,
+                                      int64_t row_num,
+                                      int64_t dim,
+                                      const uint8_t* vectors,
+                                      const bool* valid_data,
+                                      int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(
+            index,
+            "failed to build sparse float vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto ds = knowhere::GenDataSet(row_num, dim, vectors);
+        ds->SetIsSparse(true);
+        cIndex->Build(ds, valid_data, valid_data_len);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
 BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -697,6 +846,35 @@ BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
         auto row_nums = int8_value_num / dim;
         auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+BuildInt8VecIndexWithValidData(CIndex index,
+                               int64_t int8_value_num,
+                               const int8_t* vectors,
+                               const bool* valid_data,
+                               int64_t valid_data_len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto status = CStatus();
+    try {
+        AssertInfo(index,
+                   "failed to build int8 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = int8_value_num / dim;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

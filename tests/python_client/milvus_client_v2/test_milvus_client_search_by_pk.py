@@ -288,15 +288,14 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="need return error or none @Marcelo chen")
     def test_search_by_pk_nullable_vector_field(self):
         """
         target: test search by pk with nullable vector field where some vectors are null
         method: 1. create a collection with nullable sparse vector field
                 2. insert data where some vectors are null
                 3. search by IDs including some with null vectors
-                4. verify result count equals non-null vector count (effective nq)
-        expected: null vectors are filtered out, result count = non-null vector count
+                4. verify result contains empty results for null vectors
+        expected: return empty results (topk=0) for IDs with null vectors, normal results for non-null vectors
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nullable_vec_search_")
@@ -328,10 +327,8 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Case 1: Search by IDs with mixed null and non-null vectors
-        # IDs [0, 2, 3, 5] -> 0, 3 are valid, 2, 5 are null
+        # IDs [0, 2, 3, 5] -> 0, 3 have valid vectors, 2, 5 have null vectors
         ids_to_search = [0, 2, 3, 5]
-        expected_nq = 2  # only 2 non-null vectors
-
         res = self.search(
             client,
             collection_name,
@@ -341,23 +338,39 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
             limit=5
         )[0]
 
-        log.info(f"Search with ids={ids_to_search}, expected_nq={expected_nq}, actual len(res)={len(res)}")
-        assert len(res) == expected_nq, f"Expected {expected_nq} results, got {len(res)}"
+        assert len(res) == 4, f"Expected 4 result entries (one per query), got {len(res)}"
+        assert len(res[0]) > 0, "ID 0 (non-null) should have search results"
+        assert len(res[1]) == 0, "ID 2 (null) should have empty search results"
+        assert len(res[2]) > 0, "ID 3 (non-null) should have search results"
+        assert len(res[3]) == 0, "ID 5 (null) should have empty search results"
 
-        # Case 2: Search by IDs with all null vectors should raise error
+        # Case 2: Search by IDs with all valid vectors should succeed
+        valid_ids = [0, 1, 3, 4]
+        res = self.search(
+            client,
+            collection_name,
+            ids=valid_ids,
+            anns_field="sparse_vec",
+            search_params={"metric_type": "IP"},
+            limit=5
+        )[0]
+        assert len(res) == len(valid_ids), f"Expected {len(valid_ids)} results, got {len(res)}"
+        for i, result_list in enumerate(res):
+            assert len(result_list) > 0, f"ID {valid_ids[i]} should have search results"
+
+        # Case 3: Search by IDs with all null vectors
         all_null_ids = [2, 5, 8]
-        error = {"err_code": 65535,
-                 "err_msg": "all provided IDs have null vector values"}
-        self.search(
+        res = self.search(
             client,
             collection_name,
             ids=all_null_ids,
             anns_field="sparse_vec",
             search_params={"metric_type": "IP"},
-            limit=5,
-            check_task=CheckTasks.err_res,
-            check_items=error
-        )
+            limit=5
+        )[0]
+        assert len(res) == len(all_null_ids), f"Expected {len(all_null_ids)} result entries, got {len(res)}"
+        for i, result_list in enumerate(res):
+            assert len(result_list) == 0, f"ID {all_null_ids[i]} (null) should have empty search results"
 
         # Cleanup
         self.drop_collection(client, collection_name)

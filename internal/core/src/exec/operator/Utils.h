@@ -57,7 +57,12 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);
                 search_result.AssembleChunkVectorIterators(
-                    nq, 1, {0}, iterators_val.value(), larger_is_closer);
+                    nq,
+                    1,
+                    {0},
+                    iterators_val.value(),
+                    index.GetOffsetMapping(),
+                    larger_is_closer);
             } else {
                 std::string operator_type = "";
                 if (search_info.group_by_field_id_.has_value()) {

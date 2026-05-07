@@ -149,23 +149,23 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 		val, validData, err := r.GetTimestamptzFromPayload()
 		return val, validData, 0, err
 	case schemapb.DataType_BinaryVector:
-		val, dim, err := r.GetBinaryVectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, _, err := r.GetBinaryVectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_FloatVector:
-		val, dim, err := r.GetFloatVectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, _, err := r.GetFloatVectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_Float16Vector:
-		val, dim, err := r.GetFloat16VectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, _, err := r.GetFloat16VectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_BFloat16Vector:
-		val, dim, err := r.GetBFloat16VectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, _, err := r.GetBFloat16VectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_SparseFloatVector:
-		val, dim, err := r.GetSparseFloatVectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, err := r.GetSparseFloatVectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_Int8Vector:
-		val, dim, err := r.GetInt8VectorFromPayload()
-		return val, nil, dim, err
+		val, dim, validData, _, err := r.GetInt8VectorFromPayload()
+		return val, validData, dim, err
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, validData, err := r.GetStringFromPayload()
 		return val, validData, 0, err
@@ -681,96 +681,338 @@ func readByteAndConvert[T any](r *PayloadReader, convert func(parquet.ByteArray)
 	return ret, nil
 }
 
-// GetBinaryVectorFromPayload returns vector, dimension, error
-func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
+// GetBinaryVectorFromPayload returns vector, dimension, validData, numRows, error
+func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_BinaryVector {
-		return nil, -1, fmt.Errorf("failed to get binary vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, fmt.Errorf("failed to get binary vector from datatype %v", r.colType.String())
+	}
+
+	if r.nullable {
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		arrowSchema, err := fileReader.Schema()
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		var dim int
+
+		if field.Type.ID() == arrow.BINARY {
+			if !field.HasMetadata() {
+				return nil, -1, nil, 0, fmt.Errorf("nullable binary vector field is missing metadata")
+			}
+			metadata := field.Metadata
+			dimStr, ok := metadata.GetValue("dim")
+			if !ok {
+				return nil, -1, nil, 0, fmt.Errorf("nullable binary vector metadata missing required 'dim' field")
+			}
+			var err error
+			dim, err = strconv.Atoi(dimStr)
+			if err != nil {
+				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+			}
+			dim = dim / 8
+		} else {
+			col, err := r.reader.RowGroup(0).Column(0)
+			if err != nil {
+				return nil, -1, nil, 0, err
+			}
+			dim = col.Descriptor().TypeLength()
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		return ret, dim * 8, validData, int(r.numRows), nil
 	}
 
 	col, err := r.reader.RowGroup(0).Column(0)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 	dim := col.Descriptor().TypeLength()
+
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim)*r.numRows)
 	for i := 0; i < int(r.numRows); i++ {
 		copy(ret[i*dim:(i+1)*dim], values[i])
 	}
-	return ret, dim * 8, nil
+	return ret, dim * 8, nil, int(r.numRows), nil
 }
 
-// GetFloat16VectorFromPayload returns vector, dimension, error
-func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, error) {
+// GetFloat16VectorFromPayload returns vector, dimension, validData, numRows, error
+func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_Float16Vector {
-		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, fmt.Errorf("failed to get float16 vector from datatype %v", r.colType.String())
 	}
+	if r.nullable {
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		arrowSchema, err := fileReader.Schema()
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		var dim int
+
+		if field.Type.ID() == arrow.BINARY {
+			if !field.HasMetadata() {
+				return nil, -1, nil, 0, fmt.Errorf("nullable float16 vector field is missing metadata")
+			}
+			metadata := field.Metadata
+			dimStr, ok := metadata.GetValue("dim")
+			if !ok {
+				return nil, -1, nil, 0, fmt.Errorf("nullable float16 vector metadata missing required 'dim' field")
+			}
+			var err error
+			dim, err = strconv.Atoi(dimStr)
+			if err != nil {
+				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+			}
+		} else {
+			col, err := r.reader.RowGroup(0).Column(0)
+			if err != nil {
+				return nil, -1, nil, 0, err
+			}
+			dim = col.Descriptor().TypeLength() / 2
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		return ret, dim, validData, int(r.numRows), nil
+	}
+
 	col, err := r.reader.RowGroup(0).Column(0)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
+
 	dim := col.Descriptor().TypeLength() / 2
+
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
 	for i := 0; i < int(r.numRows); i++ {
 		copy(ret[i*dim*2:(i+1)*dim*2], values[i])
 	}
-	return ret, dim, nil
+	return ret, dim, nil, int(r.numRows), nil
 }
 
-// GetBFloat16VectorFromPayload returns vector, dimension, error
-func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, error) {
+// GetBFloat16VectorFromPayload returns vector, dimension, validData, numRows, error
+func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_BFloat16Vector {
-		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, fmt.Errorf("failed to get bfloat16 vector from datatype %v", r.colType.String())
 	}
+	if r.nullable {
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		arrowSchema, err := fileReader.Schema()
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		var dim int
+
+		if field.Type.ID() == arrow.BINARY {
+			if !field.HasMetadata() {
+				return nil, -1, nil, 0, fmt.Errorf("nullable bfloat16 vector field is missing metadata")
+			}
+			metadata := field.Metadata
+			dimStr, ok := metadata.GetValue("dim")
+			if !ok {
+				return nil, -1, nil, 0, fmt.Errorf("nullable bfloat16 vector metadata missing required 'dim' field")
+			}
+			var err error
+			dim, err = strconv.Atoi(dimStr)
+			if err != nil {
+				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+			}
+		} else {
+			col, err := r.reader.RowGroup(0).Column(0)
+			if err != nil {
+				return nil, -1, nil, 0, err
+			}
+			dim = col.Descriptor().TypeLength() / 2
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		return ret, dim, validData, int(r.numRows), nil
+	}
+
 	col, err := r.reader.RowGroup(0).Column(0)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
+
 	dim := col.Descriptor().TypeLength() / 2
+
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
 	for i := 0; i < int(r.numRows); i++ {
 		copy(ret[i*dim*2:(i+1)*dim*2], values[i])
 	}
-	return ret, dim, nil
+	return ret, dim, nil, int(r.numRows), nil
 }
 
-// GetFloatVectorFromPayload returns vector, dimension, error
-func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
+// GetFloatVectorFromPayload returns vector, dimension, validData, numRows, error
+func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_FloatVector {
-		return nil, -1, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
 	}
+	if r.nullable {
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		arrowSchema, err := fileReader.Schema()
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		var dim int
+
+		if field.Type.ID() == arrow.BINARY {
+			if !field.HasMetadata() {
+				return nil, -1, nil, 0, fmt.Errorf("nullable float vector field is missing metadata")
+			}
+			metadata := field.Metadata
+			dimStr, ok := metadata.GetValue("dim")
+			if !ok {
+				return nil, -1, nil, 0, fmt.Errorf("nullable float vector metadata missing required 'dim' field")
+			}
+			var err error
+			dim, err = strconv.Atoi(dimStr)
+			if err != nil {
+				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+			}
+		} else {
+			col, err := r.reader.RowGroup(0).Column(0)
+			if err != nil {
+				return nil, -1, nil, 0, err
+			}
+			dim = col.Descriptor().TypeLength() / 4
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim*4)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		return arrow.Float32Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
+	}
+
 	col, err := r.reader.RowGroup(0).Column(0)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	dim := col.Descriptor().TypeLength() / 4
@@ -778,38 +1020,89 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]float32, int64(dim)*r.numRows)
 	for i := 0; i < int(r.numRows); i++ {
 		copy(arrow.Float32Traits.CastToBytes(ret[i*dim:(i+1)*dim]), values[i])
 	}
-	return ret, dim, nil
+	return ret, dim, nil, int(r.numRows), nil
 }
 
-func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, error) {
+// GetSparseFloatVectorFromPayload returns fieldData, dimension, validData, error
+func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, []bool, error) {
 	if !typeutil.IsSparseFloatVectorType(r.colType) {
-		return nil, -1, fmt.Errorf("failed to get sparse float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, fmt.Errorf("failed to get sparse float vector from datatype %v", r.colType.String())
 	}
+
+	if r.nullable {
+		fieldData := &SparseFloatVectorFieldData{}
+		validData := make([]bool, r.numRows)
+
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, err
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		offset := 0
+		for _, chunk := range column.Data().Chunks() {
+			binaryArray, ok := chunk.(*array.Binary)
+			if !ok {
+				return nil, -1, nil, fmt.Errorf("expected Binary array, got %T", chunk)
+			}
+
+			for i := 0; i < binaryArray.Len(); i++ {
+				validData[offset+i] = binaryArray.IsValid(i)
+				if validData[offset+i] {
+					value := binaryArray.Value(i)
+					if len(value)%8 != 0 {
+						return nil, -1, nil, errors.New("invalid bytesData length")
+					}
+					fieldData.Contents = append(fieldData.Contents, value)
+					rowDim := typeutil.SparseFloatRowDim(value)
+					if rowDim > fieldData.Dim {
+						fieldData.Dim = rowDim
+					}
+				} else {
+					fieldData.Contents = append(fieldData.Contents, nil)
+				}
+			}
+			offset += binaryArray.Len()
+		}
+
+		return fieldData, int(fieldData.Dim), validData, nil
+	}
+
 	values := make([]parquet.ByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, err
 	}
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d binary, but got = %d", r.numRows, valuesRead)
+		return nil, -1, nil, fmt.Errorf("expect %d binary, but got = %d", r.numRows, valuesRead)
 	}
 
 	fieldData := &SparseFloatVectorFieldData{}
 
 	for _, value := range values {
 		if len(value)%8 != 0 {
-			return nil, -1, errors.New("invalid bytesData length")
+			return nil, -1, nil, errors.New("invalid bytesData length")
 		}
 
 		fieldData.Contents = append(fieldData.Contents, value)
@@ -819,17 +1112,76 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		}
 	}
 
-	return fieldData, int(fieldData.Dim), nil
+	return fieldData, int(fieldData.Dim), nil, nil
 }
 
-// GetInt8VectorFromPayload returns vector, dimension, error
-func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, error) {
+// GetInt8VectorFromPayload returns vector, dimension, validData, numRows, error
+func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_Int8Vector {
-		return nil, -1, fmt.Errorf("failed to get int8 vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, fmt.Errorf("failed to get int8 vector from datatype %v", r.colType.String())
 	}
+	if r.nullable {
+		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		arrowSchema, err := fileReader.Schema()
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		if arrowSchema.NumFields() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+		}
+
+		field := arrowSchema.Field(0)
+		var dim int
+
+		if field.Type.ID() == arrow.BINARY {
+			if !field.HasMetadata() {
+				return nil, -1, nil, 0, fmt.Errorf("nullable int8 vector field is missing metadata")
+			}
+			metadata := field.Metadata
+			dimStr, ok := metadata.GetValue("dim")
+			if !ok {
+				return nil, -1, nil, 0, fmt.Errorf("nullable int8 vector metadata missing required 'dim' field")
+			}
+			var err error
+			dim, err = strconv.Atoi(dimStr)
+			if err != nil {
+				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+			}
+		} else {
+			col, err := r.reader.RowGroup(0).Column(0)
+			if err != nil {
+				return nil, -1, nil, 0, err
+			}
+			dim = col.Descriptor().TypeLength()
+		}
+
+		table, err := fileReader.ReadTable(context.Background())
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+		defer table.Release()
+
+		if table.NumCols() != 1 {
+			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		}
+
+		column := table.Column(0)
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
+		}
+
+		return arrow.Int8Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
+	}
+
 	col, err := r.reader.RowGroup(0).Column(0)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	dim := col.Descriptor().TypeLength()
@@ -837,11 +1189,11 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, error) {
 	values := make([]parquet.FixedLenByteArray, r.numRows)
 	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, nil, 0, err
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]int8, int64(dim)*r.numRows)
@@ -849,7 +1201,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, error) {
 		int8Vals := arrow.Int8Traits.CastFromBytes(values[i])
 		copy(ret[i*dim:(i+1)*dim], int8Vals)
 	}
-	return ret, dim, nil
+	return ret, dim, nil, int(r.numRows), nil
 }
 
 func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {
@@ -1022,3 +1374,63 @@ var (
 	BitMask        = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
 	FlippedBitMask = [8]byte{254, 253, 251, 247, 239, 223, 191, 127}
 )
+
+// readNullableVectorData reads nullable vector data stored as Arrow Binary chunks.
+// bytesPerVector is the byte size of each vector entry.
+// Returns compact byte data (only valid vector entries) and validData bitmap.
+//
+// Arrow Binary array has 3 buffers:
+//   - Buffer 0 (validity bitmap): bit i indicates whether row i is valid (non-null).
+//   - Buffer 1 (offsets, int32): length n+1, offsets[i] is the start position of row i
+//     in the values buffer, offsets[n] is the total byte length.
+//   - Buffer 2 (values): concatenated raw bytes of all entries.
+//
+// Milvus's PayloadWriter uses BinaryBuilder.AppendNull() for null entries, which advances
+// the offset without appending any bytes (offsets[i] == offsets[i+1]). Therefore null entries
+// contribute zero bytes to the values buffer, and ValueBytes() returns a contiguous block
+// containing only valid entries' data. This allows us to bulk-copy ValueBytes() directly
+// instead of iterating per element with Value(i).
+// We add a length assertion to guard against any future change that breaks this invariant.
+func readNullableVectorData(column *arrow.Column, numRows int64, bytesPerVector int) ([]byte, []bool, error) {
+	chunks := column.Data().Chunks()
+	validCount := column.Len() - column.NullN()
+
+	ret := make([]byte, validCount*bytesPerVector)
+	validData := make([]bool, numRows)
+	logicalOffset := 0
+	dataOffset := 0
+	for _, chunk := range chunks {
+		binaryArray, ok := chunk.(*array.Binary)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("expected Binary array for nullable vector, got %T", chunk)
+		}
+		chunkLen := binaryArray.Len()
+
+		// Bulk copy all non-null vector data from this chunk
+		chunkValidCount := chunkLen - binaryArray.NullN()
+		if chunkValidCount > 0 {
+			valueBytes := binaryArray.ValueBytes()
+			expected := chunkValidCount * bytesPerVector
+			if len(valueBytes) != expected {
+				return nil, nil, merr.WrapErrParameterInvalidMsg(
+					"unexpected valueBytes length for nullable vector: got %d, expected %d", len(valueBytes), expected)
+			}
+			copy(ret[dataOffset:dataOffset+len(valueBytes)], valueBytes)
+			dataOffset += len(valueBytes)
+		}
+
+		// Build validData
+		if binaryArray.NullN() == 0 {
+			// compiler optimizes this range-based fill pattern
+			for i := range validData[logicalOffset : logicalOffset+chunkLen] {
+				validData[logicalOffset+i] = true
+			}
+		} else {
+			for i := 0; i < chunkLen; i++ {
+				validData[logicalOffset+i] = binaryArray.IsValid(i)
+			}
+		}
+		logicalOffset += chunkLen
+	}
+	return ret, validData, nil
+}

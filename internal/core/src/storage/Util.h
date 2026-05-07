@@ -59,7 +59,10 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
 
 std::shared_ptr<arrow::ArrayBuilder>
-CreateArrowBuilder(DataType data_type, DataType element_type, int dim);
+CreateArrowBuilder(DataType data_type,
+                   DataType element_type,
+                   int dim,
+                   bool nullable = false);
 
 /// \brief Utility function to create arrow:Scalar from FieldMeta.default_value
 ///

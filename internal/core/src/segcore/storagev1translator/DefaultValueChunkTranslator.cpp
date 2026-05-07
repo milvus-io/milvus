@@ -169,6 +169,16 @@ DefaultValueChunkTranslator::value_size() const {
         case milvus::DataType::ARRAY:
             value_size = sizeof(Array);
             break;
+        case milvus::DataType::VECTOR_FLOAT:
+        case milvus::DataType::VECTOR_BINARY:
+        case milvus::DataType::VECTOR_FLOAT16:
+        case milvus::DataType::VECTOR_BFLOAT16:
+        case milvus::DataType::VECTOR_INT8:
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
+            AssertInfo(field_meta_.is_nullable(),
+                       "only nullable vector fields can be dynamically added");
+            value_size = 0;
+            break;
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported default value data type {}",
@@ -209,8 +219,7 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
     if (IsVectorDataType(data_type)) {
         AssertInfo(field_meta_.is_nullable(),
                    "only nullable vector fields can be dynamically added");
-        builder = milvus::storage::CreateArrowBuilder(
-            data_type, field_meta_.get_element_type(), field_meta_.get_dim());
+        builder = std::make_shared<arrow::BinaryBuilder>();
     } else {
         builder = milvus::storage::CreateArrowBuilder(data_type);
     }

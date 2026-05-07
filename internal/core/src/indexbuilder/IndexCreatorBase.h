@@ -22,7 +22,9 @@ class IndexCreatorBase {
     virtual ~IndexCreatorBase() = default;
 
     virtual void
-    Build(const milvus::DatasetPtr& dataset) = 0;
+    Build(const milvus::DatasetPtr& dataset,
+          const bool* valid_data = nullptr,
+          const int64_t valid_data_len = 0) = 0;
 
     virtual void
     Build() = 0;

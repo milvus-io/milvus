@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
@@ -215,6 +216,23 @@ func TestPrintBinlogFiles(t *testing.T) {
 					Description:  "description_15",
 					DataType:     schemapb.DataType_Geometry,
 				},
+				{
+					FieldID:      114,
+					Name:         "field_int8_vector",
+					IsPrimaryKey: false,
+					Description:  "description_16",
+					DataType:     schemapb.DataType_Int8Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
+				},
+				{
+					FieldID:      115,
+					Name:         "field_sparse_float_vector",
+					IsPrimaryKey: false,
+					Description:  "description_17",
+					DataType:     schemapb.DataType_SparseFloatVector,
+				},
 			},
 		},
 	}
@@ -280,6 +298,19 @@ func TestPrintBinlogFiles(t *testing.T) {
 					{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 				},
 			},
+			114: &Int8VectorFieldData{
+				Data: []int8{1, 2, 3, 4, 5, 6, 7, 8},
+				Dim:  4,
+			},
+			115: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 100,
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+						typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+					},
+				},
+			},
 		},
 	}
 
@@ -342,6 +373,19 @@ func TestPrintBinlogFiles(t *testing.T) {
 					// POINT (30.123 -10.456) and LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)
 					{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 					{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
+				},
+			},
+			114: &Int8VectorFieldData{
+				Data: []int8{11, 12, 13, 14, 15, 16, 17, 18},
+				Dim:  4,
+			},
+			115: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 100,
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{5, 6, 7}, []float32{3.1, 3.2, 3.3}),
+						typeutil.CreateSparseFloatRow([]uint32{15, 25, 35}, []float32{4.1, 4.2, 4.3}),
+					},
 				},
 			},
 		},

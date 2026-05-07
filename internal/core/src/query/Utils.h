@@ -14,9 +14,37 @@
 #include <limits>
 #include <string>
 
+#include "common/BitsetView.h"
+#include "common/OffsetMapping.h"
+#include "common/Types.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
+inline TargetBitmap
+TransformBitset(const BitsetView& bitset,
+                const milvus::OffsetMapping& mapping) {
+    TargetBitmap result;
+    auto count = mapping.GetValidCount();
+    result.resize(count);
+    for (int64_t physical_idx = 0; physical_idx < count; physical_idx++) {
+        auto logical_idx = mapping.GetLogicalOffset(physical_idx);
+        if (logical_idx >= 0 &&
+            logical_idx < static_cast<int64_t>(bitset.size())) {
+            result[physical_idx] = bitset.test(logical_idx);
+        }
+    }
+    return result;
+}
+
+inline void
+TransformOffset(std::vector<int64_t>& seg_offsets,
+                const milvus::OffsetMapping& mapping) {
+    for (auto& seg_offset : seg_offsets) {
+        if (seg_offset >= 0) {
+            seg_offset = mapping.GetLogicalOffset(seg_offset);
+        }
+    }
+}
 
 template <typename T, typename U>
 inline bool

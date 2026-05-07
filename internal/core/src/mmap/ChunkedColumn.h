@@ -384,7 +384,9 @@ class ChunkedColumn : public ChunkedColumnBase {
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                      : ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
             fn(ca->get_cell_of(cids[i])->ValueAt(offsets_in_chunk[i]), i);
@@ -471,7 +473,9 @@ class ChunkedColumn : public ChunkedColumnBase {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                      : ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {

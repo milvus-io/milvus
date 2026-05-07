@@ -2386,3 +2386,288 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 			"non-nullable $meta should NOT have ValidData auto-filled")
 	})
 }
+
+func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
+	dim := int64(4)
+
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_nullable_vec",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{FieldID: 102, Name: "nullable_vec", DataType: schemapb.DataType_FloatVector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	})
+
+	// Generate vector data: [pk, pk, pk, pk]
+	genVec := func(pk int64) []float32 {
+		return []float32{float32(pk), float32(pk), float32(pk), float32(pk)}
+	}
+
+	// Create all_columns upsert data (includes nullable_vec)
+	// nullable_vec = [pk+100, pk+100, pk+100, pk+100], ValidData = all true
+	createAllCols := func(pks []int64) []*schemapb.FieldData {
+		var ids []int64
+		var vecData, nullableData []float32
+		var validData []bool
+		for _, pk := range pks {
+			ids = append(ids, pk)
+			vecData = append(vecData, genVec(pk)...)
+			nullableData = append(nullableData, genVec(pk+100)...)
+			validData = append(validData, true)
+		}
+		return []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+			},
+			{
+				FieldName: "vector", FieldId: 101, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vecData}}}},
+			},
+			{
+				FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector, ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
+			},
+		}
+	}
+
+	// Create partial_columns upsert data (excludes nullable_vec)
+	createPartialCols := func(pks []int64) []*schemapb.FieldData {
+		var ids []int64
+		var vecData []float32
+		for _, pk := range pks {
+			ids = append(ids, pk)
+			vecData = append(vecData, genVec(pk)...)
+		}
+		return []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+			},
+			{
+				FieldName: "vector", FieldId: 101, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vecData}}}},
+			},
+		}
+	}
+
+	// Create mock query result
+	// existing nullable_vec = [pk+300, pk+300, pk+300, pk+300], ValidData = all true
+	queryResult := func(pks []int64) *milvuspb.QueryResults {
+		var ids []int64
+		var vecData, nullableData []float32
+		var validData []bool
+		for _, pk := range pks {
+			ids = append(ids, pk)
+			vecData = append(vecData, genVec(pk+200)...)
+			nullableData = append(nullableData, genVec(pk+300)...)
+			validData = append(validData, true)
+		}
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+				},
+				{
+					FieldName: "vector", FieldId: 101, Type: schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vecData}}}},
+				},
+				{
+					FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector, ValidData: validData,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
+				},
+			},
+		}
+	}
+
+	runUpsert := func(upsertData []*schemapb.FieldData, mockResult *milvuspb.QueryResults) *upsertTask {
+		numRows := uint32(len(upsertData[0].GetScalars().GetLongData().GetData()))
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req:    &milvuspb.UpsertRequest{FieldsData: upsertData, NumRows: numRows},
+			upsertMsg: &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    uint64(numRows),
+					Version:    msgpb.InsertDataVersion_ColumnBased, // Required, otherwise NRows() returns 0
+				},
+			}},
+			node: &Proxy{},
+		}
+		mock := mockey.Mock(retrieveByPKs).Return(mockResult, segcore.StorageCost{}, nil).Build()
+		defer mock.UnPatch()
+		err := task.queryPreExecute(context.Background())
+		assert.NoError(t, err)
+		return task
+	}
+
+	// Step 1a: Empty data, upsert pk1(partial) -> insert, nullable_vec=null
+	task1a := runUpsert(createPartialCols([]int64{1}), queryResult(nil))
+	assert.Empty(t, task1a.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{1}, task1a.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{1, 1, 1, 1}, task1a.insertFieldData[1].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []bool{false}, task1a.insertFieldData[2].ValidData)
+	assert.Empty(t, task1a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 1b: Empty data, upsert pk2(all) -> insert, nullable_vec=[102,...]
+	task1b := runUpsert(createAllCols([]int64{2}), queryResult(nil))
+	assert.Empty(t, task1b.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{2}, task1b.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{2, 2, 2, 2}, task1b.insertFieldData[1].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []float32{102, 102, 102, 102}, task1b.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 2a: pk1 exists, upsert pk1(all) -> update, nullable_vec=[101,...] (from upsert)
+	task2a := runUpsert(createAllCols([]int64{1}), queryResult([]int64{1}))
+	assert.Equal(t, []int64{1}, task2a.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{1}, task2a.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{1, 1, 1, 1}, task2a.insertFieldData[1].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []float32{101, 101, 101, 101}, task2a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 2b: pk2 exists, upsert pk2(partial) -> update, nullable_vec=[302,...] (from existing)
+	task2b := runUpsert(createPartialCols([]int64{2}), queryResult([]int64{2}))
+	assert.Equal(t, []int64{2}, task2b.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{2}, task2b.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{2, 2, 2, 2}, task2b.insertFieldData[1].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []float32{302, 302, 302, 302}, task2b.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 3a: Empty data, upsert pk3(partial) -> insert, nullable_vec=null
+	task3a := runUpsert(createPartialCols([]int64{3}), queryResult(nil))
+	assert.Empty(t, task3a.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{3}, task3a.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []bool{false}, task3a.insertFieldData[2].ValidData)
+	assert.Empty(t, task3a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 3b: Empty data, upsert pk4(all) -> insert, nullable_vec=[104,...]
+	task3b := runUpsert(createAllCols([]int64{4}), queryResult(nil))
+	assert.Empty(t, task3b.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{4}, task3b.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{104, 104, 104, 104}, task3b.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 4a: pk3,pk4 exist, upsert pk3,pk4,pk5,pk6(all) -> pk3,pk4 update, pk5,pk6 insert
+	task4a := runUpsert(createAllCols([]int64{3, 4, 5, 6}), queryResult([]int64{3, 4}))
+	assert.Equal(t, []int64{3, 4}, task4a.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{3, 4, 5, 6}, task4a.insertFieldData[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []float32{3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6}, task4a.insertFieldData[1].GetVectors().GetFloatVector().GetData())
+	assert.Equal(t, []float32{103, 103, 103, 103, 104, 104, 104, 104, 105, 105, 105, 105, 106, 106, 106, 106}, task4a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+
+	// Step 4b: pk3,pk4 exist, upsert pk3,pk4,pk5,pk6(partial) -> pk3,pk4 update (use existing), pk5,pk6 insert (null)
+	task4b := runUpsert(createPartialCols([]int64{3, 4, 5, 6}), queryResult([]int64{3, 4}))
+	assert.Equal(t, []int64{3, 4}, task4b.deletePKs.GetIntId().GetData())
+	assert.Equal(t, []int64{3, 4, 5, 6}, task4b.insertFieldData[0].GetScalars().GetLongData().GetData())
+	// Update rows pk3,pk4: nullable_vec from existing data (ValidData=true)
+	// Insert rows pk5,pk6: nullable_vec generated by GenNullableFieldData (null, ValidData=false)
+	// ValidData has 4 elements, FloatVector only contains data for ValidData=true rows
+	assert.Equal(t, []bool{true, true, false, false}, task4b.insertFieldData[2].ValidData)
+	assert.Equal(t, []float32{303, 303, 303, 303, 304, 304, 304, 304}, task4b.insertFieldData[2].GetVectors().GetFloatVector().GetData())
+}
+
+func TestUpsertTask_GenNullableFieldData(t *testing.T) {
+	upsertIDSize := 5
+
+	t.Run("scalar_types", func(t *testing.T) {
+		testCases := []struct {
+			name     string
+			dataType schemapb.DataType
+		}{
+			{"Bool", schemapb.DataType_Bool},
+			{"Int32", schemapb.DataType_Int32},
+			{"Int64", schemapb.DataType_Int64},
+			{"Float", schemapb.DataType_Float},
+			{"Double", schemapb.DataType_Double},
+			{"VarChar", schemapb.DataType_VarChar},
+			{"JSON", schemapb.DataType_JSON},
+			{"Array", schemapb.DataType_Array},
+			{"Timestamptz", schemapb.DataType_Timestamptz},
+			{"Geometry", schemapb.DataType_Geometry},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				field := &schemapb.FieldSchema{
+					FieldID:  100,
+					Name:     "test_field",
+					DataType: tc.dataType,
+					Nullable: true,
+				}
+				result, err := GenNullableFieldData(field, upsertIDSize)
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.Equal(t, field.FieldID, result.FieldId)
+				assert.Equal(t, field.Name, result.FieldName)
+				assert.Equal(t, tc.dataType, result.Type)
+				assert.Equal(t, upsertIDSize, len(result.ValidData))
+				// All ValidData should be false (null)
+				for _, v := range result.ValidData {
+					assert.False(t, v)
+				}
+			})
+		}
+	})
+
+	t.Run("vector_types", func(t *testing.T) {
+		testCases := []struct {
+			name     string
+			dataType schemapb.DataType
+		}{
+			{"FloatVector", schemapb.DataType_FloatVector},
+			{"Float16Vector", schemapb.DataType_Float16Vector},
+			{"BFloat16Vector", schemapb.DataType_BFloat16Vector},
+			{"BinaryVector", schemapb.DataType_BinaryVector},
+			{"Int8Vector", schemapb.DataType_Int8Vector},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				field := &schemapb.FieldSchema{
+					FieldID:    100,
+					Name:       "test_vector",
+					DataType:   tc.dataType,
+					Nullable:   true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+				}
+				result, err := GenNullableFieldData(field, upsertIDSize)
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.Equal(t, field.FieldID, result.FieldId)
+				assert.Equal(t, field.Name, result.FieldName)
+				assert.Equal(t, tc.dataType, result.Type)
+				assert.Equal(t, upsertIDSize, len(result.ValidData))
+				// All ValidData should be false (null)
+				for _, v := range result.ValidData {
+					assert.False(t, v)
+				}
+				assert.NotNil(t, result.GetVectors())
+			})
+		}
+	})
+
+	t.Run("sparse_float_vector", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:  100,
+			Name:     "test_sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}
+		result, err := GenNullableFieldData(field, upsertIDSize)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, upsertIDSize, len(result.ValidData))
+		assert.NotNil(t, result.GetVectors().GetSparseFloatVector())
+	})
+
+	t.Run("unsupported_type", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:  100,
+			Name:     "test_unsupported",
+			DataType: schemapb.DataType_None,
+			Nullable: true,
+		}
+		result, err := GenNullableFieldData(field, upsertIDSize)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+}

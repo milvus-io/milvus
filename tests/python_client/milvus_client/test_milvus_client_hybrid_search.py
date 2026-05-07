@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
@@ -9,6 +11,7 @@ from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus import DataType
 from pymilvus import AnnSearchRequest
+from pymilvus import RRFRanker
 from pymilvus import WeightedRanker
 
 prefix = "client_hybrid_search"
@@ -415,6 +418,97 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                                         "ids": insert_ids,
                                         "pk_name": default_primary_key_field_name,
                                         "limit": default_limit})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_hybrid_search_nullable_vector_fields(self):
+        """
+        target: test hybrid search with nullable dense and sparse vector fields
+        method: insert mixed null/non-null vectors and search with per-request expr filters
+        expected: hybrid search returns valid distances and filters out null scalar rows
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 64
+        nullable_dense_field = "nullable_dense"
+        sparse_field = "sparse"
+        nullable_sparse_field = "nullable_sparse"
+        nullable_float_field = "nullable_float"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(nullable_dense_field, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(sparse_field, DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(nullable_sparse_field, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        schema.add_field(nullable_float_field, DataType.FLOAT, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE", index_type="FLAT")
+        index_params.add_index(nullable_dense_field, metric_type="COSINE", index_type="FLAT")
+        index_params.add_index(sparse_field, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
+        index_params.add_index(nullable_sparse_field, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        nb = default_nb
+        dense_vectors = cf.gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        nullable_dense_vectors = cf.gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        sparse_vectors = cf.gen_sparse_vectors(nb)
+        nullable_sparse_vectors = cf.gen_sparse_vectors(nb)
+        rows = []
+        for i in range(nb):
+            is_null = i % 5 == 0
+            rows.append({
+                default_primary_key_field_name: i,
+                default_vector_field_name: dense_vectors[i],
+                nullable_dense_field: None if is_null else nullable_dense_vectors[i],
+                sparse_field: sparse_vectors[i],
+                nullable_sparse_field: None if is_null else nullable_sparse_vectors[i],
+                nullable_float_field: None if is_null else float(i),
+            })
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        dense_queries = cf.gen_vectors(default_nq, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        dense_reqs = [
+            AnnSearchRequest(dense_queries, default_vector_field_name,
+                             {"metric_type": "COSINE"}, default_limit, expr=f"{nullable_float_field} > 100"),
+            AnnSearchRequest(dense_queries, nullable_dense_field,
+                             {"metric_type": "COSINE"}, default_limit, expr=f"{nullable_float_field} > 100"),
+        ]
+        valid_ids = [i for i in range(nb) if i > 100 and i % 5 != 0]
+        dense_res = self.hybrid_search(client, collection_name, dense_reqs, WeightedRanker(0.5, 0.5),
+                                       limit=default_limit,
+                                       output_fields=[default_primary_key_field_name, nullable_float_field],
+                                       check_task=CheckTasks.check_search_results,
+                                       check_items={"enable_milvus_client_api": True,
+                                                    "nq": default_nq,
+                                                    "ids": valid_ids,
+                                                    "pk_name": default_primary_key_field_name,
+                                                    "limit": default_limit})[0]
+        for hits in dense_res:
+            for hit in hits:
+                assert not math.isnan(hit["distance"])
+                assert hit[nullable_float_field] is not None
+                assert hit[nullable_float_field] > 100
+
+        sparse_queries = cf.gen_sparse_vectors(default_nq)
+        sparse_reqs = [
+            AnnSearchRequest(sparse_queries, sparse_field, {"metric_type": "IP"}, default_limit),
+            AnnSearchRequest(sparse_queries, nullable_sparse_field, {"metric_type": "IP"}, default_limit),
+        ]
+        sparse_res = self.hybrid_search(client, collection_name, sparse_reqs, RRFRanker(), limit=default_limit,
+                                        output_fields=[default_primary_key_field_name],
+                                        check_task=CheckTasks.check_search_results,
+                                        check_items={"enable_milvus_client_api": True,
+                                                     "nq": default_nq,
+                                                     "ids": list(range(nb)),
+                                                     "pk_name": default_primary_key_field_name,
+                                                     "limit": default_limit})[0]
+        for hits in sparse_res:
+            for hit in hits:
+                assert not math.isnan(hit["distance"])
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)

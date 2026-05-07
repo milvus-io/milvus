@@ -65,8 +65,15 @@ VecIndexCreator::dim() {
 }
 
 void
-VecIndexCreator::Build(const milvus::DatasetPtr& dataset) {
+VecIndexCreator::Build(const milvus::DatasetPtr& dataset,
+                       const bool* valid_data,
+                       const int64_t valid_data_len) {
     index_->BuildWithDataset(dataset, config_);
+    if (valid_data && valid_data_len > 0) {
+        auto vec_index = dynamic_cast<index::VectorIndex*>(index_.get());
+        AssertInfo(vec_index != nullptr, "failed to cast index to VectorIndex");
+        vec_index->BuildValidData(valid_data, valid_data_len);
+    }
 }
 
 void

@@ -40,12 +40,12 @@ type PayloadWriterInterface interface {
 	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
 	AddOneJSONToPayload([]byte, bool) error
 	AddOneGeometryToPayload(msg []byte, isValid bool) error
-	AddBinaryVectorToPayload([]byte, int) error
-	AddFloatVectorToPayload([]float32, int) error
-	AddFloat16VectorToPayload([]byte, int) error
-	AddBFloat16VectorToPayload([]byte, int) error
+	AddBinaryVectorToPayload(data []byte, dim int, validData []bool) error
+	AddFloatVectorToPayload(data []float32, dim int, validData []bool) error
+	AddFloat16VectorToPayload(data []byte, dim int, validData []bool) error
+	AddBFloat16VectorToPayload(data []byte, dim int, validData []bool) error
 	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
-	AddInt8VectorToPayload([]int8, int) error
+	AddInt8VectorToPayload(data []int8, dim int, validData []bool) error
 	AddVectorArrayFieldDataToPayload(*VectorArrayFieldData) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
@@ -72,12 +72,12 @@ type PayloadReaderInterface interface {
 	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)
 	GetJSONFromPayload() ([][]byte, []bool, error)
 	GetGeometryFromPayload() ([][]byte, []bool, error)
-	GetBinaryVectorFromPayload() ([]byte, int, error)
-	GetFloat16VectorFromPayload() ([]byte, int, error)
-	GetBFloat16VectorFromPayload() ([]byte, int, error)
-	GetFloatVectorFromPayload() ([]float32, int, error)
-	GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, error)
-	GetInt8VectorFromPayload() ([]int8, int, error)
+	GetBinaryVectorFromPayload() ([]byte, int, []bool, int, error)
+	GetFloat16VectorFromPayload() ([]byte, int, []bool, int, error)
+	GetBFloat16VectorFromPayload() ([]byte, int, []bool, int, error)
+	GetFloatVectorFromPayload() ([]float32, int, []bool, int, error)
+	GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, []bool, error)
+	GetInt8VectorFromPayload() ([]int8, int, []bool, int, error)
 	GetPayloadLengthFromReader() (int, error)
 
 	GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader], error)

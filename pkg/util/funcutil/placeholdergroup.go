@@ -58,10 +58,10 @@ func Int8VectorsToPlaceholderGroup(embs [][]int8) *commonpb.PlaceholderGroup {
 	return placeholderGroup
 }
 
-func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, error) {
+func FieldDataToPlaceholderGroupBytesWithCount(fieldData *schemapb.FieldData) ([]byte, int, error) {
 	placeholderValue, err := fieldDataToPlaceholderValue(fieldData)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	placeholderGroup := &commonpb.PlaceholderGroup{
@@ -69,7 +69,12 @@ func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, er
 	}
 
 	bytes, _ := proto.Marshal(placeholderGroup)
-	return bytes, nil
+	return bytes, len(placeholderValue.Values), nil
+}
+
+func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, error) {
+	bytes, _, err := FieldDataToPlaceholderGroupBytesWithCount(fieldData)
+	return bytes, err
 }
 
 func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.PlaceholderValue, error) {
