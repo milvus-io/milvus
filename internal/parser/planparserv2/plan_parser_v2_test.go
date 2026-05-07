@@ -2779,12 +2779,21 @@ func TestExpr_MatchRejectsNonCurrentElementSources(t *testing.T) {
 	assert.NoError(t, err)
 
 	invalidExprs := []string{
+		`MATCH_ALL(struct_array, $[sub_int])`,
+		`MATCH_ANY(struct_array, true)`,
+		`MATCH_ANY(struct_array, true == true)`,
 		`MATCH_ALL(struct_array, $[sub_int] > 1 && Int64Field > 0)`,
 		`MATCH_ALL(struct_array, array_length(struct_array[sub_int]) > 0)`,
 		`MATCH_ANY(struct_array, array_length(struct_array[sub_str]) == 1)`,
+		`MATCH_ALL(StringArrayField, $)`,
+		`MATCH_ANY(StringArrayField, true)`,
+		`MATCH_ANY(StringArrayField, true == true)`,
 		`MATCH_ANY(StringArrayField, $ == "Red" && Int64Field > 0)`,
 		`MATCH_ANY(StringArrayField, $ == "Red" && array_contains(StringArrayField, "Red"))`,
 		`MATCH_ANY(StringArrayField, $ == "Red" && array_length(struct_array[sub_int]) > 0)`,
+		`MATCH_ANY(JSONField["items"], $)`,
+		`MATCH_ANY(JSONField["items"], true)`,
+		`MATCH_ANY(JSONField["items"], true == true)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && Int64Field > 0)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && JSONField["other"] > 0)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && array_length(struct_array[sub_int]) > 0)`,
@@ -2794,6 +2803,37 @@ func TestExpr_MatchRejectsNonCurrentElementSources(t *testing.T) {
 		assert.Error(t, err, expr)
 		if err != nil {
 			assert.Contains(t, err.Error(), "current element accessor", expr)
+		}
+	}
+}
+
+func TestExpr_MatchRejectsTemplatePlaceholders(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	templateValues := map[string]*schemapb.TemplateValue{
+		"v":    generateTemplateValue(schemapb.DataType_String, "Red"),
+		"min":  generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		"vals": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_String, []string{"Red", "Blue"})),
+	}
+	invalidExprs := []string{
+		`MATCH_ALL(StringArrayField, $ == {v})`,
+		`MATCH_ALL(StringArrayField, {v} == $)`,
+		`MATCH_ANY(StringArrayField, $ in {vals})`,
+		`MATCH_LEAST(StringArrayField, $ == {v}, threshold=1)`,
+		`MATCH_ALL(struct_array, $[sub_str] == {v})`,
+		`MATCH_ALL(struct_array, {v} == $[sub_str])`,
+		`MATCH_ANY(struct_array, $[sub_int] > {min})`,
+		`MATCH_EXACT(struct_array, $[sub_str] == {v}, threshold=1)`,
+		`MATCH_ALL(JSONField["items"], $ == {v})`,
+		`MATCH_ALL(JSONField["items"], {v} == $)`,
+	}
+	for _, expr := range invalidExprs {
+		_, err := ParseExpr(helper, expr, templateValues)
+		assert.Error(t, err, expr)
+		if err != nil {
+			assert.Contains(t, err.Error(), "template placeholders", expr)
 		}
 	}
 }

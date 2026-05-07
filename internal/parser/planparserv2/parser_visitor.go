@@ -53,13 +53,14 @@ const (
 // can be validated against the correct source kind and element-level ColumnInfo
 // can be emitted with the correct field_id / nested_path.
 type matchContext struct {
-	sourceType  matchSourceType
-	fieldID     int64
-	fieldName   string
-	dataType    schemapb.DataType
-	field       *schemapb.FieldSchema
-	elementType schemapb.DataType
-	jsonPath    []string
+	sourceType          matchSourceType
+	fieldID             int64
+	fieldName           string
+	dataType            schemapb.DataType
+	field               *schemapb.FieldSchema
+	elementType         schemapb.DataType
+	jsonPath            []string
+	usedElementAccessor bool
 }
 
 type ParserVisitor struct {
@@ -85,6 +86,23 @@ func (v *ParserVisitor) rejectNonElementAccessorInMatchPredicate(source string) 
 		"MATCH_* predicate can only reference the current element accessor for target field %q, got: %s",
 		v.currentMatchContext.fieldName,
 		source)
+}
+
+func validateMatchPredicate(predicate *ExprWithType, mctx *matchContext, funcName string, predicateText string) error {
+	fieldName := ""
+	usedElementAccessor := false
+	if mctx != nil {
+		fieldName = mctx.fieldName
+		usedElementAccessor = mctx.usedElementAccessor
+	}
+	if !canBeExecuted(predicate) || !usedElementAccessor {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s predicate must be a boolean expression over the current element accessor for target field %q, got: %s",
+			funcName,
+			fieldName,
+			predicateText)
+	}
+	return nil
 }
 
 // VisitParens unpack the parentheses.
@@ -854,6 +872,13 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	}
 	// Remove "$[" prefix and "]" suffix
 	fieldName := tokenText[2 : len(tokenText)-1]
+
+	if v.currentMatchContext != nil {
+		if v.currentMatchContext.sourceType != matchSourceStruct {
+			return nil, merr.WrapErrParameterInvalidMsg("$[%s] is only valid when matching a struct array; use $ for array or JSON element MATCH", fieldName)
+		}
+		v.currentMatchContext.usedElementAccessor = true
+	}
 
 	// Check if we're inside an ElementFilter context
 	if v.currentStructArrayField == "" {
@@ -1942,6 +1967,10 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 }
 
 func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContext) interface{} {
+	if v.currentMatchContext != nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"MATCH_* predicate does not support template placeholders")
+	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
@@ -2357,6 +2386,9 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	if v.currentStructArrayField == "" {
 		return merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
+	if v.currentMatchContext != nil {
+		v.currentMatchContext.usedElementAccessor = true
+	}
 
 	// Construct full field name for struct array field
 	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
@@ -2403,6 +2435,7 @@ func (v *ParserVisitor) VisitElementSelf(ctx *parser.ElementSelfContext) interfa
 	mctx := v.currentMatchContext
 	switch mctx.sourceType {
 	case matchSourceArray:
+		mctx.usedElementAccessor = true
 		field := mctx.field
 		return &ExprWithType{
 			expr: &planpb.Expr{
@@ -2426,6 +2459,7 @@ func (v *ParserVisitor) VisitElementSelf(ctx *parser.ElementSelfContext) interfa
 			nodeDependent: true,
 		}
 	case matchSourceJSON:
+		mctx.usedElementAccessor = true
 		field := mctx.field
 		return &ExprWithType{
 			expr: &planpb.Expr{
@@ -2518,6 +2552,10 @@ func (v *ParserVisitor) parseMatchExpr(mctx *matchContext, exprCtx parser.IExprC
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+
+	if err := validateMatchPredicate(predicateExpr, mctx, funcName, exprCtx.GetText()); err != nil {
+		return err
 	}
 
 	if err := validateJsonMatchElementType(predicateExpr.expr, mctx); err != nil {

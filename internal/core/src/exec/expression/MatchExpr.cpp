@@ -278,6 +278,11 @@ CollectJsonIndexLeaves(const Expr* node,
 
 void
 PhyMatchFilterExpr::EvalJson(EvalCtx& context, VectorPtr& result) {
+    if (has_offset_input_) {
+        EvalJsonBrute(context, result);
+        return;
+    }
+
     // Walk the inner predicate tree: if every source leaf runs on a
     // JsonInvertedIndex, each leaf's Eval produces an element-level bitmap,
     // logical AND/OR composes them at element level, and EvalWithOffsets

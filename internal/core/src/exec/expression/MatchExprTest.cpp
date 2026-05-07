@@ -2517,6 +2517,30 @@ TEST_F(SealedMatchExprJsonTest, MatchAllNumericCompoundEmptyOffsetsWithIndex) {
 }
 
 TEST_F(SealedMatchExprJsonTest,
+       MatchAnyNumericCompoundNonEmptyOffsetsWithIndex) {
+    exec::OffsetVector offsets{0, 2, 3, 4, 5, 8, 9, 10, 11};
+    auto result = EvalFilterWithOffsets(
+        "match_any(json_field[\"arr_num\"], $ > 50 && $ < 51)", offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view.all());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        auto row = static_cast<size_t>(offsets[i]);
+        bool expected = false;
+        for (auto v : arr_num_data_[row]) {
+            if (v > 50.0 && v < 51.0) {
+                expected = true;
+                break;
+            }
+        }
+        EXPECT_EQ(expected, static_cast<bool>(view[i])) << "row=" << row;
+    }
+}
+
+TEST_F(SealedMatchExprJsonTest,
        MatchAllNumericCompoundEmptySequentialBatchWithIndex) {
     auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
     EXEC_EVAL_EXPR_BATCH_SIZE.store(1);
