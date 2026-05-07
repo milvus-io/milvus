@@ -134,6 +134,19 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 		return nil, io.EOF // end of stream, no more records to read
 	}
 
+	// Validate buffer layout BEFORE import to prevent SIGSEGV.
+	// C++ may produce a RecordBatch where schema says type A (expected) but data
+	// buffers are laid out for type B (actual from parquet). The exported CArrowSchema
+	// uses expected types (lies), but CArrowArray children's n_buffers reflects the
+	// true layout. Comparing these catches the mismatch before import.
+	if err := validateCArrayBufferLayout(unsafe.Pointer(cArr), pr.schema); err != nil {
+		goCArr := (*cdata.CArrowArray)(unsafe.Pointer(cArr))
+		goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(cSchema))
+		cdata.ReleaseCArrowArray(goCArr)
+		cdata.ReleaseCArrowSchema(goCSchema)
+		return nil, err
+	}
+
 	// Convert ArrowArray to Go RecordBatch using cdata
 	goCArr := (*cdata.CArrowArray)(unsafe.Pointer(cArr))
 	goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(cSchema))
