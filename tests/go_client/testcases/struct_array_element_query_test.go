@@ -136,6 +136,8 @@ func subset(a, b []int64) bool {
 // =============================================================================
 
 func TestStructArrayElementContains(t *testing.T) {
+	t.Skip("struct array sub-field array_contains expressions are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	opt := hp.DefaultStructAElementSchemaOption("")
@@ -178,6 +180,8 @@ func TestStructArrayElementContains(t *testing.T) {
 // =============================================================================
 
 func TestStructArrayElementQueryBasics(t *testing.T) {
+	t.Skip("struct array element_filter expressions are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	opt := hp.DefaultStructAElementSchemaOption("")
@@ -256,12 +260,16 @@ func runSTLSortCase(t *testing.T, ctx CtxT, mc MC, scalarField, namePrefix strin
 }
 
 func TestStructArrayElementSTLSortIndexCreateInt(t *testing.T) {
+	t.Skip("STL_SORT indexes on struct array sub-fields are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runSTLSortCase(t, ctx, mc, "int_val", hp.StructAElemPrefix+"_stl_int")
 }
 
 func TestStructArrayElementSTLSortIndexCreateVarchar(t *testing.T) {
+	t.Skip("STL_SORT indexes on struct array sub-fields are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runSTLSortCase(t, ctx, mc, "str_val", hp.StructAElemPrefix+"_stl_vc")
@@ -327,6 +335,8 @@ func runInvertedIndexCase(t *testing.T, ctx CtxT, mc MC, scalarField, namePrefix
 }
 
 func TestStructArrayElementInvertedIndexVarchar(t *testing.T) {
+	t.Skip("struct array element_filter expressions are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runInvertedIndexCase(t, ctx, mc, "color", hp.StructAElemPrefix+"_inv_vc",
@@ -335,6 +345,8 @@ func TestStructArrayElementInvertedIndexVarchar(t *testing.T) {
 }
 
 func TestStructArrayElementInvertedIndexInt(t *testing.T) {
+	t.Skip("struct array element_filter expressions are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runInvertedIndexCase(t, ctx, mc, "int_val", hp.StructAElemPrefix+"_inv_int",
@@ -406,6 +418,8 @@ func insertCustomRows(t *testing.T, ctx CtxT, mc MC, collName string, structSche
 }
 
 func TestStructArrayElementQueryCorrectness(t *testing.T) {
+	t.Skip("struct array element_filter, array_contains, and MATCH_EXACT expressions are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -651,6 +665,8 @@ func intersect(a, b []int64) []int64 {
 // =============================================================================
 
 func TestStructArrayElementMatchQuery(t *testing.T) {
+	t.Skip("MATCH_ANY and MATCH_ALL on struct array elements are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

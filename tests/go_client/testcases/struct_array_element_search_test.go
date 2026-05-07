@@ -58,6 +58,8 @@ func TestStructArrayElementFilterSearchVerifyInStructOffset(t *testing.T) {
 // TestStructArrayElementFilterSearchWithDocLevelFilter ports
 // test_element_filter_search_with_doc_level_filter.
 func TestStructArrayElementFilterSearchWithDocLevelFilter(t *testing.T) {
+	t.Skip("struct array element_filter search is not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -108,6 +110,8 @@ func TestStructArrayElementFilterSearchWithDocLevelFilter(t *testing.T) {
 // TestStructArrayElementFilterSearchCompoundSameElementSemantic ports
 // test_element_filter_search_compound_same_element_semantic.
 func TestStructArrayElementFilterSearchCompoundSameElementSemantic(t *testing.T) {
+	t.Skip("struct array element_filter search is not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -235,6 +239,8 @@ func semanticRows(opt hp.StructAElementSchemaOption) []hp.StructARow {
 }
 
 func TestStructArrayElementMatchSearch(t *testing.T) {
+	t.Skip("MATCH_ANY and MATCH_ALL on struct array elements are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	opt := hp.DefaultStructAElementSchemaOption("")
@@ -359,6 +365,8 @@ func TestStructArrayElementNestedIndexInvertedVarchar(t *testing.T) {
 }
 
 func TestStructArrayElementNestedIndexSTLSortInt(t *testing.T) {
+	t.Skip("STL_SORT indexes on struct array sub-fields are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	nestedIndexSetup(t, ctx, mc, elemSearchPrefix+"_ni_stl_int", "int_val", "STL_SORT")
@@ -398,6 +406,8 @@ func runNonFloatVectorCreate(t *testing.T, ctx CtxT, mc MC, namePrefix string, v
 }
 
 func TestStructArrayElementNonFloatVectorsFloat16(t *testing.T) {
+	t.Skip("non-float vector sub-fields in struct arrays are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runNonFloatVectorCreate(t, ctx, mc, elemSearchPrefix+"_nf_f16",
@@ -405,6 +415,8 @@ func TestStructArrayElementNonFloatVectorsFloat16(t *testing.T) {
 }
 
 func TestStructArrayElementNonFloatVectorsBFloat16(t *testing.T) {
+	t.Skip("non-float vector sub-fields in struct arrays are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	runNonFloatVectorCreate(t, ctx, mc, elemSearchPrefix+"_nf_bf16",
@@ -515,6 +527,8 @@ func groupByCollection(t *testing.T, ctx CtxT, mc MC) (string, []hp.StructARow) 
 }
 
 func TestStructArrayElementGroupByElementFilterBasic(t *testing.T) {
+	t.Skip("MATCH_ANY on struct array elements is not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName, rows := groupByCollection(t, ctx, mc)
@@ -656,6 +670,8 @@ func noFilterCollection(t *testing.T, ctx CtxT, mc MC) (string, []hp.StructARow)
 }
 
 func TestStructArrayElementSearchNoFilter(t *testing.T) {
+	t.Skip("COSINE indexes on struct array vector sub-fields are not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName, rows := noFilterCollection(t, ctx, mc)
