@@ -3171,3 +3171,98 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 			"non-nullable $meta should NOT have ValidData auto-filled")
 	})
 }
+
+func TestUpsertTask_queryPreExecute_StructArrayField(t *testing.T) {
+	rawSchema := constructCollectionSchemaWithStructArrayField("test_partial_update_struct_array", testStructArrayField, false)
+	upsertStructData := newStructArrayFieldData(rawSchema.StructArrayFields[0], testStructArrayField, 1, testVecDim)
+	existStructData := newStructArrayFieldData(rawSchema.StructArrayFields[0], testStructArrayField, 1, testVecDim)
+
+	assert.NoError(t, transformStructFieldNames(rawSchema))
+	schema := newSchemaInfo(rawSchema)
+
+	existStructMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			CollectionName: rawSchema.Name,
+			FieldsData:     []*schemapb.FieldData{existStructData},
+		},
+	}
+	assert.NoError(t, checkAndFlattenStructFieldData(rawSchema, existStructMsg))
+
+	upsertVector := newFloatVectorFieldData(testFloatVecField, 1, testVecDim)
+	upsertVector.FieldId = 101
+	existVector := newFloatVectorFieldData(testFloatVecField, 1, testVecDim)
+	existVector.FieldId = 101
+
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: testInt64Field,
+			FieldId:   100,
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1}},
+					},
+				},
+			},
+		},
+		upsertVector,
+		upsertStructData,
+	}
+
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: append([]*schemapb.FieldData{
+			{
+				FieldName: testInt64Field,
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1}},
+						},
+					},
+				},
+			},
+			existVector,
+		}, existStructMsg.GetFieldsData()...),
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			CollectionName: rawSchema.Name,
+			FieldsData:     upsertData,
+			NumRows:        1,
+			PartialUpdate:  true,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					CollectionName: rawSchema.Name,
+					FieldsData:     upsertData,
+					NumRows:        1,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	fieldNames := make([]string, 0, len(task.insertFieldData))
+	for _, field := range task.insertFieldData {
+		fieldNames = append(fieldNames, field.GetFieldName())
+	}
+
+	assert.Contains(t, fieldNames, typeutil.ConcatStructFieldName(testStructArrayField, "sub_text_array"))
+	assert.Contains(t, fieldNames, typeutil.ConcatStructFieldName(testStructArrayField, "sub_int_array"))
+	assert.Contains(t, fieldNames, typeutil.ConcatStructFieldName(testStructArrayField, "sub_float_vector_array"))
+}
