@@ -382,20 +382,23 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
 
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
-    // - invalid row   → null_offset + non_exist_offset (8 bytes per entry)
-    // - {"b": 1}      → non_exist_offset only (key "a" doesn't exist)
-    // - {"a": 1.0}    → valid data (neither offset)
+    // - invalid row   -> null_offset + non_exist_offset (8 bytes per entry)
+    // - {"b": 1}      -> non_exist_offset only (key "a" doesn't exist)
+    // - {"a": 1.0}    -> valid data (neither offset)
     // 20 invalid + 20 missing-path rows make both files slice reliably.
+    constexpr int kInvalidRows = 20;
+    constexpr int kMissingPathRows = 20;
+    constexpr int kValidRows = 10;
     std::vector<milvus::Json> jsons;
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kInvalidRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kMissingPathRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"b": 1})"))));
     }
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < kValidRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
@@ -403,7 +406,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
     std::vector<uint8_t> valid_data((jsons.size() + 7) / 8, 0xFF);
-    for (size_t i = 0; i < 20; ++i) {
+    for (size_t i = 0; i < kInvalidRows; ++i) {
         valid_data[i / 8] &= ~(1U << (i % 8));
     }
 
@@ -471,7 +474,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto partial = make_partial_datas(INDEX_NULL_OFFSET_FILE_NAME);
         ASSERT_GT(partial.size(), 1);
         // _meta_slice references both null_offset and non_exist_offset slices,
-        // but only null_offset slices are in the map → assertion failure.
+        // but only null_offset slices are in the map, so it asserts.
         EXPECT_THROW(CompactIndexDatas(partial), std::exception);
     }
 
@@ -482,7 +485,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 40 * sizeof(size_t));
+        EXPECT_EQ(result.size_, kInvalidRows * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
@@ -492,7 +495,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NON_EXIST_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 40 * sizeof(size_t));
+        EXPECT_EQ(result.size_,
+                  (kInvalidRows + kMissingPathRows) * sizeof(size_t));
     }
 }
 
