@@ -80,6 +80,9 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
 	case objectstorage.CloudProviderGCPNative:
 		client, err = newGcpNativeObjectStorageWithConfig(ctx, c)
+	case objectstorage.CloudProviderRustFS {
+		// RustFS: high-performance S3-compatible object storage
+		client, err = newRustFSObjectStorageWithConfig(ctx, c)
 	default:
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
 	}
