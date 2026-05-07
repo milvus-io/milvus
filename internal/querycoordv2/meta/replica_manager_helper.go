@@ -170,7 +170,7 @@ func newReplicaAssignmentInfo(replica *Replica, nodeInRG typeutil.UniqueSet) *re
 		return true
 	})
 	return &replicaAssignmentInfo{
-		replicaID:            replica.GetID(),
+		replica:              replica,
 		expectedNodeCount:    0,
 		rwNodes:              rwNodes,
 		newRONodes:           newRONodes,
@@ -204,7 +204,7 @@ func newReplicaSQNAssignmentInfo(replica *Replica, nodes typeutil.UniqueSet) *re
 		return true
 	})
 	return &replicaAssignmentInfo{
-		replicaID:            replica.GetID(),
+		replica:              replica,
 		expectedNodeCount:    0,
 		rwNodes:              rwNodes,
 		newRONodes:           newRONodes,
@@ -214,7 +214,7 @@ func newReplicaSQNAssignmentInfo(replica *Replica, nodes typeutil.UniqueSet) *re
 }
 
 type replicaAssignmentInfo struct {
-	replicaID            typeutil.UniqueID
+	replica              *Replica           // the replica snapshot this assignment was computed from
 	expectedNodeCount    int                // expected node count for each replica.
 	rwNodes              typeutil.UniqueSet // rw nodes is used by current replica. (rw -> rw)
 	newRONodes           typeutil.UniqueSet // new ro nodes for these replica. (rw -> ro)
@@ -222,9 +222,14 @@ type replicaAssignmentInfo struct {
 	unrecoverableRONodes typeutil.UniqueSet // unrecoverable ro nodes for these replica (ro node can't be put back to rw node if it's not in current resource group). (ro -> ro)
 }
 
+// GetReplica returns the replica snapshot this assignment was computed from.
+func (s *replicaAssignmentInfo) GetReplica() *Replica {
+	return s.replica
+}
+
 // GetReplicaID returns the replica id for these replica.
 func (s *replicaAssignmentInfo) GetReplicaID() typeutil.UniqueID {
-	return s.replicaID
+	return s.replica.GetID()
 }
 
 // GetNewRONodes returns the new ro nodes for these replica.
@@ -307,7 +312,7 @@ func (s replicaAssignmentInfoSortByAvailableAndRecoverable) Less(i, j int) bool 
 
 	// Reach stable sort result by replica id.
 	// Otherwise unstable assignment may cause unnecessary node transfer.
-	return left < right || (left == right && s.replicaAssignmentInfoSorter[i].replicaID < s.replicaAssignmentInfoSorter[j].replicaID)
+	return left < right || (left == right && s.replicaAssignmentInfoSorter[i].GetReplicaID() < s.replicaAssignmentInfoSorter[j].GetReplicaID())
 }
 
 // newReplicaSQNAssignmentHelper creates a new replicaSQNAssignmentHelper.
