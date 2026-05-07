@@ -572,6 +572,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataStringImpl(DataType data_type,
+                                 bool nullable,
+                                 FixedVector<std::string>&& data)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, std::move(data)) {
+    }
+
     int64_t
     DataSize() const override {
         int64_t data_size = 0;

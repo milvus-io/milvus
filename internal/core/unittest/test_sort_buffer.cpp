@@ -249,6 +249,35 @@ TEST_F(SortBufferTest, BatchedOutput) {
     EXPECT_EQ(buffer.NumOutputRows(), 9);
 }
 
+TEST_F(SortBufferTest, ExtractedBatchesAppendWithoutOverwritingRows) {
+    std::vector<DataType> column_types = {DataType::INT64};
+    std::vector<SortKeyInfo> sort_keys = {SortKeyInfo(0)};
+    SortBuffer buffer(column_types, sort_keys);
+
+    std::vector<int64_t> data(1500);
+    for (int64_t i = 0; i < data.size(); ++i) {
+        data[i] = i;
+    }
+    auto col = CreateInt64Column(data);
+    std::vector<ColumnVectorPtr> columns = {col};
+    buffer.AddRows(columns, data.size());
+    buffer.NoMoreInput();
+
+    auto first_output = buffer.GetOutput(1024);
+    auto second_output = buffer.GetOutput(476);
+    auto first_col = std::dynamic_pointer_cast<ColumnVector>(first_output[0]);
+    auto second_col = std::dynamic_pointer_cast<ColumnVector>(second_output[0]);
+    ASSERT_EQ(first_col->size(), 1024);
+    ASSERT_EQ(second_col->size(), 476);
+
+    ASSERT_NO_THROW(first_col->append(*second_col));
+    ASSERT_EQ(first_col->size(), 1500);
+    EXPECT_EQ(first_col->ValueAt<int64_t>(0), 0);
+    EXPECT_EQ(first_col->ValueAt<int64_t>(1023), 1023);
+    EXPECT_EQ(first_col->ValueAt<int64_t>(1024), 1024);
+    EXPECT_EQ(first_col->ValueAt<int64_t>(1499), 1499);
+}
+
 TEST_F(SortBufferTest, EmptyInput) {
     // Test with no input
     std::vector<DataType> column_types = {DataType::INT64};

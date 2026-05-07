@@ -350,6 +350,43 @@ class RowContainer {
     }
 
     template <DataType Type>
+    static ColumnVectorPtr
+    extractColumnVectorTypedInternal(const char* const* rows,
+                                     int32_t numRows,
+                                     RowColumn column) {
+        if constexpr (Type == DataType::ROW || Type == DataType::JSON ||
+                      Type == DataType::ARRAY || Type == DataType::NONE) {
+            ThrowInfo(DataTypeInvalid,
+                      "Not Support Extract types:[ROW/JSON/ARRAY/NONE]");
+            return nullptr;
+        } else {
+            using T = typename milvus::TypeTraits<Type>::NativeType;
+            FixedVector<T> values(numRows);
+            TargetBitmap valid_values(numRows, false);
+            auto nullMask = column.nullMask();
+            auto offset = column.offset();
+            for (auto i = 0; i < numRows; i++) {
+                const char* row = rows[i];
+                if (row == nullptr ||
+                    (nullMask && isNullAt(row, column.nullByte(), nullMask))) {
+                    continue;
+                }
+                valid_values.set(i, true);
+                if constexpr (std::is_same_v<T, std::string> ||
+                              std::is_same_v<T, std::string_view>) {
+                    values[i] = *strAt(row, offset);
+                } else {
+                    values[i] = valueAt<T>(row, offset);
+                }
+            }
+            auto field_data =
+                std::make_shared<FieldData<T>>(Type, false, std::move(values));
+            return std::make_shared<ColumnVector>(std::move(field_data),
+                                                  std::move(valid_values));
+        }
+    }
+
+    template <DataType Type>
     static void
     extractColumnTyped(const char* const* rows,
                        int32_t numRows,
@@ -358,11 +395,25 @@ class RowContainer {
         extractColumnTypedInternal<Type>(rows, numRows, column, result);
     }
 
+    template <DataType Type>
+    static ColumnVectorPtr
+    extractColumnVectorTyped(const char* const* rows,
+                             int32_t numRows,
+                             RowColumn column) {
+        return extractColumnVectorTypedInternal<Type>(rows, numRows, column);
+    }
+
     static void
     extractColumn(const char* const* rows,
                   int32_t num_rows,
                   RowColumn column,
                   const VectorPtr& result);
+
+    static ColumnVectorPtr
+    extractColumnVector(const char* const* rows,
+                        int32_t num_rows,
+                        RowColumn column,
+                        DataType data_type);
 
     void
     extractColumn(const char* const* rows,
@@ -370,6 +421,14 @@ class RowContainer {
                   int32_t column_idx,
                   const VectorPtr& result) {
         extractColumn(rows, numRows, columnAt(column_idx), result);
+    }
+
+    ColumnVectorPtr
+    extractColumnVector(const char* const* rows,
+                        int32_t numRows,
+                        int32_t column_idx) {
+        return extractColumnVector(
+            rows, numRows, columnAt(column_idx), keyTypes_[column_idx]);
     }
 
     const std::vector<char*>&
@@ -437,6 +496,15 @@ RowContainer::extractColumn(const char* const* rows,
                             const milvus::VectorPtr& result) {
     MILVUS_DYNAMIC_TYPE_DISPATCH(
         extractColumnTyped, result->type(), rows, num_rows, column, result);
+}
+
+inline ColumnVectorPtr
+RowContainer::extractColumnVector(const char* const* rows,
+                                  int32_t num_rows,
+                                  milvus::exec::RowColumn column,
+                                  DataType data_type) {
+    return MILVUS_DYNAMIC_TYPE_DISPATCH(
+        extractColumnVectorTyped, data_type, rows, num_rows, column);
 }
 }  // namespace exec
 }  // namespace milvus
