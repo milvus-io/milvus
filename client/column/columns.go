@@ -173,6 +173,137 @@ func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayFie
 	return NewColumnStructArray(fieldName, fields), nil
 }
 
+// parseVectorArrayData converts schemapb.VectorArray (per-row list of vectors) into the
+// matching ColumnXxxVectorArray. Used for ArrayOfVector sub-fields of struct arrays.
+func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, begin, end int) (Column, error) {
+	rows := va.GetData()
+	if end < 0 || end > len(rows) {
+		end = len(rows)
+	}
+	if begin < 0 {
+		begin = 0
+	}
+	if begin > end {
+		begin = end
+	}
+	rows = rows[begin:end]
+	// VectorArray.Dim may be 0 in server search responses; fall back to inner VectorField.Dim.
+	dim := int(va.GetDim())
+	if dim == 0 {
+		for _, vf := range rows {
+			if d := int(vf.GetDim()); d > 0 {
+				dim = d
+				break
+			}
+		}
+	}
+	if dim == 0 {
+		return nil, fmt.Errorf("vector array %q has unknown dim", fieldName)
+	}
+
+	switch va.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		out, err := splitVectorArrayRows(fieldName, rows, dim, func(vf *schemapb.VectorField) []float32 {
+			return vf.GetFloatVector().GetData()
+		}, func(data []float32, j, w int) []float32 {
+			v := make([]float32, w)
+			copy(v, data[j:j+w])
+			return v
+		})
+		if err != nil {
+			return nil, err
+		}
+		return NewColumnFloatVectorArray(fieldName, dim, out), nil
+
+	case schemapb.DataType_Float16Vector:
+		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
+			return vf.GetFloat16Vector()
+		}, copyByteVector)
+		if err != nil {
+			return nil, err
+		}
+		return NewColumnFloat16VectorArray(fieldName, dim, out), nil
+
+	case schemapb.DataType_BFloat16Vector:
+		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
+			return vf.GetBfloat16Vector()
+		}, copyByteVector)
+		if err != nil {
+			return nil, err
+		}
+		return NewColumnBFloat16VectorArray(fieldName, dim, out), nil
+
+	case schemapb.DataType_BinaryVector:
+		if dim%8 != 0 {
+			return nil, fmt.Errorf("binary vector array %q requires dim multiple of 8, got %d", fieldName, dim)
+		}
+		out, err := splitVectorArrayRows(fieldName, rows, dim/8, func(vf *schemapb.VectorField) []byte {
+			return vf.GetBinaryVector()
+		}, copyByteVector)
+		if err != nil {
+			return nil, err
+		}
+		return NewColumnBinaryVectorArray(fieldName, dim, out), nil
+
+	case schemapb.DataType_Int8Vector:
+		out, err := splitVectorArrayRows(fieldName, rows, dim, func(vf *schemapb.VectorField) []byte {
+			return vf.GetInt8Vector()
+		}, func(data []byte, j, w int) []int8 {
+			v := make([]int8, w)
+			for k := 0; k < w; k++ {
+				v[k] = int8(data[j+k])
+			}
+			return v
+		})
+		if err != nil {
+			return nil, err
+		}
+		return NewColumnInt8VectorArray(fieldName, dim, out), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported vector array element type %s", va.GetElementType())
+	}
+}
+
+// splitVectorArrayRows extracts per-row flat payloads via `get` and splits each by `width` using
+// `copyVector`. It validates that the flat payload length is a positive multiple of `width`, so
+// that server-side protocol errors surface as clear errors instead of silent truncation or panics.
+// The result is shaped as [row][vector][element].
+func splitVectorArrayRows[D any, E any](
+	fieldName string,
+	rows []*schemapb.VectorField,
+	width int,
+	get func(*schemapb.VectorField) []D,
+	copyVector func(data []D, offset, width int) []E,
+) ([][][]E, error) {
+	if width <= 0 {
+		return nil, fmt.Errorf("vector array %q has invalid row width %d", fieldName, width)
+	}
+	out := make([][][]E, 0, len(rows))
+	for i, vf := range rows {
+		if vf == nil {
+			return nil, fmt.Errorf("vector array %q row %d is nil", fieldName, i)
+		}
+		data := get(vf)
+		if len(data)%width != 0 {
+			return nil, fmt.Errorf("vector array %q row %d payload length %d not a multiple of row width %d",
+				fieldName, i, len(data), width)
+		}
+		row := make([][]E, 0, len(data)/width)
+		for j := 0; j+width <= len(data); j += width {
+			row = append(row, copyVector(data, j, width))
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func copyByteVector(data []byte, offset, width int) []byte {
+	v := make([]byte, width)
+	copy(v, data[offset:offset+width])
+	return v
+}
+
 func int32ToType[T ~int8 | int16](data []int32) []T {
 	return lo.Map(data, func(i32 int32, _ int) T {
 		return T(i32)
@@ -218,12 +349,23 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
 
 	case schemapb.DataType_Array:
-		// handle struct array field
+		// handle struct array field (legacy server may use DataType_Array as top-level)
 		if fd.GetStructArrays() != nil {
 			return parseStructArrayData(fd.GetFieldName(), fd.GetStructArrays(), begin, end)
 		}
 		data := fd.GetScalars().GetArrayData()
 		return parseArrayData(fd.GetFieldName(), data.GetElementType(), data.GetData(), validData, begin, end)
+
+	case schemapb.DataType_ArrayOfStruct:
+		return parseStructArrayData(fd.GetFieldName(), fd.GetStructArrays(), begin, end)
+
+	case schemapb.DataType_ArrayOfVector:
+		vectors := fd.GetVectors()
+		va := vectors.GetVectorArray()
+		if va == nil {
+			return nil, errFieldDataTypeNotMatch
+		}
+		return parseVectorArrayData(fd.GetFieldName(), va, begin, end)
 
 	case schemapb.DataType_JSON:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetJsonData().GetData(), begin, end, validData, NewColumnJSONBytes, NewNullableColumnJSONBytes)

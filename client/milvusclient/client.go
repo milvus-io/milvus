@@ -100,12 +100,9 @@ func (c *Client) dialOptions() []grpc.DialOption {
 		options = append(options, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	if c.config.DialOptions == nil {
-		// Add default connection options.
-		options = append(options, DefaultGrpcOpts...)
-	} else {
-		options = append(options, c.config.DialOptions...)
-	}
+	// Always apply default connection options first, then let caller override/extend.
+	options = append(options, DefaultGrpcOpts...)
+	options = append(options, c.config.DialOptions...)
 
 	options = append(options,
 		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
