@@ -92,9 +92,15 @@ ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb schema.proto|| { echo 'generate schema.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb common.proto|| { echo 'generate common.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb rg.proto|| { echo 'generate rg.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb feder.proto|| { echo 'generate feder.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb msg.proto|| { echo 'generate msg.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb milvus.proto|| { echo 'generate milvus.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb internal.proto|| { echo 'generate internal.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_cgo_msg.proto|| { echo 'generate index_cgo_msg.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 

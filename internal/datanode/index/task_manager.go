@@ -45,6 +45,7 @@ type IndexTaskInfo struct {
 	FailReason                string
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
+	IndexStorePathVersion     indexpb.IndexStorePathVersion
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -60,6 +61,7 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     i.IndexStorePathVersion,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
 }
@@ -74,6 +76,7 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     i.IndexStorePathVersion,
 	}
 }
 
@@ -145,6 +148,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	memSize uint64,
 	currentIndexVersion int32,
 	currentScalarIndexVersion int32,
+	indexStorePathVersion indexpb.IndexStorePathVersion,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
@@ -155,6 +159,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 		info.MemSize = memSize
 		info.CurrentIndexVersion = currentIndexVersion
 		info.CurrentScalarIndexVersion = currentScalarIndexVersion
+		info.IndexStorePathVersion = indexStorePathVersion
 		return
 	}
 }

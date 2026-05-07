@@ -127,6 +127,7 @@ type SessionRaw struct {
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
 	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
+	MaxIndexStorePathVersion int32              `json:"MaxIndexStorePathVersion,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
 	HostName     string            `json:"HostName,omitempty"`
@@ -226,6 +227,12 @@ func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption
 func WithIndexNonEncoding() SessionOption {
 	return func(session *Session) {
 		session.IndexNonEncoding = true
+	}
+}
+
+func WithMaxIndexStorePathVersion(version int32) SessionOption {
+	return func(session *Session) {
+		session.MaxIndexStorePathVersion = version
 	}
 }
 

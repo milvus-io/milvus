@@ -310,6 +310,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexPath),
 		BuildID:                   it.BuildID,
+		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 		IndexVersion:              segIndex.IndexVersion + 1,
 		StorageConfig:             createStorageConfig(),
 		IndexParams:               params,
