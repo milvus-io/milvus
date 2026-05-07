@@ -88,6 +88,12 @@ var (
 
 const apiPathPrefix = "/api/v1"
 
+// webUIRouterRegistrar is satisfied by the real proxy.Proxy and can also be
+// satisfied by lightweight test stubs, avoiding a dependency on the concrete type.
+type webUIRouterRegistrar interface {
+	RegisterRestRouter(router gin.IRouter)
+}
+
 // Server is the Proxy Server
 type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
@@ -164,23 +170,39 @@ func (s *Server) registerHTTPServer() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	metricsGinHandler := gin.Default()
+
+	// SDK REST API routes: require user authentication when authorization is enabled.
 	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		apiv1.Use(authenticate)
 	}
 	handlers := httpserver.NewHandlers(s.proxy)
 	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
+
+	// WebUI management routes (_cluster/*, _qc/*, _dc/*, etc.) are served on the
+	// internal management port (9091) which is not publicly exposed in standard
+	// deployments. These observability endpoints must remain accessible to the
+	// built-in WebUI regardless of the authorizationEnabled setting; the WebUI
+	// frontend has no mechanism to supply user credentials.
+	// Telemetry routes (_telemetry/*) carry their own per-handler auth middleware.
+	if r, ok := s.proxy.(webUIRouterRegistrar); ok {
+		registerWebUIRoutes(metricsGinHandler, r)
 	}
+
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
 		Handler:     metricsGinHandler.Handler(),
 	})
+}
+
+// registerWebUIRoutes creates a gin group without the user-auth middleware and
+// delegates route registration to r. Extracted for testability.
+func registerWebUIRoutes(engine *gin.Engine, r webUIRouterRegistrar) {
+	webuiGroup := engine.Group(apiPathPrefix)
+	webuiGroup.Use(httpserver.RequestHandlerFunc)
+	r.RegisterRestRouter(webuiGroup)
 }
 
 func (s *Server) startHTTPServer(errChan chan error) {
