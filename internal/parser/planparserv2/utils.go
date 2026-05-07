@@ -556,6 +556,17 @@ func alwaysTrueExpr() *planpb.Expr {
 	}
 }
 
+func alwaysFalseExpr() *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_UnaryExpr{
+			UnaryExpr: &planpb.UnaryExpr{
+				Op:    planpb.UnaryExpr_Not,
+				Child: alwaysTrueExpr(),
+			},
+		},
+	}
+}
+
 func IsAlwaysTruePlan(plan *planpb.PlanNode) bool {
 	switch realPlan := plan.GetNode().(type) {
 	case *planpb.PlanNode_VectorAnns:

@@ -1096,15 +1096,12 @@ func TestExpr_Invalid(t *testing.T) {
 		`-Int32Field`,
 		`!(Int32Field)`,
 		// ----------------------- or/and ------------------------
-		`not_in_schema or true`,
 		`false or not_in_schema`,
 		`"str" or false`,
 		`BoolField OR false`,
 		`Int32Field OR Int64Field`,
 		`not_in_schema and true`,
-		`false AND not_in_schema`,
 		`"str" and false`,
-		`BoolField and false`,
 		`Int32Field AND Int64Field`,
 		// -------------------- unsupported ----------------------
 		`1 ^ 2`,
@@ -1114,10 +1111,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 | 2`,
 		// -------------------- cannot be independent ----------------------
 		`BoolField`,
-		`true`,
-		`false`,
 		`Int64Field > 100 and BoolField`,
-		`Int64Field < 100 or false`, // maybe this can be optimized.
 		`!BoolField`,
 		// -------------------- array ----------------------
 		//`A == [1, 2, 3]`,
@@ -3321,36 +3315,34 @@ func TestExpr_ConstantFolding(t *testing.T) {
 // are parsed by the proxy expression parser.
 //
 // Key behavior:
-//   - Standalone "true"/"false" are parsed into ValueExpr(BoolVal) with nodeDependent=true
-//   - Because nodeDependent=true, canBeExecuted() returns false
-//   - Therefore ParseExpr rejects them with "predicate is not a boolean expression"
-//   - But combined expressions like "BoolField == true" or "1==1" work fine
+//   - Standalone "true" is converted to AlwaysTrueExpr
+//   - Standalone "false" is converted to AlwaysFalseExpr (UnaryExpr(Not, AlwaysTrueExpr))
+//   - Combined expressions like "BoolField == true" or "1==1" work fine
 //   - After rewriting, "1==1" becomes AlwaysTrueExpr, "1==2" becomes AlwaysFalseExpr
 func TestExpr_BooleanLiteral(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 
-	// Case 1: standalone "true" / "false" should fail ParseExpr
-	// because VisitBoolean sets nodeDependent=true, and canBeExecuted requires nodeDependent=false
-	standaloneBoolExprs := []string{
-		"true",
-		"false",
-		"True",
-		"False",
-		"TRUE",
-		"FALSE",
-	}
-	for _, exprStr := range standaloneBoolExprs {
+	// Case 1: standalone "true" variants → AlwaysTrueExpr
+	for _, exprStr := range []string{"true", "True", "TRUE"} {
 		expr, err := ParseExpr(helper, exprStr, nil)
-		assert.Error(t, err, "standalone %q should fail", exprStr)
-		assert.Nil(t, expr, "standalone %q should return nil expr", exprStr)
-		assert.Contains(t, err.Error(), "predicate is not a boolean expression",
-			"standalone %q error message mismatch", exprStr)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"standalone %q should become AlwaysTrueExpr", exprStr)
 	}
 
-	// Case 2: verify that handleExpr (internal) does parse them into ValueExpr with Bool
-	// This shows the ANTLR + visitor layer works, but the outer canBeExecuted gate blocks it
+	// Case 1b: standalone "false" variants → AlwaysFalseExpr
+	for _, exprStr := range []string{"false", "False", "FALSE"} {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "standalone %q should be AlwaysFalseExpr", exprStr)
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	}
+
+	// Case 2: verify that handleExpr (internal) parses them into ValueExpr with Bool
 	for _, exprStr := range []string{"true", "false"} {
 		ret := handleExpr(helper, exprStr)
 		ewt, ok := ret.(*ExprWithType)
@@ -3450,5 +3442,77 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		require.NotNil(t, ue, "should be AlwaysFalseExpr")
 		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
 		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	// Case 7: boolean literal mixed with expression (issue #48443)
+	t.Run("true_or_expr", func(t *testing.T) {
+		// true or (Int64Field > 50) → AlwaysTrueExpr (short-circuit)
+		expr, err := ParseExpr(helper, "true or (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true or expr\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("expr_or_true", func(t *testing.T) {
+		// (Int64Field > 50) or true → AlwaysTrueExpr (short-circuit)
+		expr, err := ParseExpr(helper, "(Int64Field > 50) or true", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"expr or true\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("false_or_expr", func(t *testing.T) {
+		// false or (Int64Field > 50) → Int64Field > 50
+		expr, err := ParseExpr(helper, "false or (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"false or expr\" should return the expr itself")
+	})
+
+	t.Run("true_and_expr", func(t *testing.T) {
+		// true and (Int64Field > 50) → Int64Field > 50
+		expr, err := ParseExpr(helper, "true and (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"true and expr\" should return the expr itself")
+	})
+
+	t.Run("expr_and_true", func(t *testing.T) {
+		// (Int64Field > 50) and true → Int64Field > 50
+		expr, err := ParseExpr(helper, "(Int64Field > 50) and true", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"expr and true\" should return the expr itself")
+	})
+
+	t.Run("false_and_expr", func(t *testing.T) {
+		// false and (Int64Field > 50) → AlwaysFalseExpr (short-circuit)
+		expr, err := ParseExpr(helper, "false and (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "\"false and expr\" should become AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("expr_and_false", func(t *testing.T) {
+		// (Int64Field > 50) and false → AlwaysFalseExpr (short-circuit)
+		expr, err := ParseExpr(helper, "(Int64Field > 50) and false", nil)
+		require.NoError(t, err)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "\"expr and false\" should become AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	// Case 8: non-boolean literal with logical operators should still fail
+	t.Run("int_or_expr", func(t *testing.T) {
+		_, err := ParseExpr(helper, "1 or (Int64Field > 50)", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("string_and_expr", func(t *testing.T) {
+		_, err := ParseExpr(helper, "\"hello\" and (Int64Field > 50)", nil)
+		assert.Error(t, err)
 	})
 }

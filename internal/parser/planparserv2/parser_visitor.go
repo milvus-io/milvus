@@ -1180,8 +1180,30 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return n
 	}
 
+	// One side is a boolean literal, the other is an expression: short-circuit fold.
+	// true or expr → AlwaysTrueExpr; false or expr → expr (and symmetric cases).
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'or' can only be used between boolean expressions")
+		boolLiteral := leftValue
+		otherExpr := getExpr(right)
+		if boolLiteral == nil {
+			boolLiteral = rightValue
+			otherExpr = getExpr(left)
+		}
+		if !IsBool(boolLiteral) {
+			return errors.New("'or' can only be used between boolean expressions")
+		}
+		if boolLiteral.GetBoolVal() {
+			// true or expr → always true
+			return &ExprWithType{
+				expr:     alwaysTrueExpr(),
+				dataType: schemapb.DataType_Bool,
+			}
+		}
+		// false or expr → expr
+		if otherExpr == nil || !canBeExecuted(otherExpr) {
+			return errors.New("'or' can only be used between boolean expressions")
+		}
+		return otherExpr
 	}
 
 	var leftExpr *ExprWithType
@@ -1236,8 +1258,30 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return n
 	}
 
+	// One side is a boolean literal, the other is an expression: short-circuit fold.
+	// false and expr → AlwaysFalseExpr; true and expr → expr (and symmetric cases).
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'and' can only be used between boolean expressions")
+		boolLiteral := leftValue
+		otherExpr := getExpr(right)
+		if boolLiteral == nil {
+			boolLiteral = rightValue
+			otherExpr = getExpr(left)
+		}
+		if !IsBool(boolLiteral) {
+			return errors.New("'and' can only be used between boolean expressions")
+		}
+		if !boolLiteral.GetBoolVal() {
+			// false and expr → always false
+			return &ExprWithType{
+				expr:     alwaysFalseExpr(),
+				dataType: schemapb.DataType_Bool,
+			}
+		}
+		// true and expr → expr
+		if otherExpr == nil || !canBeExecuted(otherExpr) {
+			return errors.New("'and' can only be used between boolean expressions")
+		}
+		return otherExpr
 	}
 
 	var leftExpr *ExprWithType
