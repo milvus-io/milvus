@@ -1666,6 +1666,7 @@ func (m *externalCollectionRESTProxy) GetRefreshExternalCollectionProgress(ctx c
 			State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
 			Progress:       42,
 			ExternalSource: "s3://bucket/books",
+			ExternalSpec:   `{"format":"parquet"}`,
 			StartTime:      10,
 		},
 	}, nil
@@ -1682,6 +1683,7 @@ func (m *externalCollectionRESTProxy) ListRefreshExternalCollectionJobs(ctx cont
 				State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
 				Progress:       100,
 				ExternalSource: "s3://bucket/books",
+				ExternalSpec:   `{"format":"parquet"}`,
 				StartTime:      10,
 				EndTime:        20,
 			},
@@ -1871,6 +1873,7 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(1001), proxy.progressReq.GetJobId())
 	assert.Contains(t, w.Body.String(), `"progress":42`)
+	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, ListAction), bytes.NewReader([]byte(`{"collectionName": "external_books"}`)))
 	w = httptest.NewRecorder()
@@ -1878,6 +1881,7 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "external_books", proxy.listReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"state":"RefreshCompleted"`)
+	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
 }
 
 func TestExternalCollectionJobDescribeRequiresJobIDRESTV2(t *testing.T) {

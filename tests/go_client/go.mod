@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta.0.20260506094605-445ffe015a5d
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73

@@ -3223,6 +3223,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 						CollectionName: "external_collection",
 						State:          indexpb.JobState_JobStateFinished,
 						Progress:       100,
+						ExternalSpec:   `{"format":"parquet","extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-east-1"}}`,
 					},
 				},
 			}, nil
@@ -3238,4 +3239,10 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 	require.True(t, merr.Ok(resp.GetStatus()))
 	assert.Equal(t, int64(101), capturedCollectionID)
 	require.Len(t, resp.GetJobs(), 1)
+	redactedSpec := resp.GetJobs()[0].GetExternalSpec()
+	assert.Contains(t, redactedSpec, `"access_key_id":"***"`)
+	assert.Contains(t, redactedSpec, `"access_key_value":"***"`)
+	assert.Contains(t, redactedSpec, `"region":"us-east-1"`)
+	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
+	assert.NotContains(t, redactedSpec, "SUPERSECRET")
 }
