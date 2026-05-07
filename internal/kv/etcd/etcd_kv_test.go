@@ -572,9 +572,7 @@ func (s *EtcdKVSuite) TestTxnWithPredicates() {
 	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
-	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Type().Return(0)
-	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+	badPredicate := testPredicate{target: predicates.PredTargetValue}
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string
