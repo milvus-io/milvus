@@ -58,6 +58,12 @@ class FieldData<std::string> : public FieldDataStringImpl {
                        int64_t buffered_num_rows = 0)
         : FieldDataStringImpl(data_type, nullable, buffered_num_rows) {
     }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<std::string>&& inner_data)
+        : FieldDataStringImpl(data_type, nullable, std::move(inner_data)) {
+    }
 };
 
 template <>
