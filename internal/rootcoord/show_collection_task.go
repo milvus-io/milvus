@@ -19,8 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -64,8 +62,12 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		t.Rsp.Status = merr.Status(err)
 		return err
 	}
+	var requestedCollections typeutil.Set[string]
+	if names := t.Req.GetCollectionNames(); len(names) > 0 {
+		requestedCollections = typeutil.NewSet(names...)
+	}
 	for _, coll := range colls {
-		if len(t.Req.GetCollectionNames()) > 0 && !lo.Contains(t.Req.GetCollectionNames(), coll.Name) {
+		if requestedCollections != nil && !requestedCollections.Contain(coll.Name) {
 			continue
 		}
 		if !isVisibleCollectionForCurUser(coll.Name, visibleCollections) {

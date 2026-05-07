@@ -7206,6 +7206,10 @@ type streamingConfig struct {
 
 	// Replication filtering configuration
 	ReplicationSkipMessageTypes ParamItem `refreshable:"false"`
+
+	// Replication pending message queue configuration
+	ReplicationPendingMessagesQueueLength  ParamItem `refreshable:"true"`
+	ReplicationPendingMessagesQueueMaxSize ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -7654,6 +7658,24 @@ so we set 1 second here as a threshold.`,
 		Export:       false,
 	}
 	p.ReplicationSkipMessageTypes.Init(base.mgr)
+
+	p.ReplicationPendingMessagesQueueLength = ParamItem{
+		Key:          "streaming.replication.pendingMessagesQueueLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Doc:          "The capacity of pending message queue for each replication stream client.",
+		Export:       true,
+	}
+	p.ReplicationPendingMessagesQueueLength.Init(base.mgr)
+
+	p.ReplicationPendingMessagesQueueMaxSize = ParamItem{
+		Key:          "streaming.replication.pendingMessagesQueueMaxSize",
+		Version:      "3.0.0",
+		DefaultValue: "134217728",
+		Doc:          "The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.",
+		Export:       true,
+	}
+	p.ReplicationPendingMessagesQueueMaxSize.Init(base.mgr)
 
 	p.WALRateLimitDefaultBurst = ParamItem{
 		Key:          "streaming.walRateLimit.defaultBurst",
