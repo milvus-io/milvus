@@ -4834,13 +4834,16 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
         // when child fields specified, field id is group id, child field ids are actual id values here
-        if (field_binlog.child_fields_size() > 0) {
-            field_ids.reserve(field_binlog.child_fields_size());
-            for (auto field_id : field_binlog.child_fields()) {
-                field_ids.emplace_back(field_id);
+        bool has_child_fields = field_binlog.child_fields_size() > 0;
+        if (field_ids.empty()) {
+            if (has_child_fields) {
+                field_ids.reserve(field_binlog.child_fields_size());
+                for (auto field_id : field_binlog.child_fields()) {
+                    field_ids.emplace_back(field_id);
+                }
+            } else {
+                field_ids.emplace_back(field_binlog.fieldid());
             }
-        } else {
-            field_ids.emplace_back(field_binlog.fieldid());
         }
 
         bool index_has_raw_data = true;
@@ -4904,6 +4907,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Build FieldBinlogInfo
         FieldBinlogInfo field_binlog_info;
         field_binlog_info.field_id = group_id;
+        if (has_child_fields) {
+            field_binlog_info.child_field_ids.reserve(field_ids.size());
+            for (const auto& field_id : field_ids) {
+                field_binlog_info.child_field_ids.push_back(field_id.get());
+            }
+        }
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
