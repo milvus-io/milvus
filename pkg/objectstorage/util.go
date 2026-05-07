@@ -24,13 +24,13 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage/aliyun"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage/gcp"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage/huawei"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage/tencent"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/aliyun"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/gcp"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/huawei"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/tencent"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 const (

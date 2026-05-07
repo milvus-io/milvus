@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 
-	msgkafka "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
-	msgpulsar "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	msgwoodpecker "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
+	msgkafka "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
+	msgpulsar "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	msgwoodpecker "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/wp"
 )
 
 func TestIDConvension(t *testing.T) {

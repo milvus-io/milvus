@@ -103,7 +103,8 @@ class SegmentInterface {
            int32_t consistency_level,
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
-           bool filter_only = false) const = 0;
+           bool filter_only = false,
+           bool enable_expr_cache = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -117,6 +118,7 @@ class SegmentInterface {
                       0,
                       0,
                       0,
+                      false,
                       false);
     }
 
@@ -420,7 +422,8 @@ class SegmentInternalInterface : public SegmentInterface {
            int32_t consistency_level,
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
-           bool filter_only = false) const override;
+           bool filter_only = false,
+           bool enable_expr_cache = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -615,9 +618,11 @@ class SegmentInternalInterface : public SegmentInterface {
      */
     virtual std::
         tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-        find_first_n_element(int64_t limit,
-                             const BitsetTypeView& element_bitset,
-                             const IArrayOffsets* array_offsets) const = 0;
+        find_first_n_element(
+            int64_t limit,
+            const BitsetTypeView& element_bitset,
+            const IArrayOffsets* array_offsets,
+            const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     void
     FillTargetEntryDirectly(

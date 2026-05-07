@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestSchema(t *testing.T) {
@@ -5373,16 +5373,15 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("user fields forced nullable", func(t *testing.T) {
+	t.Run("user scalar fields forced nullable but vector fields unchanged", func(t *testing.T) {
 		schema := buildSchema()
 		for _, f := range schema.GetFields() {
 			assert.False(t, f.GetNullable())
 		}
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
-		for _, f := range schema.GetFields() {
-			assert.True(t, f.GetNullable(), "field %s should be nullable", f.GetName())
-		}
+		assert.True(t, schema.GetFields()[0].GetNullable(), "scalar field should be nullable")
+		assert.False(t, schema.GetFields()[1].GetNullable(), "vector field should remain non-nullable")
 	})
 
 	t.Run("virtual pk stays non-nullable", func(t *testing.T) {
@@ -5397,9 +5396,12 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		for _, f := range schema.GetFields() {
-			if f.GetName() == common.VirtualPKFieldName {
+			switch f.GetName() {
+			case common.VirtualPKFieldName:
 				assert.False(t, f.GetNullable(), "virtual PK should remain non-nullable")
-			} else {
+			case "vec":
+				assert.False(t, f.GetNullable(), "vector field should remain non-nullable")
+			default:
 				assert.True(t, f.GetNullable())
 			}
 		}

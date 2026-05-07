@@ -25,10 +25,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // executeFilterStage executes the filter-only stage of two-stage search.
@@ -39,8 +39,14 @@ func (sd *shardDelegator) executeFilterStage(
 	sealed []SnapshotItem,
 	sealedRowCount map[int64]int64,
 ) ([]int64, error) {
+	originalFilterOnly := req.FilterOnly
+	originalEnableExprCache := req.EnableExprCache
 	req.FilterOnly = true
-	defer func() { req.FilterOnly = false }()
+	req.EnableExprCache = true
+	defer func() {
+		req.FilterOnly = originalFilterOnly
+		req.EnableExprCache = originalEnableExprCache
+	}()
 	// filteronly stage only need to search sealed segments.
 	// filterResults are proto messages whose slices (e.g. FilterValidCounts,
 	// SegmentIDs) are owned by the proto and may share backing arrays across
@@ -74,7 +80,9 @@ func (sd *shardDelegator) executeFilterStage(
 // twoStageSearch implements the two-stage search flow:
 // Stage 1: Execute filter-only on all segments to get actual filter statistics
 // Stage 2: Optimize search params using actual filter stats, execute normal search (filter re-executed)
-// Note: Bitsets are NOT cached since filtering is lightweight and can be re-executed in stage 2
+// Note: Filter bitsets are cached via the process-level ExprResCacheManager
+// (Stage 1 writes, Stage 2 reads). Cross-query reuse comes for free when the
+// same predicate runs on the same sealed segment.
 // twoStageSearch returns (results, fallback, error). When fallback is true,
 // the caller should continue with the normal single-stage search path;
 // results will be nil in that case.
@@ -102,9 +110,8 @@ func (sd *shardDelegator) twoStageSearch(
 	// In a mixed-version cluster, old workers may not populate
 	// FilterValidCounts for some or all segments. When the count is
 	// incomplete, the optimizer would work with wrong data, so signal the
-	// caller to fall back to normal single-stage search.
-	// Reset FilterOnly before any return so the caller never sees a stale flag.
-	req.FilterOnly = false
+	// caller to fall back to normal single-stage search. executeFilterStage
+	// restores request flags before returning so fallback sees the original mode.
 	expectedSegments := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	if len(validCounts) != expectedSegments {
 		log.Debug("Two-stage search: FilterValidCounts incomplete, falling back to normal search",
@@ -132,8 +139,9 @@ func (sd *shardDelegator) twoStageSearch(
 	}
 
 	// ==================== STAGE 2: Normal Search with optimized params ====================
-	// Filter is re-executed (lightweight) since we could enable expr cache
+	// Filter bitset is read from ExprResCacheManager (cached in Stage 1), skipping re-execution
 	log.Debug("Starting vector search stage with optimized params")
+	optimizedReq.EnableExprCache = true
 	// vector search stage need to search both sealed and growing segments
 	stage2Start := time.Now()
 	results, err := sd.executeSearchSubTasks(ctx, optimizedReq, sealed, growing, sealedRowCount)

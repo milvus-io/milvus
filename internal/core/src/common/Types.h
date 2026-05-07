@@ -113,6 +113,11 @@ using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 using DefaultValueType = proto::schema::ValueField;
 
+struct QueryIteratorCursor {
+    PkType last_pk;
+    int64_t last_element_offset = -1;
+};
+
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
     switch (data_type) {

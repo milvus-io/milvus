@@ -27,11 +27,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 const (
@@ -1558,10 +1558,11 @@ The default value applies to MinIO or S3 service that started with the default d
 	p.UseSSL.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
-		Key:     "minio.ssl.tlsCACert",
-		Version: "2.3.12",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:          "minio.ssl.tlsCACert",
+		Version:      "2.3.12",
+		DefaultValue: "",
+		Doc:          "path to your CACert file",
+		Export:       true,
 	}
 	p.SslCACert.Init(base.mgr)
 

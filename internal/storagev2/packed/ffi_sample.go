@@ -26,9 +26,13 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // SampleExternalFieldSizes samples rows from an external segment via Take API
@@ -44,6 +48,7 @@ func SampleExternalFieldSizes(
 	collectionID int64,
 	externalSource string,
 	externalSpec string,
+	schema *schemapb.CollectionSchema,
 	storageConfig *indexpb.StorageConfig,
 ) (map[string]int64, error) {
 	if storageConfig == nil {
@@ -65,11 +70,26 @@ func SampleExternalFieldSizes(
 	cManifestPath := C.CString(manifestPath)
 	defer C.free(unsafe.Pointer(cManifestPath))
 
+	var cSchema C.CProto
+	var schemaBytes []byte
+	if schema != nil {
+		schemaBytes, err = proto.Marshal(schema)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal collection schema: %w", err)
+		}
+		if len(schemaBytes) > 0 {
+			cSchema.proto_blob = unsafe.Pointer(&schemaBytes[0])
+			cSchema.proto_size = C.int64_t(len(schemaBytes))
+		}
+	}
+
 	var result C.CFieldMemSizeList
 	status := C.SampleExternalSegmentFieldSizes(
 		cManifestPath, C.int(sampleRows),
 		C.int64_t(collectionID), cProperties,
+		cSchema,
 		&result)
+	runtime.KeepAlive(schemaBytes)
 	defer C.FreeCFieldMemSizeList(&result)
 
 	if err := ConsumeCStatusIntoError(&status); err != nil {

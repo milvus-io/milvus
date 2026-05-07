@@ -27,7 +27,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // WriteFile writes raw bytes to a file using milvus-storage filesystem FFI.

@@ -16,7 +16,7 @@
 
 package info
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
 const (
 	Unknown            = "Unknown"

@@ -268,10 +268,9 @@ TEST(CoerceToBinary, AllVariantsToBinary) {
     }
 }
 
-// ===== Integer narrowing (via NormalizeExternalArrow) =====
-// MaybeNarrowInt is exercised through NormalizeExternalArrow because the
-// helper itself is static. These tests build wider arrow ints and assert the
-// returned array is the narrower target type with values intact.
+// ===== Scalar numeric mismatch rejection (via NormalizeExternalArrow) =====
+// External Arrow numeric types must match the Milvus scalar type exactly.
+// Wider integer inputs are rejected instead of implicitly narrowed.
 
 #include "common/FieldMeta.h"
 
@@ -291,51 +290,75 @@ MakeInt32Array(const std::vector<int32_t>& vals,
     EXPECT_TRUE(b.Finish(&out).ok());
     return out;
 }
+
+std::shared_ptr<arrow::Array>
+MakeInt64Array(const std::vector<int64_t>& vals,
+               const std::vector<bool>& valid) {
+    arrow::Int64Builder b;
+    for (size_t i = 0; i < vals.size(); ++i) {
+        if (!valid[i]) {
+            EXPECT_TRUE(b.AppendNull().ok());
+        } else {
+            EXPECT_TRUE(b.Append(vals[i]).ok());
+        }
+    }
+    std::shared_ptr<arrow::Array> out;
+    EXPECT_TRUE(b.Finish(&out).ok());
+    return out;
+}
+
+std::shared_ptr<arrow::Array>
+MakeDoubleArray(const std::vector<double>& vals,
+                const std::vector<bool>& valid) {
+    arrow::DoubleBuilder b;
+    for (size_t i = 0; i < vals.size(); ++i) {
+        if (!valid[i]) {
+            EXPECT_TRUE(b.AppendNull().ok());
+        } else {
+            EXPECT_TRUE(b.Append(vals[i]).ok());
+        }
+    }
+    std::shared_ptr<arrow::Array> out;
+    EXPECT_TRUE(b.Finish(&out).ok());
+    return out;
+}
 }  // namespace
 
-TEST(IntegerNarrowing, Int32ToInt8) {
+TEST(ScalarNumericMismatch, Int32RejectsInt8) {
     auto in =
         MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT8);
-    auto ia = std::static_pointer_cast<arrow::Int8Array>(out);
-    EXPECT_EQ(ia->Value(0), 0);
-    EXPECT_EQ(ia->Value(1), 1);
-    EXPECT_EQ(ia->Value(2), 99);
-    EXPECT_EQ(ia->Value(3), -128);
-    EXPECT_EQ(ia->Value(4), 127);
-}
-
-TEST(IntegerNarrowing, Int32ToInt16) {
-    auto in =
-        MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT16);
-    auto ia = std::static_pointer_cast<arrow::Int16Array>(out);
-    EXPECT_EQ(ia->Value(2), -32768);
-    EXPECT_EQ(ia->Value(3), 32767);
-}
-
-TEST(IntegerNarrowing, Int32ToInt8WithNulls) {
-    auto in = MakeInt32Array({5, 0, 7}, {true, false, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT8, 0, true, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT8);
-    EXPECT_EQ(out->null_count(), 1);
-    EXPECT_TRUE(out->IsNull(1));
-}
-
-TEST(IntegerNarrowing, OverflowAsserts) {
-    auto in = MakeInt32Array({999}, {true});  // > INT8_MAX
     EXPECT_THROW(
         milvus::storage::NormalizeExternalArrow(
             in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
         std::exception);
 }
 
-TEST(IntegerNarrowing, NoNarrowOnExactMatch) {
+TEST(ScalarNumericMismatch, Int32RejectsInt16) {
+    auto in =
+        MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, Int32RejectsInt8WithNulls) {
+    auto in = MakeInt32Array({5, 0, 7}, {true, false, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT8, 0, true, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, Int32RejectsInt8EvenWhenInRange) {
+    auto in = MakeInt32Array({5}, {true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, ExactMatchPassesThrough) {
     arrow::Int8Builder b;
     ASSERT_TRUE(b.Append(int8_t{5}).ok());
     std::shared_ptr<arrow::Array> in;
@@ -343,6 +366,497 @@ TEST(IntegerNarrowing, NoNarrowOnExactMatch) {
     auto out = milvus::storage::NormalizeExternalArrow(
         in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
     EXPECT_EQ(out.get(), in.get());
+}
+
+TEST(NormalizeExternalArrow, Int64RejectsString) {
+    arrow::StringBuilder builder;
+    ASSERT_TRUE(builder.AppendValues({"1", "2"}).ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            input, milvus::DataType::INT64, 0, false, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, Issue49392ScalarMismatchesReject) {
+    arrow::StringBuilder string_builder;
+    ASSERT_TRUE(string_builder.AppendValues({"abcd", "efgh"}).ok());
+    std::shared_ptr<arrow::Array> string_input;
+    ASSERT_TRUE(string_builder.Finish(&string_input).ok());
+
+    for (auto data_type : {milvus::DataType::BOOL,
+                           milvus::DataType::INT8,
+                           milvus::DataType::INT16,
+                           milvus::DataType::INT32,
+                           milvus::DataType::INT64,
+                           milvus::DataType::FLOAT,
+                           milvus::DataType::DOUBLE,
+                           milvus::DataType::TIMESTAMPTZ}) {
+        EXPECT_THROW(
+            milvus::storage::NormalizeExternalArrow(
+                string_input, data_type, 0, false, milvus::DataType::NONE),
+            std::exception);
+    }
+
+    auto int64_input = MakeInt64Array({1, 2}, {true, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(int64_input,
+                                                milvus::DataType::FLOAT,
+                                                0,
+                                                false,
+                                                milvus::DataType::NONE),
+        std::exception);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(int64_input,
+                                                milvus::DataType::DOUBLE,
+                                                0,
+                                                false,
+                                                milvus::DataType::NONE),
+        std::exception);
+
+    auto double_input = MakeDoubleArray({1.0, 2.0}, {true, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(double_input,
+                                                milvus::DataType::INT64,
+                                                0,
+                                                false,
+                                                milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, TimestamptzAcceptsTimestampAndInt64) {
+    arrow::TimestampBuilder builder(arrow::timestamp(arrow::TimeUnit::MICRO),
+                                    arrow::default_memory_pool());
+    ASSERT_TRUE(builder.AppendValues({1000, 2000}).ok());
+    std::shared_ptr<arrow::Array> timestamp_input;
+    ASSERT_TRUE(builder.Finish(&timestamp_input).ok());
+
+    auto timestamp_out =
+        milvus::storage::NormalizeExternalArrow(timestamp_input,
+                                                milvus::DataType::TIMESTAMPTZ,
+                                                0,
+                                                false,
+                                                milvus::DataType::NONE);
+    ASSERT_EQ(timestamp_out->type_id(), arrow::Type::INT64);
+
+    auto int64_input = MakeInt64Array({1000, 2000}, {true, true});
+    auto int64_out =
+        milvus::storage::NormalizeExternalArrow(int64_input,
+                                                milvus::DataType::TIMESTAMPTZ,
+                                                0,
+                                                false,
+                                                milvus::DataType::NONE);
+    EXPECT_EQ(int64_out.get(), int64_input.get());
+}
+
+TEST(NormalizeExternalArrow, StringLikeFieldsRejectInt64) {
+    auto int64_input = MakeInt64Array({1, 2}, {true, true});
+    for (auto data_type : {milvus::DataType::VARCHAR,
+                           milvus::DataType::STRING,
+                           milvus::DataType::TEXT,
+                           milvus::DataType::JSON,
+                           milvus::DataType::GEOMETRY}) {
+        EXPECT_THROW(
+            milvus::storage::NormalizeExternalArrow(
+                int64_input, data_type, 0, false, milvus::DataType::NONE),
+            std::exception);
+    }
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary, ListDimMismatchAsserts) {
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1.0f, 2.0f, 3.0f}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 3}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary, ListElementTypeMismatchAsserts) {
+    arrow::Int64Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary, ListNullElementAsserts) {
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.Append(1.0f).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary, FixedSizeListDimMismatchAsserts) {
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1.0f, 2.0f, 3.0f}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::float32(), 3), 1, values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     FixedSizeListElementTypeMismatchAsserts) {
+    arrow::Int64Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::int64(), 2), 1, values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary, BinaryVectorRejectsFixedSizeList) {
+    arrow::Int8Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 0, 1, 0, 1, 0, 1, 0}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::int8(), 8), 1, values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_BINARY, 8),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BFloat16VectorRejectsFixedSizeList) {
+    arrow::Int16Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::int16(), 2), 1, values);
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_BFLOAT16, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     FixedSizeBinaryWidthMismatchAsserts) {
+    auto fsb_type = arrow::fixed_size_binary(3 * sizeof(float));
+    arrow::FixedSizeBinaryBuilder builder(fsb_type);
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(values)).ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArrays, MixedChunkTypesNormalizeIndependently) {
+    auto fsb_type = arrow::fixed_size_binary(2 * sizeof(float));
+    arrow::FixedSizeBinaryBuilder fsb_builder(fsb_type);
+    float fsb_values[2] = {1.0f, 2.0f};
+    ASSERT_TRUE(
+        fsb_builder.Append(reinterpret_cast<const uint8_t*>(fsb_values)).ok());
+    std::shared_ptr<arrow::Array> fsb_input;
+    ASSERT_TRUE(fsb_builder.Finish(&fsb_input).ok());
+
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({3.0f, 4.0f}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto list_input = *arrow::ListArray::FromArrays(*offsets, *values);
+    auto out = milvus::storage::NormalizeVectorArrays(
+        {fsb_input, list_input}, milvus::DataType::VECTOR_FLOAT, 2, false);
+
+    ASSERT_EQ(out.size(), 2);
+    EXPECT_EQ(out[0]->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    EXPECT_EQ(out[1]->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    EXPECT_EQ(std::static_pointer_cast<arrow::FixedSizeBinaryArray>(out[0])
+                  ->byte_width(),
+              2 * sizeof(float));
+    EXPECT_EQ(std::static_pointer_cast<arrow::FixedSizeBinaryArray>(out[1])
+                  ->byte_width(),
+              2 * sizeof(float));
+}
+
+TEST(NormalizeExternalArrow, NullableFloatVectorRejectsBinaryWidthMismatch) {
+    arrow::BinaryBuilder builder;
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    ASSERT_TRUE(
+        builder.Append(reinterpret_cast<const uint8_t*>(values), sizeof(values))
+            .ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_FLOAT,
+                                                2,
+                                                true,
+                                                milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeBinaryWidthMismatch) {
+    auto fsb_type = arrow::fixed_size_binary(3 * sizeof(float));
+    arrow::FixedSizeBinaryBuilder builder(fsb_type);
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(values)).ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_FLOAT,
+                                                2,
+                                                false,
+                                                milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow,
+     NullableFloatVectorRejectsFixedSizeBinaryWidthMismatch) {
+    auto fsb_type = arrow::fixed_size_binary(3 * sizeof(float));
+    arrow::FixedSizeBinaryBuilder builder(fsb_type);
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(values)).ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_FLOAT,
+                                                2,
+                                                true,
+                                                milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeListInt64) {
+    arrow::Int64Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::int64(), 2), 1, values);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_FLOAT,
+                                                2,
+                                                false,
+                                                milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, VectorArrayRejectsFixedSizeBinaryWidthMismatch) {
+    auto fsb_type = arrow::fixed_size_binary(3 * sizeof(float));
+    arrow::FixedSizeBinaryBuilder values_builder(fsb_type);
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    ASSERT_TRUE(
+        values_builder.Append(reinterpret_cast<const uint8_t*>(values)).ok());
+    std::shared_ptr<arrow::Array> values_array;
+    ASSERT_TRUE(values_builder.Finish(&values_array).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 1}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values_array);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_ARRAY,
+                                                2,
+                                                false,
+                                                milvus::DataType::VECTOR_FLOAT),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, VectorArrayRejectsNonListInput) {
+    auto input = MakeInt64Array({1, 2}, {true, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_ARRAY,
+                                                2,
+                                                false,
+                                                milvus::DataType::VECTOR_FLOAT),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, VectorArrayRejectsOuterNullRow) {
+    arrow::FloatBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1.0f, 2.0f}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder inner_offsets_builder;
+    ASSERT_TRUE(inner_offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> inner_offsets;
+    ASSERT_TRUE(inner_offsets_builder.Finish(&inner_offsets).ok());
+    auto inner_list = *arrow::ListArray::FromArrays(*inner_offsets, *values);
+
+    arrow::Int32Builder outer_offsets_builder;
+    ASSERT_TRUE(outer_offsets_builder.AppendValues({0, 1, 1}).ok());
+    std::shared_ptr<arrow::Array> outer_offsets;
+    ASSERT_TRUE(outer_offsets_builder.Finish(&outer_offsets).ok());
+
+    arrow::TypedBufferBuilder<bool> null_bitmap_builder;
+    ASSERT_TRUE(null_bitmap_builder.Reserve(2).ok());
+    null_bitmap_builder.UnsafeAppend(true);
+    null_bitmap_builder.UnsafeAppend(false);
+    std::shared_ptr<arrow::Buffer> null_bitmap;
+    ASSERT_TRUE(null_bitmap_builder.Finish(&null_bitmap).ok());
+
+    auto outer_offsets_values =
+        std::static_pointer_cast<arrow::Int32Array>(outer_offsets)->values();
+    auto input =
+        std::make_shared<arrow::ListArray>(arrow::list(inner_list->type()),
+                                           2,
+                                           outer_offsets_values,
+                                           inner_list,
+                                           null_bitmap,
+                                           1);
+
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::VECTOR_ARRAY,
+                                                2,
+                                                false,
+                                                milvus::DataType::VECTOR_FLOAT),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, SparseVectorRejectsString) {
+    arrow::StringBuilder builder;
+    ASSERT_TRUE(builder.AppendValues({"not_sparse"}).ok());
+    std::shared_ptr<arrow::Array> input;
+    ASSERT_TRUE(builder.Finish(&input).ok());
+
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(
+                     input,
+                     milvus::DataType::VECTOR_SPARSE_U32_F32,
+                     0,
+                     false,
+                     milvus::DataType::NONE),
+                 std::exception);
+}
+
+TEST(NormalizeExternalArrow, ArrayInt64RejectsStringList) {
+    arrow::StringBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({"1", "2"}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            input, milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, ArrayInt64RejectsNullElement) {
+    arrow::Int64Builder values_builder;
+    ASSERT_TRUE(values_builder.Append(1).ok());
+    ASSERT_TRUE(values_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            input, milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, ArrayVarcharRejectsInt64List) {
+    arrow::Int64Builder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(input,
+                                                milvus::DataType::ARRAY,
+                                                0,
+                                                false,
+                                                milvus::DataType::VARCHAR),
+        std::exception);
+}
+
+TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {
+    arrow::StringBuilder values_builder;
+    ASSERT_TRUE(values_builder.AppendValues({"a", "b"}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+
+    auto input = *arrow::ListArray::FromArrays(*offsets, *values);
+    auto out = milvus::storage::NormalizeExternalArrow(
+        input, milvus::DataType::ARRAY, 0, false, milvus::DataType::VARCHAR);
+    ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
+    ASSERT_EQ(out->length(), 1);
+    EXPECT_FALSE(out->IsNull(0));
 }
 
 // ===== CoerceToList =====

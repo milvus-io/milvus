@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
@@ -511,32 +511,84 @@ var awsFamilyScheme = map[string]bool{
 
 // RedactExternalSpec returns a log-safe representation of an external spec
 // JSON string. Secret extfs values (see secretExtfsKeys) are replaced with
-// "***" so that AK/SK/PEM material never reaches log sinks. On parse failure
-// it returns "<invalid spec>" rather than the raw input — the input itself
-// may already contain a partially-recognized credential blob, so we never
-// echo it back. Empty input returns empty string for log readability.
+// "***" so that AK/SK/PEM material never reaches log sinks. Unknown fields
+// are preserved so API callers can still observe extension metadata. On parse
+// failure it returns "<invalid spec>" rather than the raw input — the input
+// itself may already contain a partially-recognized credential blob, so we
+// never echo it back. Empty input returns empty string for log readability.
 func RedactExternalSpec(specStr string) string {
 	if specStr == "" {
 		return ""
 	}
-	var spec ExternalSpec
+	var spec map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "<invalid spec>"
 	}
-	if len(spec.Extfs) > 0 {
-		redacted := make(map[string]string, len(spec.Extfs))
-		for k, v := range spec.Extfs {
-			if secretExtfsKeys[k] && v != "" {
-				redacted[k] = "***"
-			} else {
-				redacted[k] = v
-			}
-		}
-		spec.Extfs = redacted
+	if err := normalizeSnapshotID(spec); err != nil {
+		return "<invalid spec>"
+	}
+	if err := redactExtfsSecrets(spec); err != nil {
+		return "<invalid spec>"
 	}
 	out, err := json.Marshal(spec)
 	if err != nil {
 		return "<marshal error>"
 	}
 	return string(out)
+}
+
+func normalizeSnapshotID(spec map[string]json.RawMessage) error {
+	snapshotRaw, ok := spec["snapshot_id"]
+	if !ok || len(snapshotRaw) == 0 || string(snapshotRaw) == "null" {
+		return nil
+	}
+
+	var n int64
+	if err := json.Unmarshal(snapshotRaw, &n); err == nil {
+		spec["snapshot_id"] = quotedInt64JSON(n)
+		return nil
+	}
+
+	var str string
+	if err := json.Unmarshal(snapshotRaw, &str); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return err
+	}
+	spec["snapshot_id"] = quotedInt64JSON(parsed)
+	return nil
+}
+
+func quotedInt64JSON(v int64) json.RawMessage {
+	return json.RawMessage(strconv.Quote(strconv.FormatInt(v, 10)))
+}
+
+func redactExtfsSecrets(spec map[string]json.RawMessage) error {
+	extfsRaw, ok := spec["extfs"]
+	if !ok || len(extfsRaw) == 0 || string(extfsRaw) == "null" {
+		return nil
+	}
+
+	var extfs map[string]json.RawMessage
+	if err := json.Unmarshal(extfsRaw, &extfs); err != nil {
+		return err
+	}
+	for k, v := range extfs {
+		if !secretExtfsKeys[k] {
+			continue
+		}
+		var str string
+		if err := json.Unmarshal(v, &str); err == nil && str == "" {
+			continue
+		}
+		extfs[k] = json.RawMessage(`"***"`)
+	}
+	redactedExtfs, err := json.Marshal(extfs)
+	if err != nil {
+		return err
+	}
+	spec["extfs"] = redactedExtfs
+	return nil
 }

@@ -3,7 +3,7 @@ package agg
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func isSupportedAggFieldType(aggregateName string, dt schemapb.DataType) bool {

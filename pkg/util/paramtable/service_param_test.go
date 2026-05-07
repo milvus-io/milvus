@@ -22,10 +22,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestServiceParam(t *testing.T) {
@@ -366,7 +366,7 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
 
-		assert.NotEmpty(t, Params.SslCACert.GetValue())
+		assert.Empty(t, Params.SslCACert.GetValue())
 
 		assert.Equal(t, Params.UseIAM.GetAsBool(), false)
 

@@ -26,12 +26,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // externalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
@@ -231,6 +231,21 @@ func (m *externalCollectionRefreshMeta) ListJobsByCollectionID(collectionID int6
 	})
 
 	// Sort by StartTime descending (most recent first)
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].GetStartTime() > jobs[j].GetStartTime()
+	})
+
+	return jobs
+}
+
+// ListAllJobs returns all jobs, sorted by start_time descending.
+func (m *externalCollectionRefreshMeta) ListAllJobs() []*datapb.ExternalCollectionRefreshJob {
+	jobs := make([]*datapb.ExternalCollectionRefreshJob, 0, m.jobs.Len())
+	m.jobs.Range(func(_ int64, job *datapb.ExternalCollectionRefreshJob) bool {
+		jobs = append(jobs, proto.Clone(job).(*datapb.ExternalCollectionRefreshJob))
+		return true
+	})
+
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetStartTime() > jobs[j].GetStartTime()
 	})

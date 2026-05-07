@@ -607,10 +607,13 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 }
 
 void
-ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
+ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
+                                           milvus::OpContext* op_ctx) {
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     LOG_INFO(
         "[LoadColumnGroups] segment {} start, manifest {}", id_, manifest_path);
+    CheckCancellation(
+        op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
     auto properties = std::make_shared<milvus_storage::api::Properties>(
         *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
              .GetProperties());
@@ -637,7 +640,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     // let the Reader derive types from file metadata (Parquet footer).
     // FillFieldData handles Parquet-native → Milvus type conversion.
     //
-    // This overload (LoadColumnGroups(manifest_path)) is reached only via
+    // This overload is reached only via
     // ApplyLoadDiff when load_external_manifest is set, which in turn is
     // gated on is_external_collection() — see SegmentLoadInfo.cpp where the
     // flag is assigned. The non-external path uses LoadColumnGroups(
@@ -744,7 +747,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
         tasks.size(),
         cg_field_ids.size());
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
     for (auto& task : tasks) {
         auto future = pool.Submit([this,
@@ -752,13 +755,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
                                    properties,
                                    cg_index = task.cg_index,
                                    field_ids = std::move(task.field_ids),
-                                   eager_load = task.eager_load] {
+                                   eager_load = task.eager_load,
+                                   op_ctx] {
+            CheckCancellation(op_ctx,
+                              id_,
+                              cg_index,
+                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
             LoadColumnGroup(column_groups,
                             properties,
                             cg_index,
                             field_ids,
                             eager_load,
-                            /*op_ctx=*/nullptr,
+                            op_ctx,
                             /*is_replace=*/false);
         });
         load_group_futures.emplace_back(std::move(future));
@@ -2241,17 +2249,48 @@ std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
 ChunkedSegmentSealedImpl::find_first_n_element(
     int64_t limit,
     const BitsetTypeView& element_bitset,
-    const IArrayOffsets* array_offsets) const {
+    const IArrayOffsets* array_offsets,
+    const std::optional<QueryIteratorCursor>& cursor) const {
     if (!is_sorted_by_pk_) {
         // Not sorted by PK, use pk2offset_ to iterate in PK order
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets);
+            limit, element_bitset, array_offsets, cursor);
     }
 
     // Sorted by PK, element_id order = (PK, element_index) order
     // Directly iterate element_bitset in order
     if (limit == Unlimited || limit == NoLimit) {
         limit = static_cast<int64_t>(element_bitset.size());
+    }
+
+    // We iterate matching elements by global element id, which maps back
+    // to (doc_offset, element_offset). The cursor, however, only tells us the
+    // last returned PK and element offset. Find the row for that PK first; the
+    // scan can then skip only elements from that row whose element offset has
+    // already been returned.
+    std::optional<int64_t> cursor_doc_offset;
+    if (cursor.has_value()) {
+        auto pk_field_id =
+            schema_->get_primary_field_id().value_or(FieldId(-1));
+        AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+        auto pk_column = get_column(pk_field_id);
+        AssertInfo(pk_column != nullptr, "primary key column not loaded");
+        switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+            case DataType::INT64:
+                cursor_doc_offset = find_sorted_pk_doc_offset<int64_t>(
+                    std::get<int64_t>(cursor->last_pk), pk_column);
+                break;
+            case DataType::VARCHAR:
+                cursor_doc_offset = find_sorted_pk_doc_offset<std::string>(
+                    std::get<std::string>(cursor->last_pk), pk_column);
+                break;
+            default:
+                ThrowInfo(
+                    DataTypeInvalid,
+                    fmt::format(
+                        "unsupported type {}",
+                        schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
     }
 
     int64_t hit_num = 0;
@@ -2268,6 +2307,12 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     while (elem_opt.has_value() && hit_num < limit) {
         int64_t elem_id = static_cast<int64_t>(elem_opt.value());
         auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
+        if (cursor_doc_offset.has_value() &&
+            doc_id == cursor_doc_offset.value() &&
+            elem_idx <= cursor->last_element_offset) {
+            elem_opt = element_bitset.find_next(elem_id, false);
+            continue;
+        }
 
         if (doc_id != current_doc_id) {
             // New document - start a new entry
@@ -4164,7 +4209,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     // load column groups
     if (diff.load_external_manifest) {
         // External collections: load via manifest path
-        LoadColumnGroups(segment_load_info.GetManifestPath());
+        LoadColumnGroups(segment_load_info.GetManifestPath(), op_ctx);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||

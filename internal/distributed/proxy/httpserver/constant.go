@@ -18,28 +18,29 @@ package httpserver
 
 import (
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 // v2
 const (
 	// --- category ---
-	DataBaseCategory        = "/databases/"
-	CollectionCategory      = "/collections/"
-	EntityCategory          = "/entities/"
-	PartitionCategory       = "/partitions/"
-	UserCategory            = "/users/"
-	RoleCategory            = "/roles/"
-	IndexCategory           = "/indexes/"
-	AliasCategory           = "/aliases/"
-	ImportJobCategory       = "/jobs/import/"
-	PrivilegeGroupCategory  = "/privilege_groups/"
-	CollectionFieldCategory = "/collections/fields/"
-	ResourceGroupCategory   = "/resource_groups/"
-	SegmentCategory         = "/segments/"
-	QuotaCenterCategory     = "/quotacenter/"
-	CommonCategory          = "/common/"
+	DataBaseCategory              = "/databases/"
+	CollectionCategory            = "/collections/"
+	EntityCategory                = "/entities/"
+	PartitionCategory             = "/partitions/"
+	UserCategory                  = "/users/"
+	RoleCategory                  = "/roles/"
+	IndexCategory                 = "/indexes/"
+	AliasCategory                 = "/aliases/"
+	ImportJobCategory             = "/jobs/import/"
+	ExternalCollectionJobCategory = "/jobs/external_collection/"
+	PrivilegeGroupCategory        = "/privilege_groups/"
+	CollectionFieldCategory       = "/collections/fields/"
+	ResourceGroupCategory         = "/resource_groups/"
+	SegmentCategory               = "/segments/"
+	QuotaCenterCategory           = "/quotacenter/"
+	CommonCategory                = "/common/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -80,6 +81,7 @@ const (
 	FlushAction                     = "flush"
 	TruncateAction                  = "truncate"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
+	RefreshAction                   = "refresh"
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 	TransferReplicaAction           = "transfer_replica"

@@ -5,17 +5,17 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
-	federpb "github.com/milvus-io/milvus-proto/go-api/v2/federpb"
+	federpb "github.com/milvus-io/milvus-proto/go-api/v3/federpb"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 
 	types "github.com/milvus-io/milvus/internal/types"
 )

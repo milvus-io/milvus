@@ -25,22 +25,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -204,6 +204,30 @@ func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
 	}
 }
 
+func checkIndexParamsSize(size int) error {
+	maxIndexParamsSize := paramtable.Get().ProxyCfg.MaxIndexParamsSize.GetAsInt()
+	if size > maxIndexParamsSize {
+		return merr.WrapErrParameterInvalidMsg("index params size exceeds limit: %d > %d", size, maxIndexParamsSize)
+	}
+	return nil
+}
+
+func validateIndexParamsSize(params ...*commonpb.KeyValuePair) error {
+	size := 0
+	for _, param := range params {
+		size += len(param.GetKey()) + len(param.GetValue())
+	}
+	return checkIndexParamsSize(size)
+}
+
+func validateIndexParamsMapSize(params map[string]string) error {
+	size := 0
+	for k, v := range params {
+		size += len(k) + len(v)
+	}
+	return checkIndexParamsSize(size)
+}
+
 func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string]string) error {
 	if !cit.fieldSchema.GetIsFunctionOutput() {
 		return nil
@@ -242,6 +266,9 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 
 func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	cit.newExtraParams = cit.req.GetExtraParams()
+	if err := validateIndexParamsSize(cit.newExtraParams...); err != nil {
+		return err
+	}
 
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
@@ -270,6 +297,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	}
 	if jsonCastFunction, exist := indexParamsMap[common.JSONCastFunctionKey]; exist {
 		indexParamsMap[common.JSONCastFunctionKey] = strings.ToUpper(strings.TrimSpace(jsonCastFunction))
+	}
+
+	if err := validateIndexParamsMapSize(indexParamsMap); err != nil {
+		return err
 	}
 
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
@@ -557,6 +588,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		if _, exist := indexParamsMap[common.JSONPathKey]; !exist {
 			indexParamsMap[common.JSONPathKey] = cit.req.FieldName
 		}
+	}
+
+	if err := validateIndexParamsMapSize(indexParamsMap); err != nil {
+		return err
 	}
 
 	err := checkTrain(ctx, cit.fieldSchema, indexParamsMap)

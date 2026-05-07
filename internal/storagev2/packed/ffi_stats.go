@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // ManifestStat represents a stat entry from the manifest.

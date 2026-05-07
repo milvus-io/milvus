@@ -7,12 +7,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SearchReduce interface {
@@ -240,7 +240,6 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		totalOffsetElements += len(data.Topks)
 	}
 	offsetBacking := make([]int64, totalOffsetElements)
-	groupByValIterator := make([]func(int) any, len(searchResultData))
 	for i := range searchResultData {
 		data := searchResultData[i]
 		topks := data.Topks
@@ -251,11 +250,6 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			resultOffsets[i][j] = resultOffsets[i][j-1] + topks[j-1]
 		}
 		ret.AllSearchCount += data.GetAllSearchCount()
-		groupByValIterator[i] = typeutil.GetDataIterator(data.GetGroupByFieldValue())
-	}
-	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(searchResultData[0].GetGroupByFieldValue().GetType(), true, int(info.GetTopK()))
-	if err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
@@ -271,65 +265,47 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		groupSize = 1
 	}
 	groupBound := info.GetTopK() * groupSize
+	acceptedRows := make([]reduce.RowRef, 0, nq*groupBound)
+
+	// N=1 uses a typed Go map keyed by the raw value; N>=2 uses a uint64
+	// hash map with values-equality chain (because []any is not a map key).
+	groupByFieldIDs := info.GetGroupByFieldIds()
+	singleField := len(groupByFieldIDs) == 1
+	if err := reduce.ValidateGroupByFieldsPresent(searchResultData, groupByFieldIDs, singleField); err != nil {
+		return nil, err
+	}
+	var singleIters []func(int) any
+	var multiExtractors []keyExtractor
+	if singleField {
+		singleIters = buildSingleFieldIterators(searchResultData, groupByFieldIDs[0])
+	} else {
+		multiExtractors = buildMultiFieldExtractors(searchResultData, groupByFieldIDs)
+	}
 
 	for i := int64(0); i < info.GetNq(); i++ {
-		offsets := make([]int64, len(searchResultData))
-
-		dedupSet := make(map[interface{}]struct{})
-		groupByValueMap := make(map[interface{}]int64)
-
-		var j int64
-		for j = 0; j < groupBound; {
-			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
-			if sel == -1 {
-				break
-			}
-			idx := resultOffsets[sel][i] + offsets[sel]
-
-			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
-			groupByVal := groupByValIterator[sel](int(idx))
-			score := searchResultData[sel].Scores[idx]
-			dedupKey, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
-			if err != nil {
-				return nil, err
-			}
-
-			if _, ok := dedupSet[dedupKey]; !ok {
-				groupCount := groupByValueMap[groupByVal]
-				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
-					// exceed the limit for group count, filter this entity
-					filteredCount++
-				} else if groupCount >= groupSize {
-					// exceed the limit for each group, filter this entity
-					filteredCount++
-				} else {
-					fieldsData := searchResultData[sel].FieldsData
-					fieldIdxs := idxComputers[sel].Compute(idx)
-					retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
-					typeutil.AppendPKs(ret.Ids, id)
-					ret.Scores = append(ret.Scores, score)
-					if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
-						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
-					}
-					gpFieldBuilder.Add(groupByVal)
-					groupByValueMap[groupByVal] += 1
-					dedupSet[dedupKey] = struct{}{}
-					j++
-				}
-			} else {
-				// skip the same row-level entity or the same element-level hit
-				filteredCount++
-			}
-			offsets[sel]++
+		var j, fdelta, rsize int64
+		var err error
+		if singleField {
+			j, fdelta, rsize, err = reduceGroupBySinglePerNq(searchResultData, resultOffsets, i,
+				info.GetTopK(), groupSize, groupBound, singleIters, idxComputers, ret, &acceptedRows, hasElementIndices)
+		} else {
+			j, fdelta, rsize, err = reduceGroupByMultiPerNq(searchResultData, resultOffsets, i,
+				info.GetTopK(), groupSize, groupBound, multiExtractors, idxComputers, ret, &acceptedRows, hasElementIndices)
 		}
+		if err != nil {
+			return nil, err
+		}
+		filteredCount += fdelta
+		retSize += rsize
 		ret.Topks = append(ret.Topks, j)
 
-		// limit search result to avoid oom
 		if retSize > maxOutputSize {
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	ret.GroupByFieldValue = gpFieldBuilder.Build()
+	if err := writeGroupByOutput(ret, acceptedRows, searchResultData, info); err != nil {
+		return ret, merr.WrapErrServiceInternal("failed to construct group by output", err.Error())
+	}
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
 		log.Warn("GroupBy reduce filtered too many results, "+
 			"this may influence the final result seriously",
@@ -341,8 +317,194 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 }
 
 func InitSearchReducer(info *reduce.ResultInfo) SearchReduce {
-	if info.GetGroupByFieldId() > 0 {
+	if info.HasGroupBy() {
 		return &SearchGroupByReduce{}
 	}
 	return &SearchCommonReduce{}
+}
+
+// reduceGroupEntry tracks one composite-key bucket during SearchGroupByReduce.
+// Held inside a map[uint64][]*reduceGroupEntry keyed by hash, so collisions
+// resolve via linear scan with reduce.EqualGroupValues.
+type reduceGroupEntry struct {
+	values []any
+	count  int64
+}
+
+func findReduceGroupEntry(bucket []*reduceGroupEntry, values []any) *reduceGroupEntry {
+	for _, e := range bucket {
+		if reduce.EqualGroupValues(e.values, values) {
+			return e
+		}
+	}
+	return nil
+}
+
+// reduceGroupBySinglePerNq is the N=1 per-nq hot loop: typed map[any]int64
+// tracks per-group counts directly; no hash+chain indirection.
+func reduceGroupBySinglePerNq(
+	searchResultData []*schemapb.SearchResultData,
+	resultOffsets [][]int64,
+	nqIdx int64,
+	topK, groupSize, groupBound int64,
+	iterators []func(int) any,
+	idxComputers []*typeutil.FieldDataIdxComputer,
+	ret *schemapb.SearchResultData,
+	acceptedRows *[]reduce.RowRef,
+	hasElementIndices bool,
+) (j int64, filtered int64, retSize int64, err error) {
+	offsets := make([]int64, len(searchResultData))
+	dedupSet := make(map[interface{}]struct{})
+	groupCounts := make(map[any]int64)
+
+	for j = 0; j < groupBound; {
+		sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, nqIdx)
+		if sel == -1 {
+			break
+		}
+		idx := resultOffsets[sel][nqIdx] + offsets[sel]
+
+		id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
+		val := iterators[sel](int(idx))
+		score := searchResultData[sel].Scores[idx]
+		dedupKey, dedupErr := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+		if dedupErr != nil {
+			return j, filtered, retSize, dedupErr
+		}
+		if _, ok := dedupSet[dedupKey]; !ok {
+			cnt, exists := groupCounts[val]
+			switch {
+			case !exists && int64(len(groupCounts)) >= topK:
+				filtered++
+			case exists && cnt >= groupSize:
+				filtered++
+			default:
+				fieldIdxs := idxComputers[sel].Compute(idx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx, fieldIdxs...)
+				typeutil.AppendPKs(ret.Ids, id)
+				ret.Scores = append(ret.Scores, score)
+				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+				}
+				groupCounts[val] = cnt + 1
+				dedupSet[dedupKey] = struct{}{}
+				*acceptedRows = append(*acceptedRows, reduce.RowRef{ResultIdx: sel, RowIdx: idx})
+				j++
+			}
+		} else {
+			filtered++
+		}
+		offsets[sel]++
+	}
+	return
+}
+
+// reduceGroupByMultiPerNq is the N>=2 per-nq hot loop: uint64 hash map with
+// values-equality collision chain (because []any is not a map key).
+func reduceGroupByMultiPerNq(
+	searchResultData []*schemapb.SearchResultData,
+	resultOffsets [][]int64,
+	nqIdx int64,
+	topK, groupSize, groupBound int64,
+	extractors []keyExtractor,
+	idxComputers []*typeutil.FieldDataIdxComputer,
+	ret *schemapb.SearchResultData,
+	acceptedRows *[]reduce.RowRef,
+	hasElementIndices bool,
+) (j int64, filtered int64, retSize int64, err error) {
+	offsets := make([]int64, len(searchResultData))
+	dedupSet := make(map[interface{}]struct{})
+	groupBuckets := make(map[uint64][]*reduceGroupEntry)
+	totalGroups := int64(0)
+
+	for j = 0; j < groupBound; {
+		sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, nqIdx)
+		if sel == -1 {
+			break
+		}
+		idx := resultOffsets[sel][nqIdx] + offsets[sel]
+
+		id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
+		hash, values := extractors[sel](int(idx))
+		score := searchResultData[sel].Scores[idx]
+		dedupKey, dedupErr := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+		if dedupErr != nil {
+			return j, filtered, retSize, dedupErr
+		}
+		if _, ok := dedupSet[dedupKey]; !ok {
+			entry := findReduceGroupEntry(groupBuckets[hash], values)
+			isNewGroup := entry == nil
+			switch {
+			case isNewGroup && totalGroups >= topK:
+				filtered++
+			case !isNewGroup && entry.count >= groupSize:
+				filtered++
+			default:
+				if isNewGroup {
+					entry = &reduceGroupEntry{values: values}
+					groupBuckets[hash] = append(groupBuckets[hash], entry)
+					totalGroups++
+				}
+				fieldIdxs := idxComputers[sel].Compute(idx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx, fieldIdxs...)
+				typeutil.AppendPKs(ret.Ids, id)
+				ret.Scores = append(ret.Scores, score)
+				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+				}
+				entry.count++
+				dedupSet[dedupKey] = struct{}{}
+				*acceptedRows = append(*acceptedRows, reduce.RowRef{ResultIdx: sel, RowIdx: idx})
+				j++
+			}
+		} else {
+			filtered++
+		}
+		offsets[sel]++
+	}
+	return
+}
+
+// keyExtractor returns (hash, normalized values) for the row at idx. The hash
+// map drives bucket lookup; the values slice is retained for hash-collision
+// disambiguation via reduce.EqualGroupValues. Values are normalized through
+// reduce.NormalizeScalar so types align with the proxy-side reducer.
+type keyExtractor func(idx int) (uint64, []any)
+
+// buildSingleFieldIterators returns per-shard raw-value iterators for the
+// N=1 group-by path. Falls back to the legacy singular channel when segcore
+// emitted it without a FieldId stamp.
+func buildSingleFieldIterators(searchResultData []*schemapb.SearchResultData, fieldID int64) []func(int) any {
+	iters := make([]func(int) any, len(searchResultData))
+	for i := range searchResultData {
+		fd := reduce.FindGroupByFieldData(searchResultData[i], fieldID, true)
+		if fd != nil {
+			iters[i] = typeutil.GetDataIterator(fd)
+		}
+	}
+	return iters
+}
+
+func buildMultiFieldExtractors(searchResultData []*schemapb.SearchResultData, groupByFieldIDs []int64) []keyExtractor {
+	extractors := make([]keyExtractor, len(searchResultData))
+	for i := range searchResultData {
+		iters := make([]func(int) any, len(groupByFieldIDs))
+		for j, fieldID := range groupByFieldIDs {
+			fieldData := reduce.FindGroupByFieldData(searchResultData[i], fieldID, false)
+			if fieldData != nil {
+				iters[j] = typeutil.GetDataIterator(fieldData)
+			}
+		}
+		extractors[i] = reduce.MakeCompositeKeyExtractor(iters)
+	}
+	return extractors
+}
+
+// writeGroupByOutput emits the plural group-by channel unconditionally — the
+// proxy-side builders now consolidate legacy singular ids into the unified
+// slice via WithGroupByFieldIdsFromProto, so HasGroupBy is always true for
+// group-by requests. WriteGroupByFieldValues' singular-channel fallback
+// covers the case where upstream segcore emitted the legacy channel shape.
+func writeGroupByOutput(ret *schemapb.SearchResultData, acceptedRows []reduce.RowRef, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) error {
+	return reduce.WriteGroupByFieldValues(ret, acceptedRows, searchResultData, info.GetGroupByFieldIds())
 }

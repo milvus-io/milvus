@@ -388,6 +388,26 @@ class QueryContext : public Context {
         return all_rows_visible_;
     }
 
+    void
+    set_enable_expr_cache(bool enable) {
+        enable_expr_cache_ = enable;
+    }
+
+    bool
+    get_enable_expr_cache() const {
+        return enable_expr_cache_;
+    }
+
+    void
+    set_enable_sub_expr_cache_write(bool enable) {
+        enable_sub_expr_cache_write_ = enable;
+    }
+
+    bool
+    get_enable_sub_expr_cache_write() const {
+        return enable_sub_expr_cache_write_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -430,6 +450,14 @@ class QueryContext : public Context {
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};
+
+    // Expression filter cache for two-stage search
+    bool enable_expr_cache_ = false;
+    // Allow sub-expression results (for example TextMatch/PhraseMatch) to be
+    // inserted into ExprResCacheManager. Two-stage search disables this to
+    // avoid duplicating the cached full-filter bitmap with cached child
+    // bitmaps in the same request path.
+    bool enable_sub_expr_cache_write_ = true;
 };
 
 // Represent the state of one thread of query execution.

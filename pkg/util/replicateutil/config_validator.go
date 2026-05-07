@@ -22,7 +22,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // ReplicateConfigValidator validates ReplicateConfiguration according to business rules

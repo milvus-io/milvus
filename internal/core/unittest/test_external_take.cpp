@@ -244,7 +244,7 @@ BuildExternalSchema() {
     info.vec_id = FieldId(108);
 
     // Scalar fields: FieldMeta(name, id, type, nullable, default_value, external_field)
-    // All external fields are nullable=true (forced by ValidateExternalCollectionSchema)
+    // External scalar fields are nullable=true (forced by ValidateExternalCollectionSchema)
     schema->AddField(FieldMeta(FieldName("bool_col"),
                                info.bool_id,
                                DataType::BOOL,
@@ -384,7 +384,7 @@ BuildExternalSchemaWithVirtualPK() {
                                DataType::INT64,
                                false,
                                std::nullopt));
-    // External fields (nullable=true, forced by ValidateExternalCollectionSchema)
+    // External scalar fields (nullable=true, forced by ValidateExternalCollectionSchema)
     schema->AddField(FieldMeta(FieldName("int32_col"),
                                info.int32_id,
                                DataType::INT32,
@@ -1932,10 +1932,8 @@ TEST(NormalizeExternalArrow, VarcharFillFieldDataSucceedsWithString) {
     EXPECT_EQ(field_data->get_num_rows(), 3);
 }
 
-// FillFieldData for VARCHAR crashes with arrow::BINARY input (after normalize).
-// This is the exact bug scenario: internal binlog VARCHAR (STRING) gets
-// normalized to BINARY, then FillFieldData asserts STRING → crash.
-TEST(NormalizeExternalArrow, VarcharFillFieldDataFailsWithBinary) {
+// FillFieldData for VARCHAR accepts arrow::BINARY input after normalize.
+TEST(NormalizeExternalArrow, VarcharFillFieldDataSucceedsWithBinary) {
     auto str_array = MakeStringArray({"hello", "world"});
 
     // Simulate what NormalizeExternalArrow does: STRING → BINARY
@@ -1949,8 +1947,8 @@ TEST(NormalizeExternalArrow, VarcharFillFieldDataFailsWithBinary) {
 
     // Use base class pointer to avoid overload ambiguity.
     milvus::FieldDataBase* base = field_data.get();
-    // This must fail because FillFieldData asserts arrow::STRING for VARCHAR.
-    EXPECT_THROW(base->FillFieldData(chunked), std::exception);
+    EXPECT_NO_THROW(base->FillFieldData(chunked));
+    EXPECT_EQ(field_data->get_num_rows(), 2);
 }
 
 // JSON STRING passes through NormalizeExternalArrow → BINARY (expected).

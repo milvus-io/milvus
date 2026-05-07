@@ -1,6 +1,6 @@
 syntax = "proto3";
 package milvus.proto.internal;
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/internalpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/internalpb";
 
 import "common.proto";
 import "schema.proto";
@@ -147,6 +147,7 @@ message SearchRequest {
   // When 2, delegator can skip plan unmarshal for segment filter optimization.
   int32 pk_filter = 32;
   SearchType search_type = 33;
+  repeated int64 group_by_field_ids = 34;
 }
 
 message SubSearchResults {

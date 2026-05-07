@@ -5,10 +5,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 )
 
 // CheckIfCollectionCanBeCreated checks if a collection can be created.
@@ -186,14 +186,15 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 	return segmentIDs, nil
 }
 
-func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+func (m *shardManagerImpl) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.checkIfCollectionSchemaVersionMatch(collectionID, schemaVersion)
+	return m.checkIfCollectionSchemaVersionMatch(header)
 }
 
-func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
+func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
+	collectionID := header.GetCollectionId()
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
 		m.Logger().Warn("collection not found", zap.Int64("collectionID", collectionID))
@@ -202,19 +203,22 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(collectionID int6
 	// Input schemaVersion 0 means the proxy did not set it (old proxy or old SDK).
 	// Skip the schema presence and version checks for backward compatibility during rolling
 	// upgrades, where a legacy collection may still have Schema == nil when an old proxy writes.
-	if schemaVersion == 0 {
+	if header.SchemaVersion == nil {
 		return collectionInfo.SchemaVersion(), nil
 	}
+
 	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {
 		m.Logger().Warn("collection schema not found", zap.Int64("collectionID", collectionID))
 		return -1, ErrCollectionSchemaNotFound
 	}
+
 	collectionSchemaVersion := collectionInfo.SchemaVersion()
-	if collectionSchemaVersion != schemaVersion {
+	if collectionSchemaVersion != header.GetSchemaVersion() {
 		m.Logger().Warn("collection schema version not match", zap.Int64("collectionID", collectionID),
-			zap.Int32("schemaVersion", schemaVersion),
+			zap.Int32("schemaVersion", header.GetSchemaVersion()),
 			zap.Int32("collectionSchemaVersion", collectionSchemaVersion))
 		return collectionSchemaVersion, ErrCollectionSchemaVersionNotMatch
 	}
+
 	return collectionSchemaVersion, nil
 }

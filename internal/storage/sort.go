@@ -24,8 +24,8 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SortTimings holds phase-level timing information from the Sort function.

@@ -11,7 +11,7 @@ import (
 	"unsafe"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const maxByteArrayLen = math.MaxInt32

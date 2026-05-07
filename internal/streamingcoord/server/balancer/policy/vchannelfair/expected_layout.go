@@ -6,7 +6,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // newExpectedLayoutForVChannelFairPolicy creates a new expected layout for vchannel fair policy.

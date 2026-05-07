@@ -18,26 +18,26 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var Params = paramtable.Get()
@@ -1056,8 +1056,20 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(snapshot).(*Catalog)
 		ctx := context.Background()
 		var collectionID int64 = 1
-		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
-		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
+		oldC := &model.Collection{
+			CollectionID:   collectionID,
+			State:          pb.CollectionState_CollectionCreated,
+			ExternalSource: "s3://bucket/old/",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}
+		newSpec := `{"format":"parquet","my_extra":{"k":"v"}}`
+		newC := &model.Collection{
+			CollectionID:    collectionID,
+			State:           pb.CollectionState_CollectionCreated,
+			UpdateTimestamp: rand.Uint64(),
+			ExternalSource:  "s3://bucket/new/",
+			ExternalSpec:    newSpec,
+		}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 		key := BuildCollectionKey(0, collectionID)
@@ -1069,6 +1081,8 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		got := model.UnmarshalCollectionModel(&collPb)
 		assert.Equal(t, pb.CollectionState_CollectionCreated, got.State)
 		assert.Equal(t, newC.UpdateTimestamp, got.UpdateTimestamp)
+		assert.Equal(t, newC.ExternalSource, got.ExternalSource)
+		assert.Equal(t, newSpec, got.ExternalSpec)
 	})
 
 	t.Run("modify EnableDynamicField and SchemaVersion", func(t *testing.T) {

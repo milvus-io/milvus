@@ -25,8 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // ==================== Helper Functions for Meta Tests ====================
@@ -215,8 +215,8 @@ func TestExternalCollectionRefreshMeta_ListJobsByCollectionID(t *testing.T) {
 
 func TestExternalCollectionRefreshMeta_GetAllJobs(t *testing.T) {
 	jobs := []*datapb.ExternalCollectionRefreshJob{
-		{JobId: 1, CollectionId: 100},
-		{JobId: 2, CollectionId: 200},
+		{JobId: 1, CollectionId: 100, StartTime: 100},
+		{JobId: 2, CollectionId: 200, StartTime: 200},
 	}
 	meta := createMetaTestRefreshMeta(t, jobs, nil)
 
@@ -224,6 +224,11 @@ func TestExternalCollectionRefreshMeta_GetAllJobs(t *testing.T) {
 	assert.Len(t, allJobs, 2)
 	assert.NotNil(t, allJobs[1])
 	assert.NotNil(t, allJobs[2])
+
+	listedJobs := meta.ListAllJobs()
+	assert.Len(t, listedJobs, 2)
+	assert.Equal(t, int64(2), listedJobs[0].GetJobId())
+	assert.Equal(t, int64(1), listedJobs[1].GetJobId())
 }
 
 func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {

@@ -17,6 +17,7 @@
 package externalspec
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -301,6 +302,10 @@ func TestRedactExternalSpec(t *testing.T) {
 		assert.Equal(t, "<invalid spec>", RedactExternalSpec("{not json"))
 	})
 
+	t.Run("invalid_extfs_returns_placeholder", func(t *testing.T) {
+		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"parquet","extfs":"not-an-object"}`))
+	})
+
 	t.Run("secrets_masked", func(t *testing.T) {
 		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA","access_key_value":"SEC","region":"us"}}`)
 		assert.Contains(t, out, `"access_key_id":"***"`)
@@ -314,6 +319,144 @@ func TestRedactExternalSpec(t *testing.T) {
 		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":""}}`)
 		assert.Contains(t, out, `"access_key_id":""`)
 	})
+
+	t.Run("non_string_secret_values_masked", func(t *testing.T) {
+		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":123,"ssl_ca_cert":true}}`)
+		assert.Contains(t, out, `"access_key_id":"***"`)
+		assert.Contains(t, out, `"ssl_ca_cert":"***"`)
+	})
+
+	t.Run("snapshot_id_string_preserved_as_string", func(t *testing.T) {
+		out := RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137","extfs":null}`)
+		assert.Contains(t, out, `"snapshot_id":"5320540205222981137"`)
+	})
+
+	t.Run("invalid_snapshot_id_returns_placeholder", func(t *testing.T) {
+		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`))
+		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":{}}`))
+	})
+
+	t.Run("preserves_unknown_top_level_fields", func(t *testing.T) {
+		out := RedactExternalSpec(`{
+			"format":"parquet",
+			"cloud_extra":{
+				"volume_uri":"volume://tk-stagexxx2222222/test/external-collection/",
+				"volume_id":"volume-ifi5qkwp89z4ljtkvali",
+				"integration_id":"integ-lir5xfbcgrkla6fjc39w15qjk",
+				"path":"test/external-collection/"
+			},
+			"extfs":{
+				"cloud_provider":"aws",
+				"region":"us-west-2",
+				"use_iam":"true",
+				"role_arn":"arn:aws:iam::306787409409:role/lentitude-bucket-role",
+				"external_id":"zilliz-external-sO1cjGS2Vgpyan"
+			}
+		}`)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &got))
+		require.Contains(t, got, "cloud_extra")
+		cloudExtra, ok := got["cloud_extra"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "volume://tk-stagexxx2222222/test/external-collection/", cloudExtra["volume_uri"])
+		assert.Equal(t, "volume-ifi5qkwp89z4ljtkvali", cloudExtra["volume_id"])
+		assert.Equal(t, "integ-lir5xfbcgrkla6fjc39w15qjk", cloudExtra["integration_id"])
+		assert.Equal(t, "test/external-collection/", cloudExtra["path"])
+
+		extfs, ok := got["extfs"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "aws", extfs["cloud_provider"])
+		assert.Equal(t, "arn:aws:iam::306787409409:role/lentitude-bucket-role", extfs["role_arn"])
+		assert.Equal(t, "***", extfs["external_id"])
+		assert.NotContains(t, out, "zilliz-external-sO1cjGS2Vgpyan")
+	})
+}
+
+func TestExternalSpecMarshalJSON(t *testing.T) {
+	t.Run("snapshot_id_marshaled_as_string", func(t *testing.T) {
+		snapshotID := int64(5320540205222981137)
+		out, err := json.Marshal(ExternalSpec{
+			Format:     FormatIcebergTable,
+			Columns:    []string{"id", "vec"},
+			Extfs:      map[string]string{"cloud_provider": "aws"},
+			SnapshotID: &snapshotID,
+		})
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		assert.Equal(t, FormatIcebergTable, got["format"])
+		assert.Equal(t, "5320540205222981137", got["snapshot_id"])
+	})
+
+	t.Run("nil_snapshot_id_omitted", func(t *testing.T) {
+		out, err := json.Marshal(ExternalSpec{Format: FormatParquet})
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), "snapshot_id")
+		assert.Contains(t, string(out), `"format":"parquet"`)
+	})
+}
+
+func TestIsCloudEndpointHost(t *testing.T) {
+	for _, host := range []string{
+		"s3.us-west-2.amazonaws.com",
+		"s3.cn-north-1.amazonaws.com.cn",
+		"storage.googleapis.com",
+		"oss-cn-hangzhou.aliyuncs.com",
+		"cos.ap-shanghai.myqcloud.com",
+		"obs.cn-north-4.myhuaweicloud.com",
+		"acct.blob.core.windows.net",
+		"acct.blob.core.chinacloudapi.cn",
+		"acct.blob.core.usgovcloudapi.net",
+		"acct.blob.core.cloudapi.de",
+		"S3.US-WEST-2.AMAZONAWS.COM",
+	} {
+		assert.True(t, IsCloudEndpointHost(host), "host %s should be recognized", host)
+	}
+
+	for _, host := range []string{
+		"localhost:9000",
+		"bucket",
+		"amazonaws.com",
+	} {
+		assert.False(t, IsCloudEndpointHost(host), "host %s should not be recognized", host)
+	}
+}
+
+func TestDeriveEndpoint(t *testing.T) {
+	tests := []struct {
+		name          string
+		cloudProvider string
+		region        string
+		expected      string
+	}{
+		{"aws_requires_region", CloudProviderAWS, "", ""},
+		{"aws_standard", CloudProviderAWS, "us-west-2", "https://s3.us-west-2.amazonaws.com"},
+		{"aws_china", CloudProviderAWS, "cn-north-1", "https://s3.cn-north-1.amazonaws.com.cn"},
+		{"gcp_global", CloudProviderGCP, "", "https://storage.googleapis.com"},
+		{"aliyun_requires_region", CloudProviderAliyun, "", ""},
+		{"aliyun_region", CloudProviderAliyun, "cn-hangzhou", "https://oss-cn-hangzhou.aliyuncs.com"},
+		{"tencent_requires_region", CloudProviderTencent, "", ""},
+		{"tencent_region", CloudProviderTencent, "ap-shanghai", "https://cos.ap-shanghai.myqcloud.com"},
+		{"huawei_requires_region", CloudProviderHuawei, "", ""},
+		{"huawei_region", CloudProviderHuawei, "cn-north-4", "https://obs.cn-north-4.myhuaweicloud.com"},
+		{"azure_requires_region", CloudProviderAzure, "", ""},
+		{"azure_china", CloudProviderAzure, "china", "core.chinacloudapi.cn"},
+		{"azure_usgov", CloudProviderAzure, "usgov", "core.usgovcloudapi.net"},
+		{"azure_usdod", CloudProviderAzure, "usdod", "core.usgovcloudapi.net"},
+		{"azure_germany", CloudProviderAzure, "germany", "core.cloudapi.de"},
+		{"azure_public", CloudProviderAzure, "public", "core.windows.net"},
+		{"case_insensitive_provider", "AWS", "us-east-1", "https://s3.us-east-1.amazonaws.com"},
+		{"unknown_provider", "minio", "us-east-1", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, DeriveEndpoint(tt.cloudProvider, tt.region))
+		})
+	}
 }
 
 func TestParseExternalSpec_ArnKeys(t *testing.T) {

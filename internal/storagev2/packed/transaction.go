@@ -29,9 +29,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // getRetryLimit returns the configured manifest transaction retry limit.
@@ -67,6 +67,24 @@ func AddDeltaLogsToManifest(
 	storageConfig *indexpb.StorageConfig,
 	deltaLogs []DeltaLogEntry,
 ) (string, error) {
+	return addDeltaLogsToManifest(manifestPath, storageConfig, deltaLogs, C.int32_t(0))
+}
+
+// AddDeltaLogsToManifestOverwrite adds delta logs using overwrite conflict resolution.
+func AddDeltaLogsToManifestOverwrite(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	deltaLogs []DeltaLogEntry,
+) (string, error) {
+	return addDeltaLogsToManifest(manifestPath, storageConfig, deltaLogs, C.LOON_TRANSACTION_RESOLVE_OVERWRITE)
+}
+
+func addDeltaLogsToManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	deltaLogs []DeltaLogEntry,
+	resolveID C.int32_t,
+) (string, error) {
 	if len(deltaLogs) == 0 {
 		return manifestPath, nil
 	}
@@ -92,7 +110,7 @@ func AddDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -221,7 +239,7 @@ func AddStatsToManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}

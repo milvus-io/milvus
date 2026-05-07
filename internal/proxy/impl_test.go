@@ -34,9 +34,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -46,18 +46,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -3127,4 +3128,114 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 			}
 		})
 	}
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	cacheCalled := false
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).To(
+		func(_ *MetaCache, _ context.Context, _ string, _ string, _ int64) (*collectionInfo, error) {
+			cacheCalled = true
+			return nil, errors.New("collection cache should not be used for list all")
+		}).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "allowed",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+					{
+						JobId:          2,
+						CollectionName: "blocked",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName: "default",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(0), capturedCollectionID)
+	assert.False(t, cacheCalled)
+	require.Len(t, resp.GetJobs(), 2)
+	assert.Equal(t, int64(1), resp.GetJobs()[0].GetJobId())
+	assert.Equal(t, "allowed", resp.GetJobs()[0].GetCollectionName())
+	assert.Equal(t, int64(2), resp.GetJobs()[1].GetJobId())
+	assert.Equal(t, "blocked", resp.GetJobs()[1].GetCollectionName())
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "external_collection",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+		},
+	}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		collID: 101,
+		schema: &schemaInfo{
+			CollectionSchema: schema,
+		},
+	}, nil).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "external_collection",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName:         "default",
+		CollectionName: "external_collection",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(101), capturedCollectionID)
+	require.Len(t, resp.GetJobs(), 1)
 }

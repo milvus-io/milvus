@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 type SearchTaskSuite struct {
@@ -228,6 +228,50 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 
 		merged := task1.Merge(task2)
 		s.False(merged, "tasks with different FilterOnly should not merge")
+	})
+
+	s.Run("different_enable_expr_cache_cannot_merge", func() {
+		task1 := &SearchTask{
+			nq:   10,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly:      false,
+				EnableExprCache: true,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{10},
+		}
+		task2 := &SearchTask{
+			nq:   5,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly:      false,
+				EnableExprCache: false,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{5},
+		}
+
+		merged := task1.Merge(task2)
+		s.False(merged, "tasks with different EnableExprCache should not merge")
 	})
 
 	s.Run("filter_only_false_can_merge", func() {

@@ -5,23 +5,23 @@ package segments
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
-	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
-	metautil "github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	metautil "github.com/milvus-io/milvus/pkg/v3/util/metautil"
 
 	mock "github.com/stretchr/testify/mock"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 
-	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
 
-	segcorepb "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	segcorepb "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.plan;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/planpb";
 import "schema.proto";
 import "common.proto";
 
@@ -353,7 +353,14 @@ message QueryPlanNode {
   repeated int64 group_by_field_ids = 4;
   repeated Aggregate aggregates = 5;
   repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
+  optional QueryIteratorCursor query_iterator_cursor = 7;
 };
+
+message QueryIteratorCursor {
+  optional int64 last_int_pk = 1;
+  optional string last_str_pk = 2;
+  int64 last_element_offset = 3;
+}
 
 enum FunctionType{
   FunctionTypeWeight = 0;

@@ -16,7 +16,7 @@
 
 package entity
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 // RefreshExternalCollectionState represents the state of a refresh external collection job.
 type RefreshExternalCollectionState milvuspb.RefreshExternalCollectionState

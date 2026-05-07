@@ -3,8 +3,8 @@
 package compactor
 
 import (
-	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 
 	mock "github.com/stretchr/testify/mock"
 )

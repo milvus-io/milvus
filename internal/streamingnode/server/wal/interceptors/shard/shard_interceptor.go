@@ -13,10 +13,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 const interceptorName = "shard"
@@ -145,17 +145,19 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header.GetCollectionId(), schemaVersion); err != nil {
+	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header); err != nil {
 		if errors.Is(err, shards.ErrCollectionNotFound) {
-			return nil, status.NewUnrecoverableError("collection %d not found", header.GetCollectionId())
+			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
-			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", header.GetCollectionId())
+			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", collectionID)
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
 			impl.shardManager.Logger().Warn("insertMessage schema version mismatch",
-				zap.Int64("collectionID", header.GetCollectionId()),
+				zap.Int64("collectionID", collectionID),
+				zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 				zap.Int32("schemaVersion", schemaVersion),
 				zap.Int32("collectionSchemaVersion", correctSchemaVersion),
 				zap.Error(err))
@@ -163,7 +165,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 				schemaVersion, correctSchemaVersion)
 		}
 		impl.shardManager.Logger().Error("unexpected error from CheckIfCollectionSchemaVersionMatch",
-			zap.Int64("collectionID", header.GetCollectionId()),
+			zap.Int64("collectionID", collectionID),
+			zap.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			zap.Int32("schemaVersion", schemaVersion),
 			zap.Error(err))
 		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")

@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	clientv2 "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -515,8 +515,10 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 
 	// load parName partition with different partial fields
 	diffFields := []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultVarcharFieldName}
-	_, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(diffFields...))
+	taskDiff, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(diffFields...))
 	common.CheckErr(t, errPar, true)
+	err = taskDiff.Await(ctx)
+	common.CheckErr(t, err, true)
 	queryPar, errPar := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(diffFields...).WithPartitions(parName).WithLimit(common.DefaultLimit))
 	common.CheckErr(t, errPar, true)
 	common.CheckOutputFields(t, diffFields, queryPar.Fields)

@@ -12,9 +12,9 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -25,21 +25,21 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -97,15 +97,16 @@ func (t *queryTask) getQueryLabel() string {
 }
 
 type queryParams struct {
-	limit             int64
-	offset            int64
-	reduceType        reduce.IReduceType
-	isIterator        bool
-	collectionID      int64
-	groupByFields     []string
-	orderByFields     []string // NEW: ORDER BY field specifications (e.g., "price:desc")
-	timezone          string
-	extractTimeFields []string
+	limit               int64
+	offset              int64
+	reduceType          reduce.IReduceType
+	isIterator          bool
+	collectionID        int64
+	groupByFields       []string
+	orderByFields       []string // NEW: ORDER BY field specifications (e.g., "price:desc")
+	timezone            string
+	extractTimeFields   []string
+	queryIteratorCursor *planpb.QueryIteratorCursor
 }
 
 func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
@@ -325,7 +326,7 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
-func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled bool) (*queryParams, error) {
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled bool, pkDataType schemapb.DataType) (*queryParams, error) {
 	var (
 		limit             int64
 		offset            int64
@@ -413,7 +414,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 	}
 
 	// parse group by fields
-	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(QueryGroupByFieldsKey, queryParamsPair)
+	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, queryParamsPair)
 	var groupByFields []string
 	if err == nil {
 		splitFields := strings.Split(groupByFieldsStr, ",")
@@ -438,17 +439,74 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		}
 	}
 
+	queryIteratorCursor, err := parseQueryIteratorCursor(queryParamsPair, isIterator, pkDataType)
+	if err != nil {
+		return nil, err
+	}
+
 	return &queryParams{
-		limit:             limit,
-		offset:            offset,
-		reduceType:        reduceType,
-		isIterator:        isIterator,
-		collectionID:      collectionID,
-		groupByFields:     groupByFields,
-		orderByFields:     orderByFields,
-		timezone:          timezone,
-		extractTimeFields: extractTimeFields,
+		limit:               limit,
+		offset:              offset,
+		reduceType:          reduceType,
+		isIterator:          isIterator,
+		collectionID:        collectionID,
+		groupByFields:       groupByFields,
+		orderByFields:       orderByFields,
+		queryIteratorCursor: queryIteratorCursor,
+		timezone:            timezone,
+		extractTimeFields:   extractTimeFields,
 	}, nil
+}
+
+func parseQueryIteratorCursor(queryParamsPair []*commonpb.KeyValuePair, isIterator bool, pkDataType schemapb.DataType) (*planpb.QueryIteratorCursor, error) {
+	lastPK, hasLastPK := funcutil.TryGetAttrByKeyFromRepeatedKV(QueryIterLastPKKey, queryParamsPair)
+	lastOffsetStr, hasLastOffset := funcutil.TryGetAttrByKeyFromRepeatedKV(QueryIterLastOffsetKey, queryParamsPair)
+	if !hasLastPK && !hasLastOffset {
+		return nil, nil
+	}
+	if !isIterator {
+		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"invalid query iterator cursor params: %s and %s can only be used when iterator=true",
+			QueryIterLastPKKey, QueryIterLastOffsetKey))
+	}
+	if !hasLastPK || !hasLastOffset {
+		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"incomplete query iterator cursor params: %s and %s must be provided together, has_last_pk=%t, has_last_element_offset=%t",
+			QueryIterLastPKKey, QueryIterLastOffsetKey, hasLastPK, hasLastOffset))
+	}
+
+	lastOffset, err := strconv.ParseInt(lastOffsetStr, 0, 64)
+	if err != nil || lastOffset < 0 {
+		return nil, merr.WrapErrParameterInvalid("non-negative int value", lastOffsetStr,
+			"value for query iterator last element offset is invalid")
+	}
+
+	cursor := &planpb.QueryIteratorCursor{
+		LastElementOffset: lastOffset,
+	}
+	switch pkDataType {
+	case schemapb.DataType_Int64:
+		lastIntPK, err := strconv.ParseInt(lastPK, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int64 primary key", lastPK,
+				"value for query iterator last primary key is invalid")
+		}
+		cursor.LastIntPk = &lastIntPK
+	case schemapb.DataType_VarChar:
+		cursor.LastStrPk = &lastPK
+	default:
+		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("unsupported primary key type %s for query iterator cursor", pkDataType.String()))
+	}
+	return cursor, nil
+}
+
+func getPrimaryKeyDataType(schema *schemapb.CollectionSchema) schemapb.DataType {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetDataType()
+		}
+	}
+	return schemapb.DataType_None
 }
 
 func matchCountRule(outputs []string) bool {
@@ -665,7 +723,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.queryMode == common.QueryModeLargeTopK)
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.queryMode == common.QueryModeLargeTopK, getPrimaryKeyDataType(schema.CollectionSchema))
 	if err != nil {
 		return err
 	}
@@ -720,6 +778,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.plan.GetQuery().Limit = t.Limit
+	if t.queryParams.queryIteratorCursor != nil {
+		t.plan.GetQuery().QueryIteratorCursor = t.queryParams.queryIteratorCursor
+	}
 
 	// Aggregation queries have bounded result sizes:
 	// - global aggregation (no GROUP BY) returns exactly one row
