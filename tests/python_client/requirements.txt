@@ -1,4 +1,4 @@
---extra-index-url https://test.pypi.org/simple/
+--find-links https://test.pypi.org/simple/pymilvus/
 pytest-cov==2.8.1
 requests>=2.32.4
 scikit-learn>=1.5.2
@@ -23,8 +23,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc197
-pymilvus[bulk_writer]==2.7.0rc197
+pymilvus==2.7.0rc203
+pymilvus[bulk_writer]==2.7.0rc203
 # for protobuf
 protobuf>=5.29.5
 

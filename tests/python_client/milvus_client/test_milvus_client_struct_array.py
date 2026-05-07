@@ -118,6 +118,54 @@ BINARY_METRIC = "MAX_SIM_HAMMING"
 FLOAT_METRIC = "MAX_SIM_COSINE"
 INT8_METRIC = "MAX_SIM_COSINE"
 
+EMB_LIST_STRATEGY_CONFIGS = {
+    "tokenann": {
+        "strategy_params": {
+            "emb_list_strategy": "tokenann",
+        },
+    },
+    "muvera": {
+        "strategy_params": {
+            "emb_list_strategy": "muvera",
+            "muvera_num_projections": 3,
+            "muvera_num_repeats": 5,
+            "muvera_seed": 42,
+        },
+    },
+    "lemur": {
+        "strategy_params": {
+            "emb_list_strategy": "lemur",
+            "lemur_hidden_dim": 32,
+            "lemur_num_train_samples": 1000,
+            "lemur_num_epochs": 2,
+            "lemur_batch_size": 16,
+            "lemur_learning_rate": 0.001,
+            "lemur_seed": 42,
+            "lemur_num_layers": 1,
+        },
+    },
+}
+
+EMB_LIST_STRATEGY_INDEX_CONFIGS = {
+    "HNSW": {
+        "build_params": {
+            "M": 16,
+            "efConstruction": 96,
+        },
+        "search_params": {"ef": 64, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+    },
+    "DISKANN": {
+        "build_params": {},
+        "search_params": {"search_list": 30, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+    },
+}
+EMB_LIST_STRATEGY_INDEX_CASES = [
+    ("tokenann", "HNSW"),
+    ("muvera", "HNSW"),
+    ("lemur", "HNSW"),
+    ("tokenann", "DISKANN"),
+]
+
 
 class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
     """Test case of struct array basic functionality"""
@@ -2479,6 +2527,105 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
         for hit in results[0]:
             assert hit["id"] not in delete_ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("emb_list_strategy,index_type", EMB_LIST_STRATEGY_INDEX_CASES)
+    def test_search_emb_list_with_explicit_strategy(self, emb_list_strategy, index_type):
+        """
+        target: test emb list search with explicitly specified strategies
+        method: create HNSW and DISKANN indexes with supported emb_list_strategy values, load, and search
+        expected: index creation and search work correctly
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_{emb_list_strategy}_{index_type.lower()}")
+        client = self._client()
+        strategy_config = EMB_LIST_STRATEGY_CONFIGS[emb_list_strategy]
+        index_config = EMB_LIST_STRATEGY_INDEX_CONFIGS[index_type]
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        nb = 3000
+        data = []
+        for i in range(nb):
+            clips = []
+            for j in range(2):
+                clips.append(
+                    {
+                        "clip_embedding1": [random.random() for _ in range(EMB_LIST_DIM)],
+                        "scalar_field": i * 10 + j,
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "clips": clips,
+                }
+            )
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == nb
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name=f"struct_vector_index_{emb_list_strategy}_{index_type.lower()}",
+            index_type=index_type,
+            metric_type="MAX_SIM_COSINE",
+            params={
+                **index_config["build_params"],
+                **strategy_config["strategy_params"],
+            },
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        embedding_list = self.create_embedding_list(EMB_LIST_DIM, 3)
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={
+                "metric_type": "MAX_SIM_COSINE",
+                "params": index_config["search_params"],
+            },
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert 0 <= hit["id"] < nb
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
