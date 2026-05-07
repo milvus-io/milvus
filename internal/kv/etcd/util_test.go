@@ -17,6 +17,31 @@ type EtcdKVUtilSuite struct {
 	suite.Suite
 }
 
+type testPredicate struct {
+	target        predicates.PredicateTarget
+	predicateType predicates.PredicateType
+}
+
+func (p testPredicate) Target() predicates.PredicateTarget {
+	return p.target
+}
+
+func (p testPredicate) Type() predicates.PredicateType {
+	return p.predicateType
+}
+
+func (p testPredicate) IsTrue(any) bool {
+	return false
+}
+
+func (p testPredicate) Key() string {
+	return ""
+}
+
+func (p testPredicate) TargetValue() any {
+	return nil
+}
+
 func (s *EtcdKVUtilSuite) TestParsePredicateType() {
 	type testCase struct {
 		tag           string
@@ -50,8 +75,7 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 		expectSucceed bool
 	}
 
-	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Target().Return(0)
+	badPredicate := testPredicate{}
 
 	cases := []testCase{
 		{tag: "normal_value_equal", input: []predicates.Predicate{predicates.ValueEqual("a", "b")}, expectSucceed: true},
