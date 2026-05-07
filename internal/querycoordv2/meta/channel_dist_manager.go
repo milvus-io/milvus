@@ -70,7 +70,8 @@ func (view *LeaderView) Clone() *LeaderView {
 }
 
 type channelDistCriterion struct {
-	nodeIDs        typeutil.Set[int64]
+	// Callers should not combine multiple node-scoped filters in one query.
+	nodes          []int64
 	collectionID   int64
 	channelName    string
 	hasOtherFilter bool
@@ -102,12 +103,7 @@ func (f nodeChannelFilter) Match(ch *DmChannel) bool {
 }
 
 func (f nodeChannelFilter) AddFilter(criterion *channelDistCriterion) {
-	set := typeutil.NewSet(int64(f))
-	if criterion.nodeIDs == nil {
-		criterion.nodeIDs = set
-	} else {
-		criterion.nodeIDs = criterion.nodeIDs.Intersection(set)
-	}
+	criterion.nodes = []int64{int64(f)}
 }
 
 func WithNodeID2Channel(nodeID int64) ChannelDistFilter {
@@ -124,13 +120,7 @@ func (f replicaChannelFilter) Match(ch *DmChannel) bool {
 
 func (f replicaChannelFilter) AddFilter(criterion *channelDistCriterion) {
 	criterion.collectionID = f.GetCollectionID()
-
-	set := typeutil.NewSet(f.GetNodes()...)
-	if criterion.nodeIDs == nil {
-		criterion.nodeIDs = set
-	} else {
-		criterion.nodeIDs = criterion.nodeIDs.Intersection(set)
-	}
+	criterion.nodes = f.GetNodes()
 }
 
 func WithReplica2Channel(replica *Replica) ChannelDistFilter {
@@ -203,7 +193,7 @@ type nodeChannels struct {
 	nameChannel map[string]*DmChannel
 }
 
-func (c nodeChannels) Filter(critertion *channelDistCriterion) []*DmChannel {
+func (c nodeChannels) Filter(critertion *channelDistCriterion, filter func(*DmChannel) bool) []*DmChannel {
 	var channels []*DmChannel
 	switch {
 	case critertion.channelName != "":
@@ -216,7 +206,12 @@ func (c nodeChannels) Filter(critertion *channelDistCriterion) []*DmChannel {
 		channels = c.channels
 	}
 
-	return channels // lo.Filter(channels, func(ch *DmChannel, _ int) bool { return mergedFilters(ch) })
+	if critertion.hasOtherFilter {
+		channels = lo.Filter(channels, func(ch *DmChannel, _ int) bool {
+			return filter(ch)
+		})
+	}
+	return channels
 }
 
 func composeNodeChannels(channels ...*DmChannel) nodeChannels {
@@ -229,7 +224,6 @@ func composeNodeChannels(channels ...*DmChannel) nodeChannels {
 
 type ChannelDistManagerInterface interface {
 	GetByFilter(filters ...ChannelDistFilter) []*DmChannel
-	GetByCollectionAndFilter(collectionID int64, filters ...ChannelDistFilter) []*DmChannel
 	Update(nodeID typeutil.UniqueID, channels ...*DmChannel) []*DmChannel
 	GetShardLeader(channelName string, replica *Replica) *DmChannel
 	GetChannelDist(collectionID int64) []*metricsinfo.DmChannel
@@ -243,9 +237,6 @@ type ChannelDistManager struct {
 	// NodeID -> Channels
 	channels map[typeutil.UniqueID]nodeChannels
 
-	// CollectionID -> Channels
-	collectionIndex map[int64][]*DmChannel
-
 	nodeManager *session.NodeManager
 	version     int64
 }
@@ -258,9 +249,8 @@ func (m *ChannelDistManager) GetVersion() int64 {
 
 func NewChannelDistManager(nodeManager *session.NodeManager) *ChannelDistManager {
 	return &ChannelDistManager{
-		channels:        make(map[typeutil.UniqueID]nodeChannels),
-		collectionIndex: make(map[int64][]*DmChannel),
-		nodeManager:     nodeManager,
+		channels:    make(map[typeutil.UniqueID]nodeChannels),
+		nodeManager: nodeManager,
 	}
 }
 
@@ -274,43 +264,25 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 		filter.AddFilter(criterion)
 	}
 
-	var candidates []nodeChannels
-	if criterion.nodeIDs != nil {
-		candidates = lo.Map(criterion.nodeIDs.Collect(), func(nodeID int64, _ int) nodeChannels {
-			return m.channels[nodeID]
-		})
-	} else {
-		candidates = lo.Values(m.channels)
-	}
-
-	var ret []*DmChannel
-	for _, candidate := range candidates {
-		ret = append(ret, candidate.Filter(criterion)...)
-	}
-	return ret
-}
-
-func (m *ChannelDistManager) GetByCollectionAndFilter(collectionID int64, filters ...ChannelDistFilter) []*DmChannel {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
 	mergedFilters := func(ch *DmChannel) bool {
-		for _, fn := range filters {
-			if fn != nil && !fn.Match(ch) {
+		for _, f := range filters {
+			if f != nil && !f.Match(ch) {
 				return false
 			}
 		}
-
 		return true
 	}
 
-	ret := make([]*DmChannel, 0)
-
-	// If a collection ID is provided, use the collection index
-	for _, channel := range m.collectionIndex[collectionID] {
-		if mergedFilters(channel) {
-			ret = append(ret, channel)
+	var ret []*DmChannel
+	if criterion.nodes != nil {
+		for _, nodeID := range criterion.nodes {
+			ret = append(ret, m.channels[nodeID].Filter(criterion, mergedFilters)...)
 		}
+		return ret
+	}
+
+	for _, candidate := range m.channels {
+		ret = append(ret, candidate.Filter(criterion, mergedFilters)...)
 	}
 	return ret
 }
@@ -322,7 +294,6 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	if len(channels) == 0 {
 		// Node offline, remove entry to avoid memory leak
 		delete(m.channels, nodeID)
-		m.updateCollectionIndex()
 		m.version++
 		return nil
 	}
@@ -338,24 +309,8 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	}
 
 	m.channels[nodeID] = composeNodeChannels(channels...)
-	m.updateCollectionIndex()
 	m.version++
 	return newServiceableChannels
-}
-
-// update secondary index for channel distribution
-func (m *ChannelDistManager) updateCollectionIndex() {
-	m.collectionIndex = make(map[int64][]*DmChannel)
-	for _, nodeChannels := range m.channels {
-		for _, channel := range nodeChannels.channels {
-			collectionID := channel.GetCollectionID()
-			if channels, ok := m.collectionIndex[collectionID]; !ok {
-				m.collectionIndex[collectionID] = []*DmChannel{channel}
-			} else {
-				m.collectionIndex[collectionID] = append(channels, channel)
-			}
-		}
-	}
 }
 
 // GetShardLeader return the only one delegator leader which has the highest version in given replica
@@ -365,31 +320,31 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 	var setReason string
-	channels := m.collectionIndex[replica.GetCollectionID()]
-
 	var candidates *DmChannel
-	for _, channel := range channels {
-		if channel.GetChannelName() == channelName && replica.Contains(channel.Node) {
-			if candidates == nil {
-				candidates = channel
-			} else {
-				// Prioritize serviceability first, then version number
-				candidatesServiceable := candidates.IsServiceable()
-				channelServiceable := channel.IsServiceable()
-
-				updateNeeded := false
-				switch {
-				case !candidatesServiceable && channelServiceable:
-					// Current candidate is not serviceable but new channel is
-					updateNeeded = true
-					setReason = "serviceable"
-				case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
-					// Same service status but higher version
-					updateNeeded = true
-					setReason = "version_updated"
-				}
-				if updateNeeded {
+	for _, nc := range m.channels {
+		for _, channel := range nc.collChannels[replica.GetCollectionID()] {
+			if channel.GetChannelName() == channelName && replica.Contains(channel.Node) {
+				if candidates == nil {
 					candidates = channel
+				} else {
+					// Prioritize serviceability first, then version number
+					candidatesServiceable := candidates.IsServiceable()
+					channelServiceable := channel.IsServiceable()
+
+					updateNeeded := false
+					switch {
+					case !candidatesServiceable && channelServiceable:
+						// Current candidate is not serviceable but new channel is
+						updateNeeded = true
+						setReason = "serviceable"
+					case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
+						// Same service status but higher version
+						updateNeeded = true
+						setReason = "version_updated"
+					}
+					if updateNeeded {
+						candidates = channel
+					}
 				}
 			}
 		}
@@ -419,18 +374,15 @@ func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.D
 	defer m.rwmutex.RUnlock()
 
 	var ret []*metricsinfo.DmChannel
-	if collectionID > 0 {
-		if channels, ok := m.collectionIndex[collectionID]; ok {
-			for _, channel := range channels {
+	for _, nc := range m.channels {
+		if collectionID > 0 {
+			for _, channel := range nc.collChannels[collectionID] {
 				ret = append(ret, newDmChannelMetricsFrom(channel))
 			}
-		}
-		return ret
-	}
-
-	for _, channels := range m.collectionIndex {
-		for _, channel := range channels {
-			ret = append(ret, newDmChannelMetricsFrom(channel))
+		} else {
+			for _, channel := range nc.channels {
+				ret = append(ret, newDmChannelMetricsFrom(channel))
+			}
 		}
 	}
 	return ret
@@ -444,18 +396,15 @@ func (m *ChannelDistManager) GetLeaderView(collectionID int64) []*metricsinfo.Le
 	defer m.rwmutex.RUnlock()
 
 	var ret []*metricsinfo.LeaderView
-	if collectionID > 0 {
-		if channels, ok := m.collectionIndex[collectionID]; ok {
-			for _, channel := range channels {
+	for _, nc := range m.channels {
+		if collectionID > 0 {
+			for _, channel := range nc.collChannels[collectionID] {
 				ret = append(ret, newMetricsLeaderViewFrom(channel.View))
 			}
-		}
-		return ret
-	}
-
-	for _, channels := range m.collectionIndex {
-		for _, channel := range channels {
-			ret = append(ret, newMetricsLeaderViewFrom(channel.View))
+		} else {
+			for _, channel := range nc.channels {
+				ret = append(ret, newMetricsLeaderViewFrom(channel.View))
+			}
 		}
 	}
 	return ret

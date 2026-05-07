@@ -216,7 +216,7 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		return
 	}
 
-	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
+	dist := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 	distMap := typeutil.NewSet[string]()
 	for _, ch := range dist {
 		distMap.Insert(ch.GetChannelName())
@@ -255,7 +255,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		return dupChannels
 	}
 
-	delegatorList := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 	for _, delegator := range delegatorList {
 		leader := c.dist.ChannelDistManager.GetShardLeader(delegator.GetChannelName(), replica)
 		if leader == nil {
