@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
@@ -212,6 +213,42 @@ func (s *ScalarSuite) TestBasic() {
 			s.Equal(name, parsed.Name())
 			s.Equal(data, parsed.Data())
 			s.Equal(entity.FieldTypeVarChar, column.Type())
+		}
+	})
+
+	s.Run("column_mol", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		data := []string{"CCO", "c1ccccc1"}
+		column := NewColumnMolSmiles(name, data)
+		s.Equal(entity.FieldTypeMol, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(data, column.Data())
+
+		fd := column.FieldData()
+		s.Equal(name, fd.GetFieldName())
+		s.Equal(data, fd.GetScalars().GetMolSmilesData().GetData())
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnMolSmiles)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(data, parsed.Data())
+			s.Equal(entity.FieldTypeMol, parsed.Type())
+		}
+
+		fd = &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: [][]byte{[]byte("CCO"), []byte("c1ccccc1")}}},
+			}},
+		}
+		result, err = FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok = result.(*ColumnMolSmiles)
+		if s.True(ok) {
+			s.Equal(data, parsed.Data())
 		}
 	})
 

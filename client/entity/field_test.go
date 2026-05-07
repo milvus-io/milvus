@@ -73,6 +73,14 @@ func TestFieldSchema(t *testing.T) {
 	})
 }
 
+func TestFieldTypeMolMeta(t *testing.T) {
+	assert.Equal(t, "Mol", FieldTypeMol.Name())
+	assert.Equal(t, "Mol", FieldTypeMol.String())
+	pbName, pbType := FieldTypeMol.PbFieldType()
+	assert.Equal(t, "Mol", pbName)
+	assert.Equal(t, "string", pbType)
+}
+
 func TestStructSchema(t *testing.T) {
 	// Test NewStructSchema
 	schema := NewStructSchema()
