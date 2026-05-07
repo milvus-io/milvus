@@ -17,9 +17,9 @@ expr:
 	| '[' expr (',' expr)* ','? ']'                                                                         # Array
 	| EmptyArray                                                                                            # EmptyArray
 	| EXISTS expr                                                                                           # Exists
-	| expr LIKE StringLiteral                                                                               # Like
-	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'                                    # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
+	| expr LIKE expr                                                                                        # Like
+	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
@@ -34,8 +34,8 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
-	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
-	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
+	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' expr ')'  # SpatialBinary
+	| STDWithin'('Identifier',' expr',' expr')'                                                             # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call

@@ -186,6 +186,85 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 	})
 }
 
+func (s *FillExpressionValueSuite) TestSpecialStringTemplate() {
+	schema := newTestSchema(true)
+	enableMatch(schema)
+	schemaH, err := typeutil.CreateSchemaHelper(schema)
+	s.NoError(err)
+
+	s.Run("like pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField like {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, "prefix%"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PrefixMatch, rangeExpr.GetOp())
+		s.Equal("prefix", rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("text match query", func() {
+		expr, err := ParseExpr(schemaH, `text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_VarChar, "vector database"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_TextMatch, rangeExpr.GetOp())
+		s.Equal("vector database", rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("phrase match query", func() {
+		expr, err := ParseExpr(schemaH, `phrase_match(VarCharField, {query}, 1)`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_VarChar, "vector database"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PhraseMatch, rangeExpr.GetOp())
+		s.Equal("vector database", rangeExpr.GetValue().GetStringVal())
+		s.Equal(int64(1), rangeExpr.GetExtraValues()[0].GetInt64Val())
+	})
+
+	s.Run("GIS WKT", func() {
+		expr, err := ParseExpr(schemaH, `st_contains(GeometryField, {wkt})`, map[string]*schemapb.TemplateValue{
+			"wkt": generateTemplateValue(schemapb.DataType_VarChar, "POINT(0 0)"),
+		})
+		s.NoError(err)
+		gisExpr := expr.GetGisfunctionFilterExpr()
+		s.NotNil(gisExpr)
+		s.Equal(planpb.GISFunctionFilterExpr_Contains, gisExpr.GetOp())
+		s.Equal("POINT(0 0)", gisExpr.GetWktString())
+	})
+
+	s.Run("ST_DWithin WKT", func() {
+		expr, err := ParseExpr(schemaH, `st_dwithin(GeometryField, {wkt}, 1.5)`, map[string]*schemapb.TemplateValue{
+			"wkt": generateTemplateValue(schemapb.DataType_VarChar, "POINT(0 0)"),
+		})
+		s.NoError(err)
+		gisExpr := expr.GetGisfunctionFilterExpr()
+		s.NotNil(gisExpr)
+		s.Equal(planpb.GISFunctionFilterExpr_DWithin, gisExpr.GetOp())
+		s.Equal("POINT(0 0)", gisExpr.GetWktString())
+		s.Equal(float64(1.5), gisExpr.GetDistance())
+	})
+
+	s.Run("extra parameters are still constants", func() {
+		s.assertInvalidExpr(schemaH, `text_match(VarCharField, "vector database", minimum_should_match={n})`, map[string]*schemapb.TemplateValue{
+			"n": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		s.assertInvalidExpr(schemaH, `phrase_match(VarCharField, "vector database", {slop})`, map[string]*schemapb.TemplateValue{
+			"slop": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		s.assertInvalidExpr(schemaH, `st_dwithin(GeometryField, "POINT(0 0)", {distance})`, map[string]*schemapb.TemplateValue{
+			"distance": generateTemplateValue(schemapb.DataType_Double, float64(1.5)),
+		})
+		s.assertInvalidExpr(schemaH, `random_sample({ratio})`, map[string]*schemapb.TemplateValue{
+			"ratio": generateTemplateValue(schemapb.DataType_Double, float64(0.1)),
+		})
+	})
+}
+
 func (s *FillExpressionValueSuite) TestBinaryRange() {
 	s.Run("normal case", func() {
 		testcases := []testcase{
