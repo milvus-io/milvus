@@ -24,6 +24,7 @@
 #include <cstring>
 #include <exception>
 #include <iosfwd>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -82,17 +83,16 @@ StringIndexMarisa::ComputeByteSize() {
     // Size of the trie structure (marisa trie uses io_size() for serialized/memory size)
     total += trie_.io_size();
 
-    // str_ids_: vector<int64_t>
-    total += str_ids_.capacity() * sizeof(int64_t);
-
-    // str_ids_to_offsets_: map<size_t, vector<size_t>>
-    for (const auto& [key, vec] : str_ids_to_offsets_) {
-        total += sizeof(size_t);                   // key
-        total += vec.capacity() * sizeof(size_t);  // vector capacity
-        total += sizeof(std::vector<size_t>);      // vector object overhead
+    // str_ids
+    if (str_ids_mmap_data_ != nullptr) {
+        total += str_ids_mmap_size_;
+    } else {
+        total += str_ids_.capacity() * sizeof(int64_t);
     }
-    // Map node overhead (rough estimate: ~40 bytes per node for std::map)
-    total += str_ids_to_offsets_.size() * 40;
+
+    // CSR index + offsets
+    total += csr_index_.capacity() * sizeof(uint32_t);
+    total += csr_offsets_.capacity() * sizeof(uint32_t);
 
     cached_byte_size_ = total;
 }
@@ -109,18 +109,16 @@ StringIndexMarisa::CalculateTotalSize() const {
     // Size of str_ids_ vector (main data structure)
     size += str_ids_.size() * sizeof(int64_t);
 
-    // Size of str_ids_to_offsets_ map data
-    for (const auto& [key, vec] : str_ids_to_offsets_) {
-        size += sizeof(size_t);               // key
-        size += vec.size() * sizeof(size_t);  // vector data
-    }
+    // CSR index + offsets
+    size += csr_index_.size() * sizeof(uint32_t);
+    size += csr_offsets_.size() * sizeof(uint32_t);
 
     return size;
 }
 
 bool
 valid_str_id(size_t str_id) {
-    return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
+    return str_id != MARISA_NULL_KEY_ID && str_id != MARISA_INVALID_KEY_ID;
 }
 
 void
@@ -172,7 +170,8 @@ StringIndexMarisa::BuildWithFieldData(
         }
     }
 
-    // fill str_ids_to_offsets_
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
     fill_offsets();
 
     built_ = true;
@@ -200,6 +199,8 @@ StringIndexMarisa::Build(size_t n,
 
     trie_.build(keyset, MARISA_LABEL_ORDER);
     fill_str_ids(n, values, valid_data);
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
     fill_offsets();
 
     built_ = true;
@@ -225,7 +226,7 @@ StringIndexMarisa::Serialize(const Config& config) {
     close(fd);
     remove(file.c_str());
 
-    auto str_ids_len = str_ids_.size() * sizeof(size_t);
+    auto str_ids_len = str_ids_.size() * sizeof(int64_t);
     std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
     memcpy(str_ids.get(), str_ids_.data(), str_ids_len);
 
@@ -285,8 +286,10 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
-    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
+    str_ids_.resize(str_ids_len / sizeof(int64_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
 
     fill_offsets();
     built_ = true;
@@ -328,8 +331,10 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
         const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto& offsets = str_ids_to_offsets_[str_id];
-            for (auto offset : offsets) {
+            for (size_t j = csr_index_ptr_[str_id];
+                 j < csr_index_ptr_[str_id + 1];
+                 j++) {
+                auto offset = csr_offsets_ptr_[j];
                 bitset[offset] = true;
             }
         }
@@ -345,8 +350,10 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
         const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto& offsets = str_ids_to_offsets_[str_id];
-            for (auto offset : offsets) {
+            for (size_t j = csr_index_ptr_[str_id];
+                 j < csr_index_ptr_[str_id + 1];
+                 j++) {
+                auto offset = csr_offsets_ptr_[j];
                 bitset[offset] = false;
             }
         }
@@ -368,7 +375,7 @@ void
 StringIndexMarisa::SetNull(TargetBitmap& bitset) {
     tracer::AutoSpan span("StringIndexMarisa::SetNull", tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
         }
     }
@@ -379,7 +386,7 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
     tracer::AutoSpan span("StringIndexMarisa::ResetNull",
                           tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] == MARISA_NULL_KEY_ID) {
             bitset.reset(i);
         }
     }
@@ -389,9 +396,9 @@ TargetBitmap
 StringIndexMarisa::IsNotNull() {
     tracer::AutoSpan span("StringIndexMarisa::IsNotNull",
                           tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] != MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] != MARISA_NULL_KEY_ID) {
             bitset.set(i);
         }
     }
@@ -510,8 +517,9 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
     }
 
     for (const auto str_id : ids) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -564,8 +572,9 @@ StringIndexMarisa::Range(const std::string& lower_bound_value,
         }
     }
     for (const auto str_id : ids) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -580,8 +589,9 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -621,20 +631,28 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
 
     if (op == proto::plan::OpType::Match) {
         LikePatternMatcher matcher(pattern);
-        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
-            auto val = Reverse_Lookup(offsets[0]);
+        for (size_t kid = 0; kid < csr_num_keys_; kid++) {
+            auto start = csr_index_ptr_[kid];
+            auto end = csr_index_ptr_[kid + 1];
+            if (start == end)
+                continue;
+            auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && matcher(val.value())) {
-                for (auto offset : offsets) {
-                    bitset[offset] = true;
+                for (size_t j = start; j < end; j++) {
+                    bitset[csr_offsets_ptr_[j]] = true;
                 }
             }
         }
     } else {
-        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
-            auto val = Reverse_Lookup(offsets[0]);
+        for (size_t kid = 0; kid < csr_num_keys_; kid++) {
+            auto start = csr_index_ptr_[kid];
+            auto end = csr_index_ptr_[kid + 1];
+            if (start == end)
+                continue;
+            auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && match_fn(val.value())) {
-                for (auto offset : offsets) {
-                    bitset[offset] = true;
+                for (size_t j = start; j < end; j++) {
+                    bitset[csr_offsets_ptr_[j]] = true;
                 }
             }
         }
@@ -660,10 +678,43 @@ StringIndexMarisa::fill_str_ids(size_t n,
 
 void
 StringIndexMarisa::fill_offsets() {
-    for (size_t offset = 0; offset < str_ids_.size(); offset++) {
-        auto str_id = str_ids_[offset];
-        str_ids_to_offsets_[str_id].push_back(offset);
+    csr_num_keys_ = trie_.num_keys();
+
+    AssertInfo(str_ids_size_ <= std::numeric_limits<uint32_t>::max(),
+               "segment row count {} exceeds uint32_t capacity for CSR",
+               str_ids_size_);
+    AssertInfo(csr_num_keys_ < std::numeric_limits<uint32_t>::max(),
+               "trie key count {} exceeds uint32_t capacity for CSR",
+               csr_num_keys_);
+
+    // Pass 1: count occurrences per key_id
+    csr_index_.resize(csr_num_keys_ + 1, 0);
+    for (size_t offset = 0; offset < str_ids_size_; offset++) {
+        auto str_id = str_ids_ptr_[offset];
+        if (valid_str_id(str_id)) {
+            csr_index_[str_id + 1]++;
+        }
     }
+
+    // Prefix sum to get CSR index
+    for (size_t i = 1; i <= csr_num_keys_; i++) {
+        csr_index_[i] += csr_index_[i - 1];
+    }
+
+    // Pass 2: fill offsets
+    csr_offsets_.resize(csr_index_[csr_num_keys_]);
+    // Use a temporary copy of starts for scatter
+    std::vector<uint32_t> write_pos(csr_index_.begin(),
+                                    csr_index_.begin() + csr_num_keys_);
+    for (size_t offset = 0; offset < str_ids_size_; offset++) {
+        auto str_id = str_ids_ptr_[offset];
+        if (valid_str_id(str_id)) {
+            csr_offsets_[write_pos[str_id]++] = offset;
+        }
+    }
+
+    csr_index_ptr_ = csr_index_.data();
+    csr_offsets_ptr_ = csr_offsets_.data();
 }
 
 size_t
@@ -694,12 +745,12 @@ std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     tracer::AutoSpan span("StringIndexMarisa::Reverse_Lookup",
                           tracer::GetRootSpan());
-    AssertInfo(offset < str_ids_.size(), "out of range of total count");
+    AssertInfo(offset < str_ids_size_, "out of range of total count");
     marisa::Agent agent;
-    if (str_ids_[offset] < 0) {
+    if (str_ids_ptr_[offset] < 0) {
         return std::nullopt;
     }
-    agent.set_query(str_ids_[offset]);
+    agent.set_query(str_ids_ptr_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());
 }
@@ -745,15 +796,22 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     close(fd);
 
     // Write str_ids
-    auto str_ids_len = str_ids_.size() * sizeof(size_t);
+    auto str_ids_len = str_ids_.size() * sizeof(int64_t);
     writer->WriteEntry(MARISA_STR_IDS, str_ids_.data(), str_ids_len);
+
+    // Persist CSR index + offsets
+    writer->WriteEntry(MARISA_CSR_INDEX,
+                       csr_index_.data(),
+                       csr_index_.size() * sizeof(uint32_t));
+    writer->WriteEntry(MARISA_CSR_OFFSETS,
+                       csr_offsets_.data(),
+                       csr_offsets_.size() * sizeof(uint32_t));
+    writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
 void
 StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                const Config& config) {
-    auto trie_entry = reader.ReadEntry(MARISA_TRIE_INDEX);
-
     auto local_cm =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string tmp_dir =
@@ -767,10 +825,14 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
+    // Stream trie entry directly to temp file (no full-size temp buffer)
     {
         auto file_writer = storage::FileWriter(
             file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        file_writer.Write(trie_entry.data.data(), trie_entry.data.size());
+        reader.ReadEntryStream(MARISA_TRIE_INDEX,
+                               [&](const uint8_t* data, size_t len) {
+                                   file_writer.Write(data, len);
+                               });
         file_writer.Finish();
     }
 
@@ -787,13 +849,133 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         unlink(file_name.c_str());
     }
 
-    auto str_ids_entry = reader.ReadEntry(MARISA_STR_IDS);
+    // Stream str_ids entry
+    auto str_ids_bytes = reader.GetEntrySize(MARISA_STR_IDS);
+    if (config.contains(MMAP_FILE_PATH)) {
+        // mmap path: stream to disk file, then mmap
+        auto str_ids_path = file_name + ".str_ids";
+        {
+            auto fw = storage::FileWriter(
+                str_ids_path,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+            reader.ReadEntryStream(
+                MARISA_STR_IDS,
+                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+            fw.Finish();
+        }
+        auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
+        auto* mapped = mmap(NULL,
+                            str_ids_bytes,
+                            PROT_READ,
+                            MAP_PRIVATE,
+                            str_ids_file.Descriptor(),
+                            0);
+        AssertInfo(mapped != MAP_FAILED,
+                   "failed to mmap str_ids: {}",
+                   strerror(errno));
+        str_ids_file.Close();
+        str_ids_mmap_data_ = static_cast<char*>(mapped);
+        str_ids_mmap_size_ = str_ids_bytes;
+        str_ids_mmap_raii_ = std::make_unique<MmapFileRAII>(str_ids_path);
+        str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
+        str_ids_size_ = str_ids_bytes / sizeof(int64_t);
+    } else {
+        // memory path: stream to pre-allocated vector
+        str_ids_.resize(str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
+        size_t write_offset = 0;
+        reader.ReadEntryStream(
+            MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
+                memcpy(
+                    reinterpret_cast<uint8_t*>(str_ids_.data()) + write_offset,
+                    d,
+                    len);
+                write_offset += len;
+            });
+        str_ids_ptr_ = str_ids_.data();
+        str_ids_size_ = str_ids_.size();
+    }
 
-    auto str_ids_len = str_ids_entry.data.size();
-    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
-    memcpy(str_ids_.data(), str_ids_entry.data.data(), str_ids_len);
+    // Load persisted CSR or rebuild from str_ids
+    if (reader.HasEntry(MARISA_CSR_INDEX)) {
+        csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
 
-    fill_offsets();
+        // csr_offsets_ is indexed with values up to str_ids_size_; uint32_t
+        // slots require the segment to fit below 2^32 rows. Guard the load
+        // path too so files written by a future build with a larger cap can
+        // be rejected loudly instead of silently truncated.
+        AssertInfo(str_ids_size_ <= std::numeric_limits<uint32_t>::max(),
+                   "segment row count {} exceeds uint32_t capacity for CSR",
+                   str_ids_size_);
+
+        if (config.contains(MMAP_FILE_PATH)) {
+            // mmap path: stream csr_index + csr_offsets to disk, then mmap
+            auto csr_path = file_name + ".csr";
+            size_t idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+            size_t off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+
+            {
+                auto fw = storage::FileWriter(
+                    csr_path,
+                    storage::io::GetPriorityFromLoadPriority(load_priority));
+                reader.ReadEntryStream(
+                    MARISA_CSR_INDEX,
+                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+                reader.ReadEntryStream(
+                    MARISA_CSR_OFFSETS,
+                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+                fw.Finish();
+            }
+
+            csr_mmap_size_ = idx_bytes + off_bytes;
+            auto csr_file = File::Open(csr_path, O_RDONLY);
+            auto* mapped = mmap(NULL,
+                                csr_mmap_size_,
+                                PROT_READ,
+                                MAP_PRIVATE,
+                                csr_file.Descriptor(),
+                                0);
+            AssertInfo(mapped != MAP_FAILED,
+                       "failed to mmap CSR: {}",
+                       strerror(errno));
+            csr_file.Close();
+            csr_mmap_data_ = static_cast<char*>(mapped);
+            csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
+
+            csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
+            csr_offsets_ptr_ =
+                reinterpret_cast<const uint32_t*>(csr_mmap_data_ + idx_bytes);
+        } else {
+            // memory path: stream into vectors
+            auto idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+            csr_index_.resize(idx_bytes / sizeof(uint32_t));
+            size_t wo = 0;
+            reader.ReadEntryStream(
+                MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
+                    memcpy(reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
+                           d,
+                           len);
+                    wo += len;
+                });
+
+            auto off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+            csr_offsets_.resize(off_bytes / sizeof(uint32_t));
+            wo = 0;
+            reader.ReadEntryStream(
+                MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
+                    memcpy(reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
+                           d,
+                           len);
+                    wo += len;
+                });
+
+            csr_index_ptr_ = csr_index_.data();
+            csr_offsets_ptr_ = csr_offsets_.data();
+        }
+    } else {
+        // Backward compat: rebuild CSR from str_ids
+        fill_offsets();
+    }
+
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
