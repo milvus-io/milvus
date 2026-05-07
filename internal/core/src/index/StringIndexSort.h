@@ -157,10 +157,21 @@ class StringIndexSort : public StringIndex {
     int64_t
     CalculateTotalSize() const;
 
+    // Parse metadata fields (version, num_rows, valid_bitset, is_nested)
+    // from a BinarySet. Shared by LoadWithoutAssemble and LoadWithStreaming.
+    void
+    ParseMetadata(const BinarySet& binary_set);
+
+    void
+    LoadWithStreaming(const std::vector<std::string>& index_files,
+                      const Config& config,
+                      milvus::proto::common::LoadPriority load_priority);
+
     // Common fields
     int64_t field_id_ = 0;
     bool is_built_ = false;
     Config config_;
+    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     TargetBitmap valid_bitset_;
     std::vector<int32_t> idx_to_offsets_;
@@ -431,6 +442,14 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                  TargetBitmap& valid_bitset,
                  std::vector<int32_t>& idx_to_offsets) override;
 
+    // Take ownership of an existing buffer and use it as backing store.
+    // Avoids the disk round-trip of LoadFromData for non-mmap scenarios.
+    void
+    LoadFromOwnedBuffer(std::vector<uint8_t>&& buffer,
+                        size_t total_num_rows,
+                        TargetBitmap& valid_bitset,
+                        std::vector<int32_t>& idx_to_offsets);
+
     void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
@@ -505,20 +524,28 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
 
     MmapEntry
     GetEntry(size_t idx) const {
-        const uint8_t* str_ptr = string_data_start_ + string_offsets_[idx];
-        const uint8_t* post_list_ptr =
-            post_list_data_start_ + post_list_offsets_[idx];
-        return MmapEntry(str_ptr, post_list_ptr);
+        return MmapEntry(string_data_start_ + string_offsets_[idx],
+                         post_list_data_start_ + post_list_offsets_[idx]);
     }
 
  private:
+    void
+    SetupParsedPointers();
+
+    // mmap backing
     char* mmap_data_ = nullptr;
     size_t mmap_size_ = 0;
-    size_t data_size_ = 0;  // Actual data size without padding
     std::string mmap_filepath_;
+
+    // owned buffer backing (non-mmap memory mode)
+    std::vector<uint8_t> owned_data_;
+
+    // Common: points to start of data (either mmap_data_ or owned_data_.data())
+    const uint8_t* data_ptr_ = nullptr;
+    size_t data_size_ = 0;  // Actual data size without padding
     size_t unique_count_ = 0;
 
-    // Pointers to different sections in mmap'd data
+    // Pointers to different sections in data
     const uint32_t* string_offsets_ = nullptr;
     const uint8_t* string_data_start_ = nullptr;
     const uint32_t* post_list_offsets_ = nullptr;

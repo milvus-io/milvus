@@ -28,9 +28,12 @@
 #include <optional>
 #include <type_traits>
 
+#include <filesystem>
 #include "bitset/bitset.h"
 #include "boost/uuid/random_generator.hpp"
 #include "common/Consts.h"
+#include "common/File.h"
+#include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/File.h"
@@ -40,6 +43,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
+#include "index/IndexStreamUtils.h"
 #include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
@@ -66,6 +70,8 @@ StringIndexMarisa::StringIndexMarisa(
     if (file_manager_context.Valid()) {
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
+            file_manager_context);
     }
 }
 
@@ -311,13 +317,123 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
-        index_files.value(), load_priority);
-    BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
-    index_datas.clear();
-    LoadWithoutAssemble(binary_set, config);
+
+    AssertInfo(this->file_manager_ != nullptr,
+               "file_manager_ must not be null when loading StringIndexMarisa");
+    LoadWithStreaming(index_files.value(), config, load_priority);
+}
+
+int64_t
+StringIndexMarisa::StreamFilesToDisk(
+    const std::vector<std::string>& files,
+    const std::string& local_path,
+    milvus::proto::common::LoadPriority load_priority) {
+    std::filesystem::create_directories(
+        std::filesystem::path(local_path).parent_path());
+
+    int64_t total_size = 0;
+    auto file_writer = storage::FileWriter(
+        local_path, storage::io::GetPriorityFromLoadPriority(load_priority));
+
+    auto cm = this->file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+    PrefetchAndProcess(
+        cm, files, prio, kPrefetchDepth, [&](const uint8_t* data, size_t size) {
+            file_writer.Write(data, size);
+            total_size += size;
+        });
+
+    file_writer.Finish();
+    return total_size;
+}
+
+void
+StringIndexMarisa::LoadWithStreaming(
+    const std::vector<std::string>& index_files,
+    const Config& config,
+    milvus::proto::common::LoadPriority load_priority) {
+    // Classify files by key prefix. If Serialize() adds new keys in the
+    // future, this must be updated in sync — otherwise the new slices
+    // will be silently dropped.
+    std::vector<std::string> trie_files;
+    std::vector<std::string> str_ids_files;
+
+    for (auto& file : index_files) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name.rfind(MARISA_STR_IDS, 0) == 0) {
+            str_ids_files.push_back(file);
+        } else if (file_name.rfind(MARISA_TRIE_INDEX, 0) == 0) {
+            trie_files.push_back(file);
+        }
+    }
+
+    auto sortBySliceIndex = [](std::vector<std::string>& files) {
+        if (files.size() <= 1)
+            return;
+        std::sort(files.begin(),
+                  files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stoi(a.substr(a.find_last_of('_') + 1)) <
+                             std::stoi(b.substr(b.find_last_of('_') + 1));
+                  });
+    };
+    sortBySliceIndex(trie_files);
+    sortBySliceIndex(str_ids_files);
+
+    bool use_mmap =
+        config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
+
+    // trie must go through disk (marisa::read() requires fd)
+    AssertInfo(disk_file_manager_ != nullptr,
+               "disk_file_manager_ must not be null for StringIndexMarisa "
+               "streaming load (marisa trie requires disk path)");
+    auto local_prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    auto trie_path = local_prefix + "marisa-trie";
+
+    auto cm = this->file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+
+    StreamFilesToDisk(trie_files, trie_path, load_priority);
+
+    if (use_mmap) {
+        trie_.mmap(trie_path.c_str());
+        mmap_file_raii_ = std::make_unique<MmapFileRAII>(trie_path);
+    } else {
+        auto file = File::Open(trie_path, O_RDONLY);
+        trie_.read(file.Descriptor());
+        file.Close();
+        unlink(trie_path.c_str());
+        mmap_file_raii_ = nullptr;
+    }
+
+    // str_ids: stream directly to memory (no disk round-trip needed)
+    std::vector<uint8_t> str_ids_buf;
+    PrefetchAndProcess(cm,
+                       str_ids_files,
+                       prio,
+                       kPrefetchDepth,
+                       [&](const uint8_t* data, size_t size) {
+                           str_ids_buf.insert(
+                               str_ids_buf.end(), data, data + size);
+                       });
+
+    int64_t str_ids_total = str_ids_buf.size();
+    str_ids_.resize(str_ids_total / sizeof(size_t), MARISA_NULL_KEY_ID);
+    memcpy(str_ids_.data(), str_ids_buf.data(), str_ids_total);
+
+    fill_offsets();
+    built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
+
+    LOG_INFO(
+        "load StringIndexMarisa done (streaming), use_mmap: {}, "
+        "trie_size: {}, str_ids_size: {}",
+        use_mmap,
+        trie_.io_size(),
+        str_ids_total);
 }
 
 const TargetBitmap

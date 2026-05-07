@@ -368,23 +368,41 @@ IndexFactory::ScalarIndexLoadResource(
     LoadResourceRequest request{};
     request.has_raw_data = false;
 
+    // Streaming load buffer: parallel_degree batches of FILE_SLICE_SIZE,
+    // capped at DEFAULT_FIELD_MAX_MEMORY_LIMIT (128 MB).
+    auto streaming_buffer_size =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = 0;
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            // mmap streaming: only the batch buffer lives in memory
+            request.max_memory_cost = streaming_buffer_size;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // non-mmap streaming: final vector + batch buffer
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost =
+                index_size_in_bytes + streaming_buffer_size;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
+            // Streaming: trie mmap'd on disk, str_ids loaded via disk
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost = streaming_buffer_size;
             request.max_disk_cost = index_size_in_bytes;
         } else {
+            // Streaming: trie read from disk, str_ids read from disk
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + streaming_buffer_size;
             request.max_disk_cost = index_size_in_bytes;
         }
         request.has_raw_data = true;
@@ -401,21 +419,30 @@ IndexFactory::ScalarIndexLoadResource(
         if (mmap_enable) {
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost = streaming_buffer_size;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = 0;
+            request.max_memory_cost =
+                index_size_in_bytes + streaming_buffer_size;
+            request.max_disk_cost = index_size_in_bytes;
         }
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = index_size_in_bytes;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = index_size_in_bytes;
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = streaming_buffer_size;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost =
+                index_size_in_bytes + streaming_buffer_size;
+            request.max_disk_cost = index_size_in_bytes;
+        }
         request.has_raw_data = false;
     } else {
         LOG_ERROR(

@@ -28,12 +28,23 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <fcntl.h>
+#include <filesystem>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <unordered_map>
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
 #include "common/Array.h"
+#include "index/IndexStreamUtils.h"
+#include "common/CDataType.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/Slice.h"
+#include "storage/FileWriter.h"
 #include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
@@ -128,6 +139,8 @@ StringIndexSort::StringIndexSort(
         field_id_ = file_manager_context.fieldDataMeta.field_id;
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
+            file_manager_context);
     }
 }
 
@@ -316,28 +329,131 @@ StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
-        index_files.value(), load_priority);
-
-    BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-
-    index_datas.clear();
-
-    LoadWithoutAssemble(binary_set, config);
+    AssertInfo(this->file_manager_ != nullptr,
+               "file_manager_ must not be null when loading StringIndexSort");
+    LoadWithStreaming(index_files.value(), config, load_priority);
 }
 
 void
-StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
-                                     const Config& config) {
-    config_ = config;
+StringIndexSort::LoadWithStreaming(
+    const std::vector<std::string>& index_files,
+    const Config& config,
+    milvus::proto::common::LoadPriority load_priority) {
+    // Separate data slices (large) from metadata (small), skip SLICE_META.
+    // "index_data" is the main large key; "version", "index_num_rows",
+    // "valid_bitset" are small metadata keys.
+    std::vector<std::string> data_files;
+    std::vector<std::string> meta_files;
 
+    for (auto& file : index_files) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name.rfind("index_data", 0) == 0) {
+            data_files.push_back(file);
+        } else if (file_name != INDEX_FILE_SLICE_META) {
+            meta_files.push_back(file);
+        }
+    }
+
+    // Sort data slices by numeric suffix
+    if (data_files.size() > 1) {
+        std::sort(data_files.begin(),
+                  data_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stoi(a.substr(a.find_last_of('_') + 1)) <
+                             std::stoi(b.substr(b.find_last_of('_') + 1));
+                  });
+    }
+
+    // Load metadata to memory (tiny: version, index_num_rows, valid_bitset)
+    auto meta_datas =
+        this->file_manager_->LoadIndexToMemory(meta_files, load_priority);
+    BinarySet binary_set;
+    AssembleIndexDatas(meta_datas, binary_set);
+    meta_datas.clear();
+
+    bool use_mmap =
+        config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
+
+    auto cm = this->file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+
+    ParseMetadata(binary_set);
+
+    if (use_mmap) {
+        // Stream data slices to local disk, then mmap
+        auto data_path = disk_file_manager_->GetLocalIndexObjectPrefix() +
+                         "strsort-index-data";
+        int64_t data_size = 0;
+        {
+            std::filesystem::create_directories(
+                std::filesystem::path(data_path).parent_path());
+            auto file_writer = storage::FileWriter(
+                data_path,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+
+            PrefetchAndProcess(cm,
+                               data_files,
+                               prio,
+                               kPrefetchDepth,
+                               [&](const uint8_t* data, size_t size) {
+                                   file_writer.Write(data, size);
+                                   data_size += size;
+                               });
+            file_writer.Finish();
+        }
+
+        auto fd = open(data_path.c_str(), O_RDONLY);
+        AssertInfo(fd >= 0, "failed to open string sort data file");
+        auto mapped = mmap(NULL, data_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        AssertInfo(mapped != MAP_FAILED,
+                   "failed to mmap string sort data file");
+
+        auto data_ptr = std::shared_ptr<uint8_t[]>(
+            static_cast<uint8_t*>(mapped),
+            [sz = data_size, path = data_path](uint8_t* p) {
+                munmap(p, sz);
+                unlink(path.c_str());
+            });
+        binary_set.Append("index_data", data_ptr, data_size);
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        mmap_impl->SetMmapFilePath(mmap_path);
+        mmap_impl->LoadFromBinary(
+            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
+    } else {
+        // Stream data slices directly to memory buffer
+        std::vector<uint8_t> buffer;
+        PrefetchAndProcess(cm,
+                           data_files,
+                           prio,
+                           kPrefetchDepth,
+                           [&](const uint8_t* data, size_t size) {
+                               buffer.insert(buffer.end(), data, data + size);
+                           });
+
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        mmap_impl->LoadFromOwnedBuffer(
+            std::move(buffer), total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
+    }
+
+    config_ = config;
+    is_built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
+}
+
+void
+StringIndexSort::ParseMetadata(const BinarySet& binary_set) {
     auto index_num_rows = binary_set.GetByName("index_num_rows");
     AssertInfo(index_num_rows != nullptr,
                "Failed to find 'index_num_rows' in binary_set");
     memcpy(&total_num_rows_, index_num_rows->data.get(), sizeof(size_t));
 
-    // Initialize idx_to_offsets - it will be rebuilt by LoadFromBinary
     idx_to_offsets_.resize(total_num_rows_);
 
     auto valid_bitset_data = binary_set.GetByName("valid_bitset");
@@ -351,7 +467,6 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         }
     }
 
-    // Deserialize is_nested_index (optional for backward compatibility)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
         memcpy(&is_nested_index_, is_nested_data->data.get(), sizeof(bool));
@@ -371,12 +486,17 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                               version,
                               SERIALIZATION_VERSION));
     }
+}
 
-    // Check if mmap is enabled
+void
+StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
+                                     const Config& config) {
+    config_ = config;
+    ParseMetadata(binary_set);
+
     if (config.contains(MMAP_FILE_PATH)) {
         LOG_INFO("StringIndexSort: loading with mmap strategy");
         auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
-
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         mmap_impl->SetMmapFilePath(mmap_path);
@@ -571,29 +691,28 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         }
     }
 
-    auto index_data_entry = reader.ReadEntry("index_data");
-
+    auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
     if (config.contains(MMAP_FILE_PATH)) {
         LOG_INFO("StringIndexSort::LoadEntries: loading with mmap strategy");
-        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         mmap_impl->SetMmapFilePath(mmap_path);
+        auto index_data_entry = reader.ReadEntry("index_data");
         mmap_impl->LoadFromData(index_data_entry.data.data(),
                                 index_data_entry.data.size(),
                                 total_num_rows_,
                                 valid_bitset_,
                                 idx_to_offsets_);
-        impl_ = std::move(mmap_impl);
     } else {
-        LOG_INFO("StringIndexSort::LoadEntries: loading with memory strategy");
-        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
-        impl_->LoadFromData(index_data_entry.data.data(),
-                            index_data_entry.data.size(),
-                            total_num_rows_,
-                            valid_bitset_,
-                            idx_to_offsets_);
+        LOG_INFO(
+            "StringIndexSort::LoadEntries: loading with owned buffer strategy");
+        auto index_data_entry = reader.ReadEntry("index_data");
+        mmap_impl->LoadFromOwnedBuffer(std::move(index_data_entry.data),
+                                       total_num_rows_,
+                                       valid_bitset_,
+                                       idx_to_offsets_);
     }
+    impl_ = std::move(mmap_impl);
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
@@ -1218,6 +1337,17 @@ StringIndexSortMmapImpl::~StringIndexSortMmapImpl() {
             unlink(mmap_filepath_.c_str());
         }
     }
+    // owned_data_ is automatically freed by vector destructor
+}
+
+void
+StringIndexSortMmapImpl::SetupParsedPointers() {
+    auto parsed = ParseBinaryData(data_ptr_, data_size_);
+    unique_count_ = parsed.unique_count;
+    string_offsets_ = parsed.string_offsets;
+    string_data_start_ = parsed.string_data_start;
+    post_list_offsets_ = parsed.post_list_offsets;
+    post_list_data_start_ = parsed.post_list_data_start;
 }
 
 void
@@ -1274,22 +1404,35 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
         ThrowInfo(DataFormatBroken, "Failed to mmap file");
     }
 
-    const uint8_t* data_start = reinterpret_cast<const uint8_t*>(mmap_data_);
+    data_ptr_ = reinterpret_cast<const uint8_t*>(mmap_data_);
+    SetupParsedPointers();
 
-    auto parsed = ParseBinaryData(data_start, data_size_);
-    unique_count_ = parsed.unique_count;
-    string_offsets_ = parsed.string_offsets;
-    string_data_start_ = parsed.string_data_start;
-    post_list_offsets_ = parsed.post_list_offsets;
-    post_list_data_start_ = parsed.post_list_data_start;
-
-    // Initialize idx_to_offsets
+    // Rebuild idx_to_offsets
     std::fill(idx_to_offsets.begin(), idx_to_offsets.end(), -1);
-    // Rebuild idx_to_offsets by iterating through entries
     for (uint32_t unique_idx = 0; unique_idx < unique_count_; ++unique_idx) {
         MmapEntry entry = GetEntry(unique_idx);
+        entry.for_each_row_id([&idx_to_offsets, unique_idx](uint32_t row_id) {
+            idx_to_offsets[row_id] = unique_idx;
+        });
+    }
+}
 
-        // Map each row_id in posting list to this unique index
+void
+StringIndexSortMmapImpl::LoadFromOwnedBuffer(
+    std::vector<uint8_t>&& buffer,
+    size_t total_num_rows,
+    TargetBitmap& valid_bitset,
+    std::vector<int32_t>& idx_to_offsets) {
+    owned_data_ = std::move(buffer);
+    data_size_ = owned_data_.size();
+    data_ptr_ = owned_data_.data();
+
+    SetupParsedPointers();
+
+    // Rebuild idx_to_offsets
+    std::fill(idx_to_offsets.begin(), idx_to_offsets.end(), -1);
+    for (uint32_t unique_idx = 0; unique_idx < unique_count_; ++unique_idx) {
+        MmapEntry entry = GetEntry(unique_idx);
         entry.for_each_row_id([&idx_to_offsets, unique_idx](uint32_t row_id) {
             idx_to_offsets[row_id] = unique_idx;
         });
@@ -1599,12 +1742,17 @@ StringIndexSortMmapImpl::Reverse_Lookup(
 
 int64_t
 StringIndexSortMmapImpl::Size() {
+    if (!owned_data_.empty()) {
+        return static_cast<int64_t>(owned_data_.size());
+    }
     return mmap_size_;
 }
 
 int64_t
 StringIndexSortMmapImpl::ByteSize() const {
-    // mmap size (O(n) - the mapped index data)
+    if (!owned_data_.empty()) {
+        return static_cast<int64_t>(owned_data_.size());
+    }
     return mmap_size_;
 }
 

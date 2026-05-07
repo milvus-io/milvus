@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "Meta.h"
+#include "index/IndexStreamUtils.h"
 #include "bitset/bitset.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
@@ -408,18 +409,187 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
-               "index file paths is empty when load disk ann index");
+               "index file paths is empty when load scalar index sort");
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
-        index_files.value(), load_priority);
-    BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
+
+    AssertInfo(this->file_manager_ != nullptr,
+               "file_manager_ must not be null when loading ScalarIndexSort");
+    LoadWithStreaming(index_files.value(), config, load_priority);
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::LoadWithStreaming(
+    const std::vector<std::string>& index_files,
+    const Config& config,
+    milvus::proto::common::LoadPriority load_priority) {
+    // Separate files into data slices (large) and metadata files (tiny).
+    // Skip SLICE_META: data slices are streamed directly and concatenated
+    // in order by numeric suffix, so the slice metadata is not needed.
+    std::vector<std::string> data_files;
+    std::vector<std::string> meta_files;
+
+    for (auto& file : index_files) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name.rfind("index_data", 0) == 0) {
+            data_files.push_back(file);
+        } else if (file_name != INDEX_FILE_SLICE_META) {
+            meta_files.push_back(file);
+        }
+    }
+
+    std::sort(data_files.begin(),
+              data_files.end(),
+              [](const std::string& a, const std::string& b) {
+                  auto a_pos = a.find_last_of('_');
+                  auto b_pos = b.find_last_of('_');
+                  return std::stoi(a.substr(a_pos + 1)) <
+                         std::stoi(b.substr(b_pos + 1));
+              });
+
+    // Load metadata first (tiny: index_length, index_num_rows)
+    auto index_datas =
+        this->file_manager_->LoadIndexToMemory(meta_files, load_priority);
+    BinarySet meta_binary;
+    AssembleIndexDatas(index_datas, meta_binary);
     index_datas.clear();
-    LoadWithoutAssemble(binary_set, config);
+
+    auto index_length_bin = meta_binary.GetByName("index_length");
+    size_t index_size = 0;
+    if (index_length_bin) {
+        memcpy(&index_size, index_length_bin->data.get(), sizeof(size_t));
+    }
+
+    auto index_num_rows_bin = meta_binary.GetByName("index_num_rows");
+    if (index_num_rows_bin) {
+        memcpy(
+            &total_num_rows_, index_num_rows_bin->data.get(), sizeof(size_t));
+    } else {
+        total_num_rows_ = index_size;
+    }
+
+    auto is_nested_index = meta_binary.GetByName("is_nested_index");
+    if (is_nested_index) {
+        memcpy(&is_nested_index_,
+               is_nested_index->data.get(),
+               (size_t)is_nested_index->size);
+    }
+
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
+               disk_file_manager_ != nullptr;
+
+    if (is_mmap_) {
+        StreamDataToDisk(data_files, load_priority);
+    } else {
+        StreamDataToMemory(data_files, load_priority, index_size);
+    }
+
+    setup_data_pointers();
+
+    idx_to_offsets_.resize(total_num_rows_);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < Size(); ++i) {
+        const auto& item = operator[](i);
+        idx_to_offsets_[item.idx_] = i;
+        valid_bitset_.set(item.idx_);
+    }
+
+    is_built_ = true;
+    ComputeByteSize();
+
+    LOG_INFO(
+        "load ScalarIndexSort done (streaming), field_id: {}, "
+        "is_mmap: {}, data_size: {}",
+        field_id_,
+        is_mmap_,
+        is_mmap_ ? data_size_
+                 : (int64_t)(data_.size() * sizeof(IndexStructure<T>)));
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::StreamDataToDisk(
+    const std::vector<std::string>& data_files,
+    milvus::proto::common::LoadPriority load_priority) {
+    mmap_filepath_ = disk_file_manager_->GetLocalIndexObjectPrefix() +
+                     STLSORT_INDEX_FILE_NAME;
+    std::filesystem::create_directories(
+        std::filesystem::path(mmap_filepath_).parent_path());
+
+    int64_t total_data_size = 0;
+    {
+        auto file_writer = storage::FileWriter(
+            mmap_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
+
+        auto cm = this->file_manager_->GetChunkManager().get();
+        auto prio = milvus::PriorityForLoad(load_priority);
+        constexpr size_t kPrefetchDepth = 2;
+        PrefetchAndProcess(cm,
+                           data_files,
+                           prio,
+                           kPrefetchDepth,
+                           [&](const uint8_t* data, size_t size) {
+                               file_writer.Write(data, size);
+                               total_data_size += size;
+                           });
+
+        auto aligned_size =
+            ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+        if (aligned_size > total_data_size) {
+            std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
+            file_writer.Write(padding.data(), padding.size());
+        }
+        std::vector<uint8_t> mmap_padding(MMAP_INDEX_PADDING, 0);
+        file_writer.Write(mmap_padding.data(), mmap_padding.size());
+        file_writer.Finish();
+
+        data_size_ = total_data_size;
+        mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    }
+
+    auto file = File::Open(mmap_filepath_, O_RDONLY);
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+    if (mmap_data_ == MAP_FAILED) {
+        file.Close();
+        remove(mmap_filepath_.c_str());
+        ThrowInfo(
+            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
+    }
+    file.Close();
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::StreamDataToMemory(
+    const std::vector<std::string>& data_files,
+    milvus::proto::common::LoadPriority load_priority,
+    size_t index_size) {
+    data_.resize(index_size);
+    size_t write_offset = 0;
+
+    auto cm = this->file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+    PrefetchAndProcess(
+        cm,
+        data_files,
+        prio,
+        kPrefetchDepth,
+        [&](const uint8_t* data, size_t size) {
+            memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                   data,
+                   size);
+            write_offset += size;
+        });
+
+    AssertInfo(
+        write_offset == index_size * sizeof(IndexStructure<T>),
+        "the real index size is not equal to the value parsed from meta");
 }
 
 template <typename T>
@@ -679,7 +849,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     auto data_entry = reader.ReadEntry("index_data");
 
-    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
+               disk_file_manager_ != nullptr;
 
     if (is_mmap_) {
         auto load_priority =
@@ -689,9 +860,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         SetupMmapFromData(
             data_entry.data.data(), data_entry.data.size(), load_priority);
     } else {
-        data_.resize(index_size);
-        std::memcpy(
-            data_.data(), data_entry.data.data(), data_entry.data.size());
+        owned_data_ = std::move(data_entry.data);
     }
 
     setup_data_pointers();
