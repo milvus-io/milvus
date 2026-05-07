@@ -7947,7 +7947,7 @@ func convertToExternalCollectionJobInfo(internal *datapb.ExternalCollectionRefre
 	if internal == nil {
 		return nil
 	}
-	jobInfo := &milvuspb.RefreshExternalCollectionJobInfo{
+	return &milvuspb.RefreshExternalCollectionJobInfo{
 		JobId:          internal.GetJobId(),
 		CollectionName: internal.GetCollectionName(),
 		State:          convertJobStateToExternalCollectionState(internal.GetState()),
@@ -7958,7 +7958,6 @@ func convertToExternalCollectionJobInfo(internal *datapb.ExternalCollectionRefre
 		StartTime:      internal.GetStartTime(),
 		EndTime:        internal.GetEndTime(),
 	}
-	return jobInfo
 }
 
 // convertJobStateToExternalCollectionState converts internal JobState to external RefreshExternalCollectionState

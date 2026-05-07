@@ -1214,7 +1214,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 		}).Build()
 	defer m1.UnPatch()
 
-	typeMismatchErr := fmt.Errorf("field type mismatch for field 'age' (external_field 'age_col'), expected Arrow int8, actual Arrow int64")
+	typeMismatchErr := fmt.Errorf("field type mismatch, expected Arrow int8, actual Arrow int64")
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, typeMismatchErr).Build()
 	defer m2.UnPatch()
 
@@ -1224,8 +1224,6 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 	s.Error(err)
 	s.Nil(result)
 	s.Contains(err.Error(), "sampling failed")
-	s.Contains(err.Error(), "field 'age'")
-	s.Contains(err.Error(), "external_field 'age_col'")
 	s.Contains(err.Error(), "field type mismatch")
 	s.Contains(err.Error(), "expected Arrow int8")
 	s.Contains(err.Error(), "actual Arrow int64")
