@@ -94,7 +94,7 @@ func (m *MockMixCoordClientInterface) ShowPartitions(ctx context.Context, in *mi
 	if m.Error {
 		return nil, errors.New("mocked error")
 	}
-	if in.CollectionName == "collection1" || in.CollectionID == 1 {
+	if in.CollectionName == "collection1" || in.CollectionName == "collection1_alias" || in.CollectionID == 1 {
 		return &milvuspb.ShowPartitionsResponse{
 			Status:               merr.Success(),
 			PartitionIDs:         []typeutil.UniqueID{1, 2},
@@ -137,7 +137,7 @@ func (m *MockMixCoordClientInterface) DescribeCollection(ctx context.Context, in
 		return nil, errors.New("mocked error")
 	}
 	m.IncAccessCount()
-	if in.CollectionName == "collection1" || in.CollectionID == 1 {
+	if in.CollectionName == "collection1" || in.CollectionName == "collection1_alias" || in.CollectionID == 1 {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:       merr.Success(),
 			CollectionID: typeutil.UniqueID(1),
@@ -1014,6 +1014,36 @@ func TestMetaCache_GetCollection(t *testing.T) {
 		Functions: []*schemapb.FunctionSchema{},
 		Name:      "collection1",
 	})
+}
+
+func TestMetaCache_GetCollectionByAliasHitsCache(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockMixCoordClientInterface{}
+
+	err := InitMetaCache(ctx, rootCoord)
+	assert.NoError(t, err)
+
+	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection1_alias")
+	assert.NoError(t, err)
+	assert.Equal(t, typeutil.UniqueID(1), id)
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1_alias")
+	assert.NoError(t, err)
+	assert.Equal(t, "collection1", schema.GetName())
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+
+	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1_alias", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, typeutil.UniqueID(1), info.collID)
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+
+	metaCache := globalMetaCache.(*MetaCache)
+	metaCache.mu.RLock()
+	defer metaCache.mu.RUnlock()
+	_, aliasCachedAsCollection := metaCache.collInfo[dbName]["collection1_alias"]
+	assert.False(t, aliasCachedAsCollection)
+	assert.Equal(t, "collection1", metaCache.aliasInfo[dbName]["collection1_alias"].collectionName)
 }
 
 func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
