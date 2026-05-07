@@ -7,8 +7,8 @@
 package proxypb
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"

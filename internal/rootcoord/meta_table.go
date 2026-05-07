@@ -2192,14 +2192,64 @@ func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *mil
 		entity.DbName = util.DefaultDBName
 	}
 
+	catalogEntity := entity
+	if entity.Object != nil &&
+		entity.Object.GetName() == "Collection" &&
+		!funcutil.IsEmptyString(entity.ObjectName) &&
+		entity.DbName != util.AnyWord {
+		dbID, collectionID := mt.LookupCollectionAndDBID(ctx, entity.DbName, entity.ObjectName)
+		if entity.ObjectName == util.AnyWord {
+			if dbID > 0 {
+				catalogEntity = proto.Clone(entity).(*milvuspb.GrantEntity)
+				catalogEntity.DbName = funcutil.FormatDatabaseID(dbID)
+			}
+		} else if collectionID != InvalidCollectionID {
+			catalogEntity = proto.Clone(entity).(*milvuspb.GrantEntity)
+			catalogEntity.DbName = funcutil.FormatDatabaseID(dbID)
+			catalogEntity.ObjectName = funcutil.FormatCollectionID(collectionID)
+		}
+	}
+
 	mt.permissionLock.RLock()
-	entities, err := mt.catalog.ListGrant(ctx, tenant, entity)
+	entities, err := mt.catalog.ListGrant(ctx, tenant, catalogEntity)
+	if err == nil && catalogEntity != entity {
+		nameBasedEntities, nameBasedErr := mt.catalog.ListGrant(ctx, tenant, entity)
+		if nameBasedErr != nil {
+			err = nameBasedErr
+		} else {
+			entities = append(entities, nameBasedEntities...)
+		}
+	}
 	mt.permissionLock.RUnlock()
 	if err != nil {
 		return nil, err
 	}
 
-	return mt.convertGrantsToNameBased(ctx, entities), nil
+	entities = mt.convertGrantsToNameBased(ctx, entities)
+	if funcutil.IsEmptyString(entity.ObjectName) && (entity.Object == nil || funcutil.IsEmptyString(entity.Object.Name)) {
+		return entities, nil
+	}
+
+	filtered := make([]*milvuspb.GrantEntity, 0, len(entities))
+	for _, grant := range entities {
+		if entity.DbName != util.AnyWord && grant.GetDbName() != entity.DbName && grant.GetDbName() != util.AnyWord {
+			continue
+		}
+		if entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) && grant.GetObject().GetName() != entity.Object.Name {
+			continue
+		}
+		if !funcutil.IsEmptyString(entity.ObjectName) {
+			if entity.ObjectName == util.AnyWord {
+				if grant.GetObjectName() != util.AnyWord {
+					continue
+				}
+			} else if grant.GetObjectName() != entity.ObjectName {
+				continue
+			}
+		}
+		filtered = append(filtered, grant)
+	}
+	return filtered, nil
 }
 
 func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {

@@ -1474,7 +1474,18 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			dbName = util.DefaultDBName
 		}
 		if dbName != entity.DbName && dbName != util.AnyWord && entity.DbName != util.AnyWord {
-			return nil
+			if !funcutil.IsIDBasedDBName(dbName) {
+				return nil
+			}
+		}
+		if !funcutil.IsEmptyString(entity.ObjectName) {
+			if entity.ObjectName == util.AnyWord {
+				if objectName != util.AnyWord {
+					return nil
+				}
+			} else if objectName != entity.ObjectName && !funcutil.IsIDBasedObjectName(objectName) {
+				return nil
+			}
 		}
 		granteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, v)
 		keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
@@ -1505,6 +1516,24 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		}
 		return nil
 	}
+	appendGrantEntitiesByPrefix := func(prefix string, object string) error {
+		keys, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
+		if err != nil {
+			log.Ctx(ctx).Error("fail to load grant privilege entities", zap.String("key", prefix), zap.Error(err))
+			return err
+		}
+		for i, key := range keys {
+			grantInfos := typeutil.AfterN(key, prefix, "/")
+			if len(grantInfos) != 1 {
+				log.Ctx(ctx).Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", prefix))
+				continue
+			}
+			if err = appendGrantEntity(values[i], object, grantInfos[0]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	if !funcutil.IsEmptyString(entity.ObjectName) && entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) {
 		if entity.DbName == util.DefaultDBName {
@@ -1529,6 +1558,10 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		granteeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(entity.DbName, entity.ObjectName))
 		v, err := kc.Txn.Load(ctx, granteeKey)
 		if err != nil {
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, entity.Role.Name, entity.Object.Name)
+				return entities, appendGrantEntitiesByPrefix(granteePrefix, entity.Object.Name)
+			}
 			log.Ctx(ctx).Error("fail to load the grant privilege entity", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
 		}

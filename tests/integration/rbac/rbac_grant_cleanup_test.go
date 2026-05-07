@@ -255,7 +255,7 @@ func (s *RBACBasicTestSuite) TestRenameCollectionGrantSurvivesRestart() {
 				Role:       &milvuspb.RoleEntity{Name: roleName},
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				ObjectName: newName,
-				DbName:     util.AnyWord,
+				DbName:     util.DefaultDBName,
 			},
 		})
 		if err != nil || !merr.Ok(newResp.GetStatus()) || len(newResp.GetEntities()) == 0 {
@@ -266,7 +266,7 @@ func (s *RBACBasicTestSuite) TestRenameCollectionGrantSurvivesRestart() {
 				Role:       &milvuspb.RoleEntity{Name: roleName},
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				ObjectName: oldName,
-				DbName:     util.AnyWord,
+				DbName:     util.DefaultDBName,
 			},
 		})
 		return err == nil && merr.Ok(oldResp.GetStatus()) && len(oldResp.GetEntities()) == 0

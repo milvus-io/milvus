@@ -3299,6 +3299,48 @@ func TestCatalog_ListDatabases_SkipsTombstone(t *testing.T) {
 	assert.Equal(t, "test_db", dbs[0].Name)
 }
 
+func TestCatalog_ListGrantFallsBackToIDBasedPointerForNameQuery(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	role := "rename_survivor_role"
+	object := commonpb.ObjectType_Collection.String()
+	dbName := util.DefaultDBName
+	newName := "renamed_collection"
+	grantor := util.UserRoot
+	privilege := commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()
+	idObjectName := funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), funcutil.FormatCollectionID(100))
+	idGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, idObjectName)
+	idGranteeID := crypto.MD5(idGranteeKey)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+	kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, newName)).
+		Return("", merr.WrapErrIoKeyNotFound(newName)).Once()
+	kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(util.AnyWord, newName))).
+		Return("", merr.WrapErrIoKeyNotFound(newName)).Once()
+	kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(dbName, newName))).
+		Return("", merr.WrapErrIoKeyNotFound(newName)).Once()
+
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, role, object)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).
+		Return([]string{idGranteeKey}, []string{idGranteeID}, nil).Once()
+	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idGranteeID)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).
+		Return([]string{granteeIDPrefix + privilege}, []string{grantor}, nil).Once()
+
+	grants, err := c.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: role},
+		Object:     &milvuspb.ObjectEntity{Name: object},
+		ObjectName: newName,
+		DbName:     dbName,
+	})
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	require.Equal(t, funcutil.FormatDatabaseID(1), grants[0].GetDbName())
+	require.Equal(t, funcutil.FormatCollectionID(100), grants[0].GetObjectName())
+	require.Equal(t, util.PrivilegeNameForAPI(privilege), grants[0].GetGrantor().GetPrivilege().GetName())
+}
+
 func TestCatalog_AlterDatabase(t *testing.T) {
 	kvmock := mocks.NewTxnKV(t)
 	c := NewCatalog(kvmock)
