@@ -5789,9 +5789,17 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert check
         assert len(results[0]) == limit
 
-        # No duplicate IDs (each row appears at most once)
+        # Element-level search returns element hits, so the same row id may
+        # appear multiple times. If pymilvus exposes element offset, the
+        # element identity should still be unique.
         ids = [hit["id"] for hit in results[0]]
-        assert len(ids) == len(set(ids)), f"Duplicate IDs in results: {len(ids)} total, {len(set(ids))} unique"
+        offsets = [hit.get("offset") for hit in results[0]]
+        if any(offset is not None for offset in offsets):
+            assert all(offset is not None for offset in offsets), "Some element hits are missing offset"
+            element_keys = list(zip(ids, offsets))
+            assert len(element_keys) == len(set(element_keys)), (
+                f"Duplicate element hits in results: {len(element_keys)} total, {len(set(element_keys))} unique"
+            )
 
         # Distances monotonically decreasing
         distances = [hit["distance"] for hit in results[0]]
