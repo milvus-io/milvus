@@ -279,6 +279,18 @@ func TestExpr_Like(t *testing.T) {
 	fmt.Println(plan)
 	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	expr = `A like "abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_Equal, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
 func TestExpr_RegexMatch(t *testing.T) {
@@ -288,7 +300,8 @@ func TestExpr_RegexMatch(t *testing.T) {
 
 	// --- Regex-to-LIKE optimization tests ---
 
-	// Pure literal "abc" → InnerMatch (substring)
+	// Pure literal "abc" stays RegexMatch. RE2's literal PartialMatch path is
+	// faster than Milvus InnerMatch in current growing-segment benchmarks.
 	expr := `A =~ "abc"`
 	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
@@ -298,7 +311,7 @@ func TestExpr_RegexMatch(t *testing.T) {
 	}, nil, nil)
 	assert.NoError(t, err, expr)
 	assert.NotNil(t, plan)
-	assert.Equal(t, planpb.OpType_InnerMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
 	// "^abc" → PrefixMatch
@@ -340,7 +353,7 @@ func TestExpr_RegexMatch(t *testing.T) {
 	assert.Equal(t, planpb.OpType_Equal, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	// Escaped metacharacter "file\\.txt" → InnerMatch("file.txt")
+	// Escaped metacharacter without anchors stays RegexMatch
 	expr = `A =~ "file\\.txt"`
 	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
@@ -350,8 +363,8 @@ func TestExpr_RegexMatch(t *testing.T) {
 	}, nil, nil)
 	assert.NoError(t, err, expr)
 	assert.NotNil(t, plan)
-	assert.Equal(t, planpb.OpType_InnerMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
-	assert.Equal(t, "file.txt", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `file\.txt`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
 	// --- Patterns that stay as RegexMatch ---
 
@@ -442,7 +455,7 @@ func TestExpr_RegexMatch(t *testing.T) {
 
 	// --- Negation ---
 
-	// !~ with pure literal → NOT(InnerMatch)
+	// !~ with pure literal → NOT(RegexMatch)
 	expr = `A !~ "abc"`
 	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
 		Topk:         0,
@@ -454,7 +467,7 @@ func TestExpr_RegexMatch(t *testing.T) {
 	assert.NotNil(t, plan)
 	predicates := plan.GetVectorAnns().GetPredicates()
 	assert.Equal(t, planpb.UnaryExpr_Not, predicates.GetUnaryExpr().GetOp())
-	assert.Equal(t, planpb.OpType_InnerMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, planpb.OpType_RegexMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, "abc", predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetValue().GetStringVal())
 
 	// !~ with metacharacters → NOT(RegexMatch)
@@ -507,17 +520,17 @@ func TestExpr_RegexMatch(t *testing.T) {
 	}
 
 	// Optimizable patterns
-	checkVal(t, `A =~ "hello"`, planpb.OpType_InnerMatch, "hello")
+	checkVal(t, `A =~ "hello"`, planpb.OpType_RegexMatch, "hello")
 	checkVal(t, `A =~ "^hello"`, planpb.OpType_PrefixMatch, "hello")
 	checkVal(t, `A =~ "hello$"`, planpb.OpType_PostfixMatch, "hello")
 	checkVal(t, `A =~ "^hello$"`, planpb.OpType_Equal, "hello")
 	checkVal(t, `A =~ "^$"`, planpb.OpType_Equal, "")
-	checkVal(t, `A =~ "hello world"`, planpb.OpType_InnerMatch, "hello world")
-	checkVal(t, `A =~ "file\\.txt"`, planpb.OpType_InnerMatch, "file.txt")
+	checkVal(t, `A =~ "hello world"`, planpb.OpType_RegexMatch, "hello world")
+	checkVal(t, `A =~ "file\\.txt"`, planpb.OpType_RegexMatch, `file\.txt`)
 	checkVal(t, `A =~ "^file\\.txt$"`, planpb.OpType_Equal, "file.txt")
-	checkVal(t, `A =~ "a\\(b\\)"`, planpb.OpType_InnerMatch, "a(b)")
-	checkVal(t, `A =~ "price\\$10"`, planpb.OpType_InnerMatch, "price$10")
-	checkVal(t, `A =~ "back\\\\slash"`, planpb.OpType_InnerMatch, "back\\slash")
+	checkVal(t, `A =~ "a\\(b\\)"`, planpb.OpType_RegexMatch, `a\(b\)`)
+	checkVal(t, `A =~ "price\\$10"`, planpb.OpType_RegexMatch, `price\$10`)
+	checkVal(t, `A =~ "back\\\\slash"`, planpb.OpType_RegexMatch, `back\\slash`)
 
 	// Non-optimizable: metacharacters → stay RegexMatch
 	checkOp(t, `A =~ "a.*b"`, planpb.OpType_RegexMatch)
@@ -547,7 +560,7 @@ func TestExpr_RegexMatch(t *testing.T) {
 	checkOp(t, `A =~ "(?s)a.b"`, planpb.OpType_RegexMatch)
 
 	// Edge: escaped $ at end should NOT be treated as anchor
-	checkVal(t, `A =~ "price\\$"`, planpb.OpType_InnerMatch, "price$")
+	checkVal(t, `A =~ "price\\$"`, planpb.OpType_RegexMatch, `price\$`)
 	checkVal(t, `A =~ "^price\\$"`, planpb.OpType_PrefixMatch, "price$")
 }
 

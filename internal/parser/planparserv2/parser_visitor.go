@@ -568,8 +568,8 @@ func extractRegexPattern(literal string) (string, error) {
 	return result.String(), nil
 }
 
-// tryOptimizeRegexToLike attempts to convert simple regex patterns to more
-// efficient LIKE operations. Returns (op, operand, true) if optimization is
+// tryOptimizeRegexToLike attempts to convert anchored simple regex patterns to
+// more efficient LIKE operations. Returns (op, operand, true) if optimization is
 // possible, or (_, _, false) if the pattern must remain as RegexMatch.
 //
 // Only patterns composed entirely of literal characters and ^/$ anchors are
@@ -641,7 +641,10 @@ func tryOptimizeRegexToLike(pattern string) (planpb.OpType, string, bool) {
 	case hasEnd:
 		return planpb.OpType_PostfixMatch, lit, true
 	default:
-		return planpb.OpType_InnerMatch, lit, true
+		// Keep unanchored literal regex as RegexMatch. RE2's literal
+		// PartialMatch path is faster than Milvus InnerMatch in current
+		// growing-segment benchmarks.
+		return 0, "", false
 	}
 }
 
