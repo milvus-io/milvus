@@ -20,6 +20,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "arrow/array/array_base.h"
 #include "arrow/c/abi.h"
@@ -158,8 +159,7 @@ NewPackedWriter(struct ArrowSchema* schema,
         auto conf = milvus_storage::StorageConfig();
         conf.part_size = part_upload_size;
 
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+        auto trueFs = milvus::segcore::GetDefaultArrowFileSystem();
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileWriteFailed,

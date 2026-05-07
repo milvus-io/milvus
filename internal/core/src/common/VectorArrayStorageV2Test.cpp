@@ -36,6 +36,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "common/Consts.h"
@@ -108,8 +109,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
             segcore::SegcoreConfig::default_config(),
             true);
 
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
         std::vector<std::string> paths = {"test_data/0/10000.parquet",
@@ -265,8 +265,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
     void
     TearDown() override {
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         (void)fs->DeleteDir("test_data");
     }
 
@@ -289,8 +288,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     std::vector<std::string> paths = {"test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     // Prepare for index building
     int64_t collection_id = 1;
@@ -403,8 +401,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     std::vector<std::string> paths = {"test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     // Prepare for index building
     int64_t collection_id = 1;

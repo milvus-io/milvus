@@ -31,6 +31,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "arrow/type_fwd.h"
 #include "common/ArrowDataWrapper.h"
@@ -64,8 +65,7 @@ using namespace milvus::segcore;
 class TestGrowingStorageV2 : public ::testing::Test {
     void
     SetUp() override {
-        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+        fs_ = milvus::segcore::GetDefaultArrowFileSystem();
         SetUpCommonData();
     }
 

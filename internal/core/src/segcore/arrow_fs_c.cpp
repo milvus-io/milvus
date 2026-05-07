@@ -1,19 +1,3 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License. You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #include "segcore/arrow_fs_c.h"
 
 #include <exception>
@@ -25,15 +9,22 @@
 #include "storage/loon_ffi/property_singleton.h"
 
 CStatus
-InitLocalArrowFileSystemSingleton(const char* c_path) {
+InitArrowFileSystem(CStorageConfig c_storage_config) {
     try {
-        std::string path(c_path);
-        milvus_storage::ArrowFileSystemConfig conf;
-        conf.root_path = path;
-        conf.storage_type = "local";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(
+            c_storage_config);
 
-        milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(c_path);
+        auto props = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                         .GetProperties();
+        if (props) {
+            auto result =
+                milvus_storage::FilesystemCache::getInstance().get(*props, "");
+            if (!result.ok()) {
+                throw std::runtime_error(
+                    "Failed to populate FilesystemCache: " +
+                    result.status().ToString());
+            }
+        }
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -42,45 +33,6 @@ InitLocalArrowFileSystemSingleton(const char* c_path) {
 }
 
 void
-CleanArrowFileSystemSingleton() {
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
-}
-
-CStatus
-InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
-    try {
-        milvus_storage::ArrowFileSystemConfig conf;
-        conf.address = std::string(c_storage_config.address);
-        conf.bucket_name = std::string(c_storage_config.bucket_name);
-        conf.access_key_id = std::string(c_storage_config.access_key_id);
-        conf.access_key_value = std::string(c_storage_config.access_key_value);
-        conf.root_path = std::string(c_storage_config.root_path);
-        conf.storage_type = std::string(c_storage_config.storage_type);
-        conf.cloud_provider = std::string(c_storage_config.cloud_provider);
-        conf.iam_endpoint = std::string(c_storage_config.iam_endpoint);
-        conf.log_level = std::string(c_storage_config.log_level);
-        conf.region = std::string(c_storage_config.region);
-        conf.use_ssl = c_storage_config.useSSL;
-        conf.ssl_ca_cert = std::string(c_storage_config.sslCACert);
-        conf.use_iam = c_storage_config.useIAM;
-        conf.use_virtual_host = c_storage_config.useVirtualHost;
-        conf.request_timeout_ms = c_storage_config.requestTimeoutMs;
-        conf.gcp_credential_json =
-            std::string(c_storage_config.gcp_credential_json);
-        conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
-        conf.max_connections = c_storage_config.max_connections;
-        if (c_storage_config.tls_min_version != nullptr) {
-            conf.tls_min_version =
-                std::string(c_storage_config.tls_min_version);
-        }
-        conf.use_crc32c_checksum = c_storage_config.use_crc32c_checksum;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
-
-        milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(
-            c_storage_config);
-
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+CleanArrowFileSystem() {
+    milvus_storage::FilesystemCache::getInstance().clean();
 }

@@ -31,11 +31,7 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         test_dir_ = "/tmp/flush_growing_test_" + std::to_string(time(nullptr));
         fs::create_directories(test_dir_);
 
-        // initialize Arrow filesystem singleton (local filesystem for testing)
-        milvus_storage::ArrowFileSystemConfig fs_config;
-        fs_config.storage_type = "local";
-        fs_config.root_path = test_dir_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(fs_config);
+        // Arrow filesystem is initialized by init_gtest.cpp
     }
 
     void

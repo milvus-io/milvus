@@ -11,18 +11,14 @@
 
 #pragma once
 
-#include "common/type_c.h"
+#include "milvus-storage/filesystem/fs.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace milvus::segcore {
 
-CStatus
-InitArrowFileSystem(CStorageConfig c_storage_config);
+// Returns the default ArrowFileSystem from FilesystemCache.
+// Uses LoonFFIPropertiesSingleton to look up the cached instance.
+// Throws if properties singleton is not initialized or cache lookup fails.
+milvus_storage::ArrowFileSystemPtr
+GetDefaultArrowFileSystem();
 
-void
-CleanArrowFileSystem();
-
-#ifdef __cplusplus
-}
-#endif
+}  // namespace milvus::segcore

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+#include "segcore/default_fs.h"
 
 #include <folly/CancellationToken.h>
 #include <folly/ExceptionWrapper.h>
@@ -708,8 +709,7 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         AssertInfo(fs != nullptr, "arrow file system is null");
 
         milvus::Config config;
@@ -1366,8 +1366,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
 
         // get filesystem from singleton
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         if (!fs) {
             return milvus::FailureCStatus(milvus::UnexpectedError,
                                           "filesystem not initialized");

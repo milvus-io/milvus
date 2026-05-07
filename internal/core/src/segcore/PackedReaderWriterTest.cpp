@@ -32,7 +32,6 @@
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/constants.h"
-#include "segcore/arrow_fs_c.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
@@ -75,17 +74,15 @@ TEST(CPackedTest, PackedWriterAndReader) {
     int group[] = {0};
     AddCColumnSplit(cgs, group, 1);
 
-    auto c_status = InitLocalArrowFileSystemSingleton(path);
-    EXPECT_EQ(c_status.error_code, 0);
     CPackedWriter c_packed_writer = nullptr;
-    c_status = NewPackedWriter(&c_write_schema,
-                               buffer_size,
-                               paths,
-                               1,
-                               part_upload_size,
-                               cgs,
-                               &c_packed_writer,
-                               nullptr);
+    auto c_status = NewPackedWriter(&c_write_schema,
+                                    buffer_size,
+                                    paths,
+                                    1,
+                                    part_upload_size,
+                                    cgs,
+                                    &c_packed_writer,
+                                    nullptr);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_writer, nullptr);
 

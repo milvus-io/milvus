@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+#include "segcore/default_fs.h"
 
 #include <cxxabi.h>
 #include <folly/ExceptionWrapper.h>
@@ -1481,8 +1482,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is nullptr");
     milvus::storage::FileManagerContext file_manager_context(
         field_meta, index_meta, remote_chunk_manager, fs);

@@ -22,14 +22,17 @@
 #include "segcore/arrow_fs_c.h"
 #include "test_utils/Constants.h"
 
-TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {
-    const char* path = TestLocalPath.c_str();
-    CStatus status = InitLocalArrowFileSystemSingleton(path);
+TEST(ArrowFileSystem, InitAndClean) {
+    CStorageConfig config = {};
+    config.root_path = TestLocalPath.c_str();
+    config.storage_type = "local";
+
+    CStatus status = InitArrowFileSystem(config);
     EXPECT_EQ(status.error_code, 0);
 
-    CleanArrowFileSystemSingleton();
+    CleanArrowFileSystem();
 
-    // Reinitialize the singleton so subsequent tests can use it
-    status = InitLocalArrowFileSystemSingleton(path);
+    // Reinitialize so subsequent tests can use it
+    status = InitArrowFileSystem(config);
     EXPECT_EQ(status.error_code, 0);
 }
