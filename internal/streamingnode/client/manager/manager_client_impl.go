@@ -83,8 +83,9 @@ func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64
 	return result, nil
 }
 
-// CollectAllStatus collects status in all underlying streamingnode.
+// CollectAllStatus collects status in underlying streamingnodes.
 // If resourceGroup is not empty, only nodes with matching resource group will be collected.
+// If resourceGroup is empty and default resource group exists, only default resource group nodes will be collected.
 func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
@@ -99,6 +100,7 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup 
 	if len(state.State.Addresses) == 0 {
 		return make(map[int64]*types.StreamingNodeStatus), nil
 	}
+	resourceGroup = effectiveResourceGroupForCollectAllStatus(state, resourceGroup)
 
 	// Collect status of all streamingnode.
 	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroup)
@@ -122,6 +124,19 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup 
 		}
 	}
 	return result, nil
+}
+
+func effectiveResourceGroupForCollectAllStatus(state discoverer.VersionedState, resourceGroup string) string {
+	if resourceGroup != "" {
+		return resourceGroup
+	}
+	for _, session := range state.Sessions() {
+		rg := session.GetResourceGroupName()
+		if rg == "" || rg == common.DefaultResourceGroupName {
+			return common.DefaultResourceGroupName
+		}
+	}
+	return ""
 }
 
 func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
