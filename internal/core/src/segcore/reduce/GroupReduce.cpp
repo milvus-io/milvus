@@ -32,9 +32,11 @@ namespace {
 // Contract: group_size >= 1 (enforced by PlanProto normalization).
 bool
 TryAcceptCompositeGroup(
-    const PkType& pk,
+    const SearchResultPair& result,
     const CompositeGroupKey& composite_key,
     std::unordered_set<PkType>& pk_set,
+    std::unordered_set<ElementSearchResultKey, ElementSearchResultKeyHash>&
+        element_result_set,
     std::unordered_map<CompositeGroupKey, int64_t, CompositeGroupKeyHash>&
         composite_group_by_map,
     int64_t topk,
@@ -42,9 +44,28 @@ TryAcceptCompositeGroup(
     AssertInfo(group_size >= 1,
                "group_size must be >= 1 (PlanProto normalizes), got {}",
                group_size);
-    if (pk_set.count(pk) != 0) {
-        return false;
+
+    auto search_result = result.search_result_;
+    ElementSearchResultKey element_key{result.primary_key_, -1};
+    if (search_result->element_level_) {
+        AssertInfo(
+            result.offset_ >= 0 && static_cast<size_t>(result.offset_) <
+                                       search_result->element_indices_.size(),
+            "invalid element-level search result offset {}, "
+            "element_indices size {}",
+            result.offset_,
+            search_result->element_indices_.size());
+        element_key.element_index =
+            search_result->element_indices_[result.offset_];
+        if (element_result_set.count(element_key) != 0) {
+            return false;
+        }
+    } else {
+        if (pk_set.count(result.primary_key_) != 0) {
+            return false;
+        }
     }
+
     auto [it, inserted] = composite_group_by_map.try_emplace(composite_key, 0);
     if (inserted &&
         static_cast<int64_t>(composite_group_by_map.size()) > topk) {
@@ -57,7 +78,11 @@ TryAcceptCompositeGroup(
         return false;
     }
     it->second += 1;
-    pk_set.insert(pk);
+    if (search_result->element_level_) {
+        element_result_set.insert(std::move(element_key));
+    } else {
+        pk_set.insert(result.primary_key_);
+    }
     return true;
 }
 
@@ -172,6 +197,7 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         SearchResultPairComparator>
         heap;
     pk_set_.clear();
+    element_result_set_.clear();
     pairs_.clear();
     pairs_.reserve(num_segments_);
 
@@ -230,9 +256,10 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
             pilot->search_result_->composite_group_by_values_
                 .value()[pilot->offset_];
 
-        if (TryAcceptCompositeGroup(pk,
+        if (TryAcceptCompositeGroup(*pilot,
                                     composite_key,
                                     pk_set_,
+                                    element_result_set_,
                                     composite_group_by_map,
                                     topk,
                                     group_size)) {

@@ -561,6 +561,59 @@ func (suite *SearchReduceSuite) TestElementIndices_BackfillNilForEmptyResult() {
 	})
 }
 
+func (suite *SearchReduceSuite) TestElementLevelDedupUsesPKAndElementIndex() {
+	const (
+		nq   = 1
+		topk = 4
+	)
+
+	makeData := func() *schemapb.SearchResultData {
+		data := mock_segcore.GenSearchResultData(nq, topk,
+			[]int64{5, 5, 5, 6},
+			[]float32{0.99, 0.98, 0.97, 0.96},
+			[]int64{4},
+		)
+		data.ElementIndices = &schemapb.LongArray{Data: []int64{0, 1, 1, 0}}
+		return data
+	}
+
+	suite.Run("common_reduce", func() {
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+		searchReduce := &SearchCommonReduce{}
+		res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{makeData()}, reduceInfo)
+		suite.NoError(err)
+
+		suite.Equal([]int64{5, 5, 6}, res.Ids.GetIntId().Data)
+		suite.Equal([]float32{0.99, 0.98, 0.96}, res.Scores)
+		suite.Equal([]int64{0, 1, 0}, res.ElementIndices.GetData())
+		suite.Equal([]int64{3}, res.Topks)
+	})
+
+	suite.Run("group_by_reduce", func() {
+		data := makeData()
+		data.GroupByFieldValue = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{5, 5, 5, 6}},
+					},
+				},
+			},
+		}
+
+		reduceInfo := reduce.NewReduceSearchResultInfo(nq, 2).WithGroupSize(2).WithGroupByFieldIdsFromProto(101, nil)
+		searchReduce := &SearchGroupByReduce{}
+		res, err := searchReduce.ReduceSearchResultData(context.TODO(), []*schemapb.SearchResultData{data}, reduceInfo)
+		suite.NoError(err)
+
+		suite.Equal([]int64{5, 5, 6}, res.Ids.GetIntId().Data)
+		suite.Equal([]float32{0.99, 0.98, 0.96}, res.Scores)
+		suite.Equal([]int64{0, 1, 0}, res.ElementIndices.GetData())
+		suite.Equal([]int64{3}, res.Topks)
+	})
+}
+
 func (suite *SearchReduceSuite) TestElementIndices_NoElementLevel() {
 	// When no result has ElementIndices, ret.ElementIndices should remain nil.
 	const (

@@ -19,6 +19,25 @@ type SearchReduce interface {
 	ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error)
 }
 
+type elementSearchResultKey struct {
+	pk           interface{}
+	elementIndex int64
+}
+
+func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk interface{}, hasElementIndices bool) (interface{}, error) {
+	if !hasElementIndices {
+		return pk, nil
+	}
+	elementIndices := data.GetElementIndices()
+	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
+		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+	}
+	return elementSearchResultKey{
+		pk:           pk,
+		elementIndex: elementIndices.GetData()[idx],
+	}, nil
+}
+
 type SearchCommonReduce struct{}
 
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
@@ -76,18 +95,23 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 	resultOffsets := make([][]int64, len(searchResultData))
 	totalOffsetElements := 0
-	for i := range searchResultData {
-		totalOffsetElements += len(searchResultData[i].Topks)
+	for i, data := range searchResultData {
+		if int64(len(data.Topks)) < nq {
+			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+		}
+		totalOffsetElements += len(data.Topks)
 	}
 	offsetBacking := make([]int64, totalOffsetElements)
 	for i := 0; i < len(searchResultData); i++ {
-		n := len(searchResultData[i].Topks)
+		data := searchResultData[i]
+		topks := data.Topks
+		n := len(topks)
 		resultOffsets[i] = offsetBacking[:n:n]
 		offsetBacking = offsetBacking[n:]
-		for j := int64(1); j < nq; j++ {
-			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
+		for j := 1; j < n; j++ {
+			resultOffsets[i][j] = resultOffsets[i][j-1] + topks[j-1]
 		}
-		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
+		ret.AllSearchCount += data.GetAllSearchCount()
 	}
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
@@ -101,7 +125,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, numResults)
-		idSet := make(map[interface{}]struct{})
+		dedupSet := make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
@@ -112,9 +136,13 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			score := searchResultData[sel].Scores[idx]
+			dedupKey, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+			if err != nil {
+				return nil, err
+			}
 
 			// remove duplicates
-			if _, ok := idSet[id]; !ok {
+			if _, ok := dedupSet[dedupKey]; !ok {
 				fieldsData := searchResultData[sel].FieldsData
 				fieldIdxs := idxComputers[sel].Compute(idx)
 				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
@@ -123,10 +151,10 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
 				}
-				idSet[id] = struct{}{}
+				dedupSet[dedupKey] = struct{}{}
 				j++
 			} else {
-				// skip entity with same id
+				// skip the same row-level entity or the same element-level hit
 				skipDupCnt++
 			}
 			offsets[sel]++
@@ -205,18 +233,23 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 
 	resultOffsets := make([][]int64, len(searchResultData))
 	totalOffsetElements := 0
-	for i := range searchResultData {
-		totalOffsetElements += len(searchResultData[i].Topks)
+	for i, data := range searchResultData {
+		if int64(len(data.Topks)) < nq {
+			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+		}
+		totalOffsetElements += len(data.Topks)
 	}
 	offsetBacking := make([]int64, totalOffsetElements)
 	for i := range searchResultData {
-		n := len(searchResultData[i].Topks)
+		data := searchResultData[i]
+		topks := data.Topks
+		n := len(topks)
 		resultOffsets[i] = offsetBacking[:n:n]
 		offsetBacking = offsetBacking[n:]
-		for j := int64(1); j < nq; j++ {
-			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
+		for j := 1; j < n; j++ {
+			resultOffsets[i][j] = resultOffsets[i][j-1] + topks[j-1]
 		}
-		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
+		ret.AllSearchCount += data.GetAllSearchCount()
 	}
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
@@ -251,12 +284,16 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 
 	for i := int64(0); i < info.GetNq(); i++ {
 		var j, fdelta, rsize int64
+		var err error
 		if singleField {
-			j, fdelta, rsize = reduceGroupBySinglePerNq(searchResultData, resultOffsets, i,
-				info.GetTopK(), groupSize, groupBound, singleIters, idxComputers, ret, &acceptedRows)
+			j, fdelta, rsize, err = reduceGroupBySinglePerNq(searchResultData, resultOffsets, i,
+				info.GetTopK(), groupSize, groupBound, singleIters, idxComputers, ret, &acceptedRows, hasElementIndices)
 		} else {
-			j, fdelta, rsize = reduceGroupByMultiPerNq(searchResultData, resultOffsets, i,
-				info.GetTopK(), groupSize, groupBound, multiExtractors, idxComputers, ret, &acceptedRows)
+			j, fdelta, rsize, err = reduceGroupByMultiPerNq(searchResultData, resultOffsets, i,
+				info.GetTopK(), groupSize, groupBound, multiExtractors, idxComputers, ret, &acceptedRows, hasElementIndices)
+		}
+		if err != nil {
+			return nil, err
 		}
 		filteredCount += fdelta
 		retSize += rsize
@@ -314,9 +351,10 @@ func reduceGroupBySinglePerNq(
 	idxComputers []*typeutil.FieldDataIdxComputer,
 	ret *schemapb.SearchResultData,
 	acceptedRows *[]reduce.RowRef,
-) (j int64, filtered int64, retSize int64) {
+	hasElementIndices bool,
+) (j int64, filtered int64, retSize int64, err error) {
 	offsets := make([]int64, len(searchResultData))
-	idSet := make(map[interface{}]struct{})
+	dedupSet := make(map[interface{}]struct{})
 	groupCounts := make(map[any]int64)
 
 	for j = 0; j < groupBound; {
@@ -329,7 +367,11 @@ func reduceGroupBySinglePerNq(
 		id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 		val := iterators[sel](int(idx))
 		score := searchResultData[sel].Scores[idx]
-		if _, ok := idSet[id]; !ok {
+		dedupKey, dedupErr := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+		if dedupErr != nil {
+			return j, filtered, retSize, dedupErr
+		}
+		if _, ok := dedupSet[dedupKey]; !ok {
 			cnt, exists := groupCounts[val]
 			switch {
 			case !exists && int64(len(groupCounts)) >= topK:
@@ -345,7 +387,7 @@ func reduceGroupBySinglePerNq(
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
 				}
 				groupCounts[val] = cnt + 1
-				idSet[id] = struct{}{}
+				dedupSet[dedupKey] = struct{}{}
 				*acceptedRows = append(*acceptedRows, reduce.RowRef{ResultIdx: sel, RowIdx: idx})
 				j++
 			}
@@ -368,9 +410,10 @@ func reduceGroupByMultiPerNq(
 	idxComputers []*typeutil.FieldDataIdxComputer,
 	ret *schemapb.SearchResultData,
 	acceptedRows *[]reduce.RowRef,
-) (j int64, filtered int64, retSize int64) {
+	hasElementIndices bool,
+) (j int64, filtered int64, retSize int64, err error) {
 	offsets := make([]int64, len(searchResultData))
-	idSet := make(map[interface{}]struct{})
+	dedupSet := make(map[interface{}]struct{})
 	groupBuckets := make(map[uint64][]*reduceGroupEntry)
 	totalGroups := int64(0)
 
@@ -384,7 +427,11 @@ func reduceGroupByMultiPerNq(
 		id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 		hash, values := extractors[sel](int(idx))
 		score := searchResultData[sel].Scores[idx]
-		if _, ok := idSet[id]; !ok {
+		dedupKey, dedupErr := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+		if dedupErr != nil {
+			return j, filtered, retSize, dedupErr
+		}
+		if _, ok := dedupSet[dedupKey]; !ok {
 			entry := findReduceGroupEntry(groupBuckets[hash], values)
 			isNewGroup := entry == nil
 			switch {
@@ -406,7 +453,7 @@ func reduceGroupByMultiPerNq(
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
 				}
 				entry.count++
-				idSet[id] = struct{}{}
+				dedupSet[dedupKey] = struct{}{}
 				*acceptedRows = append(*acceptedRows, reduce.RowRef{ResultIdx: sel, RowIdx: idx})
 				j++
 			}
