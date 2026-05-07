@@ -30,7 +30,12 @@ StorageV2FSCache::Get(const Key& key) {
     // Convert Key to api::Properties and delegate to FilesystemCache
     // This ensures all filesystems are managed by a single cache with metrics support
     milvus_storage::api::Properties props;
-    props[PROPERTY_FS_ADDRESS] = key.address;
+    std::string address = key.address;
+    if (!key.useSSL && !address.empty() &&
+        address.find("://") == std::string::npos) {
+        address = "http://" + address;
+    }
+    props[PROPERTY_FS_ADDRESS] = address;
     props[PROPERTY_FS_BUCKET_NAME] = key.bucket_name;
     props[PROPERTY_FS_ACCESS_KEY_ID] = key.access_key_id;
     props[PROPERTY_FS_ACCESS_KEY_VALUE] = key.access_key_value;

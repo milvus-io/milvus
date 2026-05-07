@@ -30,7 +30,7 @@ package initcore
 */
 import "C"
 
-// CleanArrowFileSystemSingleton is an utility clean internal segcore fs singleton
-func CleanArrowFileSystemSingleton() {
-	C.CleanArrowFileSystemSingleton()
+// CleanArrowFileSystem cleans the filesystem cache
+func CleanArrowFileSystem() {
+	C.CleanArrowFileSystem()
 }

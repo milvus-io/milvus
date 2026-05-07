@@ -105,7 +105,7 @@ func (s *SortCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
-	initcore.CleanArrowFileSystemSingleton()
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {

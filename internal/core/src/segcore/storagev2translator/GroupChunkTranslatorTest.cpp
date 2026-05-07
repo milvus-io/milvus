@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "NamedType/underlying_functionalities.hpp"
 #include "cachinglayer/Utils.h"
@@ -60,8 +61,7 @@ using namespace milvus::segcore::storagev2translator;
 class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
-        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+        fs_ = milvus::segcore::GetDefaultArrowFileSystem();
         schema_ = CreateTestSchema();
         arrow_schema_ = schema_->ConvertToArrowSchema();
         int64_t per_batch = 1000;

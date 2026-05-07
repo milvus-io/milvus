@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/default_fs.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -358,8 +359,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
     auto load_futures =

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "ChunkedSegmentSealedImpl.h"
+#include "segcore/default_fs.h"
 
 #include <cxxabi.h>
 #include <fmt/core.h>
@@ -830,8 +831,7 @@ LoadedGroupChunkMetadata
 LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                        const std::vector<FieldId>& field_ids_for_stats,
                        const std::string& debug_key) {
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
 
     std::vector<std::future<FileMetadataLoadResult>> futures;
@@ -953,8 +953,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         milvus_storage::FieldIDList field_id_list;
         if (info.child_field_ids.size() == 0) {
@@ -2757,8 +2756,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
 
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto& cache = GetGlobalTextColumnCache();
     auto texts = cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
@@ -2952,8 +2950,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is null");
 
     milvus::Config config;

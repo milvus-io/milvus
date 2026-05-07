@@ -27,6 +27,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
+#include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "arrow/api.h"
@@ -879,8 +880,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         auto column_group_info =
             FieldDataInfo(column_group_id.get(), num_rows, "");
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
@@ -1236,8 +1236,7 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
         auto properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         google::protobuf::RepeatedPtrField<std::string> resolved;
         resolved.Reserve(encoded_refs.size());
         for (size_t j = 0; j < encoded_refs.size(); ++j) {

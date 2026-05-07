@@ -120,11 +120,6 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
-    arrow_fs_conf.storage_type = "local";
-    arrow_fs_conf.root_path = root_path;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
-
     size_t nb = data.size();
 
     auto field_data =
@@ -443,11 +438,6 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
-
-    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
-    arrow_fs_conf.storage_type = "local";
-    arrow_fs_conf.root_path = root_path;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
 
     size_t nb = data.size();
 
@@ -1607,11 +1597,6 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
-    arrow_fs_conf.storage_type = "local";
-    arrow_fs_conf.root_path = root_path;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
-
     auto field_data =
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(data.data(), data.size());
@@ -1888,11 +1873,6 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
-
-    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
-    arrow_fs_conf.storage_type = "local";
-    arrow_fs_conf.root_path = root_path;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
 
     auto field_data =
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);

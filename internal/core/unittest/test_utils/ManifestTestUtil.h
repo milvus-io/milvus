@@ -22,6 +22,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "arrow/record_batch.h"
 #include "common/FieldMeta.h"
@@ -147,8 +148,7 @@ class V3SegmentTestData {
         auto column_groups = std::move(close_result).ValueOrDie();
 
         // Commit manifest via Transaction
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         auto txn_result =
             milvus_storage::api::transaction::Transaction::Open(fs, base_path_);
         AssertInfo(txn_result.ok(),
