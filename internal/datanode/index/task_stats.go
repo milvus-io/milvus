@@ -632,9 +632,12 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return fmt.Errorf("failed to add text index stats to manifest: %w", err)
 		}
 		st.manifestPath = newManifest
-		// Dual-write: keep textIndexLogs populated so it is stored in segment metadata as a
-		// placeholder. This prevents stats_inspector from re-triggering TextIndexJob for V3
-		// segments that already have text index stats in the manifest.
+		// V3 segments store text index stats in the manifest (source of truth at load time).
+		// Clear file paths from metadata to avoid stale references, but keep the map entries
+		// as placeholders so needDoTextIndex() in stats_inspector.go won't trigger redundant jobs.
+		for _, stats := range textIndexLogs {
+			stats.Files = nil
+		}
 	}
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
@@ -810,9 +813,12 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return fmt.Errorf("failed to add JSON key stats to manifest: %w", err)
 		}
 		st.manifestPath = newManifest
-		// Dual-write: keep jsonKeyIndexStats populated so it is stored in segment metadata as a
-		// placeholder. This prevents stats_inspector from re-triggering JsonKeyIndexJob for V3
-		// segments that already have JSON key stats in the manifest.
+		// V3 segments store JSON key stats in the manifest (source of truth at load time).
+		// Clear file paths from metadata to avoid stale references, but keep the map entries
+		// as placeholders so needDoJsonKeyIndex() in stats_inspector.go won't trigger redundant jobs.
+		for _, stats := range jsonKeyIndexStats {
+			stats.Files = nil
+		}
 	}
 
 	totalElapse := st.tr.RecordSpan()
