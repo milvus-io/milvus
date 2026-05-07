@@ -731,13 +731,27 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
 
-    // field_id -> ArrayOffsetsGrowing (for fast lookup via GetArrayOffsets)
-    // Multiple field_ids from the same struct point to the same ArrayOffsetsGrowing
+    // field_id -> ArrayOffsetsGrowing, used for element-level filtering
+    // (MATCH_*, struct element access, etc.).
+    //
+    // Populated during InitializeArrayOffsets for:
+    //   - struct array subfields: all subfields of one struct share a single
+    //     ArrayOffsetsGrowing (array lengths are identical across subfields)
+    //   - plain array fields (ARRAY / VECTOR_ARRAY, not part of a struct):
+    //     each field owns its own ArrayOffsetsGrowing
+    //
+    // JSON fields are NOT present here. Growing JSON has no path index, so no
+    // ArrayOffsets is available — MATCH on growing JSON falls back to brute
+    // force. In sealed segments with a JSON path index, ArrayOffsets is
+    // serialized alongside the index and accessed via
+    // JsonInvertedIndex::GetArrayOffsets() after pinning the path index.
     std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsGrowing>>
         array_offsets_map_;
 
-    // Representative field_id for each struct (used to extract array lengths during Insert)
-    // One field_id per struct, since all fields in the same struct have identical array lengths
+    // Fields that drive ArrayOffsetsGrowing updates on Insert.
+    //   - struct array: one representative subfield per struct (all subfields
+    //     share identical array lengths, so only one needs to extract them)
+    //   - plain array: the field itself
     std::unordered_set<FieldId> struct_representative_fields_;
 
     // Tracked resource usage for refund-then-charge pattern

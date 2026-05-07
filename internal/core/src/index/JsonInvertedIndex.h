@@ -14,6 +14,7 @@
 #include <shared_mutex>
 #include "nlohmann/json_fwd.hpp"
 
+#include "common/ArrayOffsets.h"
 #include "common/Slice.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastFunction.h"
@@ -32,6 +33,7 @@ IsDataTypeSupported(JsonCastType cast_type, DataType data_type, bool is_array);
 
 const std::string INDEX_NON_EXIST_OFFSET_FILE_NAME =
     "json_index_non_exist_offsets";
+const std::string INDEX_ARRAY_OFFSETS_FILE_NAME = "json_index_array_offsets";
 class JsonInvertedIndexParseErrorRecorder {
  public:
     struct ErrorInstance {
@@ -90,6 +92,11 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
           cast_type_(cast_type),
           cast_function_(cast_function) {
         this->schema_ = ctx.fieldDataMeta.field_schema;
+        // Array cast builds per-element tantivy docs (one doc per array
+        // element); flag the base class so null_offset_ is interpreted as
+        // row-level and element/row bitmap semantics stay correct.
+        this->is_nested_index_ =
+            cast_type.data_type() == JsonCastType::DataType::ARRAY;
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(ctx);
         this->disk_file_manager_ =
@@ -165,13 +172,34 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
                            non_exist_data,
                            non_exist_data_length);
         }
+        if (!row_to_element_start_.empty()) {
+            ArrayOffsetsSealed tmp({}, row_to_element_start_);
+            auto array_offsets_buf = tmp.Serialize();
+            std::shared_ptr<uint8_t[]> array_offsets_data(
+                new uint8_t[array_offsets_buf.size()]);
+            memcpy(array_offsets_data.get(),
+                   array_offsets_buf.data(),
+                   array_offsets_buf.size());
+            res_set.Append(INDEX_ARRAY_OFFSETS_FILE_NAME,
+                           array_offsets_data,
+                           array_offsets_buf.size());
+        }
         milvus::Disassemble(res_set);
         return res_set;
     }
 
-    // Returns a bitmap indicating which rows have values that are indexed.
+    // Returns a row-level bitmap indicating which rows contain the JSON path.
     TargetBitmap
     Exists();
+
+    // Populated only when cast_type_ is ARRAY, either during build (sidecar
+    // is produced on flush) or during load (deserialized from sidecar).
+    // Null otherwise. Segment layer pulls this to register into
+    // array_offsets_map_ for MATCH_* expressions.
+    std::shared_ptr<ArrayOffsetsSealed>
+    GetArrayOffsets() const override {
+        return array_offsets_;
+    }
 
     void
     WriteEntries(storage::IndexEntryWriter* writer) override;
@@ -206,6 +234,15 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     // For example, if the JSON path is "/a", this vector will store rows like
     // null, {}, {"a": null}, etc.
     std::vector<size_t> non_exist_offsets_;
+
+    // Populated only when cast_type_ is ARRAY. Accumulated in
+    // build_index_for_json: starts with sentinel 0, each row pushes
+    // back() + array_size. Serialized as the ArrayOffsets sidecar.
+    std::vector<int32_t> row_to_element_start_;
+
+    // Materialized ArrayOffsets after loading the sidecar. Built lazily
+    // on first Load* invocation.
+    std::shared_ptr<ArrayOffsetsSealed> array_offsets_;
 };
 
 }  // namespace milvus::index

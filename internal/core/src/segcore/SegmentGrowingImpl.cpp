@@ -207,17 +207,24 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
 
 void
 SegmentGrowingImpl::InitializeArrayOffsets() {
-    // Group fields by struct_name
+    // Group struct subfields by struct_name; collect plain array fields.
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
+    std::vector<FieldId> plain_array_fields;
 
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         const auto& field_name = field_meta.get_name().get();
 
-        // Check if field belongs to a struct: format = "struct_name[field_name]"
         size_t bracket_pos = field_name.find('[');
         if (bracket_pos != std::string::npos && bracket_pos > 0) {
             std::string struct_name = field_name.substr(0, bracket_pos);
             struct_fields[struct_name].push_back(field_id);
+            continue;
+        }
+
+        auto data_type = field_meta.get_data_type();
+        if (data_type == DataType::ARRAY ||
+            data_type == DataType::VECTOR_ARRAY) {
+            plain_array_fields.push_back(field_id);
         }
     }
 
@@ -242,6 +249,14 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
             struct_name,
             field_ids.size(),
             representative_field.get());
+    }
+
+    // Plain array field: own ArrayOffsetsGrowing, field is its own representative.
+    for (auto field_id : plain_array_fields) {
+        array_offsets_map_[field_id] = std::make_shared<ArrayOffsetsGrowing>();
+        struct_representative_fields_.insert(field_id);
+        LOG_INFO("Created ArrayOffsetsGrowing for plain array field_id={}",
+                 field_id.get());
     }
 }
 

@@ -36,15 +36,30 @@ using JsonErrorRecorder = std::function<void(const Json& json,
 using JsonNullAdder = std::function<void(int64_t offset)>;
 using JsonNonExistAdder = std::function<void(int64_t offset)>;
 
-// A helper function for processing json data for building inverted index
+// Scalar JSON cast (cast_type != ARRAY). One doc per row: data_adder is
+// invoked once per row with size in {0, 1}, offset = row_id.
 template <typename T>
 void
 ProcessJsonFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
-    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
+    JsonDataAdder<T> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+// Array JSON cast (cast_type == ARRAY). data_adder is invoked once per row
+// with the row's element slice (size in 0..N). offset is the row's element
+// start id in the flattened nested index; the caller is responsible for
+// accumulating element counts into ArrayOffsets-style row-to-element-start data.
+template <typename T>
+void
+ProcessJsonFieldArrayData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
@@ -55,7 +70,6 @@ ProcessJsonFieldData<bool>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
-    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
@@ -67,7 +81,6 @@ ProcessJsonFieldData<int64_t>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
-    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
@@ -79,7 +92,6 @@ ProcessJsonFieldData<double>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
-    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
@@ -91,8 +103,47 @@ ProcessJsonFieldData<std::string>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
-    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
+    JsonDataAdder<std::string> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<bool> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<int64_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<int64_t> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<double> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,

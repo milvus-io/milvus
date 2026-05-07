@@ -19,6 +19,7 @@
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayOffsets.h"
 #include "common/FieldData.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
@@ -86,6 +87,15 @@ class IndexBase {
     virtual bool
     IsNestedIndex() const {
         return false;
+    }
+
+    // ArrayOffsets for translating element ids to rows. Non-null only when
+    // this index owns the element layout itself (currently JSON path index
+    // with ARRAY cast). Plain array / struct indexes return null and the
+    // caller should fall back to segment-owned offsets.
+    virtual std::shared_ptr<ArrayOffsetsSealed>
+    GetArrayOffsets() const {
+        return nullptr;
     }
 
     const IndexType&

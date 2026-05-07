@@ -3487,22 +3487,27 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             LoadGeometryCache(field_id, column);
         }
 
-        // Check if need to build ArrayOffsetsSealed for struct array fields
+        // Build ArrayOffsetsSealed for ARRAY / VECTOR_ARRAY fields.
+        // Struct subfields share one ArrayOffsetsSealed per struct; plain
+        // array fields get their own.
         if (data_type == DataType::ARRAY ||
             data_type == DataType::VECTOR_ARRAY) {
             auto& field_meta = schema_->operator[](field_id);
             const std::string& field_name = field_meta.get_name().get();
+            bool is_struct_subfield =
+                field_name.find('[') != std::string::npos &&
+                field_name.find(']') != std::string::npos;
 
-            if (field_name.find('[') != std::string::npos &&
-                field_name.find(']') != std::string::npos) {
+            if (is_struct_subfield) {
                 struct_name = field_name.substr(0, field_name.find('['));
-
                 auto it = struct_to_array_offsets_.find(struct_name);
                 if (it != struct_to_array_offsets_.end()) {
                     array_offsets_map_[field_id] = it->second;
                 } else {
                     field_meta_ptr = &field_meta;  // need to build
                 }
+            } else {
+                field_meta_ptr = &field_meta;  // plain array, always build
             }
         }
     }
@@ -3513,13 +3518,18 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr);
 
         std::unique_lock lck(mutex_);
-        // Double-check after re-acquiring lock
-        auto it = struct_to_array_offsets_.find(struct_name);
-        if (it == struct_to_array_offsets_.end()) {
-            struct_to_array_offsets_[struct_name] = new_offsets;
+        if (struct_name.empty()) {
+            // Plain array: not shared across fields.
             array_offsets_map_[field_id] = new_offsets;
         } else {
-            array_offsets_map_[field_id] = it->second;
+            // Double-check after re-acquiring lock
+            auto it = struct_to_array_offsets_.find(struct_name);
+            if (it == struct_to_array_offsets_.end()) {
+                struct_to_array_offsets_[struct_name] = new_offsets;
+                array_offsets_map_[field_id] = new_offsets;
+            } else {
+                array_offsets_map_[field_id] = it->second;
+            }
         }
     }
 }

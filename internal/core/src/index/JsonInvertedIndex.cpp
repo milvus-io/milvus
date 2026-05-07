@@ -59,26 +59,61 @@ JsonInvertedIndex<T>::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     LOG_INFO("Start to build json inverted index for field: {}", nested_path_);
 
-    ProcessJsonFieldData<T>(
-        field_datas,
-        this->schema_,
-        nested_path_,
-        cast_type_,
-        cast_function_,
-        // add data
-        [this](const T* data, int64_t size, int64_t offset) {
-            this->wrapper_->template add_array_data<T>(data, size, offset);
-        },
-        // handle null
-        [this](int64_t offset) { this->null_offset_.push_back(offset); },
-        // handle non exist
-        [this](int64_t offset) { this->non_exist_offsets_.push_back(offset); },
-        // handle error
-        [this](const Json& json,
-               const std::string& nested_path,
-               simdjson::error_code error) {
-            this->error_recorder_.Record(json, nested_path, error);
-        });
+    auto null_adder = [this](int64_t offset) {
+        this->null_offset_.push_back(offset);
+    };
+    auto non_exist_adder = [this](int64_t offset) {
+        this->non_exist_offsets_.push_back(offset);
+    };
+    auto error_adder = [this](const Json& json,
+                              const std::string& nested_path,
+                              simdjson::error_code error) {
+        this->error_recorder_.Record(json, nested_path, error);
+    };
+
+    if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        row_to_element_start_.push_back(0);  // sentinel
+        ProcessJsonFieldArrayData<T>(
+            field_datas,
+            this->schema_,
+            nested_path_,
+            [this](const T* data, int64_t size, int64_t offset) {
+                // Nested mode: emit one tantivy doc per element, with
+                // consecutive doc_ids [offset, offset+size). offset is the
+                // running element count (elem_start) from the Process fn.
+                if (size > 0) {
+                    this->wrapper_->template add_data<T>(data, size, offset);
+                }
+                this->row_to_element_start_.push_back(
+                    this->row_to_element_start_.back() +
+                    static_cast<int32_t>(size));
+            },
+            null_adder,
+            non_exist_adder,
+            error_adder);
+        std::vector<int32_t> element_row_ids(row_to_element_start_.back());
+        for (int32_t row = 0;
+             row < static_cast<int32_t>(row_to_element_start_.size()) - 1;
+             ++row) {
+            std::fill(element_row_ids.begin() + row_to_element_start_[row],
+                      element_row_ids.begin() + row_to_element_start_[row + 1],
+                      row);
+        }
+        array_offsets_ = std::make_shared<ArrayOffsetsSealed>(
+            std::move(element_row_ids), row_to_element_start_);
+    } else {
+        ProcessJsonFieldData<T>(
+            field_datas,
+            this->schema_,
+            nested_path_,
+            cast_function_,
+            [this](const T* data, int64_t size, int64_t offset) {
+                this->wrapper_->template add_array_data<T>(data, size, offset);
+            },
+            null_adder,
+            non_exist_adder,
+            error_adder);
+    }
 
     error_recorder_.PrintErrStats();
 }
@@ -87,6 +122,11 @@ template <typename T>
 TargetBitmap
 JsonInvertedIndex<T>::Exists() {
     int64_t count = this->Count();
+    if (this->is_nested_index_) {
+        AssertInfo(array_offsets_ != nullptr,
+                   "JSON ARRAY index requires ArrayOffsets for Exists()");
+        count = array_offsets_->GetRowCount();
+    }
     TargetBitmap bitset(count, true);
 
     auto fill_bitset = [this, count, &bitset]() {
@@ -112,6 +152,32 @@ void
 JsonInvertedIndex<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    // Load ArrayOffsets sidecar (only present for ARRAY cast_type).
+    auto array_offsets_file_itr = std::find_if(
+        index_files.begin(), index_files.end(), [&](const std::string& file) {
+            return boost::filesystem::path(file).filename().string() ==
+                   INDEX_ARRAY_OFFSETS_FILE_NAME;
+        });
+    if (array_offsets_file_itr != index_files.end()) {
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
+            {*array_offsets_file_itr}, load_priority);
+        auto data = std::move(index_datas.at(INDEX_ARRAY_OFFSETS_FILE_NAME));
+        array_offsets_ = ArrayOffsetsSealed::Deserialize(
+            reinterpret_cast<const uint8_t*>(data->PayloadData()),
+            static_cast<size_t>(data->PayloadSize()));
+        this->is_nested_index_ = true;
+    } else if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        // Legacy JSON ARRAY indexes were row-level and have no ArrayOffsets
+        // sidecar. Keep them row-level so existing json_contains/exists
+        // behavior is preserved after upgrade.
+        this->is_nested_index_ = false;
+    }
+
     auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
         non_exist_offsets_.resize((size_t)size / sizeof(size_t));
         memcpy(non_exist_offsets_.data(), data, (size_t)size);
@@ -121,10 +187,6 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             return boost::filesystem::path(file).filename().string() ==
                    INDEX_NON_EXIST_OFFSET_FILE_NAME;
         });
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     if (non_exist_offset_file_itr != index_files.end()) {
         // null offset file is not sliced
@@ -185,7 +247,8 @@ JsonInvertedIndex<T>::RetainTantivyIndexFiles(
                 auto file_name =
                     boost::filesystem::path(file).filename().string();
                 return file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
-                       std::string::npos;
+                           std::string::npos ||
+                       file_name == INDEX_ARRAY_OFFSETS_FILE_NAME;
             }),
         index_files.end());
     InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
@@ -198,6 +261,7 @@ JsonInvertedIndex<T>::BuildTantivyMeta(
     auto meta = InvertedIndexTantivy<T>::BuildTantivyMeta(file_names, has_null);
     std::shared_lock<folly::SharedMutex> lock(this->mutex_);
     meta["has_non_exist"] = !this->non_exist_offsets_.empty();
+    meta["has_array_offsets"] = !this->row_to_element_start_.empty();
     return meta;
 }
 
@@ -216,6 +280,16 @@ JsonInvertedIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
                            this->non_exist_offsets_.data(),
                            this->non_exist_offsets_.size() * sizeof(size_t));
     }
+
+    // Write ArrayOffsets sidecar (only present for ARRAY cast_type).
+    bool has_array_offsets = !this->row_to_element_start_.empty();
+    writer->PutMeta("has_array_offsets", has_array_offsets);
+    if (has_array_offsets) {
+        ArrayOffsetsSealed tmp({}, this->row_to_element_start_);
+        auto buf = tmp.Serialize();
+        writer->WriteEntry(
+            INDEX_ARRAY_OFFSETS_FILE_NAME, buf.data(), buf.size());
+    }
 }
 
 template <typename T>
@@ -233,8 +307,22 @@ JsonInvertedIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         std::memcpy(
             this->non_exist_offsets_.data(), e.data.data(), e.data.size());
     }
-    LOG_INFO("LoadEntries JsonInvertedIndex done, has_non_exist: {}",
-             has_non_exist);
+
+    // Load ArrayOffsets sidecar (only present for ARRAY cast_type).
+    bool has_array_offsets = reader.GetMeta<bool>("has_array_offsets", false);
+    if (has_array_offsets) {
+        auto e = reader.ReadEntry(INDEX_ARRAY_OFFSETS_FILE_NAME);
+        array_offsets_ = ArrayOffsetsSealed::Deserialize(
+            reinterpret_cast<const uint8_t*>(e.data.data()), e.data.size());
+        this->is_nested_index_ = true;
+    } else if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        this->is_nested_index_ = false;
+    }
+    LOG_INFO(
+        "LoadEntries JsonInvertedIndex done, has_non_exist: {}, "
+        "has_array_offsets: {}",
+        has_non_exist,
+        has_array_offsets);
 }
 
 template class JsonInvertedIndex<bool>;

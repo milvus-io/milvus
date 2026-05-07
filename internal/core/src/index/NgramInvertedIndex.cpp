@@ -162,7 +162,6 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         field_datas,
         this->schema_,
         nested_path_,
-        JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
         // add data
         [this, &total_bytes, &total_rows](

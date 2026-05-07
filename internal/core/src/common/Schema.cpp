@@ -19,6 +19,9 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "Schema.h"
 #include "arrow/type.h"
@@ -200,11 +203,13 @@ Schema::ToProto() const {
     proto::schema::CollectionSchema schema_proto;
     schema_proto.set_enable_dynamic_field(dynamic_field_id_opt_.has_value());
 
-    for (const auto& field_id : field_ids_) {
-        const auto& meta = fields_.at(field_id);
-        auto* field_proto = schema_proto.add_fields();
-        *field_proto = meta.ToProto();
+    std::unordered_map<std::string, int> struct_field_offsets;
+    std::unordered_set<int64_t> struct_sub_field_ids;
 
+    auto fill_field_proto = [&](proto::schema::FieldSchema* field_proto,
+                                const FieldId field_id,
+                                const FieldMeta& meta) {
+        *field_proto = meta.ToProto();
         if (primary_field_id_opt_.has_value() &&
             field_id == primary_field_id_opt_.value()) {
             field_proto->set_is_primary_key(true);
@@ -213,6 +218,43 @@ Schema::ToProto() const {
             field_id == dynamic_field_id_opt_.value()) {
             field_proto->set_is_dynamic(true);
         }
+    };
+
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        auto data_type = meta.get_data_type();
+        if (data_type != DataType::ARRAY &&
+            data_type != DataType::VECTOR_ARRAY) {
+            continue;
+        }
+
+        const auto& name = meta.get_name().get();
+        auto bracket_pos = name.find('[');
+        if (bracket_pos == std::string::npos || bracket_pos == 0) {
+            continue;
+        }
+
+        auto struct_name = name.substr(0, bracket_pos);
+        auto [it, inserted] = struct_field_offsets.emplace(struct_name, 0);
+        if (inserted) {
+            auto* struct_field = schema_proto.add_struct_array_fields();
+            struct_field->set_fieldid(field_id.get());
+            struct_field->set_name(struct_name);
+            it->second = schema_proto.struct_array_fields_size() - 1;
+        }
+        auto* struct_field =
+            schema_proto.mutable_struct_array_fields(it->second);
+        fill_field_proto(struct_field->add_fields(), field_id, meta);
+        struct_sub_field_ids.insert(field_id.get());
+    }
+
+    for (const auto& field_id : field_ids_) {
+        if (struct_sub_field_ids.count(field_id.get()) > 0) {
+            continue;
+        }
+        const auto& meta = fields_.at(field_id);
+        auto* field_proto = schema_proto.add_fields();
+        fill_field_proto(field_proto, field_id, meta);
     }
 
     return schema_proto;

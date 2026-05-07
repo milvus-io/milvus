@@ -7,6 +7,94 @@ type BasePlanVisitor struct {
 	*antlr.BaseParseTreeVisitor
 }
 
+func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitIsNotNull(ctx *IsNotNullContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitIdentifier(ctx *IdentifierContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitLike(ctx *LikeContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitEquality(ctx *EqualityContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitBoolean(ctx *BooleanContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTimestamptzCompareForward(ctx *TimestamptzCompareForwardContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitReverseRange(ctx *ReverseRangeContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitEmptyArray(ctx *EmptyArrayContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitPhraseMatch(ctx *PhraseMatchContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitArrayLength(ctx *ArrayLengthContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTerm(ctx *TermContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitJSONContains(ctx *JSONContainsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSTIsValid(ctx *STIsValidContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitMatchThreshold(ctx *MatchThresholdContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitBitXor(ctx *BitXorContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitElementFilter(ctx *ElementFilterContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitStructIndexField(ctx *StructIndexFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -23,14 +111,6 @@ func (v *BasePlanVisitor) VisitParens(ctx *ParensContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -39,23 +119,11 @@ func (v *BasePlanVisitor) VisitLogicalOr(ctx *LogicalOrContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitIsNotNull(ctx *IsNotNullContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitMulDivMod(ctx *MulDivModContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitIdentifier(ctx *IdentifierContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitStructField(ctx *StructFieldContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitLike(ctx *LikeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -67,11 +135,7 @@ func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) in
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitEquality(ctx *EqualityContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitBoolean(ctx *BooleanContext) interface{} {
+func (v *BasePlanVisitor) VisitElementSelf(ctx *ElementSelfContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -83,19 +147,7 @@ func (v *BasePlanVisitor) VisitSTDWithin(ctx *STDWithinContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitTimestamptzCompareForward(ctx *TimestamptzCompareForwardContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitCall(ctx *CallContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitReverseRange(ctx *ReverseRangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -103,15 +155,7 @@ func (v *BasePlanVisitor) VisitBitOr(ctx *BitOrContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitEmptyArray(ctx *EmptyArrayContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitAddSub(ctx *AddSubContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitPhraseMatch(ctx *PhraseMatchContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -119,23 +163,7 @@ func (v *BasePlanVisitor) VisitRelational(ctx *RelationalContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitArrayLength(ctx *ArrayLengthContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitTextMatch(ctx *TextMatchContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitTerm(ctx *TermContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitJSONContains(ctx *JSONContainsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -159,31 +187,7 @@ func (v *BasePlanVisitor) VisitJSONContainsAny(ctx *JSONContainsAnyContext) inte
 	return v.VisitChildren(ctx)
 }
 
-func (v *BasePlanVisitor) VisitSTIsValid(ctx *STIsValidContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitMatchThreshold(ctx *MatchThresholdContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitBitXor(ctx *BitXorContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitElementFilter(ctx *ElementFilterContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitStructIndexField(ctx *StructIndexFieldContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

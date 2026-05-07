@@ -143,6 +143,15 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
+    // Binary layout:
+    //   [row_count: int32][offset_0 = 0][offset_1]...[offset_row_count]
+    // element_row_ids_ is derived on deserialize, not stored.
+    std::vector<uint8_t>
+    Serialize() const;
+
+    static std::shared_ptr<ArrayOffsetsSealed>
+    Deserialize(const uint8_t* data, size_t size);
+
  private:
     const std::vector<int32_t> element_row_ids_;
     const std::vector<int32_t> row_to_element_start_;

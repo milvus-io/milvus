@@ -17,7 +17,9 @@
 #include "ArrayOffsets.h"
 
 #include <assert.h>
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 
 #include "bitset/bitset.h"
@@ -271,6 +273,79 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         field_meta.get_id().get(),
         row_count,
         total_elements);
+
+    auto result = std::make_shared<ArrayOffsetsSealed>(
+        std::move(element_row_ids), std::move(row_to_element_start));
+    result->resource_size_ = 4 * (row_count + 1) + 4 * total_elements;
+    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+        cachinglayer::ResourceUsage{result->resource_size_, 0});
+    return result;
+}
+
+std::vector<uint8_t>
+ArrayOffsetsSealed::Serialize() const {
+    int32_t row_count = static_cast<int32_t>(GetRowCount());
+    const size_t offsets_bytes = row_to_element_start_.size() * sizeof(int32_t);
+    const size_t total_bytes = sizeof(int32_t) + offsets_bytes;
+
+    std::vector<uint8_t> buf(total_bytes);
+    uint8_t* p = buf.data();
+    std::memcpy(p, &row_count, sizeof(int32_t));
+    p += sizeof(int32_t);
+    std::memcpy(p, row_to_element_start_.data(), offsets_bytes);
+    return buf;
+}
+
+std::shared_ptr<ArrayOffsetsSealed>
+ArrayOffsetsSealed::Deserialize(const uint8_t* data, size_t size) {
+    AssertInfo(data != nullptr, "ArrayOffsetsSealed::Deserialize: null data");
+    AssertInfo(size >= sizeof(int32_t),
+               "ArrayOffsetsSealed::Deserialize: buffer too small ({} bytes)",
+               size);
+
+    int32_t row_count = 0;
+    std::memcpy(&row_count, data, sizeof(int32_t));
+    AssertInfo(row_count >= 0,
+               "ArrayOffsetsSealed::Deserialize: invalid row_count {}",
+               row_count);
+
+    const size_t expected_bytes =
+        sizeof(int32_t) + static_cast<size_t>(row_count + 1) * sizeof(int32_t);
+    AssertInfo(size == expected_bytes,
+               "ArrayOffsetsSealed::Deserialize: size mismatch, "
+               "expected {} bytes, got {}",
+               expected_bytes,
+               size);
+
+    std::vector<int32_t> row_to_element_start(row_count + 1);
+    std::memcpy(row_to_element_start.data(),
+                data + sizeof(int32_t),
+                static_cast<size_t>(row_count + 1) * sizeof(int32_t));
+
+    AssertInfo(
+        row_to_element_start[0] == 0,
+        "ArrayOffsetsSealed::Deserialize: first offset must be 0, got {}",
+        row_to_element_start[0]);
+
+    const int32_t total_elements = row_to_element_start[row_count];
+    AssertInfo(total_elements >= 0,
+               "ArrayOffsetsSealed::Deserialize: invalid total_elements {}",
+               total_elements);
+
+    // Derive element_row_ids_ from row_to_element_start_
+    std::vector<int32_t> element_row_ids(total_elements);
+    for (int32_t row = 0; row < row_count; ++row) {
+        const int32_t s = row_to_element_start[row];
+        const int32_t e = row_to_element_start[row + 1];
+        AssertInfo(s <= e && e <= total_elements,
+                   "ArrayOffsetsSealed::Deserialize: non-monotonic offsets "
+                   "at row {}: [{}, {}]",
+                   row,
+                   s,
+                   e);
+        std::fill(
+            element_row_ids.begin() + s, element_row_ids.begin() + e, row);
+    }
 
     auto result = std::make_shared<ArrayOffsetsSealed>(
         std::move(element_row_ids), std::move(row_to_element_start));

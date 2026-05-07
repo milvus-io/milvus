@@ -502,6 +502,13 @@ class Schema {
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
+    // Check whether a struct array group with this name exists.
+    bool
+    StructExist(const std::string& name) const {
+        return struct_array_field_cache_.find(name) !=
+               struct_array_field_cache_.end();
+    }
+
     DataType
     GetFieldType(const FieldId& field_id) const {
         AssertInfo(fields_.count(field_id),

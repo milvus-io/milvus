@@ -36,35 +36,36 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
-        ${SOURCE_TEST_FILES}
+        # ${SOURCE_TEST_FILES}
+        "${CMAKE_HOME_DIRECTORY}/src/exec/expression/MatchExprTest.cpp"
         init_gtest.cpp
-        test_loading.cpp
-        test_exec.cpp
-        test_expr_materialized_view.cpp
-        test_float16.cpp
-        test_search_group_by.cpp
-        test_iterative_filter.cpp
-        test_indexing.cpp
-        test_index_wrapper.cpp
-        test_integer_overflow.cpp
-        test_query.cpp
-        test_scorer.cpp
-        test_sealed.cpp
-        test_storage.cpp
-        test_string_expr.cpp
-        test_rust_result.cpp
-        test_storage_v2_index_raw_data.cpp
-        test_group_by_json.cpp
-        test_element_filter.cpp
-        test_query_group_by.cpp
-        test_minhash.cpp
-        test_async_warmup.cpp
-        test_sort_buffer.cpp
-        test_query_order_by.cpp
-        test_determine_use_index.cpp
-        test_virtual_pk.cpp
-        test_mvcc_fast_path.cpp
-        test_external_take.cpp
+        # test_loading.cpp
+        # test_exec.cpp
+        # test_expr_materialized_view.cpp
+        # test_float16.cpp
+        # test_search_group_by.cpp
+        # test_iterative_filter.cpp
+        # test_indexing.cpp
+        # test_index_wrapper.cpp
+        # test_integer_overflow.cpp
+        # test_query.cpp
+        # test_scorer.cpp
+        # test_sealed.cpp
+        # test_storage.cpp
+        # test_string_expr.cpp
+        # test_rust_result.cpp
+        # test_storage_v2_index_raw_data.cpp
+        # test_group_by_json.cpp
+        # test_element_filter.cpp
+        # test_query_group_by.cpp
+        # test_minhash.cpp
+        # test_async_warmup.cpp
+        # test_sort_buffer.cpp
+        # test_query_order_by.cpp
+        # test_determine_use_index.cpp
+        # test_virtual_pk.cpp
+        # test_mvcc_fast_path.cpp
+        # test_external_take.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

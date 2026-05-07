@@ -1348,8 +1348,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<milvus_storage::api::Reader> reader_;
     mutable std::mutex reader_mutex_;
 
-    // ArrayOffsetsSealed for element-level filtering on array fields
-    // field_id -> ArrayOffsetsSealed mapping
+    // field_id -> ArrayOffsetsSealed, used for element-level filtering
+    // (MATCH_*, struct element access, etc.).
+    //
+    // Populated during LoadFieldData for:
+    //   - struct array subfields: all subfields of one struct share a single
+    //     ArrayOffsetsSealed (array lengths are identical across subfields)
+    //   - plain array fields (ARRAY / VECTOR_ARRAY, not part of a struct):
+    //     each field owns its own ArrayOffsetsSealed
+    //
+    // JSON fields are NOT present here. JSON ArrayOffsets are produced only
+    // when a JSON path index exists, serialized alongside the index, and
+    // accessed via JsonInvertedIndex::GetArrayOffsets() after pinning the
+    // path index.
     std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
         array_offsets_map_;
     // struct_name -> ArrayOffsetsSealed mapping (temporary during load)

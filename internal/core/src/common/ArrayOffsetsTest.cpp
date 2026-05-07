@@ -431,3 +431,93 @@ TEST_F(ArrayOffsetsTest, LargeArrayLength) {
         EXPECT_EQ(elem_idx, 9999);
     }
 }
+
+TEST_F(ArrayOffsetsTest, SerializeRoundtripBasic) {
+    ArrayOffsetsSealed original({0, 0, 1, 1, 1, 2}, {0, 2, 5, 6});
+
+    auto buf = original.Serialize();
+    // Expected: 4 (row_count) + 4 * (3 + 1) offsets = 20 bytes
+    EXPECT_EQ(buf.size(), 4 + 4 * 4);
+
+    auto restored = ArrayOffsetsSealed::Deserialize(buf.data(), buf.size());
+    ASSERT_NE(restored, nullptr);
+
+    EXPECT_EQ(restored->GetRowCount(), 3);
+    EXPECT_EQ(restored->GetTotalElementCount(), 6);
+
+    for (int32_t row = 0; row < 3; ++row) {
+        auto [orig_s, orig_e] = original.ElementIDRangeOfRow(row);
+        auto [new_s, new_e] = restored->ElementIDRangeOfRow(row);
+        EXPECT_EQ(orig_s, new_s);
+        EXPECT_EQ(orig_e, new_e);
+    }
+
+    for (int32_t elem = 0; elem < 6; ++elem) {
+        auto [orig_row, orig_idx] = original.ElementIDToRowID(elem);
+        auto [new_row, new_idx] = restored->ElementIDToRowID(elem);
+        EXPECT_EQ(orig_row, new_row);
+        EXPECT_EQ(orig_idx, new_idx);
+    }
+}
+
+TEST_F(ArrayOffsetsTest, SerializeRoundtripEmptyRows) {
+    // Rows 1 and 3 are empty arrays
+    ArrayOffsetsSealed original({0, 0, 2, 2, 2}, {0, 2, 2, 5, 5});
+
+    auto buf = original.Serialize();
+    auto restored = ArrayOffsetsSealed::Deserialize(buf.data(), buf.size());
+    ASSERT_NE(restored, nullptr);
+
+    EXPECT_EQ(restored->GetRowCount(), 4);
+    EXPECT_EQ(restored->GetTotalElementCount(), 5);
+
+    {
+        auto [s, e] = restored->ElementIDRangeOfRow(1);
+        EXPECT_EQ(s, 2);
+        EXPECT_EQ(e, 2);
+    }
+    {
+        auto [s, e] = restored->ElementIDRangeOfRow(3);
+        EXPECT_EQ(s, 5);
+        EXPECT_EQ(e, 5);
+    }
+}
+
+TEST_F(ArrayOffsetsTest, SerializeRoundtripEmpty) {
+    ArrayOffsetsSealed original;  // row_count=0, one sentinel entry {0}
+
+    auto buf = original.Serialize();
+    // 4 (row_count) + 4 (single sentinel 0) = 8 bytes
+    EXPECT_EQ(buf.size(), 8);
+
+    auto restored = ArrayOffsetsSealed::Deserialize(buf.data(), buf.size());
+    ASSERT_NE(restored, nullptr);
+    EXPECT_EQ(restored->GetRowCount(), 0);
+    EXPECT_EQ(restored->GetTotalElementCount(), 0);
+}
+
+TEST_F(ArrayOffsetsTest, SerializeRoundtripRowBitset) {
+    ArrayOffsetsSealed original({0, 0, 1, 1, 1, 2}, {0, 2, 5, 6});
+    auto buf = original.Serialize();
+    auto restored = ArrayOffsetsSealed::Deserialize(buf.data(), buf.size());
+
+    TargetBitmap row_bitset(3);
+    row_bitset[0] = true;
+    row_bitset[1] = false;
+    row_bitset[2] = true;
+    TargetBitmap valid_row_bitset(3, true);
+    TargetBitmapView row_view(row_bitset.data(), row_bitset.size());
+    TargetBitmapView valid_view(valid_row_bitset.data(),
+                                valid_row_bitset.size());
+
+    auto [elem_bitset, valid_elem_bitset] =
+        restored->RowBitsetToElementBitset(row_view, valid_view, 0);
+
+    EXPECT_EQ(elem_bitset.size(), 6);
+    EXPECT_TRUE(elem_bitset[0]);
+    EXPECT_TRUE(elem_bitset[1]);
+    EXPECT_FALSE(elem_bitset[2]);
+    EXPECT_FALSE(elem_bitset[3]);
+    EXPECT_FALSE(elem_bitset[4]);
+    EXPECT_TRUE(elem_bitset[5]);
+}

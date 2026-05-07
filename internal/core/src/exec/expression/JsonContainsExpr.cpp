@@ -28,6 +28,7 @@
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
 #include "common/Array.h"
+#include "common/ArrayOffsets.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -2260,22 +2261,33 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
 
-    // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+    auto* pinned_index = pinned_index_[0].get();
+    AssertInfo(pinned_index != nullptr,
+               "array contains index is not pinned for field {}",
+               expr_->column_.field_id_.get());
+    const bool is_nested_index = pinned_index->IsNestedIndex();
+    std::shared_ptr<const IArrayOffsets> array_offsets;
+    if (is_nested_index) {
+        if (expr_->column_.data_type_ == DataType::JSON) {
+            array_offsets = pinned_index->GetArrayOffsets();
+        } else {
+            array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+        }
+        AssertInfo(array_offsets != nullptr,
+                   "array offsets not found for field {}",
+                   expr_->column_.field_id_.get());
+    }
 
     auto execute_sub_batch =
-        [this, &array_offsets](
+        [this, is_nested_index, array_offsets](
             Index* index_ptr,
             const boost::container::vector<GetType>& vals) -> TargetBitmap {
         // Query helper: for nested index, convert element-level to row-level
         auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
             auto element_bitset = index_ptr->In(n, data);
-            if (!index_ptr->IsNestedIndex()) {
+            if (!is_nested_index) {
                 return element_bitset;
             }
-            AssertInfo(array_offsets != nullptr,
-                       "array offsets not found for field {}",
-                       expr_->column_.field_id_.get());
             return array_offsets->ForEachRowElementRange(
                 [&element_bitset](int32_t elem_start, int32_t elem_end) {
                     for (int32_t i = elem_start; i < elem_end; ++i) {

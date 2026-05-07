@@ -179,6 +179,25 @@ getAggregateOpName(planpb::AggregateOp op) {
 
 namespace {
 
+// Validates column_info against the field's schema. Element-level accesses
+// are valid against either ARRAY (classic element-level) or JSON (MATCH_*
+// inner predicate on JSON element addressed by nested_path).
+inline void
+AssertColumnInfoMatchesField(const proto::plan::ColumnInfo& column_info,
+                             const FieldMeta& field) {
+    auto data_type = field.get_data_type();
+    if (column_info.is_element_level()) {
+        if (data_type == DataType::JSON) {
+            return;
+        }
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() ==
+               static_cast<DataType>(column_info.element_type()));
+    } else {
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    }
+}
+
 // Helper function to process group_by fields
 void
 ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
@@ -828,13 +847,7 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
-    } else {
-        Assert(data_type == static_cast<DataType>(column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(column_info, field);
     std::vector<::milvus::proto::plan::GenericValue> extra_values;
     extra_values.reserve(expr_pb.extra_values_size());
     for (const auto& val : expr_pb.extra_values()) {
@@ -854,13 +867,7 @@ ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
-    } else {
-        Assert(data_type == static_cast<DataType>(column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(column_info, field);
     return std::make_shared<milvus::expr::NullExpr>(
         expr::ColumnInfo(column_info), expr_pb.op());
 }
@@ -873,12 +880,7 @@ ProtoParser::ParseBinaryRangeExprs(
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
-    } else {
-        Assert(data_type == (DataType)columnInfo.data_type());
-    }
+    AssertColumnInfoMatchesField(columnInfo, field);
     return std::make_shared<expr::BinaryRangeFilterExpr>(
         columnInfo,
         expr_pb.lower_value(),
@@ -895,12 +897,7 @@ ProtoParser::ParseTimestamptzArithCompareExprs(
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
-    } else {
-        Assert(data_type == (DataType)columnInfo.data_type());
-    }
+    AssertColumnInfoMatchesField(columnInfo, field);
     return std::make_shared<expr::TimestamptzArithCompareExpr>(
         columnInfo,
         expr_pb.arith_op(),
@@ -922,12 +919,20 @@ ProtoParser::ParseElementFilterExprs(
 
 expr::TypedExprPtr
 ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
-    auto struct_name = expr_pb.struct_name();
+    const auto& column_info = expr_pb.column();
+    auto field_id = column_info.field_id();
+    auto field_name = column_info.field_name();
+    std::vector<std::string> nested_path(column_info.nested_path().begin(),
+                                         column_info.nested_path().end());
     auto match_type = expr_pb.match_type();
     auto count = expr_pb.count();
     auto predicate = this->ParseExprs(expr_pb.predicate());
-    return std::make_shared<expr::MatchExpr>(
-        struct_name, match_type, count, predicate);
+    return std::make_shared<expr::MatchExpr>(field_id,
+                                             field_name,
+                                             std::move(nested_path),
+                                             match_type,
+                                             count,
+                                             predicate);
 }
 
 expr::TypedExprPtr
@@ -962,28 +967,14 @@ ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto& left_field = schema->operator[](left_field_id);
     auto left_data_type = left_field.get_data_type();
 
-    if (left_column_info.is_element_level()) {
-        Assert(left_data_type == DataType::ARRAY);
-        Assert(left_field.get_element_type() ==
-               static_cast<DataType>(left_column_info.element_type()));
-    } else {
-        Assert(left_data_type ==
-               static_cast<DataType>(left_column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(left_column_info, left_field);
 
     auto& right_column_info = expr_pb.right_column_info();
     auto right_field_id = FieldId(right_column_info.field_id());
     auto& right_field = schema->operator[](right_field_id);
     auto right_data_type = right_field.get_data_type();
 
-    if (right_column_info.is_element_level()) {
-        Assert(right_data_type == DataType::ARRAY);
-        Assert(right_field.get_element_type() ==
-               static_cast<DataType>(right_column_info.element_type()));
-    } else {
-        Assert(right_data_type ==
-               static_cast<DataType>(right_column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(right_column_info, right_field);
 
     return std::make_shared<expr::CompareExpr>(left_field_id,
                                                right_field_id,
@@ -999,12 +990,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
-    } else {
-        Assert(data_type == (DataType)columnInfo.data_type());
-    }
+    AssertColumnInfoMatchesField(columnInfo, field);
     std::vector<::milvus::proto::plan::GenericValue> values;
     values.reserve(expr_pb.values_size());
     for (size_t i = 0; i < expr_pb.values_size(); i++) {
@@ -1038,13 +1024,7 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
-    } else {
-        Assert(data_type == static_cast<DataType>(column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(column_info, field);
     return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
         column_info,
         expr_pb.op(),
@@ -1060,13 +1040,7 @@ ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
-    } else {
-        Assert(data_type == static_cast<DataType>(column_info.data_type()));
-    }
+    AssertColumnInfoMatchesField(column_info, field);
     return std::make_shared<expr::ExistsExpr>(column_info);
 }
 
@@ -1078,12 +1052,7 @@ ProtoParser::ParseJsonContainsExprs(
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
-    } else {
-        Assert(data_type == (DataType)columnInfo.data_type());
-    }
+    AssertColumnInfoMatchesField(columnInfo, field);
     std::vector<::milvus::proto::plan::GenericValue> values;
     values.reserve(expr_pb.elements_size());
     for (size_t i = 0; i < expr_pb.elements_size(); i++) {
@@ -1114,12 +1083,7 @@ ProtoParser::ParseGISFunctionFilterExprs(
     auto& field = schema->operator[](field_id);
     auto data_type = field.get_data_type();
 
-    if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
-    } else {
-        Assert(data_type == (DataType)columnInfo.data_type());
-    }
+    AssertColumnInfoMatchesField(columnInfo, field);
 
     auto expr = std::make_shared<expr::GISFunctionFilterExpr>(
         columnInfo, expr_pb.op(), expr_pb.wkt_string(), expr_pb.distance());
