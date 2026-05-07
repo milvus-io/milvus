@@ -746,6 +746,9 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.useIAM,
                           config.useVirtualHost,
                           config.requestTimeoutMs,
+                          config.connectTimeoutMs,
+                          config.maxRetries,
+                          config.retryBaseDelayMs,
                           config.gcp_credential_json.c_str(),
                           false,  // this field does not exist in StorageConfig
                           config.max_connections,

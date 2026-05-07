@@ -379,6 +379,25 @@ func TestServiceParam(t *testing.T) {
 		t.Logf("Minio BucketName = %s", Params.BucketName.GetValue())
 
 		t.Logf("Minio rootpath = %s", Params.RootPath.GetValue())
+
+		// Verify new network-tuning parameters exist and have sensible defaults.
+		// These knobs were added to help deployments where the object-storage
+		// endpoint is behind a high-latency or flaky network (e.g. accessing
+		// AWS/Azure from mainland China).
+		assert.Equal(t, int64(30000), Params.ConnectTimeoutMs.GetAsInt64(),
+			"default TCP connect timeout should be 30 s")
+		assert.Equal(t, int64(10), Params.MaxRetries.GetAsInt64(),
+			"default max retries should match AWS SDK default of 10")
+		assert.Equal(t, int64(25), Params.RetryBaseDelayMs.GetAsInt64(),
+			"default retry base delay should match AWS SDK default of 25 ms")
+
+		// Verify that the values can be overridden via config.
+		SParams.Save(Params.ConnectTimeoutMs.Key, "60000")
+		SParams.Save(Params.MaxRetries.Key, "300")
+		SParams.Save(Params.RetryBaseDelayMs.Key, "50")
+		assert.Equal(t, int64(60000), Params.ConnectTimeoutMs.GetAsInt64())
+		assert.Equal(t, int64(300), Params.MaxRetries.GetAsInt64())
+		assert.Equal(t, int64(50), Params.RetryBaseDelayMs.GetAsInt64())
 	})
 
 	t.Run("test metastore config", func(t *testing.T) {

@@ -107,6 +107,9 @@ struct StorageConfig {
     bool useIAM = false;
     bool useVirtualHost = false;
     int64_t requestTimeoutMs = 3000;
+    int64_t connectTimeoutMs = 30000;
+    int32_t maxRetries = 10;
+    int64_t retryBaseDelayMs = 25;
     bool gcp_native_without_auth = false;
     std::string gcp_credential_json = "";
     uint32_t max_connections = 100;
@@ -125,6 +128,9 @@ struct StorageConfig {
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
            << ", requestTimeoutMs=" << requestTimeoutMs
+           << ", connectTimeoutMs=" << connectTimeoutMs
+           << ", maxRetries=" << maxRetries
+           << ", retryBaseDelayMs=" << retryBaseDelayMs
            << ", maxConnections=" << max_connections
            << ", gcp_native_without_auth=" << std::boolalpha
            << gcp_native_without_auth << ", tls_min_version=" << tls_min_version
