@@ -486,10 +486,17 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
     }
 
     search_config[RADIUS] = radius.value();
-    // `range_search_k` is only used as one of the conditions for iterator early termination.
-    // not gurantee to return exactly `range_search_k` results, which may be more or less.
+    // `range_search_k` is used as one of the conditions for iterator early termination.
+    // for index with refinement, it is also used as the budget for refinement.
     // set it to -1 will return all results in the range.
-    search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
+    const auto refine_ratio_opt = GetValueFromConfig<float>(
+        search_info.search_params_, knowhere::indexparam::REFINE_RATIO);
+    if (refine_ratio_opt.has_value() && topk > 0) {
+        search_config[knowhere::meta::RANGE_SEARCH_K] =
+            (int64_t)(topk * refine_ratio_opt.value());
+    } else {
+        search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
+    }
 
     const auto range_filter =
         GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
