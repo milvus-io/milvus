@@ -1658,36 +1658,36 @@ func (m *externalCollectionRESTProxy) RefreshExternalCollection(ctx context.Cont
 
 func (m *externalCollectionRESTProxy) GetRefreshExternalCollectionProgress(ctx context.Context, request *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
 	m.progressReq = request
-	jobInfo := &milvuspb.RefreshExternalCollectionJobInfo{
-		JobId:          request.GetJobId(),
-		CollectionName: "external_books",
-		State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
-		Progress:       42,
-		ExternalSource: "s3://bucket/books",
-		ExternalSpec:   `{"format":"parquet"}`,
-		StartTime:      10,
-	}
 	return &milvuspb.GetRefreshExternalCollectionProgressResponse{
-		Status:  commonSuccessStatus,
-		JobInfo: jobInfo,
+		Status: commonSuccessStatus,
+		JobInfo: &milvuspb.RefreshExternalCollectionJobInfo{
+			JobId:          request.GetJobId(),
+			CollectionName: "external_books",
+			State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+			Progress:       42,
+			ExternalSource: "s3://bucket/books",
+			ExternalSpec:   `{"format":"parquet"}`,
+			StartTime:      10,
+		},
 	}, nil
 }
 
 func (m *externalCollectionRESTProxy) ListRefreshExternalCollectionJobs(ctx context.Context, request *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
 	m.listReq = request
-	jobInfo := &milvuspb.RefreshExternalCollectionJobInfo{
-		JobId:          1001,
-		CollectionName: request.GetCollectionName(),
-		State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
-		Progress:       100,
-		ExternalSource: "s3://bucket/books",
-		ExternalSpec:   `{"format":"parquet"}`,
-		StartTime:      10,
-		EndTime:        20,
-	}
 	return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 		Status: commonSuccessStatus,
-		Jobs:   []*milvuspb.RefreshExternalCollectionJobInfo{jobInfo},
+		Jobs: []*milvuspb.RefreshExternalCollectionJobInfo{
+			{
+				JobId:          1001,
+				CollectionName: request.GetCollectionName(),
+				State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
+				Progress:       100,
+				ExternalSource: "s3://bucket/books",
+				ExternalSpec:   `{"format":"parquet"}`,
+				StartTime:      10,
+				EndTime:        20,
+			},
+		},
 	}, nil
 }
 
