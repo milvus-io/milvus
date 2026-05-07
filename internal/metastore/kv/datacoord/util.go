@@ -44,7 +44,7 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 		if len(segment.GetBinlogs()) > 0 || len(segment.GetStatslogs()) > 0 {
 			log.Warn("find invalid segment while L0 segment get more than delta logs",
 				zap.Any("binlogs", segment.GetBinlogs()),
-				zap.Any("stats", segment.GetBinlogs()),
+				zap.Any("stats", segment.GetStatslogs()),
 			)
 			return fmt.Errorf("segment can not be saved because of L0 segment get more than delta logs: collection %v, segment %v",
 				segment.GetCollectionID(), segment.GetID())
