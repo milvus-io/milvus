@@ -953,13 +953,8 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 	for _, action := range task.Actions() {
-		if action.Node() == node {
-			return true
-		}
-		// LeaderAction.Node() returns the worker node, but the RPC is sent to the
-		// leader node. Match the leader node as well so that LeaderTasks are
-		// dispatched promptly when the leader reports dist.
-		if la, ok := action.(*LeaderAction); ok && la.GetLeaderID() == node {
+		// For LeaderAction, the worker node and executor node are both related.
+		if action.Node() == node || actionExecutorNode(action) == node {
 			return true
 		}
 	}
