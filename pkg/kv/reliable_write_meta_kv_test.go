@@ -2,126 +2,170 @@ package kv
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v3/mocks/mock_kv"
 )
 
 func TestReliableWriteMetaKv(t *testing.T) {
-	kv := mock_kv.NewMockMetaKv(t)
-	fail := atomic.NewBool(true)
-	kv.EXPECT().Save(context.TODO(), mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s1, s2 string) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().MultiSave(context.TODO(), mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().Remove(context.TODO(), mock.Anything).RunAndReturn(func(ctx context.Context, key string) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().MultiRemove(context.TODO(), mock.Anything).RunAndReturn(func(ctx context.Context, keys []string) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().MultiSaveAndRemove(context.TODO(), mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().MultiSaveAndRemoveWithPrefix(context.TODO(), mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-		if !fail.Load() {
-			return nil
-		}
-		return errors.New("test")
-	})
-	kv.EXPECT().CompareVersionAndSwap(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string, version int64, target string) (bool, error) {
-		if !fail.Load() {
-			return false, nil
-		}
-		return false, errors.New("test")
-	})
-	rkv := NewReliableWriteMetaKv(kv)
-	wg := sync.WaitGroup{}
-	wg.Add(7)
-	success := atomic.NewInt32(0)
-	go func() {
-		defer wg.Done()
+	t.Run("Save retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		saveMock := mockey.Mock((*testMetaKv).Save).To(
+			func(*testMetaKv, context.Context, string, string) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer saveMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
 		err := rkv.Save(context.TODO(), "test", "test")
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("MultiSave retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		multiSaveMock := mockey.Mock((*testMetaKv).MultiSave).To(
+			func(*testMetaKv, context.Context, map[string]string) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer multiSaveMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
 		err := rkv.MultiSave(context.TODO(), map[string]string{"test": "test"})
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("Remove retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		removeMock := mockey.Mock((*testMetaKv).Remove).To(
+			func(*testMetaKv, context.Context, string) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer removeMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
 		err := rkv.Remove(context.TODO(), "test")
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("MultiRemove retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		multiRemoveMock := mockey.Mock((*testMetaKv).MultiRemove).To(
+			func(*testMetaKv, context.Context, []string) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer multiRemoveMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
 		err := rkv.MultiRemove(context.TODO(), []string{"test"})
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		err := rkv.MultiSaveAndRemove(context.TODO(), map[string]string{"test": "test"}, []string{"test"})
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		err := rkv.MultiSaveAndRemoveWithPrefix(context.TODO(), map[string]string{"test": "test"}, []string{"test"})
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		_, err := rkv.CompareVersionAndSwap(context.TODO(), "test", 0, "test")
-		if err == nil {
-			success.Add(1)
-		}
-	}()
-	time.Sleep(1 * time.Second)
-	fail.Store(false)
-	wg.Wait()
-	assert.Equal(t, int32(7), success.Load())
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
 
-	fail.Store(true)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	t.Run("MultiSaveAndRemove retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		multiSaveAndRemoveMock := mockey.Mock((*testMetaKv).MultiSaveAndRemove).To(
+			func(*testMetaKv, context.Context, map[string]string, []string, ...predicates.Predicate) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer multiSaveAndRemoveMock.UnPatch()
 
-	_, err := rkv.CompareVersionAndSwap(ctx, "test", 0, "test")
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
+		err := rkv.MultiSaveAndRemove(
+			context.TODO(),
+			map[string]string{"test": "test"},
+			[]string{"test"},
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("MultiSaveAndRemoveWithPrefix retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		multiSaveAndRemoveWithPrefixMock := mockey.Mock((*testMetaKv).MultiSaveAndRemoveWithPrefix).To(
+			func(*testMetaKv, context.Context, map[string]string, []string, ...predicates.Predicate) error {
+				if calls.Inc() == 1 {
+					return errors.New("test")
+				}
+				return nil
+			},
+		).Build()
+		defer multiSaveAndRemoveWithPrefixMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
+		err := rkv.MultiSaveAndRemoveWithPrefix(
+			context.TODO(),
+			map[string]string{"test": "test"},
+			[]string{"test"},
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("CompareVersionAndSwap retries until success", func(t *testing.T) {
+		calls := atomic.NewInt32(0)
+		compareVersionAndSwapMock := mockey.Mock((*testMetaKv).CompareVersionAndSwap).To(
+			func(*testMetaKv, context.Context, string, int64, string) (bool, error) {
+				if calls.Inc() == 1 {
+					return false, errors.New("test")
+				}
+				return true, nil
+			},
+		).Build()
+		defer compareVersionAndSwapMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
+		swapped, err := rkv.CompareVersionAndSwap(context.TODO(), "test", 0, "test")
+		assert.NoError(t, err)
+		assert.True(t, swapped)
+		assert.Equal(t, int32(2), calls.Load())
+	})
+
+	t.Run("CompareVersionAndSwap stops when context expires", func(t *testing.T) {
+		compareVersionAndSwapMock := mockey.Mock((*testMetaKv).CompareVersionAndSwap).To(
+			func(*testMetaKv, context.Context, string, int64, string) (bool, error) {
+				return false, errors.New("test")
+			},
+		).Build()
+		defer compareVersionAndSwapMock.UnPatch()
+
+		rkv := NewReliableWriteMetaKv(&testMetaKv{})
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := rkv.CompareVersionAndSwap(ctx, "test", 0, "test")
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+type testMetaKv struct {
+	MetaKv
 }
