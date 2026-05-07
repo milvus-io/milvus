@@ -177,9 +177,14 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 }
 
 func (pw *FFIPackedWriter) Close() (string, error) {
+	if pw.cWriterHandle == nil {
+		return "", nil
+	}
+
 	var cColumnGroups *C.LoonColumnGroups
 
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
+	pw.cWriterHandle = nil
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
@@ -222,6 +227,7 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
 
-	defer C.loon_properties_free(pw.cProperties)
+	C.loon_properties_free(pw.cProperties)
+	pw.cProperties = nil
 	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
 }
