@@ -178,22 +178,18 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 				return err
 			}
 
-			// Caller-explicit RetryErr predicate takes precedence over the
-			// default InputError abort: when caller passes RetryErr they have
-			// decided which errors are retriable, framework must not override.
-			if c.isRetryErr != nil {
-				if !c.isRetryErr(err) {
-					log.Warn("retry func failed, not be retryable",
-						zap.Uint("retried", i),
-						zap.Uint("attempt", c.attempts),
-						zap.String("caller", getCaller(2)),
-					)
-					return err
-				}
-			} else if merr.GetErrorType(err) == merr.InputError {
-				log.Warn("retry func failed, input error is non-retriable",
+			// shouldRetry=true is the caller's explicit affirmative. Honor
+			// it. The optional RetryErr predicate is still consulted as a
+			// second gate, but unlike retry.Do the InputError default abort
+			// is intentionally not applied here: in retry.Handle the caller
+			// signals abort via shouldRetry=false, not via the error type,
+			// otherwise client-side cache-eviction patterns like
+			// retryIfSchemaError become unreachable for errors classified
+			// server-side as InputError (e.g. ErrCollectionSchemaMismatch).
+			if c.isRetryErr != nil && !c.isRetryErr(err) {
+				log.Warn("retry func failed, not be retryable",
 					zap.Uint("retried", i),
-					zap.Error(err),
+					zap.Uint("attempt", c.attempts),
 					zap.String("caller", getCaller(2)),
 				)
 				return err
