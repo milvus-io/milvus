@@ -5170,7 +5170,17 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto vectors = data_array->mutable_vectors();
             vectors->set_dim(dim);
             auto float_data = vectors->mutable_float_vector();
-            float_data->mutable_data()->Resize(size * dim, 0.0f);
+            int64_t valid_count = size;
+            if (field_meta.is_nullable()) {
+                valid_count = 0;
+                for (int64_t i = 0; i < size; i++) {
+                    if (arr->IsValid(result_mapping[i])) {
+                        valid_count++;
+                    }
+                }
+            }
+            float_data->mutable_data()->Resize(valid_count * dim, 0.0f);
+            int64_t data_pos = 0;
             for (int64_t i = 0; i < size; i++) {
                 auto idx = result_mapping[i];
                 if (arr->IsNull(idx)) {
@@ -5190,7 +5200,9 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 auto floats = reinterpret_cast<const float*>(val);
                 std::copy(floats,
                           floats + dim,
-                          float_data->mutable_data()->mutable_data() + i * dim);
+                          float_data->mutable_data()->mutable_data() +
+                              data_pos * dim);
+                data_pos++;
             }
             break;
         }
