@@ -70,7 +70,8 @@ func (view *LeaderView) Clone() *LeaderView {
 }
 
 type channelDistCriterion struct {
-	nodeIDs        typeutil.Set[int64]
+	// Callers should not combine multiple node-scoped filters in one query.
+	nodes          []int64
 	collectionID   int64
 	channelName    string
 	hasOtherFilter bool
@@ -102,12 +103,7 @@ func (f nodeChannelFilter) Match(ch *DmChannel) bool {
 }
 
 func (f nodeChannelFilter) AddFilter(criterion *channelDistCriterion) {
-	set := typeutil.NewSet(int64(f))
-	if criterion.nodeIDs == nil {
-		criterion.nodeIDs = set
-	} else {
-		criterion.nodeIDs = criterion.nodeIDs.Intersection(set)
-	}
+	criterion.nodes = []int64{int64(f)}
 }
 
 func WithNodeID2Channel(nodeID int64) ChannelDistFilter {
@@ -124,13 +120,7 @@ func (f replicaChannelFilter) Match(ch *DmChannel) bool {
 
 func (f replicaChannelFilter) AddFilter(criterion *channelDistCriterion) {
 	criterion.collectionID = f.GetCollectionID()
-
-	set := typeutil.NewSet(f.GetNodes()...)
-	if criterion.nodeIDs == nil {
-		criterion.nodeIDs = set
-	} else {
-		criterion.nodeIDs = criterion.nodeIDs.Intersection(set)
-	}
+	criterion.nodes = f.GetNodes()
 }
 
 func WithReplica2Channel(replica *Replica) ChannelDistFilter {
@@ -283,17 +273,15 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 		return true
 	}
 
-	var candidates []nodeChannels
-	if criterion.nodeIDs != nil {
-		candidates = lo.Map(criterion.nodeIDs.Collect(), func(nodeID int64, _ int) nodeChannels {
-			return m.channels[nodeID]
-		})
-	} else {
-		candidates = lo.Values(m.channels)
+	var ret []*DmChannel
+	if criterion.nodes != nil {
+		for _, nodeID := range criterion.nodes {
+			ret = append(ret, m.channels[nodeID].Filter(criterion, mergedFilters)...)
+		}
+		return ret
 	}
 
-	var ret []*DmChannel
-	for _, candidate := range candidates {
+	for _, candidate := range m.channels {
 		ret = append(ret, candidate.Filter(criterion, mergedFilters)...)
 	}
 	return ret
