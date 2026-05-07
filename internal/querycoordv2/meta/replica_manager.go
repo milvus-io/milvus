@@ -790,30 +790,48 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 
 // buildSQNodeAssignmentHelpers builds assignment helpers for streaming query node recovery.
 // If streaming node resource groups cover all replica resource groups, creates one helper per RG (isolation mode).
+// During rolling upgrades, old StreamingNodes may not carry RG labels and are reported in DefaultResourceGroupName.
+// In that case, replicas whose RG is not covered by labeled StreamingNodes share the default legacy pool, while
+// covered replicas still use RG isolation.
 // Otherwise, behavior depends on streaming.strictResourceGroupIsolation.enabled config:
 //   - If enabled (strict isolation mode): skip replicas without matching streaming node resource groups.
-//   - If disabled (default): pool all nodes together into a single helper (flat allocation mode).
+//   - If disabled and no default legacy pool exists: pool all nodes together into a single helper (flat allocation mode).
 func (m *ReplicaManager) buildSQNodeAssignmentHelpers(
 	replicas []*Replica,
 	sqnNodesByRG map[string]typeutil.UniqueSet,
 ) map[string]*replicasInSameRGAssignmentHelper {
 	// Group replicas by resource group and check coverage.
 	rgToReplicas := make(map[string][]*Replica)
-	hasUncoveredReplicas := false
+	uncoveredReplicas := make([]*Replica, 0)
 	for _, replica := range replicas {
 		rgName := replica.GetResourceGroup()
 		if _, ok := sqnNodesByRG[rgName]; ok {
 			rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
 		} else {
-			hasUncoveredReplicas = true
+			uncoveredReplicas = append(uncoveredReplicas, replica)
 		}
 	}
 
 	helpers := make(map[string]*replicasInSameRGAssignmentHelper)
+	strictIsolation := paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+
+	if len(uncoveredReplicas) > 0 && !strictIsolation {
+		if _, ok := sqnNodesByRG[DefaultResourceGroupName]; ok {
+			// Compatibility mode for rolling upgrades from old StreamingNodes without RG labels:
+			// uncovered replicas keep using the default legacy pool, while covered replicas keep
+			// their isolated pools. If there are also replicas explicitly in the default RG, they
+			// share the same default pool with uncovered legacy replicas.
+			rgToReplicas[DefaultResourceGroupName] = append(rgToReplicas[DefaultResourceGroupName], uncoveredReplicas...)
+			for rgName, rgReplicas := range rgToReplicas {
+				helpers[rgName] = newReplicaSQNAssignmentHelper(rgName, rgReplicas, sqnNodesByRG[rgName])
+			}
+			return helpers
+		}
+	}
 
 	// Check if we should use fallback mode (flat allocation).
 	// Fallback mode is used when there are uncovered replicas and isolation is disabled.
-	useFallbackMode := hasUncoveredReplicas && !paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+	useFallbackMode := len(uncoveredReplicas) > 0 && !strictIsolation
 
 	if useFallbackMode {
 		// Fallback: pool all nodes together for ALL replicas.
