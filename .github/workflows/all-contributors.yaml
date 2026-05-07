@@ -19,7 +19,7 @@ jobs:
     if: github.repository == 'milvus-io/milvus'
     steps:
       - name: checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
     
