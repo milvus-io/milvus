@@ -511,11 +511,27 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 }
 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
+// It subtracts deleted rows from L0 delta logs to produce the effective (visible) row count.
+// Without this, bulk_insert of duplicate PKs inflates row_count because it does not generate
+// delete markers, while queries correctly filter duplicates.
 func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
 	var ret int64
 	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isSegmentHealthy))
 	for _, segment := range segments {
 		ret += segment.GetNumOfRows()
+	}
+	// Subtract delta rows from L0 segments to account for deleted/tombstoned rows.
+	// L0 segments only contain delta logs and have NumOfRows=0, so they don't contribute
+	// to the positive count; their delta entries represent rows that should be excluded
+	// from the visible row count.
+	l0Segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si) && si.GetLevel() == datapb.SegmentLevel_L0
+	}))
+	for _, segment := range l0Segments {
+		ret -= int64(segmentutil.CalcDelRowCountFromDeltaLog(segment.SegmentInfo))
+	}
+	if ret < 0 {
+		ret = 0
 	}
 	return ret
 }
@@ -1717,6 +1733,16 @@ func (m *meta) GetNumRowsOfPartition(ctx context.Context, collectionID UniqueID,
 	}))
 	for _, segment := range segments {
 		ret += segment.NumOfRows
+	}
+	// Subtract delta rows from L0 segments in this partition to account for tombstones.
+	l0Segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID && si.GetLevel() == datapb.SegmentLevel_L0
+	}))
+	for _, segment := range l0Segments {
+		ret -= int64(segmentutil.CalcDelRowCountFromDeltaLog(segment.SegmentInfo))
+	}
+	if ret < 0 {
+		ret = 0
 	}
 	return ret
 }
