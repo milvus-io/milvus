@@ -5798,8 +5798,7 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
             assert all(offset is not None for offset in offsets), "Some element hits are missing offset"
             element_keys = list(zip(ids, offsets))
             assert len(element_keys) == len(set(element_keys)), (
-                f"Duplicate element hits in results: {len(element_keys)} total, "
-                f"{len(set(element_keys))} unique"
+                f"Duplicate element hits in results: {len(element_keys)} total, {len(set(element_keys))} unique"
             )
 
         # Distances monotonically decreasing
