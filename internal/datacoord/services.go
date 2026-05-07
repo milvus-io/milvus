@@ -1330,15 +1330,25 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	return resp, nil
 }
 
+// getValidatedCompactionInfo retrieves compaction info and validates that the compaction job exists.
+// Returns the compaction info or an error if the job is not found.
+func (s *Server) getValidatedCompactionInfo(ctx context.Context, compactionID int64) (*compactionInfo, error) {
+	info := s.compactionInspector.getCompactionInfo(ctx, compactionID)
+
+	// No tasks means it was never created or already cleaned up
+	if len(info.mergeInfos) == 0 && info.executingCnt == 0 && info.completedCnt == 0 &&
+		info.failedCnt == 0 && info.timeoutCnt == 0 {
+		log.Ctx(ctx).Warn("compaction task not found", zap.Int64("compactionID", compactionID))
+		return nil, merr.WrapErrCompactionResultNotFound(fmt.Sprintf("compaction job not found: %d", compactionID))
+	}
+
+	return info, nil
+}
+
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("compactionID", req.GetCompactionID()),
-	)
+	log := log.Ctx(ctx).With(zap.Int64("compactionID", req.GetCompactionID()))
 	log.Info("received get compaction state request")
-	resp := &milvuspb.GetCompactionStateResponse{
-		Status: merr.Success(),
-	}
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetCompactionStateResponse{
@@ -1347,19 +1357,33 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	}
 
 	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
-		return resp, nil
+		return &milvuspb.GetCompactionStateResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("compaction disabled")),
+		}, nil
 	}
 
-	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	info, err := s.getValidatedCompactionInfo(ctx, req.GetCompactionID())
+	if err != nil {
+		return &milvuspb.GetCompactionStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 
-	resp.State = info.state
-	resp.ExecutingPlanNo = int64(info.executingCnt)
-	resp.CompletedPlanNo = int64(info.completedCnt)
-	resp.TimeoutPlanNo = int64(info.timeoutCnt)
-	resp.FailedPlanNo = int64(info.failedCnt)
-	log.Info("success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
-		zap.Int("completed", info.completedCnt), zap.Int("failed", info.failedCnt), zap.Int("timeout", info.timeoutCnt))
+	resp := &milvuspb.GetCompactionStateResponse{
+		Status:          merr.Success(),
+		State:           info.state,
+		ExecutingPlanNo: int64(info.executingCnt),
+		CompletedPlanNo: int64(info.completedCnt),
+		TimeoutPlanNo:   int64(info.timeoutCnt),
+		FailedPlanNo:    int64(info.failedCnt),
+	}
+
+	log.Info("success to get compaction state",
+		zap.Any("state", info.state),
+		zap.Int("executing", info.executingCnt),
+		zap.Int("completed", info.completedCnt),
+		zap.Int("failed", info.failedCnt),
+		zap.Int("timeout", info.timeoutCnt))
 
 	return resp, nil
 }
@@ -1377,16 +1401,23 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
-	resp := &milvuspb.GetCompactionPlansResponse{
-		Status: merr.Success(),
-	}
 	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
-		return resp, nil
+		return &milvuspb.GetCompactionPlansResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("compaction disabled")),
+		}, nil
 	}
 
-	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
-	resp.State = info.state
+	info, err := s.getValidatedCompactionInfo(ctx, req.GetCompactionID())
+	if err != nil {
+		return &milvuspb.GetCompactionPlansResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &milvuspb.GetCompactionPlansResponse{
+		Status: merr.Success(),
+		State:  info.state,
+	}
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
 	})

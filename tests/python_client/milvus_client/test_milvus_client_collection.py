@@ -1583,14 +1583,15 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
 
         # trigger compaction
         compact_id = self.compact(client, collection_name, is_clustering=False)[0]
-        start = time.time()
-        while True:
-            time.sleep(1)
-            state = self.get_compaction_state(client, compact_id, is_clustering=False)[0]
-            if state == "Completed":
-                break
-            if time.time() - start > 180:
-                raise Exception("Compaction did not complete within 180s")
+        if compact_id > 0:
+            start = time.time()
+            while True:
+                time.sleep(1)
+                state = self.get_compaction_state(client, compact_id, is_clustering=False)[0]
+                if state == "Completed":
+                    break
+                if time.time() - start > 180:
+                    raise Exception("Compaction did not complete within 180s")
 
         # verify data integrity after compaction
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]

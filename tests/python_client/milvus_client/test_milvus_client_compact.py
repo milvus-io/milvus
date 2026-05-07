@@ -175,15 +175,16 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. compact
         compact_id = self.compact(client, collection_name, is_clustering=is_clustering)[0]
-        cost = 180
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id, is_clustering=is_clustering)[0]
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(1, f"Compact after index cost more than {cost}s")
+        if compact_id > 0:
+            cost = 180
+            start = time.time()
+            while True:
+                time.sleep(1)
+                res = self.get_compaction_state(client, compact_id, is_clustering=is_clustering)[0]
+                if res == "Completed":
+                    break
+                if time.time() - start > cost:
+                    raise Exception(1, f"Compact after index cost more than {cost}s")
 
         self.drop_collection(client, collection_name)
 
@@ -264,14 +265,15 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. compact
         compact_id = self.compact(client, collection_name, is_clustering=is_clustering)[0]
-        cost = 180
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id, is_clustering=is_clustering)[0]
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(1, f"Compact after index cost more than {cost}s")
+        if compact_id > 0:
+            cost = 180
+            start = time.time()
+            while True:
+                time.sleep(1)
+                res = self.get_compaction_state(client, compact_id, is_clustering=is_clustering)[0]
+                if res == "Completed":
+                    break
+                if time.time() - start > cost:
+                    raise Exception(1, f"Compact after index cost more than {cost}s")
 
         self.drop_collection(client, collection_name)

@@ -336,6 +336,14 @@ class ApiCollectionWrapper:
     def get_compaction_state(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
+        # Skip if compaction was not triggered (compaction_id <= 0 means no compaction job)
+        compaction_id = getattr(self.collection, 'compaction_id', -1)
+        is_clustering = kwargs.get('is_clustering', False)
+        if is_clustering:
+            compaction_id = getattr(self.collection, 'clustering_compaction_id', -1)
+        if compaction_id is not None and compaction_id <= 0:
+            log.warning(f"get_compaction_state skipped: compaction_id={compaction_id} (<= 0, no compaction triggered)")
+            return None, True
         res, check = api_request([self.collection.get_compaction_state, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
@@ -344,12 +352,25 @@ class ApiCollectionWrapper:
     def get_compaction_plans(self, timeout=None, check_task=None, check_items={}, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
+        # Skip if compaction was not triggered (compaction_id <= 0 means no compaction job)
+        compaction_id = getattr(self.collection, 'compaction_id', -1)
+        is_clustering = kwargs.get('is_clustering', False)
+        if is_clustering:
+            compaction_id = getattr(self.collection, 'clustering_compaction_id', -1)
+        if compaction_id is not None and compaction_id <= 0:
+            log.warning(f"get_compaction_plans skipped: compaction_id={compaction_id} (<= 0, no compaction triggered)")
+            return None, True
         res, check = api_request([self.collection.get_compaction_plans, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     def wait_for_compaction_completed(self, timeout=None, **kwargs):
         timeout = TIMEOUT * 3 if timeout is None else timeout
+        # Skip if compaction was not triggered (compaction_id <= 0 means no compaction job)
+        compaction_id = getattr(self.collection, 'compaction_id', -1)
+        if compaction_id is not None and compaction_id <= 0:
+            log.warning(f"wait_for_compaction_completed skipped: compaction_id={compaction_id} (<= 0, no compaction triggered)")
+            return True
         res = self.collection.wait_for_compaction_completed(timeout, **kwargs)
         # log.debug(res)
         return res
