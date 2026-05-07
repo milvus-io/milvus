@@ -209,6 +209,29 @@ BuildTestArrowTable() {
                                vec_arr});
 }
 
+std::shared_ptr<arrow::Table>
+BuildNullableVectorArrowTable() {
+    auto fsb_type = arrow::fixed_size_binary(kVecDim * sizeof(float));
+    arrow::FixedSizeBinaryBuilder vec_b(fsb_type);
+    for (int i = 0; i < 3; i++) {
+        if (i == 1) {
+            EXPECT_TRUE(vec_b.AppendNull().ok());
+            continue;
+        }
+        float v[kVecDim];
+        for (int d = 0; d < kVecDim; d++) {
+            v[d] = static_cast<float>(i * kVecDim + d);
+        }
+        EXPECT_TRUE(vec_b.Append(reinterpret_cast<const uint8_t*>(v)).ok());
+    }
+    auto vec_arr = vec_b.Finish().ValueOrDie();
+
+    auto schema = arrow::schema({
+        arrow::field("vec_col", fsb_type),
+    });
+    return arrow::Table::Make(schema, {vec_arr});
+}
+
 // Build an external schema with all supported types.
 // Returns {schema, field_ids} where field_ids are in order:
 // bool, int8, int16, int32, int64, float, double, varchar, vec
@@ -629,6 +652,44 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_MultiTypes) {
     EXPECT_FLOAT_EQ(fv.data(8), 16.0f);
 }
 
+TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorUsesCompactData) {
+    auto info = BuildExternalSchema();
+    auto table = BuildNullableVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    auto& vec_data = results->fields_data(0);
+    ASSERT_EQ(vec_data.field_id(), info.vec_id.get());
+    ASSERT_EQ(vec_data.valid_data_size(), 3);
+    EXPECT_TRUE(vec_data.valid_data(0));
+    EXPECT_FALSE(vec_data.valid_data(1));
+    EXPECT_TRUE(vec_data.valid_data(2));
+
+    auto& fv = vec_data.vectors().float_vector();
+    ASSERT_EQ(fv.data_size(), 2 * kVecDim);
+    EXPECT_FLOAT_EQ(fv.data(0), 0.0f);
+    EXPECT_FLOAT_EQ(fv.data(1), 1.0f);
+    EXPECT_FLOAT_EQ(fv.data(2), 2.0f);
+    EXPECT_FLOAT_EQ(fv.data(3), 3.0f);
+    EXPECT_FLOAT_EQ(fv.data(4), 8.0f);
+    EXPECT_FLOAT_EQ(fv.data(5), 9.0f);
+    EXPECT_FLOAT_EQ(fv.data(6), 10.0f);
+    EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
+}
+
 // Test TryTakeForSearch with all supported data types
 TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     auto [schema,
@@ -713,6 +774,41 @@ TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     // Row 1: [4,5,6,7], Row 3: [12,13,14,15]
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(0), 4.0f);
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(4), 12.0f);
+}
+
+TEST(ExternalTakeTest, TryTakeForSearch_NullableVectorUsesCompactData) {
+    auto info = BuildExternalSchema();
+    auto table = BuildNullableVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.schema);
+    plan->target_entries_ = {info.vec_id};
+
+    std::vector<int64_t> seg_offsets = {0, 1, 2};
+    SearchResult results;
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), seg_offsets.data(), seg_offsets.size(), results);
+    ASSERT_TRUE(ok);
+
+    auto& vec_data = results.output_fields_data_.at(info.vec_id);
+    ASSERT_EQ(vec_data->valid_data_size(), 3);
+    EXPECT_TRUE(vec_data->valid_data(0));
+    EXPECT_FALSE(vec_data->valid_data(1));
+    EXPECT_TRUE(vec_data->valid_data(2));
+
+    auto& fv = vec_data->vectors().float_vector();
+    ASSERT_EQ(fv.data_size(), 2 * kVecDim);
+    EXPECT_FLOAT_EQ(fv.data(0), 0.0f);
+    EXPECT_FLOAT_EQ(fv.data(1), 1.0f);
+    EXPECT_FLOAT_EQ(fv.data(2), 2.0f);
+    EXPECT_FLOAT_EQ(fv.data(3), 3.0f);
+    EXPECT_FLOAT_EQ(fv.data(4), 8.0f);
+    EXPECT_FLOAT_EQ(fv.data(5), 9.0f);
+    EXPECT_FLOAT_EQ(fv.data(6), 10.0f);
+    EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
 }
 
 // Test fallback: returns false for non-external collection
