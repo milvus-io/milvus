@@ -250,6 +250,30 @@ TEST(storage, ExternalSampleSchemaValidationRejectsMismatchedArrayElementType) {
     }
 }
 
+TEST(storage, ExternalNonNullableScalarRejectsNullValue) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> int64_array;
+    ASSERT_TRUE(builder.Finish(&int64_array).ok());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(100);
+    field_schema.set_name("age");
+    field_schema.set_external_field("age_col");
+    field_schema.set_data_type(proto::schema::DataType::Int64);
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+
+    try {
+        storage::NormalizeExternalArrow(int64_array, field_meta);
+        FAIL() << "expected NormalizeExternalArrow to reject null values";
+    } catch (const std::exception& e) {
+        std::string message = e.what();
+        EXPECT_NE(message.find("field 'age'"), std::string::npos);
+        EXPECT_NE(message.find("external_field 'age_col'"), std::string::npos);
+    }
+}
+
 TEST(storage, ExternalVarCharLargeStringNormalizesAndFillSucceeds) {
     arrow::LargeStringBuilder builder;
     ASSERT_TRUE(builder.Append("hello").ok());
@@ -327,6 +351,29 @@ TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
         DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
     auto normalized = storage::NormalizeExternalArrow(binary_array, field_meta);
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+}
+
+TEST(storage, ExternalNonNullableFloatVectorRejectsNullValue) {
+    auto fsb_type = arrow::fixed_size_binary(sizeof(float) * 2);
+    arrow::FixedSizeBinaryBuilder builder(fsb_type);
+    std::array<float, 2> row = {1.0F, 2.0F};
+    ASSERT_TRUE(
+        builder.Append(reinterpret_cast<const uint8_t*>(row.data())).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> vector_array;
+    ASSERT_TRUE(builder.Finish(&vector_array).ok());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(101);
+    field_schema.set_name("embedding");
+    field_schema.set_external_field("embedding_col");
+    field_schema.set_data_type(proto::schema::DataType::FloatVector);
+    auto* type_param = field_schema.add_type_params();
+    type_param->set_key("dim");
+    type_param->set_value("2");
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+
+    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(vector_array, field_meta));
 }
 
 TEST(storage, ExternalBinaryVectorListNormalizeFails) {
