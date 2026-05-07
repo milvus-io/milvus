@@ -1367,6 +1367,75 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	assert.Equal(t, indexpb.JobState_JobStateFinished, metaTask.GetState())
 }
 
+func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUntilJobFinished(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}
+	assert.NoError(t, refreshMeta.AddJob(job))
+
+	task1 := &datapb.ExternalCollectionRefreshTask{
+		TaskId:         1001,
+		JobId:          1,
+		CollectionId:   100,
+		NodeId:         1,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}
+	task2 := &datapb.ExternalCollectionRefreshTask{
+		TaskId:         1002,
+		JobId:          1,
+		CollectionId:   100,
+		NodeId:         1,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}
+	assert.NoError(t, refreshMeta.AddTask(task1))
+	assert.NoError(t, refreshMeta.AddTask(task2))
+	assert.NoError(t, refreshMeta.AddTaskIDToJob(1, 1001))
+	assert.NoError(t, refreshMeta.AddTaskIDToJob(1, 1002))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+
+	cluster := &stubCluster{}
+	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		State:        indexpb.JobState_JobStateFinished,
+		KeptSegments: []int64{},
+		UpdatedSegments: []*datapb.SegmentInfo{
+			{ID: 10, CollectionID: 100, NumOfRows: 7},
+		},
+	}, nil).Build()
+	defer mockQuery.UnPatch()
+
+	updateCalls := 0
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+		updateCalls++
+		return nil
+	}).Build()
+	defer mockUpdate.UnPatch()
+
+	task := newRefreshExternalCollectionTask(task1, refreshMeta, mt, &stubAllocator{nextID: 99999})
+	task.QueryTaskOnWorker(cluster)
+
+	metaTask := refreshMeta.GetTask(1001)
+	assert.Equal(t, indexpb.JobState_JobStateFinished, metaTask.GetState())
+	assert.Equal(t, 0, updateCalls)
+}
+
 func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedValidateSourceFailed(t *testing.T) {
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -1420,7 +1489,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedValidateSourceF
 	assert.Contains(t, metaTask.GetFailReason(), "task source mismatch")
 }
 
-func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSetJobInfoFailed(t *testing.T) {
+func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedPersistsResultWithoutSegmentMeta(t *testing.T) {
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 	assert.NoError(t, err)
@@ -1448,7 +1517,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSetJobInfoFaile
 	err = refreshMeta.AddTask(protoTask)
 	assert.NoError(t, err)
 
-	// Task has nil mt, so SetJobInfo will fail
+	// Task has nil mt. Finished task handling must still succeed because
+	// segment metadata is applied later at job level, not by this task.
 	alloc := &stubAllocator{nextID: 99999}
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc) // mt is nil
 
@@ -1456,16 +1526,22 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSetJobInfoFaile
 
 	// Mock query to return Finished
 	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
-		State: indexpb.JobState_JobStateFinished,
+		State:        indexpb.JobState_JobStateFinished,
+		KeptSegments: []int64{10},
+		UpdatedSegments: []*datapb.SegmentInfo{
+			{ID: 20, CollectionID: 100, NumOfRows: 7},
+		},
 	}, nil).Build()
 	defer mockQuery.UnPatch()
 
 	task.QueryTaskOnWorker(cluster)
 
-	// Task should fail because SetJobInfo fails (meta is nil)
 	metaTask := refreshMeta.GetTask(1001)
-	assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-	assert.Contains(t, metaTask.GetFailReason(), "meta is nil")
+	assert.Equal(t, indexpb.JobState_JobStateFinished, metaTask.GetState())
+	assert.Empty(t, metaTask.GetFailReason())
+	assert.Equal(t, []int64{10}, metaTask.GetKeptSegments())
+	assert.Len(t, metaTask.GetUpdatedSegments(), 1)
+	assert.Equal(t, int64(20), metaTask.GetUpdatedSegments()[0].GetID())
 }
 
 func TestRefreshExternalCollectionTask_QueryTaskOnWorker_JobNotFoundNodeIdZero(t *testing.T) {

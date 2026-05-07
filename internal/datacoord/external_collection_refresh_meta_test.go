@@ -664,6 +664,96 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
+	t.Run("persists_result_and_clones_segments", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
+		}
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		var savedTask *datapb.ExternalCollectionRefreshTask
+		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).
+			To(func(_ context.Context, task *datapb.ExternalCollectionRefreshTask) error {
+				savedTask = task
+				return nil
+			}).Build()
+		defer mockSave.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		updatedSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 7}
+		err = meta.UpdateTaskResult(
+			1001,
+			indexpb.JobState_JobStateFinished,
+			"",
+			[]int64{1, 2},
+			[]*datapb.SegmentInfo{updatedSegment},
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, savedTask)
+		assert.Equal(t, indexpb.JobState_JobStateFinished, savedTask.GetState())
+		assert.Equal(t, int64(100), savedTask.GetProgress())
+		assert.Equal(t, []int64{1, 2}, savedTask.GetKeptSegments())
+		assert.Len(t, savedTask.GetUpdatedSegments(), 1)
+		assert.Equal(t, int64(10), savedTask.GetUpdatedSegments()[0].GetID())
+		assert.Equal(t, int64(7), savedTask.GetUpdatedSegments()[0].GetNumOfRows())
+
+		updatedSegment.NumOfRows = 99
+		task := meta.GetTask(1001)
+		assert.Equal(t, int64(7), task.GetUpdatedSegments()[0].GetNumOfRows())
+		assert.Equal(t, int64(7), savedTask.GetUpdatedSegments()[0].GetNumOfRows())
+	})
+
+	t.Run("save_failed_keeps_original_task", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
+		}
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		defer mockSave.UnPatch()
+
+		err = meta.UpdateTaskResult(
+			1001,
+			indexpb.JobState_JobStateFinished,
+			"",
+			[]int64{1},
+			[]*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+		)
+		assert.Error(t, err)
+
+		task := meta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, task.GetState())
+		assert.Empty(t, task.GetKeptSegments())
+		assert.Empty(t, task.GetUpdatedSegments())
+	})
+
+	t.Run("task_not_found", func(t *testing.T) {
+		meta := createMetaTestRefreshMeta(t, nil, nil)
+
+		err := meta.UpdateTaskResult(
+			9999,
+			indexpb.JobState_JobStateFinished,
+			"",
+			[]int64{1},
+			[]*datapb.SegmentInfo{{ID: 10}},
+		)
+		assert.Error(t, err)
+	})
+}
+
 func TestExternalCollectionRefreshMeta_UpdateTaskProgress(t *testing.T) {
 	t.Run("save_failed", func(t *testing.T) {
 		catalog := &stubCatalog{}
