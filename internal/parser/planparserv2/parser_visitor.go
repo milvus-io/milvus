@@ -547,15 +547,16 @@ func extractRegexPattern(literal string) (string, error) {
 	for i := 0; i < len(inner); i++ {
 		if inner[i] == '\\' && i+1 < len(inner) {
 			next := inner[i+1]
-			if next == quote {
+			switch next {
+			case quote:
 				// Escaped quote → literal quote character
 				result.WriteByte(quote)
 				i++
-			} else if next == '\\' {
+			case '\\':
 				// Escaped backslash → single backslash
 				result.WriteByte('\\')
 				i++
-			} else {
+			default:
 				// All other escapes: pass through as-is (e.g. \d, \., \p, \n)
 				result.WriteByte('\\')
 				result.WriteByte(next)
@@ -648,6 +649,12 @@ func tryOptimizeRegexToLike(pattern string) (planpb.OpType, string, bool) {
 	}
 }
 
+func isRegexMatchSupportedType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
+	return typeutil.IsStringType(dataType) ||
+		typeutil.IsJSONType(dataType) ||
+		(typeutil.IsArrayType(dataType) && typeutil.IsStringType(elementType))
+}
+
 // VisitRegexMatch handles =~ regex match operations.
 func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface{} {
 	left := ctx.Expr().Accept(v)
@@ -668,8 +675,7 @@ func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface
 		return err
 	}
 
-	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
-		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
+	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
 		return errors.New("regex match on non-string or non-json field is unsupported")
 	}
 
@@ -725,8 +731,7 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 		return err
 	}
 
-	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
-		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
+	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
 		return errors.New("regex match on non-string or non-json field is unsupported")
 	}
 
