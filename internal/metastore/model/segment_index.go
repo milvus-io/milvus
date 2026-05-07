@@ -33,6 +33,10 @@ type SegmentIndex struct {
 	CurrentScalarIndexVersion int32
 	IndexType                 string
 	// Zero value is the legacy build-rooted layout and remains wire-compatible with old metadata.
+	// IndexStorePathVersion is the requested path version while IndexState is
+	// Unissued/InProgress, and reflects the actual on-disk layout only after
+	// FinishTask. Readers that construct paths from this field must check
+	// IndexState == Finished first.
 	IndexStorePathVersion indexpb.IndexStorePathVersion
 }
 

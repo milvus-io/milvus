@@ -210,6 +210,8 @@ func (m *versionManagerImpl) ensurePathVersionRoleMap(role string) map[int64]int
 }
 
 func isIndexStorePathVersionRole(role string) bool {
+	// Path version gating only tracks QueryNode read capability. Worker write
+	// capability is learned from each finished build's actual path version.
 	return role == typeutil.QueryNodeRole
 }
 

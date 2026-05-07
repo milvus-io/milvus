@@ -1040,6 +1040,12 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 			zap.Error(err))
 		return err
 	}
+	if actualPathVersion < segIdx.IndexStorePathVersion {
+		log.Ctx(m.ctx).Info("worker downgraded index store path version",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()))
+	}
 
 	oldSize := segIdx.IndexSerializedSize
 
