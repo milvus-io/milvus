@@ -2712,6 +2712,15 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
     auto element_type = IsVectorArrayDataType(dt) || IsArrayDataType(dt)
                             ? field_meta.get_element_type()
                             : DataType::NONE;
+    if (!field_meta.is_nullable() && array->null_count() > 0) {
+        ThrowInfo(DataTypeInvalid,
+                  "external field contains null values but schema field is "
+                  "not nullable{}, data type {}, arrow type {}, null count {}",
+                  FieldErrorSuffix(field_meta),
+                  dt,
+                  array->type()->ToString(),
+                  array->null_count());
+    }
     return NormalizeExternalArrowByType(
         array, dt, dim, field_meta.is_nullable(), element_type, field_meta);
 }
