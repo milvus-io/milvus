@@ -36,6 +36,7 @@ expr:
 	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
 	| STWithin'('Identifier','StringLiteral')'									 # STWithin
 	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
+	| STIsValid'('Identifier')'                                  			 	 # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
@@ -123,6 +124,7 @@ STContains: 'st_contains' | 'ST_CONTAINS';
 STIntersects : 'st_intersects' | 'ST_INTERSECTS';
 STWithin :'st_within' | 'ST_WITHIN';
 STDWithin: 'st_dwithin' | 'ST_DWITHIN';
+STIsValid: 'st_isvalid' | 'ST_ISVALID';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 
