@@ -236,7 +236,8 @@ struct UnaryElementFuncForRegexMatch {
                     if (has_bitmap_input && !bitmap_input[i + start_cursor])
                         continue;
                     auto idx = (filter_type == FilterType::random && offsets)
-                                   ? offsets[i] : i;
+                                   ? offsets[i]
+                                   : i;
                     res[i] = searcher->contains(src[idx]) && (*m)(src[idx]);
                 }
             } else {
@@ -695,9 +696,8 @@ struct UnaryIndexFunc {
                 // Fallback to Reverse_Lookup for indexes without
                 // PatternMatch support
                 if (!index->HasRawData()) {
-                    ThrowInfo(
-                        Unsupported,
-                        "index doesn't have raw data for RegexMatch");
+                    ThrowInfo(Unsupported,
+                              "index doesn't have raw data for RegexMatch");
                 }
                 auto cnt = index->Count();
                 TargetBitmap res(cnt);
@@ -1152,9 +1152,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     void
     EnsureRegexCache() {
-        if (regex_cache_inited_) return;
+        if (regex_cache_inited_)
+            return;
         regex_cache_inited_ = true;
-        if (expr_->op_type_ != proto::plan::OpType::RegexMatch) return;
+        if (expr_->op_type_ != proto::plan::OpType::RegexMatch)
+            return;
         auto pattern = GetValueFromProto<std::string>(expr_->val_);
         cached_regex_matcher_ = std::make_unique<PartialRegexMatcher>(pattern);
         auto lits = index::extract_literals_from_regex(pattern);

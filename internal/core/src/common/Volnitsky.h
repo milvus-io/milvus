@@ -51,8 +51,7 @@ class VolnitskySearcher {
 
             // Insert bigrams from END to START so first (leftmost)
             // occurrence wins — it produces the largest skip distance.
-            for (auto i = static_cast<ssize_t>(needle_size_ - 2);
-                 i >= 0; --i) {
+            for (auto i = static_cast<ssize_t>(needle_size_ - 2); i >= 0; --i) {
                 uint16_t bg = readBigram(needle_ + i);
                 putBigram(bg, static_cast<uint8_t>(i + 1));
             }
@@ -62,8 +61,10 @@ class VolnitskySearcher {
     /// Returns true if haystack contains needle as a substring.
     bool
     contains(std::string_view haystack) const {
-        if (needle_size_ == 0) return true;
-        if (haystack.size() < needle_size_) return false;
+        if (needle_size_ == 0)
+            return true;
+        if (haystack.size() < needle_size_)
+            return false;
 
         if (!use_volnitsky_) {
             return fallbackSearch(
@@ -72,11 +73,9 @@ class VolnitskySearcher {
                            haystack.size()) != nullptr;
         }
 
-        const auto* h =
-            reinterpret_cast<const uint8_t*>(haystack.data());
+        const auto* h = reinterpret_cast<const uint8_t*>(haystack.data());
         const auto* h_end = h + haystack.size();
-        const auto* n =
-            reinterpret_cast<const uint8_t*>(needle_);
+        const auto* n = reinterpret_cast<const uint8_t*>(needle_);
 
         // Main Volnitsky loop: pos points to where we read the bigram,
         // aligned to where needle's last bigram would sit.
@@ -117,8 +116,7 @@ class VolnitskySearcher {
     void
     putBigram(uint16_t bg, uint8_t offset) {
         size_t cell = bg % kHashSize;
-        while (hash_[cell] != 0)
-            cell = (cell + 1) % kHashSize;
+        while (hash_[cell] != 0) cell = (cell + 1) % kHashSize;
         hash_[cell] = offset;
     }
 
@@ -130,8 +128,10 @@ class VolnitskySearcher {
             uint64_t wa, wb;
             std::memcpy(&wa, a, 8);
             std::memcpy(&wb, b, 8);
-            if (wa != wb) return false;
-            if (len == 8) return true;
+            if (wa != wb)
+                return false;
+            if (len == 8)
+                return true;
         }
         return std::memcmp(a, b, len) == 0;
     }
@@ -140,11 +140,12 @@ class VolnitskySearcher {
     /// Uses SSE2 memchr + memcmp when available.
     const uint8_t*
     fallbackSearch(const uint8_t* haystack, const uint8_t* h_end) const {
-        if (needle_size_ == 0) return haystack;
-        if (haystack + needle_size_ > h_end) return nullptr;
+        if (needle_size_ == 0)
+            return haystack;
+        if (haystack + needle_size_ > h_end)
+            return nullptr;
 
-        const auto* n =
-            reinterpret_cast<const uint8_t*>(needle_);
+        const auto* n = reinterpret_cast<const uint8_t*>(needle_);
 
 #ifdef __SSE2__
         // Use SSE2 to find first byte of needle, then memcmp
@@ -152,8 +153,8 @@ class VolnitskySearcher {
         const auto* pos = haystack;
 
         while (pos + 16 <= h_end) {
-            __m128i block = _mm_loadu_si128(
-                reinterpret_cast<const __m128i*>(pos));
+            __m128i block =
+                _mm_loadu_si128(reinterpret_cast<const __m128i*>(pos));
             int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(block, first));
 
             while (mask != 0) {
@@ -170,8 +171,7 @@ class VolnitskySearcher {
 
         // Handle remaining bytes
         while (pos + needle_size_ <= h_end) {
-            if (*pos == n[0] &&
-                std::memcmp(pos, n, needle_size_) == 0) {
+            if (*pos == n[0] && std::memcmp(pos, n, needle_size_) == 0) {
                 return pos;
             }
             ++pos;
@@ -183,8 +183,10 @@ class VolnitskySearcher {
         while (pos + needle_size_ <= h_end) {
             pos = reinterpret_cast<const uint8_t*>(
                 std::memchr(pos, n[0], h_end - pos - needle_size_ + 1));
-            if (!pos) return nullptr;
-            if (std::memcmp(pos, n, needle_size_) == 0) return pos;
+            if (!pos)
+                return nullptr;
+            if (std::memcmp(pos, n, needle_size_) == 0)
+                return pos;
             ++pos;
         }
         return nullptr;

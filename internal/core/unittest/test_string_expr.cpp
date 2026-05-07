@@ -1900,7 +1900,8 @@ TEST(StringExpr, RegexMatch) {
 
     // Test cases: {pattern, expected_match_func}
     // PartialRegexMatcher uses RE2::PartialMatch (substring semantics)
-    std::vector<std::tuple<std::string, std::function<bool(const std::string&)>>>
+    std::vector<
+        std::tuple<std::string, std::function<bool(const std::string&)>>>
         testcases{
             // Pure literal — substring match
             {"abc",
@@ -1920,8 +1921,7 @@ TEST(StringExpr, RegexMatch) {
                  return m(val);
              }},
             // Empty pattern — matches everything
-            {"",
-             [](const std::string& val) { return true; }},
+            {"", [](const std::string& val) { return true; }},
             // Dot matches any
             {"a.c",
              [](const std::string& val) {
@@ -1973,11 +1973,11 @@ TEST(StringExpr, RegexMatch) {
 TEST(StringExpr, RegexMatchPartialMatchSemantics) {
     // Verify that RegexMatch uses PartialMatch (substring), not FullMatch
     PartialRegexMatcher partial("abc");
-    EXPECT_TRUE(partial(std::string("xyzabcdef")));   // substring match
-    EXPECT_TRUE(partial(std::string("abc")));          // exact match
-    EXPECT_TRUE(partial(std::string("123abc456")));    // middle match
-    EXPECT_FALSE(partial(std::string("ab")));          // no match
-    EXPECT_FALSE(partial(std::string("ABc")));         // case sensitive
+    EXPECT_TRUE(partial(std::string("xyzabcdef")));  // substring match
+    EXPECT_TRUE(partial(std::string("abc")));        // exact match
+    EXPECT_TRUE(partial(std::string("123abc456")));  // middle match
+    EXPECT_FALSE(partial(std::string("ab")));        // no match
+    EXPECT_FALSE(partial(std::string("ABc")));       // case sensitive
 
     // Contrast with RegexMatcher (FullMatch) — only matches entire string
     RegexMatcher full("abc");
@@ -2056,9 +2056,9 @@ TEST(StringExpr, ExtractLiteralsFromRegex) {
 
     // Optional with *: ab*c
     PartialRegexMatcher m8("ab*c");
-    EXPECT_TRUE(m8(std::string("xacy")));     // zero 'b'
-    EXPECT_TRUE(m8(std::string("xabcy")));    // one 'b'
-    EXPECT_TRUE(m8(std::string("xabbcy")));   // two 'b'
+    EXPECT_TRUE(m8(std::string("xacy")));    // zero 'b'
+    EXPECT_TRUE(m8(std::string("xabcy")));   // one 'b'
+    EXPECT_TRUE(m8(std::string("xabbcy")));  // two 'b'
 
     // Inline flags: (?i)error
     PartialRegexMatcher m9("(?i)error");
@@ -2124,9 +2124,13 @@ TEST(StringExpr, ExtractLiteralsFromRegex) {
     // ── Unicode property \p{...} ──
     // \p{Han} matches CJK characters
     PartialRegexMatcher m11("\\p{Han}+foo");
-    EXPECT_TRUE(m11(std::string("\xe4\xb8\xad" "foo")));   // 中foo
-    EXPECT_TRUE(m11(std::string("\xe4\xb8\xad\xe6\x96\x87" "foo")));  // 中文foo
-    EXPECT_FALSE(m11(std::string("abcfoo")));            // no Han chars
+    EXPECT_TRUE(
+        m11(std::string("\xe4\xb8\xad"
+                        "foo")));  // 中foo
+    EXPECT_TRUE(
+        m11(std::string("\xe4\xb8\xad\xe6\x96\x87"
+                        "foo")));              // 中文foo
+    EXPECT_FALSE(m11(std::string("abcfoo")));  // no Han chars
 
     // \p{Latin} matches Latin characters
     PartialRegexMatcher m12("\\p{Latin}+123");
@@ -2236,7 +2240,9 @@ TEST(StringExpr, ExtractLiteralsFromRegex) {
 
     // Unicode: mixed CJK and ASCII
     PartialRegexMatcher cjk("\\p{Han}+[0-9]+");
-    EXPECT_TRUE(cjk(std::string("\xe4\xb8\xad\xe6\x96\x87" "123")));  // 中文123
+    EXPECT_TRUE(
+        cjk(std::string("\xe4\xb8\xad\xe6\x96\x87"
+                        "123")));  // 中文123
     EXPECT_FALSE(cjk(std::string("abc123")));
 }
 
@@ -2343,7 +2349,9 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
     // ── Unicode multi-byte characters ──
     // ¥ (U+00A5) — use RE2 Unicode codepoint syntax \x{00A5}
     PartialRegexMatcher yen("\\x{00A5}\\d+");
-    EXPECT_TRUE(yen(std::string("\xc2\xa5" "100")));     // ¥100
+    EXPECT_TRUE(
+        yen(std::string("\xc2\xa5"
+                        "100")));  // ¥100
     EXPECT_FALSE(yen(std::string("$100")));
 
     // Emoji: 😀 (U+1F600) — RE2 hex codepoint
@@ -2406,7 +2414,6 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
     EXPECT_TRUE(ci(std::string("say Hello")));
 }
 
-
 // Direct unit tests for extract_literals_from_regex.
 // Validates that the extractor never produces false negatives:
 // every extracted literal MUST appear in any string that matches the regex.
@@ -2435,7 +2442,9 @@ TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
     // ── Metacharacters split literals ──
     expect_lits("abc.*def", {"abc", "def"}, ".* splits");
     expect_lits("abc.def", {"abc", "def"}, ". splits");
-    expect_lits("abc+def", {"abc", "cdef"}, "+ flushes then restarts with repeated char");
+    expect_lits("abc+def",
+                {"abc", "cdef"},
+                "+ flushes then restarts with repeated char");
 
     // ── Anchors are metacharacters ──
     expect_lits("^hello$", {"hello"}, "anchors stripped");
@@ -2481,8 +2490,7 @@ TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
     // ── Group penetration ──
     expect_lits("abc(de)fg", {"abcdefg"}, "required group penetration");
     expect_lits("abc(?:de)fg", {"abcdefg"}, "non-capturing group penetration");
-    expect_lits("abc(de)+fg", {"abcde", "defg"},
-                "group + quantifier");
+    expect_lits("abc(de)+fg", {"abcde", "defg"}, "group + quantifier");
 
     // ── Unicode property \p{...} consumed ──
     expect_lits("\\p{Han}foo", {"foo"}, "\\p{Han} consumed");
@@ -2509,7 +2517,8 @@ TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
                                   const std::string& input,
                                   const char* label) {
         PartialRegexMatcher matcher(pattern);
-        if (!matcher(input)) return;  // doesn't match, nothing to check
+        if (!matcher(input))
+            return;  // doesn't match, nothing to check
 
         auto lits = extract_literals_from_regex(pattern);
         for (const auto& lit : lits) {
@@ -2520,12 +2529,14 @@ TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
         }
     };
 
-    verify_no_false_neg("error.*timeout", "error: connection timeout",
-                        "multi-literal");
+    verify_no_false_neg(
+        "error.*timeout", "error: connection timeout", "multi-literal");
     verify_no_false_neg("colou?r", "color red", "optional char");
     verify_no_false_neg("colou?r", "colour blue", "optional char present");
     verify_no_false_neg("\\p{Han}+foo",
-                        "\xe4\xb8\xad" "foo", "Unicode Han");
+                        "\xe4\xb8\xad"
+                        "foo",
+                        "Unicode Han");
     verify_no_false_neg("(?P<id>\\d+)abc", "123abc", "named group");
     verify_no_false_neg("a{3}bc", "aaabc", "exact quantifier");
     verify_no_false_neg("file\\.txt", "open file.txt now", "escaped dot");

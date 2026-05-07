@@ -228,8 +228,7 @@ regex_to_tantivy_pattern(const std::string& pattern,
             group_depth++;
             result += c;
         } else if (c == ')') {
-            if (!flag_stack.empty() &&
-                flag_stack.back().depth == group_depth) {
+            if (!flag_stack.empty() && flag_stack.back().depth == group_depth) {
                 dot_all = flag_stack.back().prev_dot_all;
                 flag_stack.pop_back();
             }
