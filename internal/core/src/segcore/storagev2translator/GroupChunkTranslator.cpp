@@ -125,7 +125,8 @@ GroupChunkTranslator::GroupChunkTranslator(
             fs,
             file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            storage::GetReaderProperties());
+            storage::GetReaderProperties(),
+            storage::GetArrowReaderProperties());
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to create file row group reader: " +
                        result.status().ToString());

@@ -147,11 +147,16 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
 
+	err := InitArrowReaderConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
 	InitLocalChunkManager(localDataRootPath)
 
-	err := InitRemoteChunkManager(paramtable.Get())
+	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}

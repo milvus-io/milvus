@@ -237,6 +237,18 @@ func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 	}
 }
 
+func (node *QueryNode) ReconfigArrowReaderParams(evt *config.Event) {
+	if evt.HasUpdated {
+		if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+			log.Ctx(node.ctx).Warn("QueryNode failed to reconfigure arrow reader params", zap.Error(err))
+			return
+		}
+		log.Ctx(node.ctx).Info("QueryNode reconfig arrow reader params successfully",
+			zap.Int64("holeSizeLimitBytes", paramtable.Get().CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			zap.Int64("rangeSizeLimitBytes", paramtable.Get().CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+	}
+}
+
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
@@ -283,6 +295,10 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
 		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
 			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, node.ReconfigArrowReaderParams))
+	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, node.ReconfigArrowReaderParams))
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
