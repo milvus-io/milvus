@@ -312,6 +312,9 @@ message CredentialInfo {
 message ListPolicyRequest {
   // Not useful for now
   common.MsgBase base = 1;
+  // When true, proxy declares support for ID-based policies.
+  // rootcoord returns ID-based grants instead of name-based.
+  bool support_id_based_policy = 2;
 }
 
 message ListPolicyResponse {

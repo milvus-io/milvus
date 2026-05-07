@@ -41,7 +41,6 @@ func (s *RBACBasicTestSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 	s.WithMilvusConfig(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-	s.WithMilvusConfig(paramtable.Get().ProxyCfg.ResolveAliasForPrivilege.Key, "true")
 	s.MiniClusterSuite.SetupSuite()
 }
 

@@ -21,11 +21,14 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -70,6 +73,21 @@ func (c *DDLCallback) dropDatabaseV1AckCallback(ctx context.Context, result mess
 	if err := c.meta.DropDatabase(ctx, header.DbName, result.GetControlChannelResult().TimeTick); err != nil {
 		return errors.Wrap(err, "failed to drop database")
 	}
+
+	// Refresh the RBAC policy cache on all proxies so they pick up the
+	// deletion of grants that were keyed under the dropped database
+	// (both name-based {dbName}.* and ID-based dbID:X.*). Without this,
+	// proxies would still enforce the stale cached grants until their
+	// periodic refresh, creating a window where dropped-database permissions
+	// appear to linger. Best-effort: a refresh failure does not fail the
+	// drop itself, consistent with the DropCollection path.
+	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: int32(typeutil.CacheRefresh),
+	}); err != nil {
+		log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after database drop",
+			zap.String("dbName", header.DbName), zap.Error(err))
+	}
+
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(header.DbName),

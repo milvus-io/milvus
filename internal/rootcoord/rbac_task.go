@@ -35,6 +35,46 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// convertGrantsToIDBased converts name-based Collection grants to ID-based grants for the new proxy.
+// Non-Collection grants (Global, User) pass through unchanged.
+func convertGrantsToIDBased(ctx context.Context, core *Core, grants []*milvuspb.GrantEntity) []*milvuspb.GrantEntity {
+	idBasedGrants := make([]*milvuspb.GrantEntity, 0, len(grants))
+	for _, g := range grants {
+		if g.Object.GetName() == "Collection" {
+			if g.ObjectName == util.AnyWord {
+				// Wildcard grant: convert dbName to ID-based, keep objectName as "*"
+				if g.DbName != util.AnyWord {
+					if dbID := core.meta.LookupDBID(ctx, g.DbName); dbID > 0 {
+						idBasedGrants = append(idBasedGrants, &milvuspb.GrantEntity{
+							Role:       g.Role,
+							Object:     g.Object,
+							ObjectName: util.AnyWord,
+							DbName:     funcutil.FormatDatabaseID(dbID),
+							Grantor:    g.Grantor,
+						})
+						continue
+					}
+				}
+			} else {
+				// Specific grant: convert both dbName and objectName to ID-based
+				dbID, colID := core.meta.LookupCollectionAndDBID(ctx, g.DbName, g.ObjectName)
+				if colID != InvalidCollectionID {
+					idBasedGrants = append(idBasedGrants, &milvuspb.GrantEntity{
+						Role:       g.Role,
+						Object:     g.Object,
+						ObjectName: funcutil.FormatCollectionID(colID),
+						DbName:     funcutil.FormatDatabaseID(dbID),
+						Grantor:    g.Grantor,
+					})
+					continue
+				}
+			}
+		}
+		idBasedGrants = append(idBasedGrants, g)
+	}
+	return idBasedGrants
+}
+
 func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	privName := entity.Grantor.Privilege.Name
 	if err := func() error {
@@ -101,9 +141,11 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			})
 		}
 		if len(expandGrants) > 0 {
+			idBasedGrants := convertGrantsToIDBased(ctx, core, expandGrants)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+				OpType:       opType,
+				OpKey:        funcutil.PolicyForPrivileges(expandGrants),
+				OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedGrants),
 			}); err != nil {
 				log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", entity), zap.Error(err))
 				return err
@@ -117,112 +159,112 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 }
 
 func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *milvuspb.PrivilegeGroupInfo, operateType milvuspb.OperatePrivilegeGroupType) error {
-	if err := func() error {
-		groups, err := core.meta.ListPrivilegeGroups(ctx)
-		if err != nil && !common.IsIgnorableError(err) {
-			log.Ctx(ctx).Warn("fail to list privilege groups", zap.Error(err))
-			return err
-		}
-		currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
-			return group.GroupName, group.Privileges
-		})
-
-		// get roles granted to the group
-		roles, err := core.meta.GetPrivilegeGroupRoles(ctx, in.GroupName)
-		if err != nil {
-			return err
-		}
-		newGroups := make(map[string][]*milvuspb.PrivilegeEntity)
-		for k, v := range currGroups {
-			if k != in.GroupName {
-				newGroups[k] = v
-				continue
-			}
-			switch operateType {
-			case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
-				newPrivs := lo.Union(v, in.Privileges)
-				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
-					return p.Name
-				})
-			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
-				newPrivs, _ := lo.Difference(v, in.Privileges)
-				newGroups[k] = newPrivs
-			default:
-				return errors.New("invalid operate type")
-			}
-		}
-
-		var rolesToRevoke []*milvuspb.GrantEntity
-		var rolesToGrant []*milvuspb.GrantEntity
-		compareGrants := func(a, b *milvuspb.GrantEntity) bool {
-			return a.Role.Name == b.Role.Name &&
-				a.Object.Name == b.Object.Name &&
-				a.ObjectName == b.ObjectName &&
-				a.Grantor.User.Name == b.Grantor.User.Name &&
-				a.Grantor.Privilege.Name == b.Grantor.Privilege.Name &&
-				a.DbName == b.DbName
-		}
-		for _, role := range roles {
-			grants, err := core.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-				Role:   role,
-				DbName: util.AnyWord,
-			})
-			if err != nil {
-				return err
-			}
-			currGrants, err := core.expandPrivilegeGroups(ctx, grants, currGroups)
-			if err != nil {
-				return err
-			}
-			newGrants, err := core.expandPrivilegeGroups(ctx, grants, newGroups)
-			if err != nil {
-				return err
-			}
-
-			toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, newItem)
-				})
-			})
-
-			toGrant := lo.Filter(newGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(currGrants, func(currItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, currItem)
-				})
-			})
-
-			rolesToRevoke = append(rolesToRevoke, toRevoke...)
-			rolesToGrant = append(rolesToGrant, toGrant...)
-		}
-
-		if len(rolesToRevoke) > 0 {
-			opType := int32(typeutil.CacheRevokePrivilege)
-			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
-			}); err != nil {
-				log.Ctx(ctx).Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
-				return err
-			}
-		}
-
-		if len(rolesToGrant) > 0 {
-			opType := int32(typeutil.CacheGrantPrivilege)
-			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
-			}); err != nil {
-				log.Ctx(ctx).Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
+	groups, err := core.meta.ListPrivilegeGroups(ctx)
+	if err != nil && !common.IsIgnorableError(err) {
+		log.Ctx(ctx).Warn("fail to list privilege groups", zap.Error(err))
 		return errors.Wrap(err, "failed to refresh policy info cache")
 	}
+	currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+
+	// get roles granted to the group
+	roles, err := core.meta.GetPrivilegeGroupRoles(ctx, in.GroupName)
+	if err != nil {
+		return errors.Wrap(err, "failed to refresh policy info cache")
+	}
+	newGroups := make(map[string][]*milvuspb.PrivilegeEntity)
+	for k, v := range currGroups {
+		if k != in.GroupName {
+			newGroups[k] = v
+			continue
+		}
+		switch operateType {
+		case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
+			newPrivs := lo.Union(v, in.Privileges)
+			newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
+				return p.Name
+			})
+		case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
+			newPrivs, _ := lo.Difference(v, in.Privileges)
+			newGroups[k] = newPrivs
+		default:
+			return errors.Wrap(errors.New("invalid operate type"), "failed to refresh policy info cache")
+		}
+	}
+
+	var rolesToRevoke []*milvuspb.GrantEntity
+	var rolesToGrant []*milvuspb.GrantEntity
+	compareGrants := func(a, b *milvuspb.GrantEntity) bool {
+		return a.Role.Name == b.Role.Name &&
+			a.Object.Name == b.Object.Name &&
+			a.ObjectName == b.ObjectName &&
+			a.Grantor.User.Name == b.Grantor.User.Name &&
+			a.Grantor.Privilege.Name == b.Grantor.Privilege.Name &&
+			a.DbName == b.DbName
+	}
+	for _, role := range roles {
+		grants, err := core.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+			Role:   role,
+			DbName: util.AnyWord,
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to refresh policy info cache")
+		}
+		currGrants, err := core.expandPrivilegeGroups(ctx, grants, currGroups)
+		if err != nil {
+			return errors.Wrap(err, "failed to refresh policy info cache")
+		}
+		newGrants, err := core.expandPrivilegeGroups(ctx, grants, newGroups)
+		if err != nil {
+			return errors.Wrap(err, "failed to refresh policy info cache")
+		}
+
+		toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
+			return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
+				return compareGrants(item, newItem)
+			})
+		})
+
+		toGrant := lo.Filter(newGrants, func(item *milvuspb.GrantEntity, _ int) bool {
+			return !lo.ContainsBy(currGrants, func(currItem *milvuspb.GrantEntity) bool {
+				return compareGrants(item, currItem)
+			})
+		})
+
+		rolesToRevoke = append(rolesToRevoke, toRevoke...)
+		rolesToGrant = append(rolesToGrant, toGrant...)
+	}
+
 	if err := core.meta.OperatePrivilegeGroup(ctx, in.GroupName, in.Privileges, operateType); err != nil && !common.IsIgnorableError(err) {
 		log.Ctx(ctx).Warn("fail to operate privilege group", zap.Error(err))
 		return errors.Wrap(err, "failed to operate privilege group")
+	}
+
+	if len(rolesToRevoke) > 0 {
+		opType := int32(typeutil.CacheRevokePrivilege)
+		idBasedRevoke := convertGrantsToIDBased(ctx, core, rolesToRevoke)
+		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType:       opType,
+			OpKey:        funcutil.PolicyForPrivileges(rolesToRevoke),
+			OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedRevoke),
+		}); err != nil {
+			log.Ctx(ctx).Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
+			return errors.Wrap(err, "failed to refresh policy info cache")
+		}
+	}
+
+	if len(rolesToGrant) > 0 {
+		opType := int32(typeutil.CacheGrantPrivilege)
+		idBasedGrant := convertGrantsToIDBased(ctx, core, rolesToGrant)
+		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType:       opType,
+			OpKey:        funcutil.PolicyForPrivileges(rolesToGrant),
+			OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedGrant),
+		}); err != nil {
+			log.Ctx(ctx).Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
+			return errors.Wrap(err, "failed to refresh policy info cache")
+		}
 	}
 	return nil
 }

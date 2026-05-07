@@ -3906,7 +3906,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 			Type: milvuspb.OperatePrivilegeType_Grant,
 		}
 		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		// select grant
 		selectReq := &milvuspb.SelectGrantRequest{}
@@ -3937,7 +3937,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		results, _ = proxy.SelectGrant(ctx, selectReq)
 		assert.Equal(t, commonpb.ErrorCode_Success, results.GetStatus().GetErrorCode())
-		assert.NotEqual(t, 0, len(results.Entities))
+		assert.Equal(t, 0, len(results.Entities))
 
 		selectReq.Entity.Object.Name = "not existed"
 		results, _ = proxy.SelectGrant(ctx, selectReq)
@@ -3954,7 +3954,6 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 			},
 		})
 		assert.Equal(t, commonpb.ErrorCode_Success, results.GetStatus().GetErrorCode())
-		assert.NotEqual(t, 0, len(results.Entities))
 
 		req.Type = milvuspb.OperatePrivilegeType_Revoke
 		resp, _ = proxy.OperatePrivilege(ctx, req)
@@ -3974,7 +3973,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 			Type: milvuspb.OperatePrivilegeType_Grant,
 		}
 		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke
 		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
@@ -4040,7 +4039,7 @@ func testProxyOperatePrivilegeV2(ctx context.Context, t *testing.T, proxy *Proxy
 			Type:           milvuspb.OperatePrivilegeType_Grant,
 		}
 		resp, _ = proxy.OperatePrivilegeV2(ctx, roleReq)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		roleReq = &milvuspb.OperatePrivilegeV2Request{
 			Role:           &milvuspb.RoleEntity{Name: "public"},

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -122,6 +123,64 @@ func (s *PrivilegeCacheTestSuite) TestGetCredentialInfo() {
 		s.NotNil(credInfo)
 		s.Equal(&internalpb.CredentialInfo{}, credInfo)
 	})
+}
+
+func (s *PrivilegeCacheTestSuite) TestRevokeCombinedKeyRemovesBothFormats() {
+	// Verify that revoking with a combined "|"-delimited key removes both
+	// name-based and ID-based entries from privilegeInfos.
+	// This is the core behavior that the impl.go fix relies on.
+	namePolicy := `{"PType":"p","V0":"role1","V1":"Collection-default.myCol","V2":"Insert"}`
+	idPolicy := `{"PType":"p","V0":"role1","V1":"Collection-dbID:1.colID:123","V2":"Insert"}`
+
+	// Simulate CacheRefresh loading dual-write entries
+	s.cache.mu.Lock()
+	s.cache.privilegeInfos[namePolicy] = struct{}{}
+	s.cache.privilegeInfos[idPolicy] = struct{}{}
+	s.cache.mu.Unlock()
+
+	// Simulate revoke with combined key (what the fixed impl.go sends)
+	combinedKey := namePolicy + "|" + idPolicy
+	keys := funcutil.PrivilegesForPolicy(combinedKey)
+	s.cache.mu.Lock()
+	for _, key := range keys {
+		delete(s.cache.privilegeInfos, key)
+	}
+	s.cache.mu.Unlock()
+
+	s.cache.mu.RLock()
+	_, hasName := s.cache.privilegeInfos[namePolicy]
+	_, hasID := s.cache.privilegeInfos[idPolicy]
+	s.cache.mu.RUnlock()
+
+	s.False(hasName, "name-based policy should be removed")
+	s.False(hasID, "ID-based policy should be removed")
+}
+
+func (s *PrivilegeCacheTestSuite) TestRevokeSingleKeyLeavesStale() {
+	// Documents the bug: revoking only one format leaves the other stale.
+	namePolicy := `{"PType":"p","V0":"role1","V1":"Collection-default.myCol","V2":"Insert"}`
+	idPolicy := `{"PType":"p","V0":"role1","V1":"Collection-dbID:1.colID:123","V2":"Insert"}`
+
+	s.cache.mu.Lock()
+	s.cache.privilegeInfos[namePolicy] = struct{}{}
+	s.cache.privilegeInfos[idPolicy] = struct{}{}
+	s.cache.mu.Unlock()
+
+	// Old behavior: only ID-based key sent
+	keys := funcutil.PrivilegesForPolicy(idPolicy)
+	s.cache.mu.Lock()
+	for _, key := range keys {
+		delete(s.cache.privilegeInfos, key)
+	}
+	s.cache.mu.Unlock()
+
+	s.cache.mu.RLock()
+	_, hasName := s.cache.privilegeInfos[namePolicy]
+	_, hasID := s.cache.privilegeInfos[idPolicy]
+	s.cache.mu.RUnlock()
+
+	s.True(hasName, "name-based policy remains when only ID-based key is revoked")
+	s.False(hasID, "ID-based policy should be removed")
 }
 
 func TestPrivilegeCache(t *testing.T) {

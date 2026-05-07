@@ -596,8 +596,16 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
-		return c.initBuiltinRoles(initCtx)
+		if err = c.initBuiltinRoles(initCtx); err != nil {
+			return err
+		}
 	}
+
+	// One-time migration: convert name-based grants to ID-based grants
+	if err = c.meta.MigrateGrantsToEntityID(initCtx); err != nil {
+		return errors.Wrap(err, "failed to migrate grants to entity ID")
+	}
+
 	return nil
 }
 
@@ -2723,7 +2731,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 		}, nil
 	}
 
-	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant)
+	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant, in.GetSupportIdBasedPolicy())
 	if err != nil {
 		ctxLog.Error("fail to list policy", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
@@ -2748,9 +2756,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to expand privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
-		return funcutil.PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
-	})
+	expandPolicies := funcutil.PrivilegesForPolicy(funcutil.PolicyForPrivileges(expandGrants))
 
 	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
 	if err != nil {
@@ -2816,6 +2822,20 @@ func (c *Core) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequ
 		if errors.Is(err, errEmptyRBACMeta) {
 			ctxLog.Info("restoring rbac meta is empty, skip restore", zap.Error(err))
 			return merr.Success(), nil
+		}
+		// Partial skip: users/roles/privilege-groups and all resolvable grants
+		// were persisted successfully; only grants referencing collections that
+		// do not exist on this cluster were skipped. On-disk state is consistent
+		// and the proxy cache has already been refreshed in the ack callback.
+		// Return Success (with the skip detail in Status.Reason) so SDK callers
+		// do not enter an error/retry loop — they can create the missing
+		// collections and call RestoreRBAC again (idempotent via
+		// IgnorableError filtering in AlterGrant).
+		if IsRestoreRBACPartialSkip(err) {
+			ctxLog.Warn("rbac restore partially applied: some grants skipped for missing collections", zap.Error(err))
+			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+			metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			return merr.Success(err.Error()), nil
 		}
 		errMsg := "fail to execute task when restore rbac meta data"
 		ctxLog.Warn(errMsg, zap.Error(err))

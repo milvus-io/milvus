@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -59,7 +60,21 @@ var (
 	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
 
 	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
+
+	// errRestoreRBACPartialSkip signals that RestoreRBAC persisted every grant
+	// it could resolve but skipped one or more grants whose collections do not
+	// exist on this cluster. State on disk is consistent; callers must still
+	// refresh proxy caches and may retry after creating the missing collections.
+	errRestoreRBACPartialSkip = errors.New("restore rbac partial skip")
 )
+
+// IsRestoreRBACPartialSkip reports whether err was returned by RestoreRBAC to
+// signal that persistence succeeded but some grants were skipped for missing
+// collections. On this error, on-disk state is valid and proxy caches should
+// still be refreshed.
+func IsRestoreRBACPartialSkip(err error) bool {
+	return errors.Is(err, errRestoreRBACPartialSkip)
+}
 
 type MetaTableChecker interface {
 	RBACChecker
@@ -138,10 +153,13 @@ type IMetaTable interface {
 	OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
-	ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
+	ListPolicy(ctx context.Context, tenant string, supportIDBased bool) ([]*milvuspb.GrantEntity, error)
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
+	LookupCollectionAndDBID(ctx context.Context, dbName string, collectionName string) (int64, UniqueID)
+	LookupDBID(ctx context.Context, dbName string) int64
+	MigrateGrantsToEntityID(ctx context.Context) error
 	IsCustomPrivilegeGroup(ctx context.Context, groupName string) (bool, error)
 	CreatePrivilegeGroup(ctx context.Context, groupName string) error
 	DropPrivilegeGroup(ctx context.Context, groupName string) error
@@ -178,7 +196,7 @@ type MetaTable struct {
 	names   *nameDb
 	aliases *nameDb
 
-	ddLock         sync.RWMutex
+	ddLock         sync.RWMutex // acquire before permissionLock to avoid deadlock
 	permissionLock sync.RWMutex
 }
 
@@ -193,6 +211,83 @@ func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog, tsoAl
 		return nil, err
 	}
 	return mt, nil
+}
+
+// convertGrantsToNameBased converts ID-based dbName/objectName in grant entities to human-readable names,
+// and deduplicates entries from dual-write (ID-based + name-based keys for the same grant).
+// Grants whose dbID or colID cannot be resolved (because the DB or collection
+// was dropped) are filtered out so the internal "dbID:X" / "colID:Y" strings
+// never leak to SDK callers via BackupRBAC or ListGrant.
+// Must be called WITHOUT permissionLock held to avoid lock ordering issues.
+func (mt *MetaTable) convertGrantsToNameBased(ctx context.Context, entities []*milvuspb.GrantEntity) []*milvuspb.GrantEntity {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	seen := make(map[string]struct{})
+	var resolved []*milvuspb.GrantEntity
+	for _, e := range entities {
+		dbName := e.DbName
+		objectName := e.ObjectName
+		if funcutil.IsIDBasedDBName(dbName) {
+			dbID, err := funcutil.ExtractDatabaseID(dbName)
+			if err != nil {
+				log.Ctx(ctx).Warn("convertGrantsToNameBased: skipping grant with malformed dbID",
+					zap.String("dbName", dbName), zap.Error(err))
+				continue
+			}
+			resolvedDB := ""
+			for _, db := range mt.dbName2Meta {
+				if db.ID == dbID {
+					resolvedDB = db.Name
+					break
+				}
+			}
+			if resolvedDB == "" {
+				// Database no longer exists — skip so we don't leak "dbID:X" to the SDK.
+				log.Ctx(ctx).Warn("convertGrantsToNameBased: skipping grant for non-existent database",
+					zap.String("dbName", dbName))
+				continue
+			}
+			dbName = resolvedDB
+		}
+		if funcutil.IsIDBasedObjectName(objectName) {
+			collID, err := funcutil.ExtractCollectionID(objectName)
+			if err != nil {
+				log.Ctx(ctx).Warn("convertGrantsToNameBased: skipping grant with malformed colID",
+					zap.String("objectName", objectName), zap.Error(err))
+				continue
+			}
+			coll, ok := mt.collID2Meta[collID]
+			if !ok {
+				// Collection dropped — skip so we don't leak "colID:X" to the SDK
+				// (the SDK would fail to round-trip it via RestoreRBAC anyway).
+				log.Ctx(ctx).Warn("convertGrantsToNameBased: skipping grant for non-existent collection",
+					zap.String("objectName", objectName))
+				continue
+			}
+			objectName = coll.Name
+		}
+		// Deduplicate: ID-based and name-based keys resolve to the same grant
+		privName := ""
+		if e.Grantor != nil && e.Grantor.Privilege != nil {
+			privName = e.Grantor.Privilege.Name
+		}
+		dedupKey := fmt.Sprintf("%s/%s/%s/%s/%s", e.Role.GetName(), e.Object.GetName(), dbName, objectName, privName)
+		if _, exists := seen[dedupKey]; exists {
+			continue
+		}
+		seen[dedupKey] = struct{}{}
+		// Clone to avoid mutating input entities from catalog
+		if dbName != e.DbName || objectName != e.ObjectName {
+			clone := proto.Clone(e).(*milvuspb.GrantEntity)
+			clone.DbName = dbName
+			clone.ObjectName = objectName
+			resolved = append(resolved, clone)
+		} else {
+			resolved = append(resolved, e)
+		}
+	}
+	return resolved
 }
 
 func (mt *MetaTable) reload() error {
@@ -483,6 +578,17 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 		return err
 	}
 
+	// Delete all grants referencing this database (both name-based {dbName}.*
+	// and ID-based dbID:X.* entries) symmetric with DropCollection. Otherwise
+	// stale ID-based grants under the dropped dbID would persist in etcd
+	// forever (no enforcement path can match them, but they accumulate).
+	// Best-effort: a failure here does not fail the database drop itself,
+	// consistent with DeleteGrantByCollectionID in removeCollectionInternal.
+	if err := mt.catalog.DeleteGrantByDatabaseID(ctx, util.DefaultTenant, db.ID, dbName); err != nil {
+		log.Ctx(ctx).Warn("failed to delete grants for dropped database, skipping",
+			zap.Int64("dbID", db.ID), zap.String("dbName", dbName), zap.Error(err))
+	}
+
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
 	delete(mt.dbName2Meta, dbName)
@@ -628,9 +734,10 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 
 	// Delete all grants referencing this collection immediately so they don't
 	// linger until the tombstone sweeper runs (which can take minutes).
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, db.Name, coll.Name); err != nil {
+	tenant := util.DefaultTenant
+	if err := mt.catalog.DeleteGrantByCollectionID(ctx1, tenant, collectionID, db.Name, coll.Name); err != nil {
 		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
-			zap.String("dbName", db.Name), zap.String("collectionName", coll.Name), zap.Error(err))
+			zap.Int64("collectionID", collectionID), zap.Error(err))
 	}
 
 	return nil
@@ -711,9 +818,14 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return err
 	}
 
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
+	tenant := util.DefaultTenant
+	dbName := ""
+	if db, dbErr := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp); dbErr == nil {
+		dbName = db.Name
+	}
+	if err := mt.catalog.DeleteGrantByCollectionID(ctx1, tenant, collectionID, dbName, coll.Name); err != nil {
 		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
-			zap.String("dbName", coll.DBName), zap.String("collectionName", coll.Name), zap.Error(err))
+			zap.Int64("collectionID", collectionID), zap.Error(err))
 	}
 
 	allNames := common.CloneStringList(aliases)
@@ -847,6 +959,50 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 		return collectionID
 	}
 	return InvalidCollectionID
+}
+
+// LookupCollectionAndDBID looks up a collection name/alias and database name to their IDs
+// atomically under a single ddLock.RLock to avoid TOCTOU races.
+func (mt *MetaTable) LookupCollectionAndDBID(ctx context.Context, dbName string, collectionName string) (dbID int64, collectionID UniqueID) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+
+	db, err := mt.getDatabaseByNameInternal(ctx, dbName, 0)
+	if err != nil {
+		return 0, InvalidCollectionID
+	}
+
+	// Wildcard or empty collectionName: return dbID only
+	if collectionName == "" || collectionName == util.AnyWord {
+		return db.ID, InvalidCollectionID
+	}
+
+	if id, ok := mt.aliases.get(dbName, collectionName); ok {
+		return db.ID, id
+	}
+	if id, ok := mt.names.get(dbName, collectionName); ok {
+		return db.ID, id
+	}
+	return 0, InvalidCollectionID
+}
+
+// LookupDBID looks up a database name to its ID under ddLock.
+// Used for wildcard Collection grants (e.g., grant on Collection *) where only dbID is needed.
+func (mt *MetaTable) LookupDBID(ctx context.Context, dbName string) int64 {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	if db, ok := mt.dbName2Meta[dbName]; ok {
+		return db.ID
+	}
+	return 0
 }
 
 // Note: The returned model.Collection is read-only. Do NOT modify it directly,
@@ -1059,11 +1215,22 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		}
 	}
 
+	// On rename / DB move, the old {oldDB}.{oldName} name-based grant pointer becomes
+	// stale: ID-based keys remain valid (grants keyed by collectionID) but the stale
+	// name-based pointer would survive a later drop+recreate of the same old name and
+	// leak privileges via the proxy name-based fallback. Clean it up best-effort; a
+	// failure here does not fail the rename itself.
+	//
+	// Gate on direct state comparison (not UpdateMask.Paths) so a stray
+	// FieldMaskCollectionName / FieldMaskDB in the mask — e.g. from a future
+	// code path that sets the mask defensively without actually changing the
+	// value — cannot delete a live, non-stale grant pointer.
 	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
-		if err := mt.catalog.MigrateGrantCollectionName(ctx1, util.DefaultTenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
-			log.Ctx(ctx).Warn("failed to migrate grants for renamed collection, skipping",
-				zap.String("oldDBName", oldColl.DBName), zap.String("oldName", oldColl.Name),
-				zap.String("newDBName", newColl.DBName), zap.String("newName", newColl.Name), zap.Error(err))
+		if err := mt.catalog.DeleteStaleNameBasedGrant(ctx1, util.DefaultTenant, oldColl.DBName, oldColl.Name); err != nil {
+			log.Ctx(ctx).Warn("failed to delete stale name-based grant after rename",
+				zap.String("dbName", oldColl.DBName),
+				zap.String("collectionName", oldColl.Name),
+				zap.Error(err))
 		}
 	}
 
@@ -1930,10 +2097,83 @@ func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity
 		entity.DbName = util.DefaultDBName
 	}
 
+	// Resolve entity IDs for ID-based storage (dual-write).
+	// For specific collections: resolve both dbID and collectionID.
+	// For wildcard (*): resolve dbID only (key format: dbID:X.*).
+	var dbID, collectionID int64
+	if entity.Object.Name == "Collection" {
+		if entity.ObjectName != util.AnyWord {
+			dbID, collectionID = mt.LookupCollectionAndDBID(ctx, entity.DbName, entity.ObjectName)
+			if collectionID == InvalidCollectionID {
+				if funcutil.IsRevoke(operateType) {
+					log.Ctx(ctx).Info("skip revoke for dropped collection",
+						zap.String("collection", entity.ObjectName))
+					return common.NewIgnorableError(merr.WrapErrCollectionNotFound(entity.ObjectName))
+				}
+				return merr.WrapErrCollectionNotFound(entity.ObjectName)
+			}
+		} else if entity.DbName != util.AnyWord {
+			// Wildcard collection on a specific database — resolve dbID for ID-based key.
+			// If the database doesn't exist, reject the operation rather than silently
+			// falling back to a name-based write (which would re-activate if a same-named
+			// database is created later).
+			dbID = mt.LookupDBID(ctx, entity.DbName)
+			if dbID == 0 {
+				if funcutil.IsRevoke(operateType) {
+					log.Ctx(ctx).Info("skip revoke for non-existent database",
+						zap.String("database", entity.DbName))
+					return common.NewIgnorableError(merr.WrapErrDatabaseNotFound(entity.DbName))
+				}
+				return merr.WrapErrDatabaseNotFound(entity.DbName)
+			}
+		}
+	}
+
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.AlterGrant(ctx, tenant, entity, operateType)
+	return mt.catalog.AlterGrant(ctx, tenant, entity, operateType, dbID, collectionID)
+}
+
+// MigrateGrantsToEntityID performs a one-time additive migration of all name-based grants to ID-based grants.
+// New ID-based keys are created alongside existing name-based keys for rollback safety.
+//
+// Tenant scoping: Milvus currently operates as a single-tenant system — every
+// RBAC catalog call in this codebase uses util.DefaultTenant (empty string).
+// Migrating only DefaultTenant matches the rest of the RBAC stack. Supporting
+// additional tenants would require a tenant discovery mechanism that does not
+// yet exist; adding it here in isolation would have nothing to iterate over.
+//
+// Concurrency: this is called from Core.initRbac during RootCoord startup,
+// before the node registers its etcd session and before any DDL broadcast
+// traffic can reach this process. We still hold a single ddLock.RLock across
+// the entire migration scan as defensive hardening: if a future caller invokes
+// MigrateGrantsToEntityID outside of startup, concurrent DDL cannot split the
+// scan and produce stale dbID/collID mappings for collections deleted mid-scan.
+func (mt *MetaTable) MigrateGrantsToEntityID(ctx context.Context) error {
+	tenant := util.DefaultTenant
+
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	// Both callbacks run under the caller-held RLock — do NOT re-acquire it or
+	// the migration will deadlock if a writer is waiting.
+	collectionNameToID := func(dbName, collName string) (int64, error) {
+		if collID, ok := mt.names.get(dbName, collName); ok {
+			return collID, nil
+		}
+		if collID, ok := mt.aliases.get(dbName, collName); ok {
+			return collID, nil
+		}
+		return 0, merr.WrapErrCollectionNotFound(collName)
+	}
+	dbNameToID := func(dbName string) (int64, error) {
+		if db, ok := mt.dbName2Meta[dbName]; ok {
+			return db.ID, nil
+		}
+		return 0, merr.WrapErrDatabaseNotFound(dbName)
+	}
+	return mt.catalog.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
 }
 
 // SelectGrant select grant
@@ -1952,10 +2192,64 @@ func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *mil
 		entity.DbName = util.DefaultDBName
 	}
 
-	mt.permissionLock.RLock()
-	defer mt.permissionLock.RUnlock()
+	catalogEntity := entity
+	if entity.Object != nil &&
+		entity.Object.GetName() == "Collection" &&
+		!funcutil.IsEmptyString(entity.ObjectName) &&
+		entity.DbName != util.AnyWord {
+		dbID, collectionID := mt.LookupCollectionAndDBID(ctx, entity.DbName, entity.ObjectName)
+		if entity.ObjectName == util.AnyWord {
+			if dbID > 0 {
+				catalogEntity = proto.Clone(entity).(*milvuspb.GrantEntity)
+				catalogEntity.DbName = funcutil.FormatDatabaseID(dbID)
+			}
+		} else if collectionID != InvalidCollectionID {
+			catalogEntity = proto.Clone(entity).(*milvuspb.GrantEntity)
+			catalogEntity.DbName = funcutil.FormatDatabaseID(dbID)
+			catalogEntity.ObjectName = funcutil.FormatCollectionID(collectionID)
+		}
+	}
 
-	return mt.catalog.ListGrant(ctx, tenant, entity)
+	mt.permissionLock.RLock()
+	entities, err := mt.catalog.ListGrant(ctx, tenant, catalogEntity)
+	if err == nil && catalogEntity != entity {
+		nameBasedEntities, nameBasedErr := mt.catalog.ListGrant(ctx, tenant, entity)
+		if nameBasedErr != nil {
+			err = nameBasedErr
+		} else {
+			entities = append(entities, nameBasedEntities...)
+		}
+	}
+	mt.permissionLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+
+	entities = mt.convertGrantsToNameBased(ctx, entities)
+	if funcutil.IsEmptyString(entity.ObjectName) && (entity.Object == nil || funcutil.IsEmptyString(entity.Object.Name)) {
+		return entities, nil
+	}
+
+	filtered := make([]*milvuspb.GrantEntity, 0, len(entities))
+	for _, grant := range entities {
+		if entity.DbName != util.AnyWord && grant.GetDbName() != entity.DbName && grant.GetDbName() != util.AnyWord {
+			continue
+		}
+		if entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) && grant.GetObject().GetName() != entity.Object.Name {
+			continue
+		}
+		if !funcutil.IsEmptyString(entity.ObjectName) {
+			if entity.ObjectName == util.AnyWord {
+				if grant.GetObjectName() != util.AnyWord {
+					continue
+				}
+			} else if grant.GetObjectName() != entity.ObjectName {
+				continue
+			}
+		}
+		filtered = append(filtered, grant)
+	}
+	return filtered, nil
 }
 
 func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
@@ -1968,11 +2262,18 @@ func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvusp
 	return mt.catalog.DeleteGrant(ctx, tenant, role)
 }
 
-func (mt *MetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
+func (mt *MetaTable) ListPolicy(ctx context.Context, tenant string, supportIDBased bool) ([]*milvuspb.GrantEntity, error) {
 	mt.permissionLock.RLock()
-	defer mt.permissionLock.RUnlock()
+	grants, err := mt.catalog.ListPolicy(ctx, tenant)
+	mt.permissionLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
 
-	return mt.catalog.ListPolicy(ctx, tenant)
+	if supportIDBased {
+		return grants, nil
+	}
+	return mt.convertGrantsToNameBased(ctx, grants), nil
 }
 
 func (mt *MetaTable) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
@@ -1984,9 +2285,17 @@ func (mt *MetaTable) ListUserRole(ctx context.Context, tenant string) ([]string,
 
 func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
 	mt.permissionLock.RLock()
-	defer mt.permissionLock.RUnlock()
+	meta, err := mt.catalog.BackupRBAC(ctx, tenant)
+	mt.permissionLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
 
-	return mt.catalog.BackupRBAC(ctx, tenant)
+	// Resolve ID-based grant names after releasing permissionLock
+	if grants := meta.GetGrants(); len(grants) > 0 {
+		meta.Grants = mt.convertGrantsToNameBased(ctx, grants)
+	}
+	return meta, nil
 }
 
 func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
@@ -2059,10 +2368,93 @@ func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.Re
 }
 
 func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	// Strip grants from meta so catalog handles everything except grants
+	grants := meta.GetGrants()
+	metaWithoutGrants := &milvuspb.RBACMeta{
+		Users:           meta.GetUsers(),
+		Roles:           meta.GetRoles(),
+		PrivilegeGroups: meta.GetPrivilegeGroups(),
+	}
+
+	// Resolve collection IDs outside permissionLock to avoid lock-ordering issues (ddLock → permissionLock)
+	type grantWithIDs struct {
+		grant        *milvuspb.GrantEntity
+		dbID         int64
+		collectionID int64
+	}
+	var resolvedGrants []grantWithIDs
+	// skipped collects grants whose target collection no longer exists on this
+	// cluster. These are not applied (can't resolve a collectionID) but must be
+	// surfaced to the caller so they can create the missing collections and
+	// retry RestoreRBAC (AlterGrant is idempotent via IgnorableError).
+	var skipped []string
+	for _, grant := range grants {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
+		// Preserve wildcard privilege "*" as-is; routing it through
+		// PrivilegeGroupNameForMetastore would encode it as "PrivilegeGroup*"
+		// and break wildcard semantics. Mirrors the fix in PR #48978.
+		switch {
+		case util.IsAnyWord(privName):
+		case util.IsPrivilegeNameDefined(privName):
+			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
+		default:
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
+		}
+
+		var dbID, collectionID int64
+		if grant.Object.GetName() == "Collection" && grant.ObjectName != util.AnyWord {
+			dbID, collectionID = mt.LookupCollectionAndDBID(ctx, grant.DbName, grant.ObjectName)
+			if collectionID == InvalidCollectionID {
+				log.Ctx(ctx).Warn("skipping restore of grant for non-existent collection",
+					zap.String("dbName", grant.DbName), zap.String("objectName", grant.ObjectName))
+				skipped = append(skipped, fmt.Sprintf("%s.%s", grant.DbName, grant.ObjectName))
+				continue
+			}
+		} else if grant.Object.GetName() == "Collection" && grant.ObjectName == util.AnyWord && grant.DbName != util.AnyWord {
+			// Wildcard grant on a specific database — resolve dbID for ID-based key,
+			// consistent with the OperatePrivilege path. If the database doesn't exist,
+			// skip the grant (same as collection-not-found above) rather than silently
+			// writing a name-based grant that would re-activate if a same-named DB
+			// is created later.
+			dbID = mt.LookupDBID(ctx, grant.DbName)
+			if dbID == 0 {
+				log.Ctx(ctx).Warn("skipping restore of wildcard grant for non-existent database",
+					zap.String("dbName", grant.DbName))
+				skipped = append(skipped, fmt.Sprintf("%s.*", grant.DbName))
+				continue
+			}
+		}
+		resolvedGrants = append(resolvedGrants, grantWithIDs{grant: grant, dbID: dbID, collectionID: collectionID})
+	}
+
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.RestoreRBAC(ctx, tenant, meta)
+	if err := mt.catalog.RestoreRBAC(ctx, tenant, metaWithoutGrants); err != nil {
+		return err
+	}
+
+	// Handle grants at MetaTable level with pre-resolved collectionIDs
+	for _, rg := range resolvedGrants {
+		if err := mt.catalog.AlterGrant(ctx, tenant, rg.grant, milvuspb.OperatePrivilegeType_Grant, rg.dbID, rg.collectionID); err != nil {
+			if !common.IsIgnorableError(err) {
+				return errors.Wrap(err, "failed to alter grant during restore")
+			}
+		}
+	}
+
+	// Surface skipped grants so callers know to create the missing collections
+	// and retry. Everything else (users, roles, privilege groups, non-skipped
+	// grants) has been restored at this point, so a retry after the collections
+	// exist is idempotent. The returned error wraps errRestoreRBACPartialSkip
+	// so the ack callback can still refresh proxy caches for the persisted
+	// state (check with IsRestoreRBACPartialSkip).
+	if len(skipped) > 0 {
+		return errors.Wrapf(errRestoreRBACPartialSkip,
+			"restored %d grants but skipped %d grants for non-existent collections: %v; create the missing collections and retry RestoreRBAC",
+			len(resolvedGrants), len(skipped), skipped)
+	}
+	return nil
 }
 
 // check if the privilege group name is defined by users

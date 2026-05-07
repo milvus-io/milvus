@@ -6178,9 +6178,28 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 	priCache := privilege.GetPrivilegeCache()
 	if priCache != nil {
+		// Merge both name-based and ID-based keys so that Grant/Revoke operates
+		// on both formats in privilegeInfos. During dual-write, CacheRefresh loads
+		// both formats; using only one key on revoke would leave stale entries.
+		//
+		// Only Grant/Revoke op types use PrivilegesForPolicy(opKey) to split
+		// by "|" — other op types (CacheAddUserToRole, CacheDeleteUser, etc.)
+		// treat opKey as an opaque identifier (user/role pair, username, role
+		// name) where appending "|idKey" would corrupt the format. Restrict
+		// the merge to the two op types that actually need it.
+		opKey := req.GetOpKey()
+		opType := typeutil.CacheOpType(req.OpType)
+		if idKey := req.GetOpKeyIDBased(); idKey != "" &&
+			(opType == typeutil.CacheGrantPrivilege || opType == typeutil.CacheRevokePrivilege) {
+			if opKey != "" {
+				opKey = opKey + "|" + idKey
+			} else {
+				opKey = idKey
+			}
+		}
 		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
-			OpType: typeutil.CacheOpType(req.OpType),
-			OpKey:  req.OpKey,
+			OpType: opType,
+			OpKey:  opKey,
 		})
 		if err != nil {
 			log.Warn("fail to refresh policy info",
