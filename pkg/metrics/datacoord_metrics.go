@@ -301,6 +301,16 @@ var (
 
 	*/
 
+	// IndexRowsProgress tracks index building progress by row count per collection/index.
+	// The "progress_type" label distinguishes total_rows, indexed_rows, and pending_index_rows.
+	IndexRowsProgress = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "index_rows_progress",
+			Help:      "index building progress in rows, grouped by collection and index",
+		}, []string{collectionIDLabelName, indexName, "progress_type"})
+
 	// IndexRequestCounter records the number of the index requests.
 	IndexRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -456,6 +466,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
 	registry.MustRegister(FlushedSegmentFileNum)
+	registry.MustRegister(IndexRowsProgress)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
@@ -476,6 +487,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 }
 
 func CleanupDataCoordWithCollectionID(collectionID int64) {
+	IndexRowsProgress.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
 	IndexTaskNum.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})

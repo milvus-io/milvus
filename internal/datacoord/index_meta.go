@@ -321,6 +321,61 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
+// indexRowsKey uniquely identifies an index within a collection for metric aggregation.
+type indexRowsKey struct {
+	collectionID int64
+	indexID      int64
+}
+
+// indexRowsAccum accumulates row counts for a single index.
+type indexRowsAccum struct {
+	indexName   string
+	totalRows   int64
+	indexedRows int64
+	pendingRows int64
+}
+
+// updateIndexRowsProgressMetrics aggregates per-segment index state into
+// per-collection/index Prometheus gauges that expose total_rows, indexed_rows
+// and pending_index_rows. This gives operators dashboards-level visibility
+// into index building progress without requiring SDK calls (issue #47411).
+func (m *indexMeta) updateIndexRowsProgressMetrics() {
+	// Reset the gauge so stale index entries disappear after deletion.
+	metrics.IndexRowsProgress.Reset()
+
+	accum := make(map[indexRowsKey]*indexRowsAccum)
+
+	for _, segIdx := range m.segmentBuildInfo.List() {
+		if segIdx.IsDeleted || !m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			continue
+		}
+		key := indexRowsKey{collectionID: segIdx.CollectionID, indexID: segIdx.IndexID}
+		a, ok := accum[key]
+		if !ok {
+			a = &indexRowsAccum{
+				indexName: m.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+			}
+			accum[key] = a
+		}
+		a.totalRows += segIdx.NumRows
+		switch segIdx.IndexState {
+		case commonpb.IndexState_Finished:
+			a.indexedRows += segIdx.NumRows
+		default:
+			// Unissued, InProgress, Failed, Retry, None — all count as pending
+			a.pendingRows += segIdx.NumRows
+		}
+	}
+
+	for key, a := range accum {
+		collID := fmt.Sprint(key.collectionID)
+		iName := a.indexName
+		metrics.IndexRowsProgress.WithLabelValues(collID, iName, "total_rows").Set(float64(a.totalRows))
+		metrics.IndexRowsProgress.WithLabelValues(collID, iName, "indexed_rows").Set(float64(a.indexedRows))
+		metrics.IndexRowsProgress.WithLabelValues(collID, iName, "pending_index_rows").Set(float64(a.pendingRows))
+	}
+}
+
 func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) bool {
 	// Skip error handling since json path existence is guaranteed in CreateIndex
 	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)

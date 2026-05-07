@@ -111,3 +111,53 @@ func TestDataCoordNumSegmentsLabelNames(t *testing.T) {
 	// Clean up
 	DataCoordNumSegments.Reset()
 }
+
+func TestIndexRowsProgress(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	RegisterDataCoord(registry)
+
+	// Test that IndexRowsProgress can be used with all three progress types
+	IndexRowsProgress.WithLabelValues("1", "test_index", "total_rows").Set(1000)
+	IndexRowsProgress.WithLabelValues("1", "test_index", "indexed_rows").Set(500)
+	IndexRowsProgress.WithLabelValues("1", "test_index", "pending_index_rows").Set(500)
+
+	// Verify values
+	total := testutil.ToFloat64(IndexRowsProgress.WithLabelValues("1", "test_index", "total_rows"))
+	assert.Equal(t, float64(1000), total)
+
+	indexed := testutil.ToFloat64(IndexRowsProgress.WithLabelValues("1", "test_index", "indexed_rows"))
+	assert.Equal(t, float64(500), indexed)
+
+	pending := testutil.ToFloat64(IndexRowsProgress.WithLabelValues("1", "test_index", "pending_index_rows"))
+	assert.Equal(t, float64(500), pending)
+
+	// Clean up
+	IndexRowsProgress.Reset()
+}
+
+func TestCleanupDataCoordWithCollectionID_IndexRowsProgress(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	RegisterDataCoord(registry)
+
+	// Set up metrics for two collections
+	IndexRowsProgress.WithLabelValues("100", "idx1", "total_rows").Set(1000)
+	IndexRowsProgress.WithLabelValues("100", "idx1", "indexed_rows").Set(500)
+	IndexRowsProgress.WithLabelValues("200", "idx2", "total_rows").Set(2000)
+	IndexRowsProgress.WithLabelValues("200", "idx2", "indexed_rows").Set(1500)
+
+	// Verify both collections have metrics
+	assert.Equal(t, float64(1000), testutil.ToFloat64(IndexRowsProgress.WithLabelValues("100", "idx1", "total_rows")))
+	assert.Equal(t, float64(2000), testutil.ToFloat64(IndexRowsProgress.WithLabelValues("200", "idx2", "total_rows")))
+
+	// Cleanup collection 100
+	CleanupDataCoordWithCollectionID(100)
+
+	// Verify collection 100 metrics are deleted
+	assert.Equal(t, 0.0, testutil.ToFloat64(IndexRowsProgress.WithLabelValues("100", "idx1", "total_rows")))
+
+	// Verify collection 200 metrics still exist
+	assert.Equal(t, float64(2000), testutil.ToFloat64(IndexRowsProgress.WithLabelValues("200", "idx2", "total_rows")))
+
+	// Clean up
+	IndexRowsProgress.Reset()
+}
