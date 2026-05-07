@@ -330,5 +330,5 @@ replace (
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
 
-// TODO: update to zilliztech/milvus-catalog release tag after milvus-catalog PR is merged
-replace github.com/milvus-io/milvus-catalog => /home/shaoting/workspace/milvus-catalog
+// TODO: update to milvus-catalog release tag after milvus-catalog PR is merged.
+replace github.com/milvus-io/milvus-catalog => github.com/zilliztech/milvus-catalog v0.0.0-20260507095645-6e6ff7153dd8

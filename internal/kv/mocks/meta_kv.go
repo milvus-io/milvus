@@ -331,6 +331,70 @@ func (_c *MetaKv_Load_Call) RunAndReturn(run func(context.Context, string) (stri
 	return _c
 }
 
+// LoadWithModRevision provides a mock function with given fields: ctx, key
+func (_m *MetaKv) LoadWithModRevision(ctx context.Context, key string) (string, int64, error) {
+	ret := _m.Called(ctx, key)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadWithModRevision")
+	}
+
+	var r0 string
+	var r1 int64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, int64, error)); ok {
+		return rf(ctx, key)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) int64); ok {
+		r1 = rf(ctx, key)
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = rf(ctx, key)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MetaKv_LoadWithModRevision_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithModRevision'
+type MetaKv_LoadWithModRevision_Call struct {
+	*mock.Call
+}
+
+// LoadWithModRevision is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *MetaKv_Expecter) LoadWithModRevision(ctx interface{}, key interface{}) *MetaKv_LoadWithModRevision_Call {
+	return &MetaKv_LoadWithModRevision_Call{Call: _e.mock.On("LoadWithModRevision", ctx, key)}
+}
+
+func (_c *MetaKv_LoadWithModRevision_Call) Run(run func(ctx context.Context, key string)) *MetaKv_LoadWithModRevision_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MetaKv_LoadWithModRevision_Call) Return(_a0 string, _a1 int64, _a2 error) *MetaKv_LoadWithModRevision_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MetaKv_LoadWithModRevision_Call) RunAndReturn(run func(context.Context, string) (string, int64, error)) *MetaKv_LoadWithModRevision_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadWithPrefix provides a mock function with given fields: ctx, key
 func (_m *MetaKv) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
 	ret := _m.Called(ctx, key)
