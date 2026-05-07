@@ -239,3 +239,53 @@ func TestHandle(t *testing.T) {
 	}, Attempts(10))
 	assert.NoError(t, err)
 }
+
+// Regression: Handle must honor the caller's shouldRetry=true even when the
+// returned error is server-classified InputError. This is the cross-case the
+// client-side cache-eviction pattern in retryIfSchemaError depends on:
+// ErrCollectionSchemaMismatch is tagged InputError server-side (the client
+// sent a stale schema and the server rejected) but the client legitimately
+// wants to evict its cache and retry. Before this case the framework's
+// "default InputError abort" was firing after shouldRetry=true and
+// retryIfSchemaError silently never retried.
+func TestHandle_ShouldRetryOverridesInputErrorDefault(t *testing.T) {
+	counter := 0
+	err := Handle(context.Background(), func() (bool, error) {
+		counter++
+		if counter == 1 {
+			return true, merr.WrapErrCollectionSchemaMisMatch("mocked")
+		}
+		return false, nil
+	}, Attempts(10))
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2, counter,
+		"Handle should retry once when caller returns shouldRetry=true on InputError")
+}
+
+// Symmetric guard: shouldRetry=false on InputError still aborts immediately
+// (this path was already correct; pinning it down so the regression fix
+// above doesn't accidentally turn into "always retry InputError").
+func TestHandle_ShouldRetryFalseAbortsOnInputError(t *testing.T) {
+	counter := 0
+	err := Handle(context.Background(), func() (bool, error) {
+		counter++
+		return false, merr.WrapErrCollectionSchemaMisMatch("mocked")
+	}, Attempts(10))
+
+	assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
+	assert.Equal(t, 1, counter)
+}
+
+// retry.Do has no shouldRetry signal from the caller, so the InputError
+// default abort remains the right behavior — keep it pinned.
+func TestDo_InputErrorAbortsByDefault(t *testing.T) {
+	counter := 0
+	err := Do(context.Background(), func() error {
+		counter++
+		return merr.WrapErrCollectionSchemaMisMatch("mocked")
+	}, Attempts(10))
+
+	assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
+	assert.Equal(t, 1, counter, "Do should abort on InputError without retrying")
+}
