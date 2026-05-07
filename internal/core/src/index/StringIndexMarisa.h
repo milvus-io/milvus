@@ -81,12 +81,12 @@ class StringIndexMarisa : public StringIndex {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(std::string value, OpType op) override;
+    Range(const std::string& value, OpType op) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override;
 
     const TargetBitmap
@@ -141,13 +141,19 @@ class StringIndexMarisa : public StringIndex {
     int64_t
     CalculateTotalSize() const;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  private:
     Config config_;
     marisa::Trie trie_;
     std::vector<int64_t> str_ids_;  // used to retrieve.
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };
 

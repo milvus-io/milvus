@@ -34,6 +34,7 @@
 #include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
 #include "index/IndexInfo.h"
+#include "index/ScalarIndex.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
@@ -103,6 +104,17 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
             return boost::algorithm::to_lower_copy(value.get<std::string>()) ==
                    "true";
         }
+        // compatibility for numeric string (e.g., from index_params which is map<string,string>)
+        if constexpr (std::is_integral_v<T>) {
+            if (value.is_string()) {
+                auto str = value.get<std::string>();
+                if constexpr (std::is_signed_v<T>) {
+                    return static_cast<T>(std::stoll(str));
+                } else {
+                    return static_cast<T>(std::stoull(str));
+                }
+            }
+        }
         return value.get<T>();
     } catch (const nlohmann::json::type_error& e) {
         if (!CONFIG_PARAM_TYPE_CHECK_ENABLED) {
@@ -158,6 +170,12 @@ GetIndexEngineVersionFromConfig(const Config& config);
 
 int32_t
 GetBitmapCardinalityLimitFromConfig(const Config& config);
+
+ScalarIndexType
+GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
+
+ScalarIndexType
+GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
 
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config);

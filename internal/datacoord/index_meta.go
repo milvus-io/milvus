@@ -1140,12 +1140,16 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 
 		for _, segIdx := range segIndexInfos.Values() {
 			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+				indexVersion := segIdx.CurrentIndexVersion
+				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
+					indexVersion = segIdx.CurrentScalarIndexVersion
+				}
 				ret[segID][segIdx.IndexID] = &indexpb.SegmentIndexState{
 					SegmentID:    segID,
 					State:        segIdx.IndexState,
 					FailReason:   segIdx.FailReason,
 					IndexName:    index.IndexName,
-					IndexVersion: segIdx.CurrentIndexVersion,
+					IndexVersion: indexVersion,
 				}
 			}
 		}

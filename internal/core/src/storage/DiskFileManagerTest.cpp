@@ -9,39 +9,80 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
-#include <chrono>
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
-#include <arrow/record_batch.h>
-#include <arrow/type.h>
-#include <arrow/type_fwd.h>
+#include <boost/filesystem/path.hpp>
+#include <cxxabi.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <exception>
+#include <future>
+#include <initializer_list>
+#include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <fstream>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <unistd.h>
 
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "common/Slice.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "filemanager/OutputStream.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/PayloadReader.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "index/BitmapIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "index/StringIndexSort.h"
+
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT16_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT32_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT64_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT8_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectSTRING_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectVARCHAR_Test;
 
 using namespace std;
 using namespace milvus;
@@ -127,10 +168,10 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
     conf.root_path = TestLocalPath + "diskann";
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    EXPECT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
@@ -166,10 +207,8 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
-    auto storage_config = gen_local_storage_config(TestLocalPath + "diskann/");
-    auto cm = storage::CreateChunkManager(storage_config);
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm, fs));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -231,6 +270,27 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path_read);
     lcm->Remove(large_index_file_path);
     lcm->Remove(small_index_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    milvus::index::ScalarIndexSort<int64_t> index(context);
+    std::vector<int64_t> values = {1, 2, 3};
+    index.Build(values.size(), values.data());
+
+    auto stats = index.UploadUnified({});
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    storage::MemFileManagerImpl file_manager(context);
+    std::string expected_path = file_manager.GetRemoteIndexObjectPrefix() +
+                                "/milvus_packed_stlsort_index.v3";
+    std::string v3_path = files[0];
+
+    EXPECT_EQ(v3_path, expected_path);
 }
 
 int
@@ -335,7 +395,6 @@ CreateFileManager(const ChunkManagerPtr& cm,
     // field_id: 100, index_build_id: 1000, index_version: 1
     IndexMeta index_meta = {
         3, 100, 1000, 1, "opt_fields", "field_name", DataType::VECTOR_FLOAT, 1};
-    int64_t slice_size = milvus::FILE_SLICE_SIZE;
     return std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
         kOptVecFieldDataMeta, index_meta, cm, std::move(fs)));
 }
@@ -529,6 +588,262 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
     }
 }
 
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 1000;
+
+    struct VectorTypeInfo {
+        DataType data_type;
+        std::string type_name;
+        size_t element_size;
+        bool is_sparse;
+    };
+
+    std::vector<VectorTypeInfo> vector_types = {
+        {DataType::VECTOR_FLOAT, "FLOAT", sizeof(float), false},
+        {DataType::VECTOR_FLOAT16, "FLOAT16", sizeof(knowhere::fp16), false},
+        {DataType::VECTOR_BFLOAT16, "BFLOAT16", sizeof(knowhere::bf16), false},
+        {DataType::VECTOR_INT8, "INT8", sizeof(int8_t), false},
+        {DataType::VECTOR_BINARY, "BINARY", dim / 8, false},
+        {DataType::VECTOR_SPARSE_U32_F32, "SPARSE", 0, true}};
+
+    for (const auto& vec_type : vector_types) {
+        for (int null_percent : {0, 20, 100}) {
+            int64_t valid_count = num_rows * (100 - null_percent) / 100;
+
+            std::vector<uint8_t> valid_data((num_rows + 7) / 8, 0);
+            for (int64_t i = 0; i < valid_count; ++i) {
+                valid_data[i >> 3] |= (1 << (i & 0x07));
+            }
+
+            FieldDataPtr field_data;
+            std::vector<uint8_t> vec_data;
+            std::unique_ptr<knowhere::sparse::SparseRow<float>[]> sparse_vecs;
+
+            if (vec_type.is_sparse) {
+                const int64_t sparse_dim = 1000;
+                const float sparse_density = 0.1;
+                sparse_vecs = milvus::segcore::GenerateRandomSparseFloatVector(
+                    valid_count, sparse_dim, sparse_density);
+
+                field_data =
+                    storage::CreateFieldData(DataType::VECTOR_SPARSE_U32_F32,
+                                             DataType::NONE,
+                                             true,
+                                             sparse_dim,
+                                             num_rows);
+                auto field_data_impl = std::dynamic_pointer_cast<
+                    milvus::FieldData<milvus::SparseFloatVector>>(field_data);
+                field_data_impl->FillFieldData(
+                    sparse_vecs.get(), valid_data.data(), num_rows, 0);
+            } else {
+                if (vec_type.data_type == DataType::VECTOR_BINARY) {
+                    vec_data.resize(valid_count * dim / 8);
+                } else {
+                    vec_data.resize(valid_count * dim * vec_type.element_size);
+                }
+                for (size_t i = 0; i < vec_data.size(); ++i) {
+                    vec_data[i] = static_cast<uint8_t>(i % 256);
+                }
+
+                field_data = storage::CreateFieldData(
+                    vec_type.data_type, DataType::NONE, true, dim);
+
+                if (vec_type.data_type == DataType::VECTOR_FLOAT) {
+                    auto impl = std::dynamic_pointer_cast<
+                        milvus::FieldData<milvus::FloatVector>>(field_data);
+                    impl->FillFieldData(
+                        vec_data.data(), valid_data.data(), num_rows, 0);
+                } else if (vec_type.data_type == DataType::VECTOR_FLOAT16) {
+                    auto impl = std::dynamic_pointer_cast<
+                        milvus::FieldData<milvus::Float16Vector>>(field_data);
+                    impl->FillFieldData(
+                        vec_data.data(), valid_data.data(), num_rows, 0);
+                } else if (vec_type.data_type == DataType::VECTOR_BFLOAT16) {
+                    auto impl = std::dynamic_pointer_cast<
+                        milvus::FieldData<milvus::BFloat16Vector>>(field_data);
+                    impl->FillFieldData(
+                        vec_data.data(), valid_data.data(), num_rows, 0);
+                } else if (vec_type.data_type == DataType::VECTOR_INT8) {
+                    auto impl = std::dynamic_pointer_cast<
+                        milvus::FieldData<milvus::Int8Vector>>(field_data);
+                    impl->FillFieldData(
+                        vec_data.data(), valid_data.data(), num_rows, 0);
+                } else if (vec_type.data_type == DataType::VECTOR_BINARY) {
+                    auto impl = std::dynamic_pointer_cast<
+                        milvus::FieldData<milvus::BinaryVector>>(field_data);
+                    impl->FillFieldData(
+                        vec_data.data(), valid_data.data(), num_rows, 0);
+                }
+            }
+
+            ASSERT_EQ(field_data->get_num_rows(), num_rows);
+            ASSERT_EQ(field_data->get_valid_rows(), valid_count);
+
+            auto payload_reader =
+                std::make_shared<milvus::storage::PayloadReader>(field_data);
+            storage::InsertData insert_data(payload_reader);
+            FieldDataMeta field_data_meta = {
+                collection_id, partition_id, segment_id, field_id};
+            insert_data.SetFieldDataMeta(field_data_meta);
+            insert_data.SetTimestamps(0, 100);
+
+            auto serialized_data =
+                insert_data.Serialize(storage::StorageType::Remote);
+
+            std::string insert_file_path = TestLocalPath + "diskann/nullable_" +
+                                           vec_type.type_name + "_" +
+                                           std::to_string(null_percent);
+            boost::filesystem::remove_all(insert_file_path);
+            cm_->Write(insert_file_path,
+                       serialized_data.data(),
+                       serialized_data.size());
+
+            if (vec_type.is_sparse) {
+                int64_t file_size = cm_->Size(insert_file_path);
+                std::vector<uint8_t> buffer(file_size);
+                cm_->Read(insert_file_path, buffer.data(), file_size);
+
+                std::shared_ptr<uint8_t[]> serialized_data_ptr(
+                    buffer.data(), [&](uint8_t*) {});
+                auto new_insert_data = storage::DeserializeFileData(
+                    serialized_data_ptr, buffer.size());
+                ASSERT_EQ(new_insert_data->GetCodecType(),
+                          storage::InsertDataType);
+
+                auto new_payload = new_insert_data->GetFieldData();
+                ASSERT_TRUE(new_payload->get_data_type() ==
+                            DataType::VECTOR_SPARSE_U32_F32);
+                ASSERT_EQ(new_payload->get_num_rows(), num_rows)
+                    << "num_rows mismatch for " << vec_type.type_name
+                    << " with null_percent=" << null_percent;
+                ASSERT_EQ(new_payload->get_valid_rows(), valid_count)
+                    << "valid_rows mismatch for " << vec_type.type_name
+                    << " with null_percent=" << null_percent;
+                ASSERT_TRUE(new_payload->IsNullable());
+
+                for (int i = 0; i < num_rows; ++i) {
+                    if (i < valid_count) {
+                        ASSERT_TRUE(new_payload->is_valid(i))
+                            << "Row " << i
+                            << " should be valid for null_percent="
+                            << null_percent;
+
+                        auto original = &sparse_vecs[i];
+                        auto new_vec =
+                            static_cast<const knowhere::sparse::SparseRow<
+                                milvus::SparseValueType>*>(
+                                new_payload->RawValue(i));
+                        ASSERT_EQ(original->size(), new_vec->size())
+                            << "Size mismatch at row " << i
+                            << " for null_percent=" << null_percent;
+
+                        for (size_t j = 0; j < original->size(); ++j) {
+                            ASSERT_EQ((*original)[j].id, (*new_vec)[j].id)
+                                << "ID mismatch at row " << i << ", element "
+                                << j << " for null_percent=" << null_percent;
+                            ASSERT_EQ((*original)[j].val, (*new_vec)[j].val)
+                                << "Value mismatch at row " << i << ", element "
+                                << j << " for null_percent=" << null_percent;
+                        }
+                    } else {
+                        ASSERT_FALSE(new_payload->is_valid(i))
+                            << "Row " << i
+                            << " should be null for null_percent="
+                            << null_percent;
+                    }
+                }
+            } else {
+                IndexMeta index_meta = {segment_id,
+                                        field_id,
+                                        1000,
+                                        1,
+                                        "test",
+                                        "vec_field",
+                                        vec_type.data_type,
+                                        dim};
+                auto file_manager = std::make_shared<DiskFileManagerImpl>(
+                    storage::FileManagerContext(
+                        field_data_meta, index_meta, cm_, fs_));
+
+                milvus::Config config;
+                config[INSERT_FILES_KEY] =
+                    std::vector<std::string>{insert_file_path};
+
+                std::string local_data_path;
+                if (vec_type.data_type == DataType::VECTOR_FLOAT) {
+                    local_data_path =
+                        file_manager->CacheRawDataToDisk<float>(config);
+                } else if (vec_type.data_type == DataType::VECTOR_INT8) {
+                    local_data_path =
+                        file_manager->CacheRawDataToDisk<int8_t>(config);
+                } else if (vec_type.data_type == DataType::VECTOR_FLOAT16) {
+                    local_data_path =
+                        file_manager->CacheRawDataToDisk<knowhere::fp16>(
+                            config);
+                } else if (vec_type.data_type == DataType::VECTOR_BFLOAT16) {
+                    local_data_path =
+                        file_manager->CacheRawDataToDisk<knowhere::bf16>(
+                            config);
+                } else if (vec_type.data_type == DataType::VECTOR_BINARY) {
+                    local_data_path =
+                        file_manager->CacheRawDataToDisk<uint8_t>(config);
+                }
+
+                ASSERT_FALSE(local_data_path.empty())
+                    << "Failed for " << vec_type.type_name
+                    << " with null_percent=" << null_percent;
+
+                auto local_chunk_manager =
+                    LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+                uint32_t read_num_rows = 0;
+                uint32_t read_dim = 0;
+                local_chunk_manager->Read(
+                    local_data_path, 0, &read_num_rows, sizeof(read_num_rows));
+                local_chunk_manager->Read(local_data_path,
+                                          sizeof(read_num_rows),
+                                          &read_dim,
+                                          sizeof(read_dim));
+
+                EXPECT_EQ(read_num_rows, valid_count)
+                    << "Mismatch for " << vec_type.type_name
+                    << " with null_percent=" << null_percent;
+                EXPECT_EQ(read_dim, dim);
+
+                size_t bytes_per_vector =
+                    (vec_type.data_type == DataType::VECTOR_BINARY)
+                        ? (dim / 8)
+                        : (dim * vec_type.element_size);
+                auto data_size = read_num_rows * bytes_per_vector;
+                std::vector<uint8_t> buffer(data_size);
+                local_chunk_manager->Read(
+                    local_data_path,
+                    sizeof(read_num_rows) + sizeof(read_dim),
+                    buffer.data(),
+                    data_size);
+
+                EXPECT_EQ(buffer.size(), vec_data.size())
+                    << "Data size mismatch for " << vec_type.type_name;
+                for (size_t i = 0; i < std::min(buffer.size(), vec_data.size());
+                     ++i) {
+                    EXPECT_EQ(buffer[i], vec_data[i])
+                        << "Data mismatch at byte " << i << " for "
+                        << vec_type.type_name
+                        << " with null_percent=" << null_percent;
+                }
+
+                local_chunk_manager->Remove(local_data_path);
+            }
+
+            cm_->Remove(insert_file_path);
+        }
+    }
+}
+
 TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     std::string local_index_file_path;
     std::string local_text_index_file_path;
@@ -564,4 +879,364 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     EXPECT_FALSE(local_chunk_manager->Exist(local_text_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_json_stats_file_path));
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+    const int64_t null_percent = 20;  // 20% null
+    const int64_t valid_count = num_rows * (100 - null_percent) / 100;
+
+    std::vector<uint8_t> valid_data((num_rows + 7) / 8, 0);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        valid_data[i >> 3] |= (1 << (i & 0x07));
+    }
+
+    std::vector<float> vec_data(valid_count * dim);
+    for (size_t i = 0; i < vec_data.size(); ++i) {
+        vec_data[i] = static_cast<float>(i % 100);
+    }
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    auto field_data_impl =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::FloatVector>>(
+            field_data);
+    field_data_impl->FillFieldData(
+        vec_data.data(), valid_data.data(), num_rows, 0);
+
+    ASSERT_EQ(field_data->get_num_rows(), num_rows);
+    ASSERT_EQ(field_data->get_valid_rows(), valid_count);
+    ASSERT_TRUE(field_data->IsNullable());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path = TestLocalPath + "diskann/valid_data_test";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+
+    std::string valid_data_path =
+        TestLocalPath + "diskann/valid_data_test_output";
+    boost::filesystem::remove_all(valid_data_path);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[index::VALID_DATA_PATH_KEY] = valid_data_path;
+
+    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    ASSERT_FALSE(local_data_path.empty());
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path))
+        << "valid_data file should be created for nullable field";
+
+    size_t read_total_num_rows = 0;
+    local_chunk_manager->Read(
+        valid_data_path, 0, &read_total_num_rows, sizeof(size_t));
+    EXPECT_EQ(read_total_num_rows, num_rows)
+        << "total_num_rows should match original num_rows";
+
+    size_t bitmap_size = (num_rows + 7) / 8;
+    std::vector<uint8_t> read_bitmap(bitmap_size);
+    local_chunk_manager->Read(
+        valid_data_path, sizeof(size_t), read_bitmap.data(), bitmap_size);
+
+    // Verify bitmap content
+    for (int64_t i = 0; i < num_rows; ++i) {
+        bool expected_valid = (i < valid_count);
+        bool actual_valid = (read_bitmap[i / 8] >> (i % 8)) & 1;
+        EXPECT_EQ(actual_valid, expected_valid)
+            << "Validity mismatch at row " << i;
+    }
+
+    local_chunk_manager->Remove(local_data_path);
+    local_chunk_manager->Remove(valid_data_path);
+    cm_->Remove(insert_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+
+    std::vector<float> vec_data(num_rows * dim);
+    for (size_t i = 0; i < vec_data.size(); ++i) {
+        vec_data[i] = static_cast<float>(i % 100);
+    }
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    field_data->FillFieldData(vec_data.data(), num_rows);
+
+    ASSERT_EQ(field_data->get_num_rows(), num_rows);
+    ASSERT_FALSE(field_data->IsNullable());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path = TestLocalPath + "diskann/non_nullable_test";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+
+    std::string valid_data_path =
+        TestLocalPath + "diskann/non_nullable_valid_data";
+    boost::filesystem::remove_all(valid_data_path);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[index::VALID_DATA_PATH_KEY] = valid_data_path;
+
+    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    ASSERT_FALSE(local_data_path.empty());
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    EXPECT_FALSE(local_chunk_manager->Exist(valid_data_path))
+        << "valid_data file should NOT be created for non-nullable field";
+
+    local_chunk_manager->Remove(local_data_path);
+    cm_->Remove(insert_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 1000;
+    std::vector<int64_t> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        values[i] = static_cast<int64_t>(i * 3);
+    }
+
+    milvus::index::ScalarIndexSort<int64_t> build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadUnified({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::ScalarIndexSort<int64_t> load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<int64_t> query_vals = {0, 3, 6};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_TRUE(bitset[2]);
+        EXPECT_FALSE(bitset[3]);
+    }
+
+    {
+        auto bitset =
+            load_index.Range(static_cast<int64_t>(6), milvus::OpType::LessThan);
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_FALSE(bitset[2]);
+    }
+
+    {
+        auto bitset = load_index.Range(
+            static_cast<int64_t>(3), true, static_cast<int64_t>(9), false);
+        EXPECT_FALSE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_TRUE(bitset[2]);
+        EXPECT_FALSE(bitset[3]);
+    }
+
+    for (size_t i = 0; i < N; ++i) {
+        auto val = load_index.Reverse_Lookup(i);
+        ASSERT_TRUE(val.has_value());
+        EXPECT_EQ(val.value(), values[i]);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 1000;
+    std::vector<int64_t> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        values[i] = static_cast<int64_t>(i % 100);
+    }
+
+    milvus::index::BitmapIndex<int64_t> build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadUnified({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::BitmapIndex<int64_t> load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<int64_t> query_vals = {0, 1};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        for (size_t i = 0; i < N; ++i) {
+            if (values[i] == 0 || values[i] == 1) {
+                EXPECT_TRUE(bitset[i]) << "offset " << i;
+            } else {
+                EXPECT_FALSE(bitset[i]) << "offset " << i;
+            }
+        }
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 500;
+    std::vector<std::string> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "str_%03zu", i);
+        values[i] = buf;
+    }
+
+    milvus::index::StringIndexMarisa build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadUnified({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::StringIndexMarisa load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<std::string> query_vals = {"str_000", "str_001"};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        for (size_t i = 2; i < N; ++i) {
+            EXPECT_FALSE(bitset[i]) << "offset " << i;
+        }
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 500;
+    std::vector<std::string> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "str_%03zu", i);
+        values[i] = buf;
+    }
+
+    milvus::index::StringIndexSort build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadUnified({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::StringIndexSort load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<std::string> query_vals = {"str_000", "str_001"};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        for (size_t i = 2; i < N; ++i) {
+            EXPECT_FALSE(bitset[i]) << "offset " << i;
+        }
+    }
+
+    {
+        auto val = load_index.Reverse_Lookup(0);
+        ASSERT_TRUE(val.has_value());
+        EXPECT_EQ(val.value(), "str_000");
+    }
 }

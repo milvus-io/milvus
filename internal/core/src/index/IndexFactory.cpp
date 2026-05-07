@@ -23,6 +23,8 @@
 #include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "index/IndexInfo.h"
+#include "index/TextMatchIndex.h"
 #include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
@@ -78,6 +80,16 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
         assert(create_index_info.tantivy_index_version != 0);
+        if (create_index_info.is_text_match) {
+            auto field_schema = FieldMeta::ParseFrom(
+                file_manager_context.fieldDataMeta.field_schema);
+            return std::make_unique<TextMatchIndex>(
+                file_manager_context,
+                create_index_info.tantivy_index_version,
+                "milvus_tokenizer",
+                field_schema.get_analyzer_params().c_str(),
+                create_index_info.analyzer_extra_info.c_str());
+        }
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
             create_index_info.tantivy_index_version,

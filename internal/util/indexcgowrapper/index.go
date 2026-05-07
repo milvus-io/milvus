@@ -130,33 +130,6 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	return index, nil
 }
 
-func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (map[string]int64, error) {
-	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
-		return nil, err
-	}
-	result := C.CreateProtoLayout()
-	defer C.ReleaseProtoLayout(result)
-	status := C.BuildTextIndex(result, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
-	if err := HandleCStatus(&status, "failed to build text index"); err != nil {
-		return nil, err
-	}
-	var indexStats cgopb.IndexStats
-	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
-		return nil, err
-	}
-
-	res := make(map[string]int64)
-	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
-		res[indexInfo.FileName] = indexInfo.FileSize
-	}
-	return res, nil
-}
-
 type JSONKeyStatsResult struct {
 	// MemSize is the actual memory size when loaded
 	MemSize int64

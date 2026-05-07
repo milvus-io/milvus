@@ -86,6 +86,10 @@ static inline void
 set_bit(BitsetType& bitset, FieldId field_id, bool flag = true) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
+    AssertInfo(pos < bitset.size(),
+               "field id {} exceeds ready bitset size {}",
+               field_id.get(),
+               bitset.size());
     bitset[pos] = flag;
 }
 
@@ -93,8 +97,24 @@ static inline bool
 get_bit(const BitsetType& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
+    AssertInfo(pos < bitset.size(),
+               "field id {} exceeds ready bitset size {}",
+               field_id.get(),
+               bitset.size());
 
     return bitset[pos];
+}
+
+static inline size_t
+ready_bitset_size(const SchemaPtr& schema) {
+    size_t size = schema->size();
+    for (const auto& [field_id, _] : *schema) {
+        auto pos = field_id.get() - START_USER_FIELDID;
+        if (pos >= 0) {
+            size = std::max(size, static_cast<size_t>(pos + 1));
+        }
+    }
+    return size;
 }
 
 void
@@ -1463,9 +1483,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     int64_t segment_id,
     bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
-      field_data_ready_bitset_(schema->size()),
-      index_ready_bitset_(schema->size()),
-      binlog_index_bitset_(schema->size()),
+      field_data_ready_bitset_(ready_bitset_size(schema)),
+      index_ready_bitset_(ready_bitset_size(schema)),
+      binlog_index_bitset_(ready_bitset_size(schema)),
       ngram_fields_(std::unordered_set<FieldId>(schema->size())),
       scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
           schema->size())),
@@ -1806,6 +1826,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     }
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
+    if (!info_proto->base_path().empty()) {
+        file_ctx.set_stats_base_path(info_proto->base_path());
+    }
 
     auto field_id = milvus::FieldId(info_proto->fieldid());
     const auto& field_meta = schema_->operator[](field_id);

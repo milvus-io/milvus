@@ -43,6 +43,7 @@
 #include "storage/FileManager.h"
 #include "storage/IndexData.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -60,6 +61,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -84,7 +86,7 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
-    std::string remote_prefix = GetRemoteIndexFilePrefixV2();
+    std::string remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name;
 }
 
@@ -179,42 +181,6 @@ DiskFileManagerImpl::AddFileInternal(
 
     return true;
 }  // namespace knowhere
-
-// Opens an input stream with fs_
-// note that `fs_` must not be nullptr.
-std::shared_ptr<InputStream>
-DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
-    auto local_file_name = GetFileName(filename);
-    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
-
-    auto fs = fs_;
-    AssertInfo(fs, "fs is nullptr");
-
-    auto remote_file = fs->OpenInputFile(remote_file_path);
-    AssertInfo(remote_file.ok(), "failed to open remote file");
-    return std::static_pointer_cast<milvus::InputStream>(
-        std::make_shared<milvus::storage::RemoteInputStream>(
-            std::move(remote_file.ValueOrDie())));
-}
-
-// Opens an output stream with fs_
-// note that `fs_` must not be nullptr.
-std::shared_ptr<OutputStream>
-DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
-    auto local_file_name = GetFileName(filename);
-    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
-
-    auto fs = fs_;
-    AssertInfo(fs, "fs is nullptr");
-
-    auto remote_stream = fs->OpenOutputStream(remote_file_path);
-    AssertInfo(remote_stream.ok(),
-               "failed to open remote stream, reason: {}",
-               remote_stream.status().ToString());
-
-    return std::make_shared<milvus::storage::RemoteOutputStream>(
-        std::move(remote_stream.ValueOrDie()));
-}
 
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
@@ -1261,10 +1227,5 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<int8_t>(const Config& config);
-
-std::string
-DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {
-    return FileManagerImpl::GetRemoteIndexFilePrefixV2();
-}
 
 }  // namespace milvus::storage

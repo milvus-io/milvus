@@ -31,6 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -485,6 +486,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	analyzerExtraInfo := ""
 	for _, field := range st.req.GetSchema().GetFields() {
 		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -502,21 +504,42 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+			buildIndexParams.IndexParams = []*commonpb.KeyValuePair{
+				{Key: "index_type", Value: "INVERTED"},
+				{Key: "is_text_match", Value: "true"},
+			}
 
-			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
+			// set analyzer extra info
+			if len(analyzerExtraInfo) > 0 {
+				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
+			}
+
+			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err
+			}
+			defer index.Delete()
+
+			indexStats, err := index.UpLoad()
+			if err != nil {
+				return err
+			}
+
+			uploaded := make(map[string]int64)
+			for _, info := range indexStats.GetSerializedIndexInfos() {
+				uploaded[info.FileName] = info.FileSize
 			}
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-				FieldID:    field.GetFieldID(),
-				Version:    version,
-				BuildID:    taskID,
-				Files:      lo.Keys(uploaded),
-				LogSize:    totalSize,
-				MemorySize: totalSize,
+				FieldID:                   field.GetFieldID(),
+				Version:                   version,
+				BuildID:                   taskID,
+				Files:                     lo.Keys(uploaded),
+				LogSize:                   totalSize,
+				MemorySize:                totalSize,
+				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(st.req.GetCurrentScalarIndexVersion()),
 			}
 			mu.Unlock()
 
@@ -712,7 +735,7 @@ func buildIndexParams(
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
-		CurrentScalarIndexVersion:        req.GetCurrentScalarIndexVersion(),
+		CurrentScalarIndexVersion:        common.ClampScalarIndexVersion(req.GetCurrentScalarIndexVersion()),
 		StorageVersion:                   req.GetStorageVersion(),
 		JsonStatsMaxShreddingColumns:     options.JSONStatsMaxShreddingColumns,
 		JsonStatsShreddingRatioThreshold: options.JSONStatsShreddingRatio,

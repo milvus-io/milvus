@@ -42,6 +42,7 @@ MemFileManagerImpl::MemFileManagerImpl(
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 bool
@@ -91,16 +92,6 @@ MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
     }
 
     return true;
-}
-
-std::shared_ptr<InputStream>
-MemFileManagerImpl::OpenInputStream(const std::string& filename) {
-    return nullptr;
-}
-
-std::shared_ptr<OutputStream>
-MemFileManagerImpl::OpenOutputStream(const std::string& filename) {
-    return nullptr;
 }
 
 bool

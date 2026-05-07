@@ -96,9 +96,35 @@ const (
 )
 
 const (
+	// Scalar index engine version tracks the *capability* of a Milvus node
+	// (which index types / features it supports). It is reported by QueryNodes
+	// in their session and aggregated by datacoord so that newly built indexes
+	// are clamped to a version every node in the cluster can load — this is
+	// what makes rolling upgrades safe.
+	//
+	// Engine version is distinct from the on-disk file format version
+	// (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h). Multiple engine
+	// versions can share the same file format; bumping the engine version
+	// does not necessarily imply a format change.
+	//
+	// Scalar index engine version 3:
+	// - Packed single-file index layout (file format v3) becomes the default
+	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
+	//   INVERTED to STL_SORT
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(2)
+	CurrentScalarIndexEngineVersion = int32(3)
+	MaximumScalarIndexEngineVersion = int32(3)
 )
+
+// ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
+// Used by DataNode to ensure the version written back to metadata does not exceed
+// what the cluster can handle.
+func ClampScalarIndexVersion(v int32) int32 {
+	if v > MaximumScalarIndexEngineVersion {
+		return MaximumScalarIndexEngineVersion
+	}
+	return v
+}
 
 const DefaultTimezone = "UTC"
 
@@ -168,12 +194,14 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	IsSparseKey               = "is_sparse"
-	AutoIndexName             = "AUTOINDEX"
-	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
-	IgnoreGrowing             = "ignore_growing"
-	ConsistencyLevel          = "consistency_level"
-	HintsKey                  = "hints"
+	IsSparseKey                       = "is_sparse"
+	AutoIndexName                     = "AUTOINDEX"
+	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
+	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
+	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	IgnoreGrowing                     = "ignore_growing"
+	ConsistencyLevel                  = "consistency_level"
+	HintsKey                          = "hints"
 
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"

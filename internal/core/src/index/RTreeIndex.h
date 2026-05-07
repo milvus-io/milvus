@@ -11,16 +11,30 @@
 
 #pragma once
 
-#include <cstddef>
-#include <vector>
 #include <folly/SharedMutex.h>
-#include "storage/FileManager.h"
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/MemFileManagerImpl.h"
+#include <stdint.h>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/Geometry.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
 #include "index/RTreeIndexWrapper.h"
 #include "index/ScalarIndex.h"
-#include "index/Meta.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 
@@ -119,12 +133,12 @@ class RTreeIndex : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     const bool
@@ -177,11 +191,17 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     void
     finish();
 
- protected:
     std::shared_ptr<RTreeIndexWrapper> wrapper_;
     std::string path_;
     proto::schema::FieldSchema schema_;

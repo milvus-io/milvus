@@ -14,14 +14,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stddef.h>
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "index/Meta.h"
-#include "knowhere/dataset.h"
 #include "common/Types.h"
+#include "fmt/core.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "pb/schema.pb.h"
+#include "storage/FileManager.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 template <typename T>
@@ -79,9 +91,8 @@ ScalarIndex<std::string>::BuildWithRawDataForUT(size_t n,
     auto ok = arr.ParseFromArray(values, n);
     Assert(ok);
 
-    std::vector<std::string> vecs{
-        std::make_move_iterator(arr.mutable_data()->begin()),
-        std::make_move_iterator(arr.mutable_data()->end())};
+    // TODO :: optimize here. avoid memory copy.
+    std::vector<std::string> vecs{arr.data().begin(), arr.data().end()};
     Build(arr.data_size(), vecs.data());
 }
 
@@ -148,6 +159,94 @@ ScalarIndex<double>::BuildWithRawDataForUT(size_t n,
                                            const Config& config) {
     auto data = reinterpret_cast<double*>(const_cast<void*>(values));
     Build(n, data);
+}
+
+template <typename T>
+IndexStatsPtr
+ScalarIndex<T>::UploadUnified(const Config& config) {
+    AssertInfo(
+        file_manager_ != nullptr,
+        "file_manager_ is null, UploadUnified requires a valid file manager");
+
+    // Build filename: milvus_packed_<type>_index.v3
+    // The ".v3" suffix encodes the on-disk file format version (matches
+    // MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h), not the scalar index
+    // engine version. See pkg/common/common.go for the distinction.
+    auto type_str = ToString(GetIndexType());
+    std::transform(
+        type_str.begin(), type_str.end(), type_str.begin(), ::tolower);
+    auto filename = "milvus_packed_" + type_str + "_index.v3";
+
+    // Create the IndexEntryWriter
+    auto writer =
+        file_manager_->CreateIndexEntryWriterUnified(filename, is_index_file_);
+    AssertInfo(writer != nullptr,
+               "failed to create IndexEntryWriter for V3 format");
+
+    // Call subclass implementation to write all entries.
+    // Subclasses use writer->PutMeta() to add their metadata.
+    WriteEntries(writer.get());
+
+    // Finish writing - writes __meta__ entry, Directory Table and Footer
+    writer->Finish();
+
+    // Get actual file size from writer
+    auto file_size = writer->GetTotalBytesWritten();
+
+    LOG_INFO("UploadUnified completed for index type: {}, file size: {}",
+             index_type_,
+             file_size);
+
+    // Return IndexStats with the single packed file (full remote path)
+    std::vector<SerializedIndexFileInfo> index_files;
+    auto remote_prefix = is_index_file_
+                             ? file_manager_->GetRemoteIndexObjectPrefix()
+                             : file_manager_->GetRemoteTextLogPrefix();
+    auto remote_path = remote_prefix + "/" + filename;
+    index_files.emplace_back(remote_path, file_size);
+
+    return IndexStats::New(file_size, std::move(index_files));
+}
+
+template <typename T>
+void
+ScalarIndex<T>::LoadUnified(const Config& config) {
+    AssertInfo(
+        file_manager_ != nullptr,
+        "file_manager_ is null, LoadUnified requires a valid file manager");
+
+    // Get the packed index file path from config
+    auto index_files =
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
+    AssertInfo(index_files.has_value() && !index_files.value().empty(),
+               "index_files is required for LoadUnified");
+
+    // For V3 format, there should be exactly one packed file
+    AssertInfo(index_files.value().size() == 1,
+               "LoadUnified expects exactly one packed index file, got: {}",
+               index_files.value().size());
+    const auto& packed_file = index_files.value()[0];
+
+    LOG_INFO("LoadUnified: loading packed index file: {}", packed_file);
+
+    // Open the file using the file manager
+    auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
+    AssertInfo(input != nullptr,
+               "failed to open input stream for packed index file: {}",
+               packed_file);
+
+    size_t file_size = input->Size();
+
+    auto collection_id =
+        GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
+
+    auto reader =
+        storage::IndexEntryReader::Open(input, file_size, collection_id);
+    AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
+
+    LoadEntries(*reader, config);
+
+    LOG_INFO("LoadUnified completed for index type: {}", index_type_);
 }
 
 template class ScalarIndex<bool>;
