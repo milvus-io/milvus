@@ -385,8 +385,10 @@ func TestRemoveCollectionByID_CleansUpAliases(t *testing.T) {
 				"alias3": {collectionName: "other_collection", cachedAt: time.Now()},
 			},
 		},
-		collectionCacheVersion: make(map[UniqueID]uint64),
-		sfGlobal:               conc.Singleflight[*collectionInfo]{},
+		collectionCacheVersion:  make(map[UniqueID]uint64),
+		sfGlobal:                conc.Singleflight[*collectionInfo]{},
+		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
+		partitionCache:          NewVersionCache[string, *partitionInfo](),
 	}
 
 	// Remove collection by ID
@@ -457,6 +459,8 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 		dbInfo: map[string]*databaseInfo{
 			"mydb": {},
 		},
+		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
+		partitionCache:          NewVersionCache[string, *partitionInfo](),
 	}
 
 	cache.RemoveDatabase(ctx, "mydb")

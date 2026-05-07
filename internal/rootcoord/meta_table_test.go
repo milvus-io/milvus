@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -712,7 +713,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101)
+		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101, false)
 		assert.Error(t, err)
 	})
 	t.Run("get by alias", func(t *testing.T) {
@@ -734,7 +735,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -761,7 +762,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -786,7 +787,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 	})
 
@@ -808,7 +809,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -839,7 +840,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -855,7 +856,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
+		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -1380,6 +1381,62 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 	})
 }
 
+func TestMetaTable_DropPartition_CopyOnWrite(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	originalPart := &model.Partition{
+		PartitionID:   100,
+		PartitionName: "p1",
+		CollectionID:  100,
+		State:         pb.PartitionState_PartitionCreated,
+	}
+	catalog.On("AlterPartition",
+		mock.Anything,
+		int64(10),
+		originalPart,
+		mock.MatchedBy(func(newPart *model.Partition) bool {
+			return newPart != nil &&
+				newPart != originalPart &&
+				newPart.PartitionID == originalPart.PartitionID &&
+				newPart.PartitionName == originalPart.PartitionName &&
+				newPart.CollectionID == originalPart.CollectionID &&
+				newPart.State == pb.PartitionState_PartitionDropping
+		}),
+		metastore.MODIFY,
+		uint64(9999),
+	).Return(nil).Once()
+
+	meta := &MetaTable{
+		catalog: catalog,
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			100: {
+				CollectionID: 100,
+				DBID:         10,
+				State:        pb.CollectionState_CollectionCreated,
+				Partitions:   []*model.Partition{originalPart},
+			},
+		},
+		partitionName2ID: map[int64]map[string]int64{
+			100: {"p1": 100},
+		},
+	}
+
+	snapshot, err := meta.GetCollectionByID(context.Background(), "", 100, typeutil.MaxTimestamp, true)
+	require.NoError(t, err)
+	require.Same(t, originalPart, snapshot.Partitions[0])
+
+	err = meta.DropPartition(context.Background(), 100, 100, 9999)
+	require.NoError(t, err)
+
+	require.Same(t, originalPart, snapshot.Partitions[0])
+	assert.Equal(t, pb.PartitionState_PartitionCreated, snapshot.Partitions[0].State)
+
+	require.Len(t, meta.collID2Meta[100].Partitions, 1)
+	assert.NotSame(t, originalPart, meta.collID2Meta[100].Partitions[0])
+	assert.Equal(t, pb.PartitionState_PartitionDropping, meta.collID2Meta[100].Partitions[0].State)
+	assert.Equal(t, pb.PartitionState_PartitionCreated, originalPart.State)
+	assert.NotContains(t, meta.partitionName2ID[100], "p1")
+}
+
 func TestMetaTable_RemovePartition(t *testing.T) {
 	t.Run("catalog error", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
@@ -1765,6 +1822,7 @@ func TestMetaTable_AddPartition(t *testing.T) {
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
 			},
+			partitionName2ID: make(map[int64]map[string]int64),
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.NoError(t, err)
@@ -2336,7 +2394,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		}
 
 		mt.aliases.insert(util.DefaultDBName, "aliases", 1)
-		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp)
+		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), ret.CollectionID)
 	})

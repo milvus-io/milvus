@@ -339,6 +339,10 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
+	if globalMetaCache != nil {
+		globalMetaCache.Close()
+	}
+
 	node.cancel()
 	node.wg.Wait()
 
