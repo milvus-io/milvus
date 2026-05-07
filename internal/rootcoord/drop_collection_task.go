@@ -37,6 +37,7 @@ type dropCollectionTask struct {
 	header    *message.DropCollectionMessageHeader
 	body      *message.DropCollectionRequest
 	vchannels []string
+	ackSyncUp bool
 }
 
 func (t *dropCollectionTask) validate(ctx context.Context) error {
@@ -83,6 +84,7 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 		DbName:         collMeta.DBName,
 	}
 	t.vchannels = collMeta.VirtualChannelNames
+	t.ackSyncUp = len(collMeta.FileResourceIds) > 0
 	return nil
 }
 
