@@ -301,6 +301,37 @@ func TestCachedConfig(t *testing.T) {
 	}
 }
 
+func TestNoDuplicateCacheEviction(t *testing.T) {
+	// Verify that the dispatcher does not have a redundant config cache reset handler.
+	// Cache eviction is handled directly by EvictCacheValueByFormat in source update(),
+	// so the dispatcher should not also clear the cache on every event.
+	mgr, _ := Init()
+
+	// Set up a cached value
+	mgr.SetConfig("x.y", "val1")
+	ok := mgr.CASCachedValue("x.y", "val1", "cached-val")
+	require.True(t, ok)
+	val, exist := mgr.GetCachedValue("x.y")
+	require.True(t, exist)
+	assert.Equal(t, "cached-val", val)
+
+	// Dispatch an event directly through the dispatcher (simulating the event path).
+	// After the fix, the dispatcher should NOT clear the config cache because
+	// that responsibility belongs to the source's update() method.
+	mgr.Dispatcher.Dispatch(&Event{
+		EventSource: "TestSource",
+		EventType:   UpdateType,
+		Key:         "unrelated.key",
+		Value:       "some-value",
+	})
+
+	// The cached value should still be present because the dispatcher no longer
+	// has a handler that clears the cache on every event.
+	val, exist = mgr.GetCachedValue("x.y")
+	assert.True(t, exist, "cached value should not be evicted by dispatcher event")
+	assert.Equal(t, "cached-val", val)
+}
+
 type ErrSource struct{}
 
 func (e ErrSource) Close() {
