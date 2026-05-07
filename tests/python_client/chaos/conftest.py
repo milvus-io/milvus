@@ -13,6 +13,9 @@ def pytest_addoption(parser):
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
     parser.addoption("--enable_import", action="store", type=bool, default=False, help="enable_import")
     parser.addoption("--target_rgs", action="store", default="", help="comma-separated resource group names to target for chaos (e.g. rg1,rg2)")
+    parser.addoption("--chaos_mode", action="store", default="one", help="chaos mode: 'one' (random single pod) or 'all' (all matching pods)")
+    parser.addoption("--target_components", action="store", default="querynode,streamingnode", help="comma-separated components to inject chaos (e.g. querynode,streamingnode)")
+    parser.addoption("--chaos_template", action="store", default="", help="path to external ChaosMesh YAML template (overrides built-in config)")
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 
 
@@ -74,3 +77,18 @@ def enable_import(request):
 @pytest.fixture
 def target_rgs(request):
     return request.config.getoption("--target_rgs")
+
+
+@pytest.fixture
+def chaos_mode(request):
+    return request.config.getoption("--chaos_mode")
+
+
+@pytest.fixture
+def target_components(request):
+    return request.config.getoption("--target_components")
+
+
+@pytest.fixture
+def chaos_template(request):
+    return request.config.getoption("--chaos_template")
