@@ -19,7 +19,7 @@ package eventlog
 import (
 	"testing"
 
-	mock "github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -44,63 +44,96 @@ func (s *GlobalLoggerSuite) TestGetGlobalLogger() {
 }
 
 func (s *GlobalLoggerSuite) TestRecord() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*testLogger]*testLoggerCalls)
+	recordMock := mockey.Mock((*testLogger).Record).To(
+		func(logger *testLogger, evt Evt) {
+			calls[logger].records = append(calls[logger].records, evt)
+		},
+	).Build()
+	defer recordMock.UnPatch()
 
-	getGlobalLogger().Register("mock1", mock1)
-	getGlobalLogger().Register("mock2", mock2)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
+
+	getGlobalLogger().Register("logger1", logger1)
+	getGlobalLogger().Register("logger2", logger2)
 
 	rawEvt := NewRawEvt(Level_Info, "test")
 
-	mock1.EXPECT().Record(rawEvt)
-	mock2.EXPECT().Record(rawEvt)
-
 	getGlobalLogger().Record(rawEvt)
 
-	mock3 := NewMockLogger(s.T())
+	s.Equal([]Evt{rawEvt}, calls[logger1].records)
+	s.Equal([]Evt{rawEvt}, calls[logger2].records)
 
-	getGlobalLogger().Register("mock3", mock3) // register logger without expectations
+	logger3 := newTestLogger(calls)
+	getGlobalLogger().Register("logger3", logger3)
 
 	rawEvt = NewRawEvt(Level_Debug, "test")
 
 	getGlobalLogger().Record(rawEvt)
+
+	s.Equal(1, calls[logger1].recordCount())
+	s.Equal(1, calls[logger2].recordCount())
+	s.Equal(0, calls[logger3].recordCount())
 }
 
 func (s *GlobalLoggerSuite) TestRecordFunc() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*testLogger]*testLoggerCalls)
+	recordFuncMock := mockey.Mock((*testLogger).RecordFunc).To(
+		func(logger *testLogger, level Level, fn func() Evt) {
+			calls[logger].recordFuncs = append(calls[logger].recordFuncs, testRecordFuncCall{
+				level: level,
+				evt:   fn(),
+			})
+		},
+	).Build()
+	defer recordFuncMock.UnPatch()
 
-	getGlobalLogger().Register("mock1", mock1)
-	getGlobalLogger().Register("mock2", mock2)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
+
+	getGlobalLogger().Register("logger1", logger1)
+	getGlobalLogger().Register("logger2", logger2)
 
 	rawEvt := NewRawEvt(Level_Info, "test")
 
-	mock1.EXPECT().RecordFunc(mock.Anything, mock.Anything)
-	mock2.EXPECT().RecordFunc(mock.Anything, mock.Anything)
-
 	getGlobalLogger().RecordFunc(Level_Info, func() Evt { return rawEvt })
 
-	mock3 := NewMockLogger(s.T())
+	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
+	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
 
-	getGlobalLogger().Register("mock3", mock3) // register logger without expectations
+	logger3 := newTestLogger(calls)
+	getGlobalLogger().Register("logger3", logger3)
 
 	rawEvt = NewRawEvt(Level_Debug, "test")
 
 	getGlobalLogger().RecordFunc(Level_Debug, func() Evt { return rawEvt })
+
+	s.Equal(1, calls[logger1].recordFuncCount())
+	s.Equal(1, calls[logger2].recordFuncCount())
+	s.Equal(0, calls[logger3].recordFuncCount())
 }
 
 func (s *GlobalLoggerSuite) TestFlush() {
-	mock1 := NewMockLogger(s.T())
-	mock2 := NewMockLogger(s.T())
+	calls := make(map[*testLogger]*testLoggerCalls)
+	flushMock := mockey.Mock((*testLogger).Flush).To(
+		func(logger *testLogger) error {
+			calls[logger].flushes++
+			return nil
+		},
+	).Build()
+	defer flushMock.UnPatch()
 
-	getGlobalLogger().Register("mock1", mock1)
-	getGlobalLogger().Register("mock2", mock2)
+	logger1 := newTestLogger(calls)
+	logger2 := newTestLogger(calls)
 
-	mock1.EXPECT().Flush().Return(nil)
-	mock2.EXPECT().Flush().Return(nil)
+	getGlobalLogger().Register("logger1", logger1)
+	getGlobalLogger().Register("logger2", logger2)
 
 	err := getGlobalLogger().Flush()
 	s.NoError(err)
+	s.Equal(1, calls[logger1].flushes)
+	s.Equal(1, calls[logger2].flushes)
 }
 
 func TestGlobalLogger(t *testing.T) {

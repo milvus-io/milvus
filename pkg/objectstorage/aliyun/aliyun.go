@@ -34,8 +34,6 @@ func NewMinioClient(address string, opts *minio.Options) (*minio.Client, error) 
 }
 
 // Credential is defined to mock aliyun credential.Credentials
-//
-//go:generate mockery --name=Credential --with-expecter
 type Credential interface {
 	credentials.Credential
 }
