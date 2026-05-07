@@ -460,6 +460,9 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  fastStopEnable: false # Whether to enable fast-stop skip logic for collections with repeated resource-limit load failures.
+  resourceLimitFastStopWindow: 300 # Window (in seconds) for resource-limit load failure counting used by fast-stop collection skipping.
+  resourceLimitFastStopThreshold: 100 # Threshold of resource-limit load failures for a collection to be skipped during QueryNode graceful stop.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord

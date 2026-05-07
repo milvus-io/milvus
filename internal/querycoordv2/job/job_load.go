@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
+	"github.com/milvus-io/milvus/internal/querycoordv2/resourcelimit"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -95,6 +96,7 @@ func (job *LoadCollectionJob) Execute() error {
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
+	resourcelimit.Clear(req.GetCollectionId())
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		return nil

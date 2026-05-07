@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/resourcelimit"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -344,7 +345,7 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collect
 // Returns:
 //   - segmentTasks: tasks for moving segments between nodes
 //   - channelTasks: tasks for moving channels between nodes
-func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig, isStoppingBalance bool) ([]task.Task, []task.Task) {
+func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig, isStoppingBalance bool, fastStopReduceOnly bool) ([]task.Task, []task.Task) {
 	if len(replicas) == 0 {
 		return nil, nil
 	}
@@ -372,6 +373,30 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 	}
 	for i := range segmentPlans {
 		segmentPlans[i].LoadPriority = loadPriority
+	}
+
+	if fastStopReduceOnly {
+		log.Ctx(ctx).RatedInfo(10, "apply fast-stop reduce-only drain for stopping balance")
+
+		reduceOnlySegPlans := make([]assign.SegmentAssignPlan, 0, len(segmentPlans))
+		for _, p := range segmentPlans {
+			if p.From == -1 {
+				continue
+			}
+			p.To = -1
+			reduceOnlySegPlans = append(reduceOnlySegPlans, p)
+		}
+		segmentPlans = reduceOnlySegPlans
+
+		reduceOnlyChanPlans := make([]assign.ChannelAssignPlan, 0, len(channelPlans))
+		for _, p := range channelPlans {
+			if p.From == -1 {
+				continue
+			}
+			p.To = -1
+			reduceOnlyChanPlans = append(reduceOnlyChanPlans, p)
+		}
+		channelPlans = reduceOnlyChanPlans
 	}
 
 	segmentTasks := make([]task.Task, 0)
@@ -460,7 +485,15 @@ func (b *BalanceChecker) processBalanceQueue(
 			continue
 		}
 
-		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
+		fastStopReduceOnly := isStoppingBalance && resourcelimit.ShouldFastStop(item.collectionID)
+		if fastStopReduceOnly {
+			log.Ctx(ctx).RatedInfo(10,
+				"resource limit fast-stop enabled, use reduce-only drain in stopping balance",
+				zap.Int64("collectionID", item.collectionID),
+			)
+		}
+
+		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance, fastStopReduceOnly)
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)
