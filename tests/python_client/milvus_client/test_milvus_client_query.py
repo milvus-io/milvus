@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from utils.util_log import test_log as log
