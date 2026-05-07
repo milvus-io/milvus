@@ -558,9 +558,9 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 	// Read-your-write validation against the authoritative segment view:
 	// before persisting a segment-index record, verify the target segment
 	// still exists and is in a Flushed/Indexed state. Without this check, a
-	// compaction running concurrently (via the CommitCompaction composite
-	// API) can mark the segment Dropped between the time the index scheduler
-	// picks it and the time indexnode writes the segment-index record,
+	// compaction running concurrently can mark the segment Dropped between the
+	// time the index scheduler picks it and the time indexnode writes the
+	// segment-index record,
 	// producing an orphan segment-index pointing at a dead segment.
 	//
 	// Cost: one extra ListSegments round-trip per index build — acceptable

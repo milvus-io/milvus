@@ -12,9 +12,15 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	catalog "github.com/milvus-io/milvus-catalog"
 	"github.com/milvus-io/milvus-catalog/server"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
+	datacoordcatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	querycoordcatalog "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	rootcoordcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	streamingcoordcatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	streamingnodecatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -26,6 +32,7 @@ func main() {
 	etcdAddr := flag.String("etcd", "localhost:2379", "etcd endpoints (comma separated)")
 	tikvPD := flag.String("tikv-pd", "localhost:2389", "TiKV PD endpoints (comma separated)")
 	defaultRootPath := flag.String("default-root-path", "", "fallback root-path for clients that don't send x-root-path metadata")
+	chunkRootPath := flag.String("chunk-root-path", "", "chunk manager root path used to rebuild legacy text log paths")
 	flag.Parse()
 
 	paramtable.Init()
@@ -46,7 +53,7 @@ func main() {
 		return tikvkv.NewTiKV(client, rootPath, tikvkv.WithRequestTimeout(10*time.Second))
 	}
 
-	var newKv server.KvFactory
+	var newKv func(rootPath string) kv.MetaKv
 	switch *metaStore {
 	case "tikv":
 		newKv = newTikvKv
@@ -62,7 +69,20 @@ func main() {
 		log.Info("catalog-server backend: etcd", zap.String("endpoints", *etcdAddr))
 	}
 
-	pool := server.NewImplPool(newKv)
+	pool := server.NewImplPool(func(rootPath string) (*catalog.CatalogServiceImpl, error) {
+		kvClient := newKv(rootPath)
+		return catalog.NewCatalogServiceWithBackendAndCatalogs(
+			kvClient,
+			kvClient,
+			*chunkRootPath,
+			rootPath,
+			rootcoordcatalog.NewCatalog(kvClient),
+			datacoordcatalog.NewCatalog(kvClient, *chunkRootPath, rootPath),
+			querycoordcatalog.NewCatalog(kvClient),
+			streamingcoordcatalog.NewCataLog(kvClient),
+			streamingnodecatalog.NewCataLog(kvClient),
+		), nil
+	})
 
 	cfg := server.DefaultConfig()
 	cfg.MetaStoreType = *metaStore

@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	catalogclient "github.com/milvus-io/milvus-catalog/client"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -379,7 +380,22 @@ func (s *Server) initMeta() error {
 	record := timerecord.NewTimeRecorder("querycoord")
 
 	log.Info("init meta")
-	s.store = querycoord.NewCatalog(s.kv)
+	if paramtable.Get().MetaStoreCfg.UseCatalogService.GetAsBool() {
+		rootPath := Params.EtcdCfg.MetaRootPath.GetValue()
+		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+			rootPath = Params.TiKVCfg.MetaRootPath.GetValue()
+		}
+		catalogSvc, err := catalogclient.NewCatalogServiceClient(
+			paramtable.Get().MetaStoreCfg.CatalogServiceAddr.GetValue(),
+			rootPath,
+		)
+		if err != nil {
+			return err
+		}
+		s.store = catalogSvc
+	} else {
+		s.store = querycoord.NewCatalog(s.kv)
+	}
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
 
 	s.broker = meta.NewCoordinatorBroker(

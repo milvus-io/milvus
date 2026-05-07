@@ -521,14 +521,12 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType       ParamItem `refreshable:"false"`
-	UseCatalogService   ParamItem `refreshable:"false"`
-	CatalogServiceAddr  ParamItem `refreshable:"false"`
-	UseAtomicCompaction ParamItem `refreshable:"true"`
-	UseAtomicFlush      ParamItem `refreshable:"true"`
-	PaginationSize      ParamItem `refreshable:"true"`
-	ReadConcurrency     ParamItem `refreshable:"true"`
-	MaxEtcdTxnNum       ParamItem `refreshable:"true"`
+	MetaStoreType      ParamItem `refreshable:"false"`
+	UseCatalogService  ParamItem `refreshable:"false"`
+	CatalogServiceAddr ParamItem `refreshable:"false"`
+	PaginationSize     ParamItem `refreshable:"true"`
+	ReadConcurrency    ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum      ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -558,22 +556,6 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CatalogServiceAddr.Init(base.mgr)
-
-	p.UseAtomicCompaction = ParamItem{
-		Key:          "metastore.useAtomicCompaction",
-		Version:      "2.6.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.UseAtomicCompaction.Init(base.mgr)
-
-	p.UseAtomicFlush = ParamItem{
-		Key:          "metastore.useAtomicFlush",
-		Version:      "2.6.0",
-		DefaultValue: "false",
-		Export:       true,
-	}
-	p.UseAtomicFlush.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",

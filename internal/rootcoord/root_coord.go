@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore/catalog_service"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
@@ -398,10 +397,6 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			log.Ctx(initCtx).Info("Using etcd as meta storage.", zap.Bool("useCatalogService", useCatalogService))
-			metaKV := c.metaKVCreator()
-			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
-			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			local := kvmetastore.NewCatalog(metaKV)
 			if useCatalogService {
 				addr := Params.MetaStoreCfg.CatalogServiceAddr.GetValue()
 				rootPath := Params.EtcdCfg.MetaRootPath.GetValue()
@@ -409,17 +404,17 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 				if grpcErr != nil {
 					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
 				}
-				catalog = catalog_service.NewRootCoordAdapter(catalogSvc, local)
-				log.Ctx(initCtx).Info("RootCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr))
+				catalog = catalogSvc
+				log.Ctx(initCtx).Info("RootCoord using CatalogService", zap.String("addr", addr), zap.String("rootPath", rootPath))
 			} else {
+				metaKV := c.metaKVCreator()
+				kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
+				kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
+				local := kvmetastore.NewCatalog(metaKV)
 				catalog = local
 			}
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.", zap.Bool("useCatalogService", useCatalogService))
-			metaKV := c.metaKVCreator()
-			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
-			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			local := kvmetastore.NewCatalog(metaKV)
 			if useCatalogService {
 				addr := Params.MetaStoreCfg.CatalogServiceAddr.GetValue()
 				rootPath := Params.TiKVCfg.MetaRootPath.GetValue()
@@ -427,9 +422,13 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 				if grpcErr != nil {
 					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
 				}
-				catalog = catalog_service.NewRootCoordAdapter(catalogSvc, local)
-				log.Ctx(initCtx).Info("RootCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr))
+				catalog = catalogSvc
+				log.Ctx(initCtx).Info("RootCoord using CatalogService", zap.String("addr", addr), zap.String("rootPath", rootPath))
 			} else {
+				metaKV := c.metaKVCreator()
+				kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
+				kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
+				local := kvmetastore.NewCatalog(metaKV)
 				catalog = local
 			}
 		default:

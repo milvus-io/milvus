@@ -44,7 +44,6 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore/catalog_service"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -626,17 +625,17 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		var err error
 		var catalog metastore.DataCoordCatalog
 		useCatalogService := paramtable.Get().MetaStoreCfg.UseCatalogService.GetAsBool()
-		local := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
 		if useCatalogService {
 			addr := paramtable.Get().MetaStoreCfg.CatalogServiceAddr.GetValue()
 			catalogSvc, grpcErr := catalogclient.NewCatalogServiceClient(addr, s.metaRootPath)
 			if grpcErr != nil {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
 			}
-			catalog = catalog_service.NewDataCoordAdapter(catalogSvc, local)
-			log.Info("DataCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr), zap.String("rootPath", s.metaRootPath))
+			catalog = catalogSvc
+			log.Info("DataCoord using CatalogService", zap.String("addr", addr), zap.String("rootPath", s.metaRootPath))
 		} else {
 			log.Info("DataCoord using legacy DataCoordCatalog")
+			local := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
 			catalog = local
 		}
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
