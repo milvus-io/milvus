@@ -4,12 +4,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage/aliyun/mocks"
 )
 
 func TestNewMinioClient(t *testing.T) {
@@ -40,65 +39,184 @@ func TestNewMinioClient(t *testing.T) {
 }
 
 func TestCredentialProvider_Retrieve(t *testing.T) {
-	c := new(CredentialProvider)
-	mockAliyunCreds := mocks.NewCredential(t)
-	c.aliyunCreds = mockAliyunCreds
-
 	ak := "ak"
 	sk := "sk"
 	token := "token"
 	errMock := errors.Errorf("mock")
 
 	t.Run("get ak or sk or token failed", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(nil, errMock).Times(1)
-		_, err := c.Retrieve()
-		assert.Error(t, err)
+		t.Run("ak", func(t *testing.T) {
+			fakeAliyunCreds := &struct{ Credential }{}
+			calls := &credentialCalls{}
+			mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.ak++
+					return nil, errMock
+				},
+			).Build()
+			defer mockAK.UnPatch()
 
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
-		mockAliyunCreds.EXPECT().GetAccessKeySecret().Return(nil, errMock).Times(1)
-		_, err = c.Retrieve()
-		assert.Error(t, err)
+			c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
+			_, err := c.Retrieve()
+			assert.Error(t, err)
+			assertCredentialCalls(t, calls, 1, 0, 0)
+		})
 
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
-		mockAliyunCreds.EXPECT().GetAccessKeySecret().Return(&sk, nil).Times(1)
-		mockAliyunCreds.EXPECT().GetSecurityToken().Return(nil, errMock).Times(1)
-		_, err = c.Retrieve()
-		assert.Error(t, err)
+		t.Run("sk", func(t *testing.T) {
+			fakeAliyunCreds := &struct{ Credential }{}
+			calls := &credentialCalls{}
+			mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.ak++
+					return &ak, nil
+				},
+			).Build()
+			defer mockAK.UnPatch()
+			mockSK := mockey.Mock((*struct{ Credential }).GetAccessKeySecret).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.sk++
+					return nil, errMock
+				},
+			).Build()
+			defer mockSK.UnPatch()
+
+			c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
+			_, err := c.Retrieve()
+			assert.Error(t, err)
+			assertCredentialCalls(t, calls, 1, 1, 0)
+		})
+
+		t.Run("token", func(t *testing.T) {
+			fakeAliyunCreds := &struct{ Credential }{}
+			calls := &credentialCalls{}
+			mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.ak++
+					return &ak, nil
+				},
+			).Build()
+			defer mockAK.UnPatch()
+			mockSK := mockey.Mock((*struct{ Credential }).GetAccessKeySecret).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.sk++
+					return &sk, nil
+				},
+			).Build()
+			defer mockSK.UnPatch()
+			mockToken := mockey.Mock((*struct{ Credential }).GetSecurityToken).To(
+				func(*struct{ Credential }) (*string, error) {
+					calls.token++
+					return nil, errMock
+				},
+			).Build()
+			defer mockToken.UnPatch()
+
+			c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
+			_, err := c.Retrieve()
+			assert.Error(t, err)
+			assertCredentialCalls(t, calls, 1, 1, 1)
+		})
 	})
 
 	t.Run("ok", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
-		mockAliyunCreds.EXPECT().GetAccessKeySecret().Return(&sk, nil).Times(1)
-		mockAliyunCreds.EXPECT().GetSecurityToken().Return(&token, nil).Times(1)
+		fakeAliyunCreds := &struct{ Credential }{}
+		calls := &credentialCalls{}
+		mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.ak++
+				return &ak, nil
+			},
+		).Build()
+		defer mockAK.UnPatch()
+		mockSK := mockey.Mock((*struct{ Credential }).GetAccessKeySecret).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.sk++
+				return &sk, nil
+			},
+		).Build()
+		defer mockSK.UnPatch()
+		mockToken := mockey.Mock((*struct{ Credential }).GetSecurityToken).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.token++
+				return &token, nil
+			},
+		).Build()
+		defer mockToken.UnPatch()
+
+		c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
 		ret, err := c.Retrieve()
 		assert.NoError(t, err)
 		assert.Equal(t, ak, ret.AccessKeyID)
 		assert.Equal(t, sk, ret.SecretAccessKey)
 		assert.Equal(t, token, ret.SessionToken)
 		assert.Equal(t, c.akCache, ret.AccessKeyID)
+		assertCredentialCalls(t, calls, 1, 1, 1)
 	})
 }
 
 func TestCredentialProvider_IsExpired(t *testing.T) {
-	c := new(CredentialProvider)
-	mockAliyunCreds := mocks.NewCredential(t)
-	c.aliyunCreds = mockAliyunCreds
-
 	ak := "ak"
 	errMock := errors.Errorf("mock")
 	t.Run("expired", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
+		fakeAliyunCreds := &struct{ Credential }{}
+		calls := &credentialCalls{}
+		mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.ak++
+				return &ak, nil
+			},
+		).Build()
+		defer mockAK.UnPatch()
+
+		c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
 		assert.True(t, c.IsExpired())
+		assertCredentialCalls(t, calls, 1, 0, 0)
 	})
 
 	t.Run("not expired", func(t *testing.T) {
+		fakeAliyunCreds := &struct{ Credential }{}
+		calls := &credentialCalls{}
+		mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.ak++
+				return &ak, nil
+			},
+		).Build()
+		defer mockAK.UnPatch()
+
+		c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
 		c.akCache = ak
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
 		assert.False(t, c.IsExpired())
+		assertCredentialCalls(t, calls, 1, 0, 0)
 	})
 
 	t.Run("get failed, assume expired", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(nil, errMock).Times(1)
+		fakeAliyunCreds := &struct{ Credential }{}
+		calls := &credentialCalls{}
+		mockAK := mockey.Mock((*struct{ Credential }).GetAccessKeyId).To(
+			func(*struct{ Credential }) (*string, error) {
+				calls.ak++
+				return nil, errMock
+			},
+		).Build()
+		defer mockAK.UnPatch()
+
+		c := &CredentialProvider{aliyunCreds: fakeAliyunCreds}
 		assert.True(t, c.IsExpired())
+		assertCredentialCalls(t, calls, 1, 0, 0)
 	})
+}
+
+type credentialCalls struct {
+	ak    int
+	sk    int
+	token int
+}
+
+func assertCredentialCalls(t *testing.T, calls *credentialCalls, akCalls int, skCalls int, tokenCalls int) {
+	t.Helper()
+
+	assert.Equal(t, akCalls, calls.ak)
+	assert.Equal(t, skCalls, calls.sk)
+	assert.Equal(t, tokenCalls, calls.token)
 }
