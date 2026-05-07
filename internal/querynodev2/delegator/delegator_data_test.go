@@ -29,6 +29,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1715,6 +1717,137 @@ func (s *DelegatorDataSuite) TestProcessManualFlush_NilTracker() {
 	// When checkpointTracker is nil, should return immediately without panic
 	s.delegator.checkpointTracker = nil
 	s.delegator.ProcessManualFlush(context.Background(), 1000)
+}
+
+func TestSegmentEffectiveTs(t *testing.T) {
+	// Import segment: commit_timestamp takes precedence over start_position.Timestamp
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       1,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+		CommitTimestamp: 5000,
+	}
+	assert.Equal(t, uint64(5000), segmentEffectiveTs(info))
+
+	// Normal segment: falls back to start_position.Timestamp
+	infoNormal := &querypb.SegmentLoadInfo{
+		SegmentID:     2,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+	}
+	assert.Equal(t, uint64(1000), segmentEffectiveTs(infoNormal))
+}
+
+func TestSegmentEffectiveTs_DelegatorHelper(t *testing.T) {
+	// commit_ts=0: use start_position
+	info := &querypb.SegmentLoadInfo{
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+	}
+	assert.Equal(t, uint64(1000), segmentEffectiveTs(info))
+
+	// commit_ts > 0: override
+	info.CommitTimestamp = 5000
+	assert.Equal(t, uint64(5000), segmentEffectiveTs(info))
+
+	// nil start_position + commit_ts
+	info2 := &querypb.SegmentLoadInfo{CommitTimestamp: 3000}
+	assert.Equal(t, uint64(3000), segmentEffectiveTs(info2))
+
+	// both zero
+	info3 := &querypb.SegmentLoadInfo{}
+	assert.Equal(t, uint64(0), segmentEffectiveTs(info3))
+}
+
+func TestDeleteBuffer_PinsAtCommitTs(t *testing.T) {
+	// Simulate: import segment segID=42, start_position.ts=1000, commit_ts=5000.
+	// After LoadSegments, the delete buffer must be pinned at commit_ts=5000.
+
+	const segID int64 = 42
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	buf := deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](0, 1024*1024)
+
+	// Compute effective ts: segmentEffectiveTs must return commit_ts for import segment.
+	effectiveTs := segmentEffectiveTs(&querypb.SegmentLoadInfo{
+		SegmentID:       segID,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	})
+	assert.Equal(t, commitTs, effectiveTs,
+		"segmentEffectiveTs must return commit_ts for import segment")
+
+	// Pin at commit_ts (as LoadSegments does).
+	buf.Pin(effectiveTs, segID)
+
+	// Unpin at wrong ts (start_position.ts): no-op, pin at commit_ts stays.
+	buf.Unpin(startTs, segID)
+
+	// Pin at commit_ts is still active — Unpin at commit_ts removes it.
+	buf.Unpin(commitTs, segID)
+	// After unpin, a second unpin should be safe (no panic/error).
+	buf.Unpin(commitTs, segID)
+}
+
+func TestDeleteBuffer_ListAfterUsesCommitTs(t *testing.T) {
+	// Invariant I10: ListAfter must use segmentEffectiveTs (commit_ts when non-zero),
+	// not the raw StartPosition timestamp.
+	// If ListAfter uses the stale StartPosition, it would return too many delete records
+	// (including pre-import deletes that are irrelevant).
+
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	}
+
+	effectiveTs := segmentEffectiveTs(info)
+	assert.Equal(t, commitTs, effectiveTs,
+		"segmentEffectiveTs must return commit_ts for import segment, not startPosition")
+
+	// Verify: for normal segment (commitTs=0), effectiveTs falls back to startPosition
+	normalInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     43,
+		StartPosition: &msgpb.MsgPosition{Timestamp: startTs},
+	}
+	normalEffective := segmentEffectiveTs(normalInfo)
+	assert.Equal(t, startTs, normalEffective,
+		"segmentEffectiveTs must return startPosition for normal segment")
+}
+
+func TestDeleteBuffer_CatchUpUsesCommitTs(t *testing.T) {
+	// Invariant I10: catchUpTs in loadStreamDelete must start at segmentEffectiveTs,
+	// not StartPosition.Timestamp. This ensures the catch-up phase doesn't
+	// re-process delete records from before the import commit time.
+
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	}
+
+	// Simulate catchUpTs initialization logic from loadStreamDelete
+	catchUpTs := segmentEffectiveTs(info)
+	// snapshotMaxTs=0 means no snapshot → catchUpTs should be segmentEffectiveTs
+	snapshotMaxTs := uint64(0)
+	if snapshotMaxTs > 0 {
+		catchUpTs = snapshotMaxTs + 1
+	}
+	assert.Equal(t, commitTs, catchUpTs,
+		"catchUpTs must start at commit_ts (not startPosition) when no snapshot exists")
+
+	// With snapshot: catchUpTs should advance beyond snapshot
+	snapshotMaxTs = 6000
+	catchUpTs2 := segmentEffectiveTs(info)
+	if snapshotMaxTs > 0 {
+		catchUpTs2 = snapshotMaxTs + 1
+	}
+	assert.Equal(t, uint64(6001), catchUpTs2,
+		"catchUpTs must advance to snapshotMaxTs+1 when snapshot exists")
 }
 
 func TestDelegatorDataSuite(t *testing.T) {

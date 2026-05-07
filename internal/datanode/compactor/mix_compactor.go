@@ -264,7 +264,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
 	var reader storage.RecordReader
 	if seg.GetManifest() != "" {
@@ -365,14 +365,22 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				err := func() error {
 					rec := rb.Build()
 					defer rec.Release()
-					return mWriter.Write(rec)
+					out := overwriteRecordTimestamps(rec, seg.GetCommitTimestamp())
+					if out != rec {
+						defer out.Release()
+					}
+					return mWriter.Write(out)
 				}()
 				if err != nil {
 					return 0, 0, err
 				}
 			}
 		} else {
-			err := mWriter.Write(r)
+			out := overwriteRecordTimestamps(r, seg.GetCommitTimestamp())
+			err := mWriter.Write(out)
+			if out != r {
+				out.Release()
+			}
 			if err != nil {
 				return 0, 0, err
 			}

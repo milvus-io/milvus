@@ -587,7 +587,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	if err != nil {
 		return err
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -686,6 +686,12 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
+			}
+
+			// Normalize import segment timestamps: overwrite to commit_ts
+			// so the output segment becomes a normal segment (commit_ts = 0).
+			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 {
+				v.Timestamp = int64(commitTs)
 			}
 
 			clusteringKey := row[t.clusteringKeyField.FieldID]
@@ -916,7 +922,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
 
-	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
+	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	binlogs := make([]*datapb.FieldBinlog, 0)
 
 	requiredFields := typeutil.NewSet[int64]()

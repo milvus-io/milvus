@@ -408,6 +408,11 @@ message SegmentLoadInfo {
     int32 data_version = 25;
     bool use_take_for_output = 26;
     int64 estimated_bytes_per_row = 27;
+    // commit_timestamp mirrors data_coord.SegmentInfo.commit_timestamp.
+    // QueryNode uses it for: delete-buffer pinning, ListAfter calls, and
+    // passing to C++ segcore to overwrite the in-memory timestamp column
+    // (enabling correct MVCC visibility and TTL evaluation).
+    uint64 commit_timestamp = 28;
 }
 
 message FieldIndexInfo {

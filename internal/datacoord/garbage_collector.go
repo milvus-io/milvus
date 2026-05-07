@@ -711,11 +711,11 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
 	// We do this because collection meta drop relies on all segment being GCed.
 	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-		segment.GetDmlPosition().GetTimestamp() > cpTimestamp {
+		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
 		// segment gc shall only happen when channel cp is after segment dml cp.
 		log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).
 			RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
-				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
+				zap.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
 				zap.Uint64("channelCpTs", cpTimestamp),
 			)
 		return false

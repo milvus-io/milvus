@@ -136,4 +136,8 @@ message SegmentLoadInfo {
   string manifest_path = 21;
   bool use_take_for_output = 22;  // when true, use take() API for output field retrieval instead of bulk_subscript
   int64 estimated_bytes_per_row = 23;  // sampled avg memory bytes per row (from Take API); used as fallback when format metadata lacks size stats
+  // commit_timestamp is the transaction timestamp for import/CDC segments.
+  // When non-zero, segcore overwrites the in-memory timestamp column so all
+  // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
+  uint64 commit_timestamp = 24;
 }

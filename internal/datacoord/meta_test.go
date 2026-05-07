@@ -684,6 +684,161 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.NotEmpty(seg.GetDroppedAt())
 		}
 	})
+
+	suite.Run("mix compaction normalizes commit_timestamp to zero", func() {
+		// Input: two import segments with different commit_timestamps.
+		// After compaction, row timestamps are already rewritten to commit_ts
+		// by the compactor, so the output segment is normalized (CommitTimestamp = 0).
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 2, CommitTimestamp: 5000,
+		}})
+		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 2, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 3, CommitTimestamp: 8000,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 10, NumOfRows: 5}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "compaction normalizes commit_timestamp: row timestamps already rewritten")
+	})
+
+	suite.Run("sort compaction normalizes commit_timestamp to zero", func() {
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
+			NumOfRows: 2, CommitTimestamp: 7777,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 2, NumOfRows: 2}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1},
+			Type:          datapb.CompactionType_SortCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "sort compaction normalizes commit_timestamp: row timestamps already rewritten")
+	})
+
+	suite.Run("clustering compaction normalizes commit_timestamp to zero", func() {
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 2, CommitTimestamp: 6000,
+		}})
+		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 2, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 3, CommitTimestamp: 4000,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 10, NumOfRows: 5}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "clustering compaction normalizes commit_timestamp: row timestamps already rewritten")
+	})
+
+	suite.Run("mix compaction with mixed import and normal segments normalizes to zero", func() {
+		// One import segment (commitTs=5000) + one normal segment (commitTs=0).
+		// After compaction, row timestamps are rewritten, so output is normalized.
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 2, CommitTimestamp: 5000,
+		}})
+		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 2, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 3, CommitTimestamp: 0,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 10, NumOfRows: 5}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "compaction normalizes commit_timestamp: row timestamps already rewritten")
+	})
+
+	suite.Run("mix compaction with no import segments sets commit_timestamp to 0", func() {
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 2, CommitTimestamp: 0,
+		}})
+		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 2, CollectionID: 100, PartitionID: 10,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			NumOfRows: 3, CommitTimestamp: 0,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{SegmentID: 10, NumOfRows: 5}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "normal segment compaction must not set commit_timestamp")
+	})
 }
 
 func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
@@ -2449,6 +2604,27 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
+
+	t.Run("update commit timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Flushed},
+		})
+
+		const testTs uint64 = 1234567890
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateCommitTimestamp(1, testTs))
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 1)
+		assert.Equal(t, testTs, seg.GetCommitTimestamp())
+
+		// verify clearing to zero works
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateCommitTimestamp(1, 0))
+		assert.NoError(t, err)
+		seg = meta.GetSegment(context.TODO(), 1)
+		assert.Equal(t, uint64(0), seg.GetCommitTimestamp())
+	})
 }
 
 func TestUpdateManifestVersion(t *testing.T) {
@@ -3390,6 +3566,44 @@ func TestMeta_GetSegmentsJSON(t *testing.T) {
 	assert.Equal(t, int64(200), segments[1].NumOfRows)
 	assert.Equal(t, "Sealed", segments[1].State)
 	assert.True(t, segments[1].Compacted)
+}
+
+func TestTruncateChannelByTime(t *testing.T) {
+	t.Run("import segment not dropped when flushTs < commit_timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              100,
+			InsertChannel:   "ch1",
+			State:           commonpb.SegmentState_Flushed,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}})
+		assert.NoError(t, err)
+		err = meta.TruncateChannelByTime(context.Background(), "ch1", 3000)
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 100)
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg.GetState(),
+			"import segment should NOT be dropped when flushTs < commit_timestamp")
+	})
+
+	t.Run("import segment dropped when flushTs >= commit_timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              101,
+			InsertChannel:   "ch2",
+			State:           commonpb.SegmentState_Flushed,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch2", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}})
+		assert.NoError(t, err)
+		err = meta.TruncateChannelByTime(context.Background(), "ch2", 6000)
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 101)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg.GetState(),
+			"import segment should be dropped when flushTs >= commit_timestamp")
+	})
 }
 
 func Test_meta_DropSegmentsOfPartition(t *testing.T) {

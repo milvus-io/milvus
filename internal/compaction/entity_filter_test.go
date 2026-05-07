@@ -66,7 +66,7 @@ func (s *EntityFilterSuite) TestEntityFilterByTTL() {
 	}
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			filter := newEntityFilter(nil, test.collTTL, test.nowTime)
+			filter := newEntityFilter(nil, test.collTTL, test.nowTime, 0)
 
 			entityTs := tsoutil.ComposeTSByTime(test.entityTime, 0)
 			got := filter.Filtered("mockpk", entityTs, -1)
@@ -81,6 +81,65 @@ func (s *EntityFilterSuite) TestEntityFilterByTTL() {
 			}
 		})
 	}
+}
+
+// TestEntityFilterByTTLWithCommitTs verifies that import/CDC segments (commitTs != 0)
+// are protected from premature TTL expiry caused by outdated row timestamps.
+func (s *EntityFilterSuite) TestEntityFilterByTTLWithCommitTs() {
+	// In practice, import row timestamps are generated during the import process
+	// and are only slightly older than the commit time (hours, not years).
+	nowTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// Entity timestamp is 6 hours before commit (typical import lag).
+	entityTime := nowTime.Add(-6 * time.Hour)
+	entityTs := tsoutil.ComposeTSByTime(entityTime, 0)
+
+	// Collection TTL is 1 hour — entity timestamp alone would appear expired.
+	ttlOneHour := int64(1 * time.Hour)
+
+	s.Run("without commitTs: row expires (baseline)", func() {
+		filter := newEntityFilter(nil, ttlOneHour, nowTime, 0)
+		got := filter.Filtered("pk1", entityTs, -1)
+		s.True(got, "row should expire without commitTs protection")
+	})
+
+	s.Run("with commitTs recent enough: row is protected", func() {
+		// commitTs is 30 minutes ago — within TTL.
+		recentCommitTime := nowTime.Add(-30 * time.Minute)
+		commitTs := tsoutil.ComposeTSByTime(recentCommitTime, 0)
+		filter := newEntityFilter(nil, ttlOneHour, nowTime, commitTs)
+		got := filter.Filtered("pk1", entityTs, -1)
+		s.False(got, "row should not expire when commitTs is within TTL window")
+	})
+
+	s.Run("with commitTs also expired: row expires", func() {
+		// commitTs is 2 hours ago — beyond TTL.
+		expiredCommitTime := nowTime.Add(-2 * time.Hour)
+		commitTs := tsoutil.ComposeTSByTime(expiredCommitTime, 0)
+		filter := newEntityFilter(nil, ttlOneHour, nowTime, commitTs)
+		got := filter.Filtered("pk1", entityTs, -1)
+		s.True(got, "row should expire when both row_ts and commitTs are beyond TTL")
+	})
+
+	s.Run("with commitTs: ttl_field expiration still applies", func() {
+		// Per-row TTL field claims expiration 1 hour ago. TTL field represents
+		// user intent and should be honored regardless of commitTs.
+		expiredTimeMicros := nowTime.Add(-1 * time.Hour).UnixMicro()
+		recentCommitTime := nowTime.Add(-30 * time.Minute)
+		commitTs := tsoutil.ComposeTSByTime(recentCommitTime, 0)
+		filter := newEntityFilter(nil, ttlOneHour, nowTime, commitTs)
+		got := filter.Filtered("pk1", tsoutil.ComposeTSByTime(recentCommitTime, 0), expiredTimeMicros)
+		s.True(got, "ttl_field expiration should apply even when commitTs is set")
+	})
+
+	s.Run("without commitTs: ttl_field expiration applies", func() {
+		expiredTimeMicros := nowTime.Add(-1 * time.Hour).UnixMicro()
+		filter := newEntityFilter(nil, ttlOneHour, nowTime, 0)
+		// Use a recent entity ts so TTL by timestamp alone would NOT expire it.
+		recentTs := tsoutil.ComposeTSByTime(nowTime.Add(-30*time.Minute), 0)
+		got := filter.Filtered("pk1", recentTs, expiredTimeMicros)
+		s.True(got, "ttl_field should expire the row when commitTs is 0")
+	})
 }
 
 func getMilvusBirthday() time.Time {

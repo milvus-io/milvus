@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
@@ -248,6 +249,21 @@ func GenerateCSVFile(t *testing.T, c *cluster.MiniClusterV3, schema *schemapb.Co
 		panic(err)
 	}
 	return filePath, sep
+}
+
+// AssertImportSegmentsHaveCommitTimestamp verifies that all flushed segments
+// for the given collection have CommitTimestamp > 0 after import.
+func AssertImportSegmentsHaveCommitTimestamp(t *testing.T, c *cluster.MiniClusterV3, collectionName string) {
+	segments, err := c.ShowSegments(collectionName)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, segments, "expected at least one segment after import")
+	for _, seg := range segments {
+		if seg.GetState() == commonpb.SegmentState_Flushed {
+			assert.Greater(t, seg.GetCommitTimestamp(), uint64(0),
+				"segment %d should have CommitTimestamp > 0, got %d",
+				seg.GetID(), seg.GetCommitTimestamp())
+		}
+	}
 }
 
 func WaitForImportDone(ctx context.Context, c *cluster.MiniClusterV3, jobID string) error {

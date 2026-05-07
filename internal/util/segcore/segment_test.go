@@ -145,6 +145,42 @@ func assertEqualCount(
 	retrieveResult2.Release()
 }
 
+// TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp verifies that
+// ConvertToSegcoreSegmentLoadInfo handles a querypb.SegmentLoadInfo with
+// CommitTimestamp set without errors.  CommitTimestamp is NOT present in
+// segcorepb.SegmentLoadInfo; instead it is propagated to the C segment via
+// CreateCSegment -> seg.SetCommitTimestamp.  This test documents that contract:
+// the conversion function must succeed and preserve all other fields correctly.
+func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
+	// Non-zero CommitTimestamp: conversion must succeed and base fields are correct.
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		CollectionID:    1,
+		PartitionID:     2,
+		CommitTimestamp: 9999,
+	}
+	result := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(42), result.GetSegmentID(),
+		"SegmentID must be preserved through conversion")
+	assert.Equal(t, int64(1), result.GetCollectionID(),
+		"CollectionID must be preserved through conversion")
+	assert.Equal(t, int64(2), result.GetPartitionID(),
+		"PartitionID must be preserved through conversion")
+
+	// Zero CommitTimestamp: conversion must also succeed.
+	info2 := &querypb.SegmentLoadInfo{
+		SegmentID:    43,
+		CollectionID: 1,
+		PartitionID:  2,
+		// CommitTimestamp = 0
+	}
+	result2 := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	assert.NotNil(t, result2)
+	assert.Equal(t, int64(43), result2.GetSegmentID(),
+		"SegmentID must be preserved through conversion when CommitTimestamp is zero")
+}
+
 func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 	t.Run("nil input", func(t *testing.T) {
 		result := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
