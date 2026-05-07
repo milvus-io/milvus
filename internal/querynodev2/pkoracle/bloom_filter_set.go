@@ -107,7 +107,17 @@ func (s *BloomFilterSet) Stats() *storage.PkStatistics {
 
 // PkCandidateExist reports whether bloom filter data has been loaded (current or historical).
 func (s *BloomFilterSet) PkCandidateExist() bool {
-	return s.currentStat != nil || s.historyStats != nil
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+	if s.currentStat != nil {
+		return true
+	}
+	for _, stat := range s.historyStats {
+		if stat != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdatePkCandidate updates currentStats with provided pks.

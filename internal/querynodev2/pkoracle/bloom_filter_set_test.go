@@ -101,6 +101,49 @@ func TestHistoricalStat(t *testing.T) {
 	}
 }
 
+func TestPkCandidateExist(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("empty set returns false", func(t *testing.T) {
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		assert.False(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("with current stat returns true", func(t *testing.T) {
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)}
+		bfs.UpdatePkCandidate(pks)
+		assert.True(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("nil-only historyStats returns false", func(t *testing.T) {
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.historyStats = []*storage.PkStatistics{nil, nil}
+		assert.False(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("empty historyStats slice returns false", func(t *testing.T) {
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.historyStats = []*storage.PkStatistics{}
+		assert.False(t, bfs.PkCandidateExist())
+	})
+
+	t.Run("valid historical stat returns true", func(t *testing.T) {
+		batchSize := 10
+		pks := make([]storage.PrimaryKey, 0, batchSize)
+		for i := 0; i < batchSize; i++ {
+			pks = append(pks, storage.NewInt64PrimaryKey(int64(i)))
+		}
+
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdatePkCandidate(pks)
+		bfs.AddHistoricalStats(bfs.currentStat)
+		bfs.currentStat = nil
+
+		assert.True(t, bfs.PkCandidateExist())
+	})
+}
+
 func TestMemSize(t *testing.T) {
 	paramtable.Init()
 
