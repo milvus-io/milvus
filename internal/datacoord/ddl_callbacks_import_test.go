@@ -32,16 +32,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // ================================
@@ -821,4 +826,140 @@ func TestImportFlowIntegration(t *testing.T) {
 
 		t.Log("Import flow documented successfully")
 	})
+}
+
+func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	alloc := allocator.NewMockAllocator(t)
+	importMeta, err := NewImportMeta(context.Background(), catalog, alloc, nil)
+	assert.NoError(t, err)
+	return importMeta, catalog
+}
+
+func buildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommitImportMessageV2 {
+	broadcastMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+	return message.BroadcastResultCommitImportMessageV2{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *messagespb.CommitImportMessageBody](broadcastMsg),
+		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRollbackImportMessageV2 {
+	broadcastMsg := message.NewRollbackImportMessageBuilderV2().
+		WithHeader(&message.RollbackImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+	return message.BroadcastResultRollbackImportMessageV2{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.RollbackImportMessageHeader, *messagespb.RollbackImportMessageBody](broadcastMsg),
+		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      1,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 1)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      2,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
+	assert.NoError(t, err)
+
+	// Segment cleanup is handled by import inspector, not the callback.
+	updatedJob := importMeta.GetJob(ctx, 2)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	// Job already Failed (abort won the race).
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 3,
+			State: internalpb.ImportJobState_Failed,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
+	assert.NoError(t, err)
+
+	// UpdateJob skips jobs in Failed state → no-op.
+	updatedJob := importMeta.GetJob(ctx, 3)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+}
+
+func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	// Job already Committing (commit won the race).
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 4,
+			State: internalpb.ImportJobState_Committing,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(4))
+	assert.NoError(t, err)
+
+	// Abort rejected: job already in committed state.
+	updatedJob := importMeta.GetJob(ctx, 4)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }

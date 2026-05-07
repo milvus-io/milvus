@@ -48,7 +48,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -159,6 +161,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/import/create":                "Import",
 	"/v2/vectordb/jobs/import/get_progress":          "GetImportProgress",
 	"/v2/vectordb/jobs/import/describe":              "GetImportProgress",
+	"/v2/vectordb/jobs/import/commit":                "CommitImport",
+	"/v2/vectordb/jobs/import/abort":                 "AbortImport",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
 	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
 	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
@@ -310,6 +314,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
 	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ImportJobCategory+CommitAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.commitImportJob))))
+	router.POST(ImportJobCategory+AbortAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.abortImportJob))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
 	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
 	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
@@ -3171,6 +3177,30 @@ func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Conte
 	return resp, err
 }
 
+func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	jobIDGetter := anyReq.(JobIDGetter)
+	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &datapb.CommitImportRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, false, false,
+		"/milvus.proto.milvus.MilvusService/CommitImport",
+		func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.CommitImport(reqCtx, req.(*datapb.CommitImportRequest))
+		})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
+	}
+	return resp, err
+}
+
 func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*RefreshExternalCollectionProgressReq)
 	req := &milvuspb.GetRefreshExternalCollectionProgressRequest{
@@ -3184,6 +3214,30 @@ func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c
 	if err == nil {
 		jobInfo := resp.(*milvuspb.GetRefreshExternalCollectionProgressResponse).GetJobInfo()
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: refreshExternalCollectionJobInfoToMap(jobInfo)})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	jobIDGetter := anyReq.(JobIDGetter)
+	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &datapb.AbortImportRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxy(ctx, c, req, false, false,
+		"/milvus.proto.milvus.MilvusService/AbortImport",
+		func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.AbortImport(reqCtx, req.(*datapb.AbortImportRequest))
+		})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
 	}
 	return resp, err
 }

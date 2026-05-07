@@ -125,6 +125,11 @@ service DataCoord {
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
   rpc GetRefreshExternalCollectionProgress(GetRefreshExternalCollectionProgressRequest) returns(GetRefreshExternalCollectionProgressResponse){}
   rpc ListRefreshExternalCollectionJobs(ListRefreshExternalCollectionJobsRequest) returns(ListRefreshExternalCollectionJobsResponse){}
+
+  // Import 2PC RPCs — internal only, not exposed in public MilvusService
+  rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
+  rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
+  rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -1258,6 +1263,8 @@ message ImportJob {
   string create_time = 16;
   repeated string ready_vchannels = 17;
   uint64 data_ts = 18;
+  repeated string committed_vchannels = 19;
+  bool            auto_commit         = 20;
 }
 
 enum ImportTaskStateV2 {
@@ -1706,4 +1713,20 @@ message PinSnapshotDataResponse {
 message UnpinSnapshotDataRequest {
   common.MsgBase base = 1;
   int64 pin_id = 2;                 // pin ID from PinSnapshotData response
+}
+
+message CommitImportRequest {
+  common.MsgBase base   = 1;
+  int64          job_id = 2;
+}
+
+message AbortImportRequest {
+  common.MsgBase base   = 1;
+  int64          job_id = 2;
+}
+
+message HandleCommitVchannelRequest {
+  common.MsgBase base     = 1;
+  int64          job_id   = 2;
+  string         vchannel = 3;
 }

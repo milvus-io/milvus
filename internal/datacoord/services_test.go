@@ -54,6 +54,7 @@ import (
 	types2 "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -5186,4 +5187,100 @@ func TestUnpinSnapshotData(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp))
 	})
+}
+
+func TestCommitImport_HappyPath(t *testing.T) {
+	ctx := context.Background()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1001,
+			CollectionID: 200,
+			State:        internalpb.ImportJobState_Uncommitted,
+			AutoCommit:   false,
+		},
+	}
+
+	importMetaMock := NewMockImportMeta(t)
+	// GetJob is called twice: once before lock and once after lock.
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(1001)).Return(job).Times(2)
+
+	server := &Server{
+		importMeta:    importMetaMock,
+		importJobLock: lock.NewKeyLock[int64](),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// Mock broadcastCommitImportMessage to succeed.
+	broadcastMock := mockey.Mock((*Server).broadcastCommitImportMessage).
+		Return(nil).Build()
+	defer broadcastMock.UnPatch()
+
+	resp, err := server.CommitImport(ctx, &datapb.CommitImportRequest{JobId: 1001})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
+func TestAbortImport_HappyPath(t *testing.T) {
+	ctx := context.Background()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        2001,
+			CollectionID: 300,
+			State:        internalpb.ImportJobState_Uncommitted,
+			AutoCommit:   false,
+		},
+	}
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(2001)).Return(job).Times(2)
+
+	server := &Server{
+		importMeta:    importMetaMock,
+		importJobLock: lock.NewKeyLock[int64](),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// Mock broadcastRollbackImportMessage to succeed.
+	broadcastMock := mockey.Mock((*Server).broadcastRollbackImportMessage).
+		Return(nil).Build()
+	defer broadcastMock.UnPatch()
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2001})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
+func TestHandleCommitVchannelRPC(t *testing.T) {
+	ctx := context.Background()
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
+		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+			// Execute the callback to verify it works correctly.
+			return callback()
+		})
+
+	segIDs := []int64{10, 20, 30}
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return(segIDs).Build()
+	defer getSegIDsMock.UnPatch()
+
+	updateSegsMock := mockey.Mock((*meta).UpdateSegmentsInfo).
+		Return(nil).Build()
+	defer updateSegsMock.UnPatch()
+
+	server := &Server{
+		importMeta: importMetaMock,
+		meta:       &meta{},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:    3001,
+		Vchannel: "vchan-0",
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
 }

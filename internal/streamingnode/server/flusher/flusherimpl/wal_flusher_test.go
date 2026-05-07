@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -27,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -152,6 +155,110 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 		expect.Maybe()
 	}
 	return mixcoord
+}
+
+func TestDispatch_CommitImportMessage(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	// Build a CommitImport immutable message.
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	// Set up mock MixCoordClient with HandleCommitVchannel expectation.
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	// Set up mock WriteBufferManager with FlushChannel expectation.
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	// Set up mock RecoveryStorage with ObserveMessage expectation.
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	// Initialize resource with mocks.
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
+
+	// Build a minimal WALFlusherImpl for dispatch testing.
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          log.With(log.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	err := impl.dispatch(immutableMsg)
+	assert.NoError(t, err)
+}
+
+func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	tests := []struct {
+		name     string
+		vchannel string
+		jobID    int64
+	}{
+		{name: "basic_rollback", vchannel: "vchannel-rollback-1", jobID: 10},
+		{name: "different_job", vchannel: "vchannel-rollback-2", jobID: 99},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Build a RollbackImport immutable message.
+			mutableMsg := message.NewRollbackImportMessageBuilderV2().
+				WithHeader(&message.RollbackImportMessageHeader{
+					CollectionId: 100,
+					JobId:        tc.jobID,
+				}).
+				WithBody(&message.RollbackImportMessageBody{}).
+				WithVChannel(tc.vchannel).
+				MustBuildMutable()
+			mutableMsg.WithTimeTick(300)
+			mutableMsg.WithLastConfirmed(rmq.NewRmqID(299))
+			immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(300))
+
+			// Set up mock RecoveryStorage: ObserveMessage should still be called from the defer.
+			rs := mock_recovery.NewMockRecoveryStorage(t)
+			rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+			// No MixCoordClient or WriteBufferManager should be called.
+			resource.InitForTest(t)
+
+			impl := &WALFlusherImpl{
+				notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+				logger:          log.With(log.FieldComponent("test-flusher")),
+				RecoveryStorage: rs,
+			}
+
+			err := impl.dispatch(immutableMsg)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {

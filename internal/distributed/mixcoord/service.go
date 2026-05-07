@@ -941,6 +941,18 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	return s.mixCoord.ListImports(ctx, in)
 }
 
+func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitImport(ctx, req)
+}
+
+func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AbortImport(ctx, req)
+}
+
+func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return s.mixCoord.HandleCommitVchannel(ctx, req)
+}
+
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.mixCoord.ListIndexes(ctx, in)
 }

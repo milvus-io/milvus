@@ -46,6 +46,9 @@ const (
 	CSVNullKey = "nullkey"
 )
 
+// AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
+const AutoCommitKey = "auto_commit"
+
 // Options for backup-restore mode.
 const (
 	// BackupFlag indicates whether the import is in backup-restore mode, default to false.
@@ -199,4 +202,13 @@ func GetEZK(options Options) (string, error) {
 		return "", nil
 	}
 	return ezk, nil
+}
+
+// IsAutoCommit parses the auto_commit option. Defaults to true if absent.
+func IsAutoCommit(options Options) bool {
+	val, err := funcutil.GetAttrByKeyFromRepeatedKV(AutoCommitKey, options)
+	if err != nil || strings.ToLower(val) != "false" {
+		return true
+	}
+	return false
 }

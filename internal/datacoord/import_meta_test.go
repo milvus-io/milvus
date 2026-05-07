@@ -336,3 +336,44 @@ func TestTaskStatsJSON(t *testing.T) {
 	assert.NotNil(t, taskMeta.get(2))
 	assert.Equal(t, 2, len(taskMeta.listTaskStats()))
 }
+
+func TestHandleCommitVchannel(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	jobID := int64(100)
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Committing,
+			Vchannels: []string{"ch1", "ch2"},
+		},
+	}
+	err = im.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+
+	callCount := 0
+	cb := func() error { callCount++; return nil }
+
+	// First commit of ch1 — should succeed and persist
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", cb)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount)
+	assert.Contains(t, im.GetJob(context.TODO(), jobID).GetCommittedVchannels(), "ch1")
+
+	// Idempotent second commit of ch1 — callback should NOT fire again
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", cb)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount) // still 1, not 2
+
+	// Unknown job returns error
+	err = im.HandleCommitVchannel(context.TODO(), int64(9999), "ch1", cb)
+	assert.Error(t, err)
+	assert.Equal(t, 1, callCount) // callback not called for missing job
+}

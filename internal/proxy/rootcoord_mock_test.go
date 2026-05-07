@@ -1392,6 +1392,18 @@ func (coord *MixCoordMock) ListImports(ctx context.Context, in *internalpb.ListI
 	}, nil
 }
 
+func (coord *MixCoordMock) CommitImport(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) AbortImport(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) HandleCommitVchannel(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }

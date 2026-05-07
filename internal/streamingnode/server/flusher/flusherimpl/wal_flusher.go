@@ -18,11 +18,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -278,6 +281,44 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
 		}()
+	case message.MessageTypeCommitImport:
+		commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
+		if err != nil {
+			impl.logger.DPanic("failed to parse CommitImportMessage", zap.Error(err))
+			return nil
+		}
+		vchannel := msg.VChannel()
+		jobID := commitMsg.Header().GetJobId()
+
+		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
+		if err := resource.Resource().WriteBufferManager().
+			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
+			impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
+				zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
+		}
+
+		// Notify DataCoord that this vchannel has committed.
+		mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(impl.notifier.Context())
+		if err != nil {
+			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
+		}
+		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
+			Base:     commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			JobId:    jobID,
+			Vchannel: vchannel,
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			impl.logger.Panic("HandleCommitVchannel RPC failed, panicking to retry from WAL",
+				zap.Int64("jobID", jobID), zap.String("vchannel", vchannel), zap.Error(err))
+		}
+		impl.logger.Info("CommitImportMessage handled: vchannel committed",
+			zap.String("vchannel", vchannel), zap.Int64("jobID", jobID))
+		return nil // don't forward to flusherComponents
+	case message.MessageTypeRollbackImport:
+		// No-op: DataCoord DDL ack callback handles all state changes.
+		impl.logger.Info("RollbackImportMessage consumed (no-op in flusher)",
+			zap.String("vchannel", msg.VChannel()))
+		return nil // don't forward to flusherComponents
 	}
 	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
 }

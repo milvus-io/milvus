@@ -6951,6 +6951,20 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	return resp, nil
 }
 
+func (node *Proxy) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	return node.mixCoord.CommitImport(ctx, req)
+}
+
+func (node *Proxy) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	return node.mixCoord.AbortImport(ctx, req)
+}
+
 // DeregisterSubLabel must add the sub-labels here if using other labels for the sub-labels
 func DeregisterSubLabel(subLabel string) {
 	rateCol.DeregisterSubLabel(internalpb.RateType_DQLQuery.String(), subLabel)
