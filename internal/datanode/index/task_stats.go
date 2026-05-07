@@ -877,6 +877,7 @@ func buildIndexParams(
 		PartitionID:                      req.GetPartitionID(),
 		SegmentID:                        req.GetTargetSegmentID(),
 		IndexVersion:                     req.GetTaskVersion(),
+		NumRows:                          req.GetNumRows(),
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
