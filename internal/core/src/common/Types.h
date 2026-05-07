@@ -814,7 +814,7 @@ struct TypeTraits<DataType::DOUBLE> {
 
 template <>
 struct TypeTraits<DataType::TIMESTAMPTZ> {
-    using NativeType = double;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::TIMESTAMPTZ;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;

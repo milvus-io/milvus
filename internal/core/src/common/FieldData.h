@@ -58,6 +58,12 @@ class FieldData<std::string> : public FieldDataStringImpl {
                        int64_t buffered_num_rows = 0)
         : FieldDataStringImpl(data_type, nullable, buffered_num_rows) {
     }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<std::string>&& inner_data)
+        : FieldDataStringImpl(data_type, nullable, std::move(inner_data)) {
+    }
 };
 
 template <>
@@ -68,6 +74,12 @@ class FieldData<Json> : public FieldDataJsonImpl {
                        bool nullable,
                        int64_t buffered_num_rows = 0)
         : FieldDataJsonImpl(data_type, nullable, buffered_num_rows) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<Json>&& inner_data)
+        : FieldDataJsonImpl(data_type, nullable, std::move(inner_data)) {
     }
 };
 
@@ -445,6 +457,9 @@ using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length);
 
 void
 ResizeScalarFieldData(const DataType& type,

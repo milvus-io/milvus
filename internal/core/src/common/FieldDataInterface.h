@@ -572,6 +572,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataStringImpl(DataType data_type,
+                                 bool nullable,
+                                 FixedVector<std::string>&& data)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, std::move(data)) {
+    }
+
     int64_t
     DataSize() const override {
         int64_t data_size = 0;
@@ -746,6 +753,12 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                                bool nullable,
                                int64_t total_num_rows = 0)
         : FieldDataImpl<Json, true>(1, data_type, nullable, total_num_rows) {
+    }
+
+    explicit FieldDataJsonImpl(DataType data_type,
+                               bool nullable,
+                               FixedVector<Json>&& data)
+        : FieldDataImpl<Json, true>(1, data_type, nullable, std::move(data)) {
     }
 
     int64_t
