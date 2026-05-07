@@ -73,6 +73,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -174,7 +175,8 @@ func (node *QueryNode) initSession() error {
 			common.MinimalScalarIndexEngineVersion,
 			common.CurrentScalarIndexEngineVersion,
 			common.MaximumScalarIndexEngineVersion),
-		sessionutil.WithIndexNonEncoding())
+		sessionutil.WithIndexNonEncoding(),
+		sessionutil.WithMaxIndexStorePathVersion(int32(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)))
 	if node.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}

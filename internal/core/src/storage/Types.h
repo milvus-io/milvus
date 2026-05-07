@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
+#include "pb/index_coord.pb.h"
 #include "pb/schema.pb.h"
 
 namespace milvus::storage {
@@ -89,6 +90,11 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
+    // Path format version for index files on object storage.
+    // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}
+    // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+    milvus::proto::index::IndexStorePathVersion index_store_path_version =
+        milvus::proto::index::INDEX_STORE_PATH_VERSION_BUILD_ROOTED;
 };
 
 struct StorageConfig {

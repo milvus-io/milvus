@@ -9,7 +9,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
@@ -33,6 +35,11 @@ type IndexEngineVersionManager interface {
 	AddNode(session *sessionutil.Session)
 	RemoveNode(session *sessionutil.Session)
 	Update(session *sessionutil.Session)
+	StartupByRole(role string, sessions map[string]*sessionutil.Session)
+	AddByRole(role string, session *sessionutil.Session)
+	RemoveByRole(role string, session *sessionutil.Session)
+	UpdateByRole(role string, session *sessionutil.Session)
+	GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion
 
 	// Vector index version methods (from knowhere library)
 	GetCurrentIndexEngineVersion() int32
@@ -61,6 +68,8 @@ type versionManagerImpl struct {
 	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
 	indexNonEncoding    map[int64]bool
 	sessionVersion      map[int64]semver.Version
+
+	indexStorePathVersionByRole map[string]map[int64]int32
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
@@ -69,6 +78,9 @@ func newIndexEngineVersionManager() IndexEngineVersionManager {
 		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
 		indexNonEncoding:    map[int64]bool{},
 		sessionVersion:      map[int64]semver.Version{},
+		indexStorePathVersionByRole: map[string]map[int64]int32{
+			typeutil.QueryNodeRole: {},
+		},
 	}
 }
 
@@ -91,6 +103,8 @@ func (m *versionManagerImpl) Startup(sessions map[string]*sessionutil.Session) {
 	for _, session := range sessions {
 		m.addOrUpdate(session)
 	}
+
+	m.startupByRoleLocked(typeutil.QueryNodeRole, sessions)
 }
 
 func (m *versionManagerImpl) AddNode(session *sessionutil.Session) {
@@ -98,6 +112,7 @@ func (m *versionManagerImpl) AddNode(session *sessionutil.Session) {
 	defer m.mu.Unlock()
 
 	m.addOrUpdate(session)
+	m.addOrUpdatePathVersionLocked(typeutil.QueryNodeRole, session)
 }
 
 func (m *versionManagerImpl) RemoveNode(session *sessionutil.Session) {
@@ -105,6 +120,7 @@ func (m *versionManagerImpl) RemoveNode(session *sessionutil.Session) {
 	defer m.mu.Unlock()
 
 	m.removeNodeByID(session.ServerID)
+	m.removePathVersionLocked(typeutil.QueryNodeRole, session)
 }
 
 func (m *versionManagerImpl) removeNodeByID(sessionID int64) {
@@ -119,6 +135,102 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	defer m.mu.Unlock()
 
 	m.addOrUpdate(session)
+	m.addOrUpdatePathVersionLocked(typeutil.QueryNodeRole, session)
+}
+
+func (m *versionManagerImpl) StartupByRole(role string, sessions map[string]*sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.startupByRoleLocked(role, sessions)
+}
+
+func (m *versionManagerImpl) startupByRoleLocked(role string, sessions map[string]*sessionutil.Session) {
+	if !isIndexStorePathVersionRole(role) {
+		return
+	}
+
+	sessionMap := lo.MapKeys(sessions, func(session *sessionutil.Session, _ string) int64 {
+		return session.ServerID
+	})
+	roleMap := m.ensurePathVersionRoleMap(role)
+	for sessionID := range roleMap {
+		if _, ok := sessionMap[sessionID]; !ok {
+			delete(roleMap, sessionID)
+		}
+	}
+	for _, session := range sessions {
+		m.addOrUpdatePathVersionLocked(role, session)
+	}
+}
+
+func (m *versionManagerImpl) AddByRole(role string, session *sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.addOrUpdatePathVersionLocked(role, session)
+}
+
+func (m *versionManagerImpl) RemoveByRole(role string, session *sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.removePathVersionLocked(role, session)
+}
+
+func (m *versionManagerImpl) UpdateByRole(role string, session *sessionutil.Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.addOrUpdatePathVersionLocked(role, session)
+}
+
+func (m *versionManagerImpl) addOrUpdatePathVersionLocked(role string, session *sessionutil.Session) {
+	if !isIndexStorePathVersionRole(role) || session == nil {
+		return
+	}
+	m.ensurePathVersionRoleMap(role)[session.ServerID] = session.MaxIndexStorePathVersion
+}
+
+func (m *versionManagerImpl) removePathVersionLocked(role string, session *sessionutil.Session) {
+	if !isIndexStorePathVersionRole(role) || session == nil {
+		return
+	}
+	delete(m.ensurePathVersionRoleMap(role), session.ServerID)
+}
+
+func (m *versionManagerImpl) ensurePathVersionRoleMap(role string) map[int64]int32 {
+	if m.indexStorePathVersionByRole == nil {
+		m.indexStorePathVersionByRole = map[string]map[int64]int32{}
+	}
+	if _, ok := m.indexStorePathVersionByRole[role]; !ok {
+		m.indexStorePathVersionByRole[role] = map[int64]int32{}
+	}
+	return m.indexStorePathVersionByRole[role]
+}
+
+func isIndexStorePathVersionRole(role string) bool {
+	// Path version gating only tracks QueryNode read capability. Worker write
+	// capability is learned from each finished build's actual path version.
+	return role == typeutil.QueryNodeRole
+}
+
+func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	minVersion := int32(math.MaxInt32)
+	hasSession := false
+	for _, version := range m.ensurePathVersionRoleMap(typeutil.QueryNodeRole) {
+		hasSession = true
+		if version < minVersion {
+			minVersion = version
+		}
+	}
+	if !hasSession {
+		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	}
+	return indexpb.IndexStorePathVersion(minVersion)
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {

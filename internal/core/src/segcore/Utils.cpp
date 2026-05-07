@@ -1471,6 +1471,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->field_id,
                                           load_index_info->index_build_id,
                                           load_index_info->index_version};
+    index_meta.index_store_path_version =
+        load_index_info->index_store_path_version;
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
     if (load_index_info->field_type == milvus::DataType::JSON) {
