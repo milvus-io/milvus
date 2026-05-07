@@ -183,6 +183,120 @@ func Test_ConvertToGenericValue(t *testing.T) {
 	}
 }
 
+func Test_ConvertToGenericValue_NilReturnsError(t *testing.T) {
+	_, err := ConvertToGenericValue("myVar", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expression template variable value is nil")
+	assert.Contains(t, err.Error(), "myVar")
+}
+
+func Test_ConvertToGenericValue_UnknownTypeReturnsError(t *testing.T) {
+	// A TemplateValue with no Val set (nil oneof) hits the default case.
+	tv := &schemapb.TemplateValue{}
+	_, err := ConvertToGenericValue("myVar", tv)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expression elements can only be scalars")
+}
+
+func Test_UnmarshalExpressionValues_NilTemplateValueReturnsError(t *testing.T) {
+	input := map[string]*schemapb.TemplateValue{
+		"key": nil,
+	}
+	_, err := UnmarshalExpressionValues(input)
+	assert.Error(t, err)
+}
+
+func Test_ConvertArrayValue_BoolData(t *testing.T) {
+	input := map[string]*schemapb.TemplateValue{
+		"bools": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Bool, []bool{true, false, true})),
+	}
+	output, err := UnmarshalExpressionValues(input)
+	assert.NoError(t, err)
+	arr := output["bools"].GetArrayVal()
+	assert.True(t, arr.GetSameType())
+	assert.Equal(t, schemapb.DataType_Bool, arr.GetElementType())
+	assert.Len(t, arr.GetArray(), 3)
+	assert.True(t, arr.GetArray()[0].GetBoolVal())
+	assert.False(t, arr.GetArray()[1].GetBoolVal())
+	assert.True(t, arr.GetArray()[2].GetBoolVal())
+}
+
+func Test_ConvertArrayValue_DoubleData(t *testing.T) {
+	input := map[string]*schemapb.TemplateValue{
+		"doubles": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Double, []float64{1.1, 2.2, 3.3})),
+	}
+	output, err := UnmarshalExpressionValues(input)
+	assert.NoError(t, err)
+	arr := output["doubles"].GetArrayVal()
+	assert.True(t, arr.GetSameType())
+	assert.Equal(t, schemapb.DataType_Double, arr.GetElementType())
+	assert.Len(t, arr.GetArray(), 3)
+	assert.Equal(t, 1.1, arr.GetArray()[0].GetFloatVal())
+	assert.Equal(t, 2.2, arr.GetArray()[1].GetFloatVal())
+	assert.Equal(t, 3.3, arr.GetArray()[2].GetFloatVal())
+}
+
+func Test_ConvertArrayValue_StringData(t *testing.T) {
+	input := map[string]*schemapb.TemplateValue{
+		"strs": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_VarChar, []string{"a", "b", "c"})),
+	}
+	output, err := UnmarshalExpressionValues(input)
+	assert.NoError(t, err)
+	arr := output["strs"].GetArrayVal()
+	assert.True(t, arr.GetSameType())
+	assert.Equal(t, schemapb.DataType_VarChar, arr.GetElementType())
+	assert.Len(t, arr.GetArray(), 3)
+	assert.Equal(t, "a", arr.GetArray()[0].GetStringVal())
+	assert.Equal(t, "b", arr.GetArray()[1].GetStringVal())
+	assert.Equal(t, "c", arr.GetArray()[2].GetStringVal())
+}
+
+func Test_ConvertArrayValue_NestedArrayData(t *testing.T) {
+	inner := generateTemplateArrayValue(schemapb.DataType_Int64, []int64{10, 20})
+	input := map[string]*schemapb.TemplateValue{
+		"nested": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{inner})),
+	}
+	output, err := UnmarshalExpressionValues(input)
+	assert.NoError(t, err)
+	outer := output["nested"].GetArrayVal()
+	assert.Equal(t, schemapb.DataType_Array, outer.GetElementType())
+	assert.Len(t, outer.GetArray(), 1)
+	innerArr := outer.GetArray()[0].GetArrayVal()
+	assert.Len(t, innerArr.GetArray(), 2)
+	assert.Equal(t, int64(10), innerArr.GetArray()[0].GetInt64Val())
+	assert.Equal(t, int64(20), innerArr.GetArray()[1].GetInt64Val())
+}
+
+func Test_ConvertArrayValue_UnknownTypeReturnsError(t *testing.T) {
+	// Build a TemplateArrayValue with no Data set (nil oneof) to hit the default error branch.
+	unknownArr := &schemapb.TemplateArrayValue{}
+	tv := &schemapb.TemplateValue{
+		Val: &schemapb.TemplateValue_ArrayVal{
+			ArrayVal: unknownArr,
+		},
+	}
+	_, err := ConvertToGenericValue("myVar", tv)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown template variable value type")
+}
+
+func Test_ConvertArrayValue_InvalidJSONReturnsError(t *testing.T) {
+	badJSON := &schemapb.TemplateArrayValue{
+		Data: &schemapb.TemplateArrayValue_JsonData{
+			JsonData: &schemapb.JSONArray{
+				Data: [][]byte{[]byte("not valid json {{")},
+			},
+		},
+	}
+	tv := &schemapb.TemplateValue{
+		Val: &schemapb.TemplateValue_ArrayVal{
+			ArrayVal: badJSON,
+		},
+	}
+	_, err := ConvertToGenericValue("myVar", tv)
+	assert.Error(t, err)
+}
+
 func generateTemplateValue(dataType schemapb.DataType, data interface{}) *schemapb.TemplateValue {
 	switch dataType {
 	case schemapb.DataType_Bool:
