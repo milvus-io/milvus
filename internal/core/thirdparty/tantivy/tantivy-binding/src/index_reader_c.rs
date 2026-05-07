@@ -377,6 +377,79 @@ pub extern "C" fn tantivy_json_term_query_keyword(
     }
 }
 
+// Batch JSON terms queries
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_i64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const i64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_i64(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_f64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const f64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_f64(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_bool(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const bool,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_bool(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_keyword(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const *const c_char,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_keyword(json_path, terms, bitset)
+            .into()
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn tantivy_json_exist_query(
     ptr: *mut c_void,

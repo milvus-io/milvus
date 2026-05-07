@@ -39,9 +39,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::In",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
         return bitset;
     }
 
@@ -62,10 +60,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyFilter",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_filter(bitset, filter);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        apply_hits_with_filter(bitset, filter);
         return bitset;
     }
 
@@ -77,10 +73,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyCallback",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_callback(bitset, callback);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        apply_hits_with_callback(bitset, callback);
     }
 
     const TargetBitmap
@@ -88,9 +82,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::NotIn",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
 
         bitset.flip();
 
