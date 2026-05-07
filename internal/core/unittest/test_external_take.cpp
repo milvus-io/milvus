@@ -1969,6 +1969,55 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDAcceptsString) {
 
 namespace {
 
+FieldMeta
+MakeExternalFieldMetaForNormalizeTest(DataType data_type,
+                                      int64_t dim,
+                                      bool nullable,
+                                      DataType element_type) {
+    const auto name = FieldName("field");
+    const auto field_id = FieldId(1000);
+    const auto external_field = "external_field";
+    if (data_type == DataType::VECTOR_ARRAY) {
+        return FieldMeta(name,
+                         field_id,
+                         data_type,
+                         element_type,
+                         dim,
+                         std::nullopt,
+                         external_field);
+    }
+    if (IsVectorDataType(data_type)) {
+        return FieldMeta(name,
+                         field_id,
+                         data_type,
+                         dim,
+                         std::nullopt,
+                         nullable,
+                         std::nullopt,
+                         external_field);
+    }
+    if (IsStringDataType(data_type)) {
+        return FieldMeta(name,
+                         field_id,
+                         data_type,
+                         65535,
+                         nullable,
+                         std::nullopt,
+                         external_field);
+    }
+    if (IsArrayDataType(data_type)) {
+        return FieldMeta(name,
+                         field_id,
+                         data_type,
+                         element_type,
+                         nullable,
+                         std::nullopt,
+                         external_field);
+    }
+    return FieldMeta(
+        name, field_id, data_type, nullable, std::nullopt, external_field);
+}
+
 std::shared_ptr<arrow::StringArray>
 MakeStringArray(const std::vector<std::string>& values) {
     arrow::StringBuilder builder;
@@ -1988,8 +2037,10 @@ TEST(NormalizeExternalArrow, VarcharStringConvertedToBinary) {
     auto str_array = MakeStringArray({"hello", "world", "test"});
     ASSERT_EQ(str_array->type_id(), arrow::Type::STRING);
 
-    auto result = milvus::storage::NormalizeExternalArrow(
-        str_array, milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForNormalizeTest(
+        milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto result =
+        milvus::storage::NormalizeExternalArrow(str_array, field_meta);
 
     EXPECT_EQ(result->type_id(), arrow::Type::BINARY);
     EXPECT_EQ(result->length(), 3);
@@ -2005,8 +2056,10 @@ TEST(NormalizeExternalArrow, VarcharBinaryPassthrough) {
     auto bin_array = std::make_shared<arrow::BinaryArray>(bin_data);
     ASSERT_EQ(bin_array->type_id(), arrow::Type::BINARY);
 
-    auto result = milvus::storage::NormalizeExternalArrow(
-        bin_array, milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForNormalizeTest(
+        milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto result =
+        milvus::storage::NormalizeExternalArrow(bin_array, field_meta);
 
     // BINARY is not STRING, so the String→Binary branch does not fire; passthrough.
     EXPECT_EQ(result->type_id(), arrow::Type::BINARY);
@@ -2033,8 +2086,10 @@ TEST(NormalizeExternalArrow, VarcharFillFieldDataSucceedsWithBinary) {
     auto str_array = MakeStringArray({"hello", "world"});
 
     // Simulate what NormalizeExternalArrow does: STRING → BINARY
-    auto normalized = milvus::storage::NormalizeExternalArrow(
-        str_array, milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForNormalizeTest(
+        milvus::DataType::VARCHAR, 0, false, milvus::DataType::NONE);
+    auto normalized =
+        milvus::storage::NormalizeExternalArrow(str_array, field_meta);
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
 
     auto chunked = std::make_shared<arrow::ChunkedArray>(normalized);
@@ -2052,8 +2107,10 @@ TEST(NormalizeExternalArrow, JsonStringConvertedToBinary) {
     auto str_array = MakeStringArray({R"({"a":1})", R"({"b":2})"});
     ASSERT_EQ(str_array->type_id(), arrow::Type::STRING);
 
-    auto result = milvus::storage::NormalizeExternalArrow(
-        str_array, milvus::DataType::JSON, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForNormalizeTest(
+        milvus::DataType::JSON, 0, false, milvus::DataType::NONE);
+    auto result =
+        milvus::storage::NormalizeExternalArrow(str_array, field_meta);
 
     EXPECT_EQ(result->type_id(), arrow::Type::BINARY);
     EXPECT_EQ(result->length(), 2);
@@ -2066,8 +2123,9 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
     assert(s.ok());
     auto arr = builder.Finish().ValueOrDie();
 
-    auto result = milvus::storage::NormalizeExternalArrow(
-        arr, milvus::DataType::INT64, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForNormalizeTest(
+        milvus::DataType::INT64, 0, false, milvus::DataType::NONE);
+    auto result = milvus::storage::NormalizeExternalArrow(arr, field_meta);
 
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());

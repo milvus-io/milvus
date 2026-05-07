@@ -16,10 +16,13 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "storage/Util.h"
 
 using milvus::storage::CanonicalizeArrowVariants;
@@ -268,13 +271,67 @@ TEST(CoerceToBinary, AllVariantsToBinary) {
     }
 }
 
-// ===== Scalar numeric mismatch rejection (via NormalizeExternalArrow) =====
-// External Arrow numeric types must match the Milvus scalar type exactly.
-// Wider integer inputs are rejected instead of implicitly narrowed.
-
-#include "common/FieldMeta.h"
-
 namespace {
+milvus::FieldMeta
+MakeExternalFieldMetaForTest(milvus::DataType data_type,
+                             int64_t dim,
+                             bool nullable,
+                             milvus::DataType element_type) {
+    const auto name = milvus::FieldName("field");
+    const auto field_id = milvus::FieldId(1000);
+    const auto external_field = "external_field";
+    if (data_type == milvus::DataType::VECTOR_ARRAY) {
+        return milvus::FieldMeta(name,
+                                 field_id,
+                                 data_type,
+                                 element_type,
+                                 dim,
+                                 std::nullopt,
+                                 external_field);
+    }
+    if (milvus::IsVectorDataType(data_type)) {
+        return milvus::FieldMeta(name,
+                                 field_id,
+                                 data_type,
+                                 dim,
+                                 std::nullopt,
+                                 nullable,
+                                 std::nullopt,
+                                 external_field);
+    }
+    if (milvus::IsStringDataType(data_type)) {
+        return milvus::FieldMeta(name,
+                                 field_id,
+                                 data_type,
+                                 65535,
+                                 nullable,
+                                 std::nullopt,
+                                 external_field);
+    }
+    if (milvus::IsArrayDataType(data_type)) {
+        return milvus::FieldMeta(name,
+                                 field_id,
+                                 data_type,
+                                 element_type,
+                                 nullable,
+                                 std::nullopt,
+                                 external_field);
+    }
+    return milvus::FieldMeta(
+        name, field_id, data_type, nullable, std::nullopt, external_field);
+}
+
+std::shared_ptr<arrow::Array>
+NormalizeVectorArraysToFixedSizeBinaryForTest(
+    const std::vector<std::shared_ptr<arrow::Array>>& arrays,
+    milvus::DataType data_type,
+    int64_t dim) {
+    AssertInfo(arrays.size() == 1, "test helper expects one array");
+    auto field_meta = MakeExternalFieldMetaForTest(
+        data_type, dim, false, milvus::DataType::NONE);
+    return milvus::storage::NormalizeExternalArrow(arrays.front(), field_meta);
+}
+
 std::shared_ptr<arrow::Array>
 MakeInt32Array(const std::vector<int32_t>& vals,
                const std::vector<bool>& valid) {
@@ -324,38 +381,42 @@ MakeDoubleArray(const std::vector<double>& vals,
 }
 }  // namespace
 
+// ===== Scalar numeric mismatch rejection (via NormalizeExternalArrow) =====
+// External Arrow numeric types must match the Milvus scalar type exactly.
+// Wider integer inputs are rejected instead of implicitly narrowed.
+
 TEST(ScalarNumericMismatch, Int32RejectsInt8) {
     auto in =
         MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(in, field_meta),
+                 std::exception);
 }
 
 TEST(ScalarNumericMismatch, Int32RejectsInt16) {
     auto in =
         MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT16, 0, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(in, field_meta),
+                 std::exception);
 }
 
 TEST(ScalarNumericMismatch, Int32RejectsInt8WithNulls) {
     auto in = MakeInt32Array({5, 0, 7}, {true, false, true});
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            in, milvus::DataType::INT8, 0, true, milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT8, 0, true, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(in, field_meta),
+                 std::exception);
 }
 
 TEST(ScalarNumericMismatch, Int32RejectsInt8EvenWhenInRange) {
     auto in = MakeInt32Array({5}, {true});
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(in, field_meta),
+                 std::exception);
 }
 
 TEST(ScalarNumericMismatch, ExactMatchPassesThrough) {
@@ -363,8 +424,9 @@ TEST(ScalarNumericMismatch, ExactMatchPassesThrough) {
     ASSERT_TRUE(b.Append(int8_t{5}).ok());
     std::shared_ptr<arrow::Array> in;
     ASSERT_TRUE(b.Finish(&in).ok());
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
+    auto out = milvus::storage::NormalizeExternalArrow(in, field_meta);
     EXPECT_EQ(out.get(), in.get());
 }
 
@@ -374,10 +436,10 @@ TEST(NormalizeExternalArrow, Int64RejectsString) {
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            input, milvus::DataType::INT64, 0, false, milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT64, 0, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, Issue49392ScalarMismatchesReject) {
@@ -394,35 +456,30 @@ TEST(NormalizeExternalArrow, Issue49392ScalarMismatchesReject) {
                            milvus::DataType::FLOAT,
                            milvus::DataType::DOUBLE,
                            milvus::DataType::TIMESTAMPTZ}) {
+        auto field_meta = MakeExternalFieldMetaForTest(
+            data_type, 0, false, milvus::DataType::NONE);
         EXPECT_THROW(
-            milvus::storage::NormalizeExternalArrow(
-                string_input, data_type, 0, false, milvus::DataType::NONE),
+            milvus::storage::NormalizeExternalArrow(string_input, field_meta),
             std::exception);
     }
 
     auto int64_input = MakeInt64Array({1, 2}, {true, true});
+    auto float_field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::FLOAT, 0, false, milvus::DataType::NONE);
     EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(int64_input,
-                                                milvus::DataType::FLOAT,
-                                                0,
-                                                false,
-                                                milvus::DataType::NONE),
+        milvus::storage::NormalizeExternalArrow(int64_input, float_field_meta),
         std::exception);
+    auto double_field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::DOUBLE, 0, false, milvus::DataType::NONE);
     EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(int64_input,
-                                                milvus::DataType::DOUBLE,
-                                                0,
-                                                false,
-                                                milvus::DataType::NONE),
+        milvus::storage::NormalizeExternalArrow(int64_input, double_field_meta),
         std::exception);
 
     auto double_input = MakeDoubleArray({1.0, 2.0}, {true, true});
+    auto int64_field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::INT64, 0, false, milvus::DataType::NONE);
     EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(double_input,
-                                                milvus::DataType::INT64,
-                                                0,
-                                                false,
-                                                milvus::DataType::NONE),
+        milvus::storage::NormalizeExternalArrow(double_input, int64_field_meta),
         std::exception);
 }
 
@@ -433,21 +490,15 @@ TEST(NormalizeExternalArrow, TimestamptzAcceptsTimestampAndInt64) {
     std::shared_ptr<arrow::Array> timestamp_input;
     ASSERT_TRUE(builder.Finish(&timestamp_input).ok());
 
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::TIMESTAMPTZ, 0, false, milvus::DataType::NONE);
     auto timestamp_out =
-        milvus::storage::NormalizeExternalArrow(timestamp_input,
-                                                milvus::DataType::TIMESTAMPTZ,
-                                                0,
-                                                false,
-                                                milvus::DataType::NONE);
+        milvus::storage::NormalizeExternalArrow(timestamp_input, field_meta);
     ASSERT_EQ(timestamp_out->type_id(), arrow::Type::INT64);
 
     auto int64_input = MakeInt64Array({1000, 2000}, {true, true});
     auto int64_out =
-        milvus::storage::NormalizeExternalArrow(int64_input,
-                                                milvus::DataType::TIMESTAMPTZ,
-                                                0,
-                                                false,
-                                                milvus::DataType::NONE);
+        milvus::storage::NormalizeExternalArrow(int64_input, field_meta);
     EXPECT_EQ(int64_out.get(), int64_input.get());
 }
 
@@ -458,9 +509,10 @@ TEST(NormalizeExternalArrow, StringLikeFieldsRejectInt64) {
                            milvus::DataType::TEXT,
                            milvus::DataType::JSON,
                            milvus::DataType::GEOMETRY}) {
+        auto field_meta = MakeExternalFieldMetaForTest(
+            data_type, 0, false, milvus::DataType::NONE);
         EXPECT_THROW(
-            milvus::storage::NormalizeExternalArrow(
-                int64_input, data_type, 0, false, milvus::DataType::NONE),
+            milvus::storage::NormalizeExternalArrow(int64_input, field_meta),
             std::exception);
     }
 }
@@ -477,7 +529,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListDimMismatchAsserts) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -494,7 +546,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListElementTypeMismatchAsserts) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -512,7 +564,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListNullElementAsserts) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -525,7 +577,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, FixedSizeListDimMismatchAsserts) {
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::float32(), 3), 1, values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -539,7 +591,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::int64(), 2), 1, values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -552,7 +604,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, BinaryVectorRejectsFixedSizeList) {
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::int8(), 8), 1, values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_BINARY, 8),
                  std::exception);
 }
@@ -566,7 +618,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::int16(), 2), 1, values);
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_BFLOAT16, 2),
                  std::exception);
 }
@@ -580,7 +632,7 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(milvus::storage::NormalizeVectorArraysToFixedSizeBinary(
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_FLOAT, 2),
                  std::exception);
 }
@@ -605,8 +657,10 @@ TEST(NormalizeVectorArrays, MixedChunkTypesNormalizeIndependently) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto list_input = *arrow::ListArray::FromArrays(*offsets, *values);
-    auto out = milvus::storage::NormalizeVectorArrays(
-        {fsb_input, list_input}, milvus::DataType::VECTOR_FLOAT, 2, false);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::VECTOR_FLOAT, 2, false, milvus::DataType::NONE);
+    auto out = milvus::storage::NormalizeArrowForChunkWriter(
+        {fsb_input, list_input}, field_meta);
 
     ASSERT_EQ(out.size(), 2);
     EXPECT_EQ(out[0]->type_id(), arrow::Type::FIXED_SIZE_BINARY);
@@ -628,13 +682,10 @@ TEST(NormalizeExternalArrow, NullableFloatVectorRejectsBinaryWidthMismatch) {
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_FLOAT,
-                                                2,
-                                                true,
-                                                milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::VECTOR_FLOAT, 2, true, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeBinaryWidthMismatch) {
@@ -645,13 +696,10 @@ TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeBinaryWidthMismatch) {
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_FLOAT,
-                                                2,
-                                                false,
-                                                milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::VECTOR_FLOAT, 2, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow,
@@ -663,13 +711,10 @@ TEST(NormalizeExternalArrow,
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_FLOAT,
-                                                2,
-                                                true,
-                                                milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::VECTOR_FLOAT, 2, true, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeListInt64) {
@@ -680,13 +725,10 @@ TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeListInt64) {
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::int64(), 2), 1, values);
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_FLOAT,
-                                                2,
-                                                false,
-                                                milvus::DataType::NONE),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::VECTOR_FLOAT, 2, false, milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsFixedSizeBinaryWidthMismatch) {
@@ -704,24 +746,24 @@ TEST(NormalizeExternalArrow, VectorArrayRejectsFixedSizeBinaryWidthMismatch) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values_array);
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_ARRAY,
-                                                2,
-                                                false,
-                                                milvus::DataType::VECTOR_FLOAT),
-        std::exception);
+    auto field_meta =
+        MakeExternalFieldMetaForTest(milvus::DataType::VECTOR_ARRAY,
+                                     2,
+                                     false,
+                                     milvus::DataType::VECTOR_FLOAT);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsNonListInput) {
     auto input = MakeInt64Array({1, 2}, {true, true});
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_ARRAY,
-                                                2,
-                                                false,
-                                                milvus::DataType::VECTOR_FLOAT),
-        std::exception);
+    auto field_meta =
+        MakeExternalFieldMetaForTest(milvus::DataType::VECTOR_ARRAY,
+                                     2,
+                                     false,
+                                     milvus::DataType::VECTOR_FLOAT);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsOuterNullRow) {
@@ -758,13 +800,13 @@ TEST(NormalizeExternalArrow, VectorArrayRejectsOuterNullRow) {
                                            null_bitmap,
                                            1);
 
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::VECTOR_ARRAY,
-                                                2,
-                                                false,
-                                                milvus::DataType::VECTOR_FLOAT),
-        std::exception);
+    auto field_meta =
+        MakeExternalFieldMetaForTest(milvus::DataType::VECTOR_ARRAY,
+                                     2,
+                                     false,
+                                     milvus::DataType::VECTOR_FLOAT);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, SparseVectorRejectsString) {
@@ -773,12 +815,12 @@ TEST(NormalizeExternalArrow, SparseVectorRejectsString) {
     std::shared_ptr<arrow::Array> input;
     ASSERT_TRUE(builder.Finish(&input).ok());
 
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(
-                     input,
-                     milvus::DataType::VECTOR_SPARSE_U32_F32,
-                     0,
-                     false,
-                     milvus::DataType::NONE),
+    auto field_meta =
+        MakeExternalFieldMetaForTest(milvus::DataType::VECTOR_SPARSE_U32_F32,
+                                     0,
+                                     false,
+                                     milvus::DataType::NONE);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
                  std::exception);
 }
 
@@ -794,10 +836,10 @@ TEST(NormalizeExternalArrow, ArrayInt64RejectsStringList) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            input, milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, ArrayInt64RejectsNullElement) {
@@ -813,10 +855,10 @@ TEST(NormalizeExternalArrow, ArrayInt64RejectsNullElement) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(
-            input, milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, ArrayVarcharRejectsInt64List) {
@@ -831,13 +873,10 @@ TEST(NormalizeExternalArrow, ArrayVarcharRejectsInt64List) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(
-        milvus::storage::NormalizeExternalArrow(input,
-                                                milvus::DataType::ARRAY,
-                                                0,
-                                                false,
-                                                milvus::DataType::VARCHAR),
-        std::exception);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::ARRAY, 0, false, milvus::DataType::VARCHAR);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
+                 std::exception);
 }
 
 TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {
@@ -852,8 +891,9 @@ TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    auto out = milvus::storage::NormalizeExternalArrow(
-        input, milvus::DataType::ARRAY, 0, false, milvus::DataType::VARCHAR);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        milvus::DataType::ARRAY, 0, false, milvus::DataType::VARCHAR);
+    auto out = milvus::storage::NormalizeExternalArrow(input, field_meta);
     ASSERT_EQ(out->type_id(), arrow::Type::BINARY);
     ASSERT_EQ(out->length(), 1);
     EXPECT_FALSE(out->IsNull(0));
