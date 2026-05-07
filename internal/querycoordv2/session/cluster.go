@@ -384,7 +384,7 @@ func (c *clients) getOrCreate(ctx context.Context, node *NodeInfo) (types.QueryN
 	if cli := c.get(node.ID()); cli != nil {
 		return cli, nil
 	}
-	return c.create(node)
+	return c.create(ctx, node)
 }
 
 func createNewClient(ctx context.Context, addr string, nodeID int64, queryNodeCreator QueryNodeCreator) (types.QueryNodeClient, error) {
@@ -395,13 +395,13 @@ func createNewClient(ctx context.Context, addr string, nodeID int64, queryNodeCr
 	return newCli, nil
 }
 
-func (c *clients) create(node *NodeInfo) (types.QueryNodeClient, error) {
+func (c *clients) create(ctx context.Context, node *NodeInfo) (types.QueryNodeClient, error) {
 	c.Lock()
 	defer c.Unlock()
 	if cli, ok := c.clients[node.ID()]; ok {
 		return cli, nil
 	}
-	cli, err := createNewClient(context.Background(), node.Addr(), node.ID(), c.queryNodeCreator)
+	cli, err := createNewClient(ctx, node.Addr(), node.ID(), c.queryNodeCreator)
 	if err != nil {
 		return nil, err
 	}
