@@ -555,11 +555,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(int64_t limit,
-                         const BitsetTypeView& element_bitset,
-                         const IArrayOffsets* array_offsets) const override {
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override {
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets);
+            limit, element_bitset, array_offsets, cursor);
     }
 
     bool

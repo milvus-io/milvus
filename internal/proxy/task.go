@@ -81,6 +81,8 @@ const (
 	SearchIterBatchSizeKey = "search_iter_batch_size"
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
+	QueryIterLastPKKey     = "query_iter_last_pk"
+	QueryIterLastOffsetKey = "query_iter_last_element_offset"
 	QueryGroupByFieldsKey  = "group_by_fields"
 	OrderByFieldsKey       = "order_by_fields"
 	PipelineTraceKey       = "pipeline_trace"
