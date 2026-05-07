@@ -10,11 +10,11 @@ import (
 
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	metastore "github.com/milvus-io/milvus/internal/metastore"
+	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
 
 	mock "github.com/stretchr/testify/mock"
 
-	model "github.com/milvus-io/milvus/internal/metastore/model"
+	model "github.com/milvus-io/milvus/pkg/v3/metastore/model"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 )

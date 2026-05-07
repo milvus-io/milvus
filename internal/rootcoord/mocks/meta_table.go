@@ -14,7 +14,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	model "github.com/milvus-io/milvus/internal/metastore/model"
+	model "github.com/milvus-io/milvus/pkg/v3/metastore/model"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )

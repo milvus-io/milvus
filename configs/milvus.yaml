@@ -66,6 +66,8 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
+  useCatalogService: false # When true, use remote CatalogService via gRPC
+  catalogServiceAddr: "localhost:19510" # CatalogService gRPC address, e.g. "localhost:19510"
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.

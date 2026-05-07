@@ -521,10 +521,12 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType   ParamItem `refreshable:"false"`
-	PaginationSize  ParamItem `refreshable:"true"`
-	ReadConcurrency ParamItem `refreshable:"true"`
-	MaxEtcdTxnNum   ParamItem `refreshable:"true"`
+	MetaStoreType      ParamItem `refreshable:"false"`
+	UseCatalogService  ParamItem `refreshable:"false"`
+	CatalogServiceAddr ParamItem `refreshable:"false"`
+	PaginationSize     ParamItem `refreshable:"true"`
+	ReadConcurrency    ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum      ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -536,6 +538,24 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
+
+	p.UseCatalogService = ParamItem{
+		Key:          "metastore.useCatalogService",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          `When true, RootCoord and DataCoord use unified CatalogService instead of separate catalogs`,
+		Export:       true,
+	}
+	p.UseCatalogService.Init(base.mgr)
+
+	p.CatalogServiceAddr = ParamItem{
+		Key:          "metastore.catalogServiceAddr",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Doc:          `Address of the remote Catalog Service gRPC endpoint, e.g. "localhost:19510"`,
+		Export:       true,
+	}
+	p.CatalogServiceAddr.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",

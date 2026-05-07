@@ -69,6 +69,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
+	github.com/milvus-io/milvus-catalog v0.0.0
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260506064405-f5b77584c710
 	github.com/milvus-io/milvus/client/v2 v2.6.2
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
@@ -328,3 +329,6 @@ replace (
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
+
+// TODO: update to milvus-catalog release tag after milvus-catalog PR is merged.
+replace github.com/milvus-io/milvus-catalog => github.com/zilliztech/milvus-catalog v0.0.0-20260507095645-6e6ff7153dd8

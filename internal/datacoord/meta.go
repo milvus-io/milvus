@@ -33,16 +33,17 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-catalog/catalogpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -774,6 +775,76 @@ func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, err
 }
 
 // SetState setting segment with provided ID state
+// SetStatesBatch transitions multiple segments to the target state in a single
+// catalog call, holding segMu for the whole batch. This avoids N independent
+// AlterSegments RPC calls when sealing or dropping many segments in one shot
+// (e.g. SealAllSegments on a channel with N growing segments). N+1 independent
+// catalog writes collapse into 1 batched AlterSegments call, eliminating the
+// partial-sealed middle state and reducing gRPC overhead to a single round-trip
+// against catalog-server.
+func (m *meta) SetStatesBatch(ctx context.Context, segmentIDs []UniqueID, targetState commonpb.SegmentState) error {
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	log := log.Ctx(ctx)
+	log.Debug("meta update: setting segment states batch",
+		zap.Int("count", len(segmentIDs)),
+		zap.Any("target state", targetState))
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]map[string]int),
+	}
+	clonedSegments := make([]*SegmentInfo, 0, len(segmentIDs))
+
+	for _, segmentID := range segmentIDs {
+		curSegInfo := m.segments.GetSegment(segmentID)
+		if curSegInfo == nil {
+			log.Warn("meta update: setting segment state batch - segment not found",
+				zap.Int64("segmentID", segmentID),
+				zap.Any("target state", targetState))
+			// idempotent drop — skip missing segments when target is Dropped
+			if targetState == commonpb.SegmentState_Dropped {
+				continue
+			}
+			return fmt.Errorf("segment is not exist with ID = %d", segmentID)
+		}
+		clonedSegment := curSegInfo.Clone()
+		if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
+			updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
+			clonedSegments = append(clonedSegments, clonedSegment)
+		}
+	}
+
+	if len(clonedSegments) == 0 {
+		return nil
+	}
+
+	segInfos := make([]*datapb.SegmentInfo, 0, len(clonedSegments))
+	for _, cs := range clonedSegments {
+		segInfos = append(segInfos, cs.SegmentInfo)
+	}
+
+	if err := m.catalog.AlterSegments(ctx, segInfos); err != nil {
+		log.Warn("meta update: setting states batch - failed to alter segments",
+			zap.Int("count", len(segInfos)),
+			zap.String("target state", targetState.String()),
+			zap.Error(err))
+		return err
+	}
+
+	metricMutation.commit()
+	for _, cs := range clonedSegments {
+		m.segments.SetSegment(cs.SegmentInfo.GetID(), cs)
+	}
+
+	log.Info("meta update: setting states batch - complete",
+		zap.Int("count", len(segInfos)),
+		zap.String("target state", targetState.String()))
+	return nil
+}
+
 func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState commonpb.SegmentState) error {
 	log := log.Ctx(context.TODO())
 	log.Debug("meta update: setting segment state",
@@ -2133,13 +2204,9 @@ func (m *meta) completeMixCompactionMutation(
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
 
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		log.Warn("fail to alter compactTo segments", zap.Error(err))
-		return nil, nil, err
-	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		log.Warn("fail to alter compactFrom segments", zap.Error(err))
+	// alter compactTo before compactFrom segments to avoid data lost if service
+	// crash during AlterSegments.
+	if err := m.commitCompactionMetaMutation(t, compactToInfos, compactFromInfos, binlogs); err != nil {
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -3078,4 +3145,28 @@ func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targ
 			return err
 		}
 	}
+}
+
+// commitCompactionMetaMutation commits the compaction state-change by writing
+// the new compact_to segments before flipping compact_from segments to Dropped.
+func (m *meta) commitCompactionMetaMutation(
+	t *datapb.CompactionTask,
+	compactToInfos []*datapb.SegmentInfo,
+	compactFromInfos []*datapb.SegmentInfo,
+	binlogs []metastore.BinlogsIncrement,
+) error {
+	log := log.Ctx(m.ctx).With(
+		zap.Int64("taskID", t.GetPlanID()),
+		zap.Int64("collectionID", t.GetCollectionID()),
+	)
+
+	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
+		log.Warn("fail to alter compactTo segments", zap.Error(err))
+		return err
+	}
+	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
+		log.Warn("fail to alter compactFrom segments", zap.Error(err))
+		return err
+	}
+	return nil
 }

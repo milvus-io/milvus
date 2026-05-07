@@ -2,7 +2,9 @@ package server
 
 import (
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
+	catalogclient "github.com/milvus-io/milvus-catalog/client"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
@@ -10,6 +12,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -45,9 +50,21 @@ func (b *ServerBuilder) WithSession(session sessionutil.SessionInterface) *Serve
 }
 
 func (s *ServerBuilder) Build() *Server {
+	var catalog metastore.StreamingCoordCataLog = streamingcoord.NewCataLog(s.metaKV)
+	if paramtable.Get().MetaStoreCfg.UseCatalogService.GetAsBool() {
+		rootPath := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
+		if paramtable.Get().MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+			rootPath = paramtable.Get().TiKVCfg.MetaRootPath.GetValue()
+		}
+		remote, err := catalogclient.NewCatalogServiceClient(paramtable.Get().MetaStoreCfg.CatalogServiceAddr.GetValue(), rootPath)
+		if err != nil {
+			log.Fatal("failed to connect catalog service", zap.Error(err))
+		}
+		catalog = remote
+	}
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
-		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
+		resource.OptStreamingCatalog(catalog),
 		resource.OptMixCoordClient(s.mixCoordClient),
 		resource.OptSession(s.session),
 	)

@@ -33,6 +33,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	catalogclient "github.com/milvus-io/milvus-catalog/client"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -621,7 +623,21 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+		var catalog metastore.DataCoordCatalog
+		useCatalogService := paramtable.Get().MetaStoreCfg.UseCatalogService.GetAsBool()
+		if useCatalogService {
+			addr := paramtable.Get().MetaStoreCfg.CatalogServiceAddr.GetValue()
+			catalogSvc, grpcErr := catalogclient.NewCatalogServiceClient(addr, s.metaRootPath)
+			if grpcErr != nil {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
+			}
+			catalog = catalogSvc
+			log.Info("DataCoord using CatalogService", zap.String("addr", addr), zap.String("rootPath", s.metaRootPath))
+		} else {
+			log.Info("DataCoord using legacy DataCoordCatalog")
+			local := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+			catalog = local
+		}
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
 		if err != nil {
 			return err

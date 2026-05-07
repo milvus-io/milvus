@@ -263,6 +263,20 @@ func (kv *EmbedEtcdKV) Load(ctx context.Context, key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
+func (kv *EmbedEtcdKV) LoadWithModRevision(ctx context.Context, key string) (string, int64, error) {
+	key = kv.GetPath(key)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx1, key)
+	if err != nil {
+		return "", 0, err
+	}
+	if resp.Count <= 0 {
+		return "", 0, nil
+	}
+	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
+}
+
 // LoadBytes returns value of the given key
 func (kv *EmbedEtcdKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
 	key = kv.GetPath(key)
