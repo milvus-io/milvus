@@ -78,11 +78,6 @@ Run test scenario automatically:
    bash chaos_test.sh ${pod} ${chaos_type} ${chaos_task} ${replicas_num}
    # example: bash chaos_test.sh querynode pod_kill chaos-test 2
    ```
-### Github Action
-* [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
-* [Pod Failure Chaos Test](https://github.com/milvus-io/milvus/blob/master/.github/workflows/pod-failure-chaos-test.yaml)
-* [Network Partition Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/network-partition-chaos-test.yaml)
-
 ### Nightly 
 still in planning 
 
@@ -97,4 +92,4 @@ still in planning
 * Generate yaml file for your chaos scenarios. You can create a chaos experiment in chaos-dashboard, then download the yaml file of it.
 * Add yaml file to chaos_objects dir and rename it as `chaos_${component_name}_${chaos_type}.yaml`. Make sure `kubectl apply -f ${your_chaos_yaml_file}` can take effect
 * Add testcase in `testcases.yaml`. You should figure out the expectation of milvus during the chaos
-* Run your added testcase according to `Manually` above and check whether it as your expectation 
+* Run your added testcase according to `Manually` above and check whether it as your expectation

@@ -57,12 +57,3 @@ run all tasks
 $ bash run.sh -p ${Password}
 # Password, the password of root"
 ```
-
-## Integrate deploy test into CI
-Provides a way to periodically run docker compose deployment tests through GitHub action：[deploy-test](https://github.com/milvus-io/milvus/blob/master/.github/workflows/deploy-test.yaml)
-
-- [x] Parallel testing for four deployment scenarios
-- [x] Upload logs to artifacts for further debug
-- [x] Email notification for test failure
-- [x] Support helm deployment tests
-- [x] Cover more detail information in email notification
