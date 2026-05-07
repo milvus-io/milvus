@@ -1801,6 +1801,59 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
 }
 
+func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
+	paramtable.Init()
+
+	// Schema only has fieldID=100 and 101; fieldID=999 is "dropped" (not in schema)
+	schema := &schemapb.CollectionSchema{
+		Name: "test_dropped_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	t.Run("index on dropped field is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    1,
+			CollectionID: 10,
+			NumOfRows:    100,
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:        999, // dropped field
+					IndexID:        2001,
+					IndexFilePaths: []string{"index/999/file1"},
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
+	})
+
+	t.Run("binlog with dropped field in child fields is skipped", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    2,
+			CollectionID: 10,
+			NumOfRows:    100,
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 888, // column group containing a dropped field
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 1024},
+					},
+					ChildFields: []int64{999}, // dropped field
+				},
+			},
+		}
+		factor := resourceEstimateFactor{}
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		assert.NoError(t, err)
+		assert.NotNil(t, usage)
+	})
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})

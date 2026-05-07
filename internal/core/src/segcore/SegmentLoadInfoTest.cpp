@@ -2639,3 +2639,166 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_TRUE(saw_user_group);
     EXPECT_TRUE(diff.column_groups_to_load.empty());
 }
+
+// ==================== Drop Field Tests ====================
+// These tests verify that ComputeDiff correctly handles fields that exist
+// in the old schema but have been dropped from the new schema.
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsDroppedField) {
+    // Bug: ComputeDiffDefaultFields iterates schema_->get_fields() (old schema)
+    // which still includes the dropped field. If the field has no data source
+    // in either old or new, it gets added to fields_to_fill_default.
+    //
+    // Setup: old schema has field 110 (extra_field3). New schema drops it.
+    // Old_info has no data for field 110 (never loaded).
+    // Expected: field 110 should NOT appear in fields_to_fill_default.
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    new_schema->AddDebugField("json_field", DataType::JSON);
+    new_schema->AddDebugField("bm25_field", DataType::JSON);
+    new_schema->AddDebugField("group_field", DataType::INT64);
+    new_schema->AddDebugField("child_field1", DataType::FLOAT);
+    new_schema->AddDebugField("child_field2", DataType::FLOAT);
+    new_schema->AddDebugField("child_field3", DataType::FLOAT);
+    new_schema->AddDebugField("extra_field1", DataType::INT64);
+    new_schema->AddDebugField("extra_field2", DataType::FLOAT);
+    // field 110 (extra_field3) intentionally NOT added — it is dropped
+    new_schema->set_primary_field_id(FieldId(100));
+
+    // Current: only has pk binlog, all other fields were default-filled
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* binlog = current_proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // New: same, no data for field 110
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(100);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/pk_binlog");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);  // old schema has 110
+    SegmentLoadInfo new_info(new_proto, new_schema);       // new schema no 110
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 110 is dropped — it should NOT be in fields_to_fill_default
+    for (const auto& fid : diff.fields_to_fill_default) {
+        EXPECT_NE(fid.get(), 110)
+            << "Dropped field 110 should not be in fields_to_fill_default";
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexesDroppedField) {
+    // Bug: ComputeDiffTextIndexes iterates schema_->get_fields() (old schema)
+    // and checks enable_match(). If the dropped field had enable_match, it
+    // gets added to text_indexes_to_create.
+    //
+    // Setup: old schema has text_field (102) with enable_match=true.
+    // New schema drops field 102.
+    // Expected: field 102 should NOT appear in text_indexes_to_create.
+
+    auto old_schema = CreateSchemaWithTextMatchField();
+    // 100=pk, 101=vec, 102=text_field(enable_match), 103=plain_varchar
+
+    // New schema: drops field 102 (text_field)
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    // Skip field 102 (dropped)
+    new_schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+    new_schema->set_primary_field_id(FieldId(100));
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(current_proto, old_schema);
+    SegmentLoadInfo new_info(new_proto, new_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 102 is dropped — it should NOT be in text_indexes_to_create
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0)
+        << "Dropped field 102 should not be in text_indexes_to_create";
+}
+
+// NOTE: ComputeDiffIndexes also has a schema filter for dropped fields, but
+// it cannot be unit-tested because BuildCache() requires schema to contain all
+// fields referenced by index_infos in the proto (it accesses schema[field_id]).
+// The filter serves as defense-in-depth; Go layer filters dropped-field indexes
+// before constructing the proto.
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogsDroppedField) {
+    // Verify that ComputeDiffBinlogs skips binlogs for dropped fields.
+    //
+    // Setup: new_info has binlog for field 102 (legacy format).
+    // New schema drops field 102.
+    // The binlog should NOT appear in binlogs_to_load.
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    // field 102 (json_field) intentionally NOT added — dropped
+    new_schema->set_primary_field_id(FieldId(100));
+
+    // Current: binlog for field 101 only
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(101);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_101");
+    cur_log->set_entries_num(1000);
+
+    // New: binlogs for fields 101 and 102 (legacy format)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog_101");
+    new_log1->set_entries_num(1000);
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(102);
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/binlog_102");
+    new_log2->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, new_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 102 is dropped — should NOT appear in binlogs_to_load
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_load) {
+        for (const auto& fid : field_ids) {
+            EXPECT_NE(fid.get(), 102)
+                << "Dropped field 102 should not be in binlogs_to_load";
+        }
+    }
+    // Field 102 should be in field_data_to_drop (was filtered from new)
+    // but since it wasn't in current either, it won't be there.
+    // Just verify no crash and dropped field is excluded from load.
+}
+
+// NOTE: ComputeDiffColumnGroups also has a schema filter for dropped fields,
+// but it cannot be unit-tested because GetColumnGroups() requires Loon FFI
+// (real manifest file access). The filter uses the same pattern
+// (new_info.schema_->has_field()) as ComputeDiffBinlogs tested above.

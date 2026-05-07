@@ -211,9 +211,15 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
     std::set<int64_t> new_index_ids;
     // Find indexes to load/replace: indexes in new_info but not in current
-    // Use converted_field_index_cache_ from new_info
+    // Only consider fields that exist in the current schema (skip dropped fields)
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
+        // Schema-driven: skip indexes for fields not in current schema.
+        // Use new_info's schema (the latest) since this->schema_ may still
+        // contain dropped fields from a prior load.
+        if (!new_info.schema_->has_field(field_id)) {
+            continue;
+        }
         for (const auto& load_index_info : load_index_infos) {
             new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
@@ -298,6 +304,13 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
             !same_binlog_files(*cur_field_binlog, new_field_binlog);
 
         for (auto child_id : child_fields) {
+            // Schema-driven: skip fields not in current schema.
+            // Use new_info's schema (the latest) since this->schema_ may still
+            // contain dropped fields from a prior load.
+            if (!new_info.schema_->has_field(FieldId(child_id))) {
+                continue;
+            }
+
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             // current_fields is keyed by child field id, so look up the
             // child — keying by new_field_binlog.fieldid() misses multi-
@@ -407,6 +420,14 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
+
+            // Schema-driven: skip fields not in current schema.
+            // Use new_info's schema (the latest) since this->schema_ may still
+            // contain dropped fields from a prior load.
+            if (!new_info.schema_->has_field(FieldId(field_id))) {
+                continue;
+            }
+
             new_seen_field_ids.emplace(field_id);
 
             auto cur_iter = cur_field_to_files.find(field_id);
@@ -500,6 +521,10 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
     // Collect fields that need reload (index no longer has raw data)
     std::set<FieldId> fields_to_reload;
     for (const auto& field_id : field_index_has_raw_data_) {
+        // Skip fields dropped from the new schema
+        if (!new_info.schema_->has_field(field_id)) {
+            continue;
+        }
         if (new_info.field_index_has_raw_data_.find(field_id) ==
             new_info.field_index_has_raw_data_.end()) {
             fields_to_reload.emplace(field_id);
@@ -611,7 +636,7 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                            fields_filled_with_default_.end());
 
     // Compute: schema_fields - new_info_fields - current_handled
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
@@ -667,7 +692,7 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     }
 
     // Find text indexes to create: enable_match fields without pre-built index
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
         if (!field_meta.enable_match()) {
             continue;
         }

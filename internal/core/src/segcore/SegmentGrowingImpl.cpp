@@ -733,6 +733,15 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
+
+        // Skip fields that have been dropped from schema (except system fields)
+        if (!SystemProperty::Instance().IsSystem(field_id) &&
+            !schema_->has_field(field_id)) {
+            LOG_INFO("growing segment skips dropped field {} during load",
+                     field_id.get());
+            continue;
+        }
+
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
 
@@ -802,6 +811,14 @@ SegmentGrowingImpl::load_field_data_common(
     if (field_id == RowFieldID) {
         insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
+        return;
+    }
+
+    // Skip if field has been dropped from schema
+    if (!schema_->has_field(field_id)) {
+        LOG_INFO(
+            "growing segment skips dropped field {} in load_field_data_common",
+            field_id.get());
         return;
     }
 
@@ -972,6 +989,16 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                        ->metadata()
                                        ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
                                        ->data());
+
+                    // Skip if field has been dropped from schema
+                    if (!schema_->has_field(FieldId(field_id))) {
+                        LOG_INFO(
+                            "growing segment skips dropped field {} in column "
+                            "group",
+                            field_id);
+                        continue;
+                    }
+
                     for (auto& field : schema_->get_fields()) {
                         if (field.second.get_id().get() != field_id) {
                             continue;

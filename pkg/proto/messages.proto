@@ -289,6 +289,7 @@ message AlterCollectionMessageHeader {
     google.protobuf.FieldMask update_mask = 3;
     CacheExpirations cache_expirations = 4;
     repeated int64 flushed_segment_ids = 5; // will be filled by wal shard manager.
+    repeated int64 dropped_field_ids = 6; // field IDs removed by this alter operation, used to cascade-delete indexes in ack callback.
 }
 
 // AlterCollectionMessageBody is the body of alter collection message.
@@ -804,4 +805,3 @@ message BatchUpdateManifestItem {
 message BatchUpdateManifestV2ColumnGroups {
     map<int64, data.FieldBinlog> column_groups = 1;
 }
-

@@ -7392,3 +7392,641 @@ func TestAlterCollection_RejectExternalTupleMutation(t *testing.T) {
 		assert.Contains(t, err.Error(), "immutable")
 	})
 }
+
+func testDropFieldBaseSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			{FieldID: 102, Name: "scalar_field", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "partition_key", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 104, Name: "clustering_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true},
+			{FieldID: 105, Name: "dynamic_field", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "test_func", InputFieldNames: []string{"scalar_field"}, OutputFieldNames: []string{"vector"}},
+		},
+	}
+}
+
+func TestValidateDropField(t *testing.T) {
+	baseSchema := testDropFieldBaseSchema()
+
+	t.Run("empty field name", func(t *testing.T) {
+		err := validateDropField(baseSchema, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "field name is empty")
+	})
+
+	t.Run("field not found", func(t *testing.T) {
+		err := validateDropField(baseSchema, "nonexistent_field")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "field not found")
+	})
+
+	t.Run("cannot drop primary key", func(t *testing.T) {
+		err := validateDropField(baseSchema, "id")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop primary key field")
+	})
+
+	t.Run("cannot drop the last vector field", func(t *testing.T) {
+		err := validateDropField(baseSchema, "vector")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop the last vector field")
+	})
+
+	t.Run("can drop vector field when multiple exist", func(t *testing.T) {
+		multiVecSchema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector1", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "vector2", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "64"}}},
+			},
+		}
+		err := validateDropField(multiVecSchema, "vector2")
+		assert.NoError(t, err)
+	})
+
+	t.Run("cannot drop partition key", func(t *testing.T) {
+		err := validateDropField(baseSchema, "partition_key")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop partition key field")
+	})
+
+	t.Run("cannot drop clustering key", func(t *testing.T) {
+		err := validateDropField(baseSchema, "clustering_key")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop clustering key field")
+	})
+
+	t.Run("cannot drop dynamic field", func(t *testing.T) {
+		err := validateDropField(baseSchema, "dynamic_field")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop dynamic field")
+	})
+
+	t.Run("field referenced by function - input", func(t *testing.T) {
+		err := validateDropField(baseSchema, "scalar_field")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "is referenced by function test_func as input")
+	})
+
+	t.Run("field referenced by function - output", func(t *testing.T) {
+		// Need two vector fields so the "last vector field" check passes,
+		// allowing us to reach the output field reference check.
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec_output", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "vec_other", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "64"}}},
+				{FieldID: 103, Name: "text", DataType: schemapb.DataType_VarChar},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "embed_func", InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_output"}},
+			},
+		}
+		err := validateDropField(schema, "vec_output")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "is referenced by function embed_func as output")
+	})
+
+	t.Run("success - field can be dropped", func(t *testing.T) {
+		schemaNoFunc := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "droppable_field", DataType: schemapb.DataType_VarChar},
+			},
+		}
+		err := validateDropField(schemaNoFunc, "droppable_field")
+		assert.NoError(t, err)
+	})
+
+	t.Run("can drop vector when struct array field also has vector", func(t *testing.T) {
+		// Top-level vector is the only Fields-level vector, but the struct
+		// array field also contains a vector, so total vector count == 2 and
+		// the drop should succeed.
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_embed", DataType: schemapb.DataType_ArrayOfVector},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "vec")
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop whole struct array field by name - success", func(t *testing.T) {
+		// Top-level vector remains after dropping the struct, so the drop is allowed.
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.NoError(t, err)
+	})
+
+	t.Run("reject drop struct array field when it holds the only vector", func(t *testing.T) {
+		// The struct contains the only vector in the collection (an ArrayOfVector
+		// sub-field); dropping it would leave no vector field.
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 101, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 102, Name: "para_text", DataType: schemapb.DataType_Array},
+						{FieldID: 103, Name: "para_embed", DataType: schemapb.DataType_ArrayOfVector},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "would leave no vector field")
+	})
+
+	t.Run("reject drop struct array field with protected sub-field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_key", DataType: schemapb.DataType_Array, IsPartitionKey: true},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sub-field para_key is partition key")
+	})
+
+	t.Run("reject drop struct array field referenced by function", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "embed_func", InputFieldNames: []string{"para_text"}, OutputFieldNames: []string{"vec"}},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sub-field para_text is referenced by function embed_func as input")
+	})
+
+	t.Run("reject drop sub-field of struct array field by name", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "para_text")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop sub-field of struct array field")
+		assert.Contains(t, err.Error(), "paragraphs.para_text")
+	})
+}
+
+func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
+	ctx := context.Background()
+	baseSchema := testDropFieldBaseSchema()
+
+	t.Run("nil action", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action:         nil,
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "action is nil")
+	})
+
+	t.Run("empty add request fails validation", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "exactly one function schema is required")
+	})
+
+	t.Run("drop by field_name - validation error", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{
+								FieldName: "id",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop primary key field")
+	})
+
+	t.Run("drop by field_id - success", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "droppable", DataType: schemapb.DataType_VarChar},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{
+								FieldId: 102,
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop by field_id - not found", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{
+								FieldId: 999,
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "field not found with id")
+	})
+
+	t.Run("drop by field_name - success", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "droppable", DataType: schemapb.DataType_VarChar},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{
+								FieldName: "droppable",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop by function_name - success", func(t *testing.T) {
+		schemaWithFunc := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+				{FieldID: 102, Name: "text", DataType: schemapb.DataType_VarChar},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "bm25_func", Type: schemapb.FunctionType_BM25},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schemaWithFunc,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
+								FunctionName: "bm25_func",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop by function_name - not found", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
+								FunctionName: "nonexistent_func",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function not found")
+	})
+
+	t.Run("drop with empty schema", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: nil,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{
+								FieldName: "field",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty old schema")
+	})
+
+	t.Run("drop by field_id - struct array field success", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{
+								FieldId: 102,
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop by field_id - reject sub-field of struct array field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+		}
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: schema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+						DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+							Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{
+								FieldId: 103,
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot drop sub-field of struct array field")
+		assert.Contains(t, err.Error(), "paragraphs.para_text")
+	})
+
+	t.Run("unknown action type", func(t *testing.T) {
+		task := &alterCollectionSchemaTask{
+			ctx:       ctx,
+			oldSchema: baseSchema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_collection",
+				Action:         &milvuspb.AlterCollectionSchemaRequest_Action{},
+			},
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown action type")
+	})
+}
+
+func TestValidateDropFunction(t *testing.T) {
+	t.Run("empty function name", func(t *testing.T) {
+		err := validateDropFunction(&schemapb.CollectionSchema{}, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function name is empty")
+	})
+
+	t.Run("function not found", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "embedding_func", Type: schemapb.FunctionType_TextEmbedding},
+			},
+		}
+		err := validateDropFunction(schema, "nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function not found")
+	})
+
+	t.Run("drop function leaves another vector field", func(t *testing.T) {
+		// Cascade removes vec_func_out, but vec_other remains.
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
+				{FieldID: 103, Name: "vec_other", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_func_out"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "embed_func")
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop function would leave no vector field", func(t *testing.T) {
+		// BM25-only collection: sparse_vec is the only vector and is the
+		// function's output. Cascade removal would leave 0 vectors.
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "bm25_func")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "would leave no vector field")
+	})
+
+	t.Run("drop function preserves vector in struct array field", func(t *testing.T) {
+		// Cascade removes the function's output vector, but a vector inside a
+		// StructArrayField remains, so the collection is still searchable.
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 103, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 104, Name: "para_embed", DataType: schemapb.DataType_ArrayOfVector},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "bm25_func")
+		assert.NoError(t, err)
+	})
+}

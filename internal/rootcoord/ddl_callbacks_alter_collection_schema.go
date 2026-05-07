@@ -22,9 +22,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -33,24 +36,47 @@ import (
 
 // broadcastAlterCollectionSchema broadcasts the alter collection schema message to all channels.
 func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
-	if err != nil {
-		return err
-	}
-
-	// 1. check if the request is valid.
 	action := req.GetAction()
 	if action == nil {
 		return merr.WrapErrParameterInvalidMsg("action is nil")
 	}
-	addRequest := action.GetAddRequest()
+
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	if _, ok := action.GetOp().(*milvuspb.AlterCollectionSchemaRequest_Action_DropRequest); ok {
+		if err := waitUntilSchemaDropReady(ctx); err != nil {
+			return err
+		}
+	}
+
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
+	switch action.GetOp().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
+		return c.broadcastAlterCollectionSchemaAdd(ctx, broadcaster, coll, req)
+	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
+		return c.broadcastAlterCollectionSchemaDrop(ctx, broadcaster, coll, req)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request")
+	}
+}
+
+// broadcastAlterCollectionSchemaAdd handles AddRequest: adding function fields.
+func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+	addRequest := req.GetAction().GetAddRequest()
 	if addRequest == nil {
-		return merr.WrapErrParameterInvalidMsg("add_request is nil, only add operation is supported for now")
+		return merr.WrapErrParameterInvalidMsg("add_request is nil")
 	}
 
 	fieldInfos := addRequest.GetFieldInfos()
@@ -73,7 +99,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty")
 	}
 
-	// 2. check if the field schemas are illegal.
+	// Check field schemas.
 	fieldSchemas := make([]*schemapb.FieldSchema, 0, len(fieldInfos))
 	for _, fieldInfo := range fieldInfos {
 		fieldSchema := fieldInfo.GetFieldSchema()
@@ -86,7 +112,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return errors.Wrap(err, "failed to check field schema")
 	}
 
-	// 3. check if the fields already exist
+	// Check fields don't already exist.
 	fieldNameSet := make(map[string]struct{})
 	for _, field := range coll.Fields {
 		fieldNameSet[field.Name] = struct{}{}
@@ -98,15 +124,18 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		fieldNameSet[fieldSchema.Name] = struct{}{}
 	}
 
-	// 4. check if the function already exists
+	// Check function doesn't already exist.
 	for _, function := range coll.Functions {
 		if function.Name == functionSchema.GetName() {
 			return merr.WrapErrParameterInvalidMsg("function already exists, name: %s", functionSchema.GetName())
 		}
 	}
 
-	// 5. assign new field and function ids.
-	fieldIDStart := nextFieldID(coll)
+	// Build new collection schema.
+	schema := coll.ToCollectionSchemaPB()
+
+	// Assign new field and function IDs.
+	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	for i, fieldSchema := range fieldSchemas {
 		fieldSchema.FieldID = fieldIDStart + int64(i)
 	}
@@ -137,19 +166,14 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		functionSchema.OutputFieldIds[idx] = fieldID
 	}
 
-	// 6. build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
-	// Version is incremented by 1. No CAS is needed here because Proxy's
-	// checkSchemaVersionConsistency gate blocks new AlterCollectionSchema calls
-	// until the previous backfill reaches 100% consistency, and DDL requests
-	// are serialized through a single DDL queue — so concurrent schema changes
-	// that could produce duplicate version numbers are impossible.
 	schema.Version = coll.SchemaVersion + 1
 	schema.DoPhysicalBackfill = addRequest.GetDoPhysicalBackfill()
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
+	schema.Properties = properties
 
-	// 7. get cache expirations.
+	// Broadcast.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -163,13 +187,14 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -178,4 +203,190 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return err
 	}
 	return nil
+}
+
+// broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
+func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+	dropReq := req.GetAction().GetDropRequest()
+	if dropReq == nil {
+		return merr.WrapErrParameterInvalidMsg("drop_request is nil")
+	}
+
+	var schema *schemapb.CollectionSchema
+	var properties []*commonpb.KeyValuePair
+	var droppedFieldIds []int64
+	var err error
+
+	switch id := dropReq.GetIdentifier().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
+		schema, properties, droppedFieldIds, err = buildSchemaForDropFunction(coll, id.FunctionName)
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
+		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, id.FieldName, 0)
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
+		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, "", id.FieldId)
+	default:
+		return merr.WrapErrParameterInvalidMsg("drop request must specify field_name, field_id, or function_name")
+	}
+	if err != nil {
+		return err
+	}
+
+	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+
+	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.VirtualChannelNames...)
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			DbId:         coll.DBID,
+			CollectionId: coll.CollectionID,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
+			},
+			CacheExpirations: cacheExpirations,
+			DroppedFieldIds:  droppedFieldIds,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema:     schema,
+				Properties: properties,
+			},
+		}).
+		WithBroadcast(channels).
+		MustBuildBroadcast()
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// buildSchemaForDropField builds the new schema, properties, and droppedFieldIds for dropping a field.
+// It looks up the target by fieldName or fieldID across top-level Fields and StructArrayFields,
+// removes it from the schema, and updates max_field_id. Dropping a sub-field of a struct array
+// field is rejected (no symmetric add-sub-field support).
+func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID int64) (
+	schema *schemapb.CollectionSchema,
+	properties []*commonpb.KeyValuePair,
+	droppedFieldIds []int64,
+	err error,
+) {
+	matchField := func(f *model.Field) bool {
+		if fieldName != "" {
+			return f.Name == fieldName
+		}
+		return fieldID > 0 && f.FieldID == fieldID
+	}
+	matchStruct := func(sf *model.StructArrayField) bool {
+		if fieldName != "" {
+			return sf.Name == fieldName
+		}
+		return fieldID > 0 && sf.FieldID == fieldID
+	}
+
+	// Top-level field path: remove from fields.
+	var droppedField *model.Field
+	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
+	for _, f := range coll.Fields {
+		if droppedField == nil && matchField(f) {
+			droppedField = f
+			continue
+		}
+		newFields = append(newFields, model.MarshalFieldModel(f))
+	}
+	if droppedField != nil {
+		schema = coll.ToCollectionSchemaPB()
+		maxFieldID := maxAssignedFieldIDFromSchema(schema)
+		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
+		schema.Fields = newFields
+		schema.Properties = properties
+		schema.Version = coll.SchemaVersion + 1
+		return schema, properties, []int64{droppedField.FieldID}, nil
+	}
+
+	// Struct array field path: remove the whole entry from StructArrayFields.
+	// droppedFieldIds includes the struct ID plus every sub-field ID so that
+	// index cascade (matched by FieldID) and segcore filtering (schema.has_field)
+	// naturally cover every column that physically goes away.
+	// Sub-field drops are already rejected at the proxy layer; if one reaches
+	// here we fall through to the generic "field not found" tail.
+	var droppedStruct *model.StructArrayField
+	newStructs := make([]*schemapb.StructArrayFieldSchema, 0, len(coll.StructArrayFields))
+	for _, s := range coll.StructArrayFields {
+		if droppedStruct == nil && matchStruct(s) {
+			droppedStruct = s
+			continue
+		}
+		newStructs = append(newStructs, model.MarshalStructArrayFieldModel(s))
+	}
+	if droppedStruct != nil {
+		schema = coll.ToCollectionSchemaPB()
+		maxFieldID := maxAssignedFieldIDFromSchema(schema)
+		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
+		schema.StructArrayFields = newStructs
+		schema.Properties = properties
+		schema.Version = coll.SchemaVersion + 1
+		droppedFieldIds = append(droppedFieldIds, droppedStruct.FieldID)
+		for _, subField := range droppedStruct.Fields {
+			droppedFieldIds = append(droppedFieldIds, subField.FieldID)
+		}
+		return schema, properties, droppedFieldIds, nil
+	}
+
+	if fieldName != "" {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+	return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found with id: %d", fieldID)
+}
+
+// buildSchemaForDropFunction builds the new schema for dropping a function and its output fields.
+// It removes the function from Functions, removes all output fields from Fields, and updates max_field_id.
+func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
+	schema *schemapb.CollectionSchema,
+	properties []*commonpb.KeyValuePair,
+	droppedFieldIds []int64,
+	err error,
+) {
+	var targetFunc *model.Function
+	for _, fn := range coll.Functions {
+		if fn.Name == functionName {
+			targetFunc = fn
+			break
+		}
+	}
+	if targetFunc == nil {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	}
+
+	droppedFieldIds = append(droppedFieldIds, targetFunc.OutputFieldIDs...)
+	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
+	for _, fid := range targetFunc.OutputFieldIDs {
+		outputFieldIDSet[fid] = struct{}{}
+	}
+
+	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
+	for _, field := range coll.Fields {
+		if _, ok := outputFieldIDSet[field.FieldID]; !ok {
+			newFields = append(newFields, model.MarshalFieldModel(field))
+		}
+	}
+
+	newFunctions := make([]*schemapb.FunctionSchema, 0, len(coll.Functions)-1)
+	for _, fn := range coll.Functions {
+		if fn.Name != functionName {
+			newFunctions = append(newFunctions, model.MarshalFunctionModel(fn))
+		}
+	}
+
+	schema = coll.ToCollectionSchemaPB()
+	maxFieldID := maxAssignedFieldIDFromSchema(schema)
+	properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
+	schema.Fields = newFields
+	schema.Functions = newFunctions
+	schema.Properties = properties
+	schema.Version = coll.SchemaVersion + 1
+
+	return schema, properties, droppedFieldIds, nil
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -169,6 +170,17 @@ func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string
 		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
 	}
 	return broadcaster, nil
+}
+
+func waitUntilSchemaDropReady(ctx context.Context) error {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if err := balancer.WaitUntilSchemaDropReady(ctx); err != nil {
+		return errors.Wrap(err, "failed to wait until schema drop ready")
+	}
+	return nil
 }
 
 // startBroadcastWithAliasOrCollectionLock starts a broadcast with alias or collection lock.

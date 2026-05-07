@@ -1997,7 +1997,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				return nil, err
+				// field might have been dropped, skip its index
+				log.Info("skip index for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				continue
 			}
 			indexedFields[fieldID] = struct{}{}
 
@@ -2077,8 +2079,10 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			// get field schema from fieldID
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-				return nil, err
+				// field might have been dropped, skip it and continue processing
+				// other fields in the same column group
+				log.Info("skip binlog for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
+				continue
 			}
 			if _, ok := indexedFields[fieldID]; !ok {
 				hasIndex = false

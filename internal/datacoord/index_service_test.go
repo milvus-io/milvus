@@ -2544,6 +2544,88 @@ func TestServer_DropIndex(t *testing.T) {
 	})
 }
 
+func TestServer_DropIndex_DroppedField(t *testing.T) {
+	initStreamingSystem(t)
+	var (
+		collID    = UniqueID(1)
+		fieldID   = UniqueID(10)
+		indexID   = UniqueID(100)
+		indexName = "idx_dropped_field"
+		createTS  = uint64(1000)
+		ctx       = context.Background()
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("AlterIndexes", mock.Anything, mock.Anything).Return(nil)
+
+	// Broker returns a schema that does NOT contain fieldID=10 (simulating a dropped field)
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				// fieldID=10 is intentionally absent — it has been dropped
+			},
+		},
+	}, nil)
+
+	s := &Server{
+		meta: &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog: catalog,
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collID: {
+						indexID: {
+							CollectionID: collID,
+							FieldID:      fieldID, // points to dropped field
+							IndexID:      indexID,
+							IndexName:    indexName,
+							IsDeleted:    false,
+							CreateTime:   createTS,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "128"},
+							},
+							IndexParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+							},
+						},
+					},
+				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			},
+			segments: NewSegmentsInfo(),
+		},
+		broker:          b,
+		allocator:       newMockAllocator(t),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+
+	// Collection is loaded
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:        merr.Success(),
+		CollectionIDs: []int64{collID},
+	}, nil)
+	s.mixCoord = mixCoord
+
+	RegisterDDLCallbacks(s)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// DropIndex should succeed: field not in schema triggers continue, not error
+	resp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+}
+
 func TestServer_GetIndexInfos(t *testing.T) {
 	var (
 		collID     = UniqueID(1)
