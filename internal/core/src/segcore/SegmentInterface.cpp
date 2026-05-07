@@ -70,7 +70,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
     // Use a per-call OpContext for storage_usage; sharing op_ctx across
     // segments would make each segment's search_storage_cost_ accumulate
-    // every prior segment's bytes, inflating GetTotalStorageCost().
+    // every prior segment's bytes.
     milvus::OpContext local_ctx;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;

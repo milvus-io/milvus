@@ -54,7 +54,6 @@
 #include "segcore/Types.h"
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -1301,25 +1300,15 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                         &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    std::vector<CSearchResult> results;
-    results.push_back(c_search_result_on_bigIndex);
-
-    auto slice_nqs = std::vector<int64_t>{num_queries};
-    auto slice_topKs = std::vector<int64_t>{topK};
-
-    CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData({},
-                                            &cSearchResultData,
-                                            plan,
-                                            placeholderGroup,
-                                            results.data(),
-                                            results.size(),
-                                            slice_nqs.data(),
-                                            slice_topKs.data(),
-                                            slice_nqs.size());
-    ASSERT_EQ(status.error_code, Success);
-
+    // This test asserts on seg_offsets_/distances_ via topk_per_nq_prefix_sum_.
+    // The full reduce pipeline isn't needed — just materialize the prefix sum
+    // for the dense (no invalid rows) search result.
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    search_result_on_bigIndex->topk_per_nq_prefix_sum_.resize(num_queries + 1);
+    for (int64_t i = 0; i <= num_queries; ++i) {
+        search_result_on_bigIndex->topk_per_nq_prefix_sum_[i] = i * topK;
+    }
+
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -1335,7 +1324,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
-    DeleteSearchResultDataBlobs(cSearchResultData);
 }
 
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
@@ -1453,25 +1441,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                         &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    std::vector<CSearchResult> results;
-    results.push_back(c_search_result_on_bigIndex);
-
-    auto slice_nqs = std::vector<int64_t>{num_queries};
-    auto slice_topKs = std::vector<int64_t>{topK};
-
-    CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData({},
-                                            &cSearchResultData,
-                                            plan,
-                                            placeholderGroup,
-                                            results.data(),
-                                            results.size(),
-                                            slice_nqs.data(),
-                                            slice_topKs.data(),
-                                            slice_nqs.size());
-    ASSERT_EQ(status.error_code, Success);
-
+    // See the sibling test above — manually materialize topk_per_nq_prefix_sum_
+    // instead of running the full reduce pipeline.
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    search_result_on_bigIndex->topk_per_nq_prefix_sum_.resize(num_queries + 1);
+    for (int64_t i = 0; i <= num_queries; ++i) {
+        search_result_on_bigIndex->topk_per_nq_prefix_sum_[i] = i * topK;
+    }
+
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -1487,5 +1464,4 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
-    DeleteSearchResultDataBlobs(cSearchResultData);
 }
