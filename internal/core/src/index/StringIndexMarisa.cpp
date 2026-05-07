@@ -599,10 +599,11 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
         op != proto::plan::OpType::PostfixMatch &&
         op != proto::plan::OpType::InnerMatch &&
         op != proto::plan::OpType::RegexMatch) {
-        ThrowInfo(Unsupported,
-                  "StringIndexMarisa::PatternMatch only supports Match, "
-                  "PrefixMatch, PostfixMatch, InnerMatch, RegexMatch, got op: {}",
-                  static_cast<int>(op));
+        ThrowInfo(
+            Unsupported,
+            "StringIndexMarisa::PatternMatch only supports Match, "
+            "PrefixMatch, PostfixMatch, InnerMatch, RegexMatch, got op: {}",
+            static_cast<int>(op));
     }
 
     // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys

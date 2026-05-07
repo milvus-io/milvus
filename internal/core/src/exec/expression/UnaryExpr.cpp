@@ -1644,8 +1644,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [ expr_type, &processed_cursor, &bitmap_input,
-          regex_matcher_ptr, volnitsky_ptr
+        [
+            expr_type,
+            &processed_cursor,
+            &bitmap_input,
+            regex_matcher_ptr,
+            volnitsky_ptr
         ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,

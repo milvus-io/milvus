@@ -394,9 +394,22 @@ extract_literals_from_regex(const std::string& pattern) {
     // — NOT a guaranteed literal in the matched text.
     auto is_escaped_literal = [&](char next) -> bool {
         switch (next) {
-            case '.': case '+': case '*': case '?': case '^': case '$':
-            case '{': case '}': case '(': case ')': case '|': case '[':
-            case ']': case '\\': case '/': case '-':
+            case '.':
+            case '+':
+            case '*':
+            case '?':
+            case '^':
+            case '$':
+            case '{':
+            case '}':
+            case '(':
+            case ')':
+            case '|':
+            case '[':
+            case ']':
+            case '\\':
+            case '/':
+            case '-':
                 return true;
             default:
                 return false;
@@ -435,8 +448,10 @@ extract_literals_from_regex(const std::string& pattern) {
             // Scan flag characters: only [imsU-] are valid flags
             for (size_t j = i + 2; j < pattern.size(); ++j) {
                 char fc = pattern[j];
-                if (fc == ')' || fc == ':') break;
-                if (fc == 'i') return {};  // case-insensitive
+                if (fc == ')' || fc == ':')
+                    break;
+                if (fc == 'i')
+                    return {};  // case-insensitive
                 // If we hit a non-flag character, this is not a flag
                 // group (e.g. (?P<...), (?<...), (?'...'))
                 if (fc != 'm' && fc != 's' && fc != 'U' && fc != '-') {
@@ -449,10 +464,10 @@ extract_literals_from_regex(const std::string& pattern) {
     // ── Parse {n}, {n,}, {n,m} quantifier ──
     // Returns (min, exact, end_pos). exact=true means {n} (min==max).
     // Returns (-1, false, pos) on parse failure.
-    auto parse_quantifier =
-        [](const std::string& pat,
-           size_t pos) -> std::tuple<int, bool, size_t> {
-        if (pos >= pat.size() || pat[pos] != '{') return {-1, false, pos};
+    auto parse_quantifier = [](const std::string& pat,
+                               size_t pos) -> std::tuple<int, bool, size_t> {
+        if (pos >= pat.size() || pat[pos] != '{')
+            return {-1, false, pos};
         size_t j = pos + 1;
         int n = 0;
         bool has_n = false;
@@ -461,8 +476,10 @@ extract_literals_from_regex(const std::string& pattern) {
             has_n = true;
             ++j;
         }
-        if (!has_n || j >= pat.size()) return {-1, false, pos};
-        if (pat[j] == '}') return {n, true, j + 1};  // {n} exact
+        if (!has_n || j >= pat.size())
+            return {-1, false, pos};
+        if (pat[j] == '}')
+            return {n, true, j + 1};  // {n} exact
         if (pat[j] == ',') {
             ++j;
             while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') ++j;
@@ -525,8 +542,7 @@ extract_literals_from_regex(const std::string& pattern) {
                         std::string elem(1, next);
                         if (exact) {
                             // {n} exact: expand, keep contiguity
-                            for (int r = 0; r < min_count; ++r)
-                                current += next;
+                            for (int r = 0; r < min_count; ++r) current += next;
                             i = end_pos;
                         } else {
                             // {n,m} or {n,}: expand min, break contiguity
@@ -555,7 +571,8 @@ extract_literals_from_regex(const std::string& pattern) {
                 if ((next == 'p' || next == 'P') && i < pattern.size() &&
                     pattern[i] == '{') {
                     while (i < pattern.size() && pattern[i] != '}') ++i;
-                    if (i < pattern.size()) ++i;  // skip '}'
+                    if (i < pattern.size())
+                        ++i;  // skip '}'
                 }
             }
             continue;
@@ -567,17 +584,20 @@ extract_literals_from_regex(const std::string& pattern) {
             ++i;
             // Skip to closing ], handling \]
             while (i < pattern.size() && pattern[i] != ']') {
-                if (pattern[i] == '\\' && i + 1 < pattern.size()) ++i;
+                if (pattern[i] == '\\' && i + 1 < pattern.size())
+                    ++i;
                 ++i;
             }
-            if (i < pattern.size()) ++i;  // skip ']'
+            if (i < pattern.size())
+                ++i;  // skip ']'
             // Character class may be followed by a quantifier — skip it
             if (i < pattern.size() &&
                 (pattern[i] == '?' || pattern[i] == '*' || pattern[i] == '+')) {
                 ++i;
             } else if (i < pattern.size() && pattern[i] == '{') {
                 while (i < pattern.size() && pattern[i] != '}') ++i;
-                if (i < pattern.size()) ++i;
+                if (i < pattern.size())
+                    ++i;
             }
             continue;
         }
@@ -622,14 +642,16 @@ extract_literals_from_regex(const std::string& pattern) {
                             }
                             ++i;
                         }
-                        if (i < pattern.size() && pattern[i] == ':') ++i;
+                        if (i < pattern.size() && pattern[i] == ':')
+                            ++i;
                         break;
                     }
                     // Flag character (i, m, s, U, etc.)
                     ++i;
                 }
             }
-            if (is_flag_group) continue;
+            if (is_flag_group)
+                continue;
 
             // Find the matching ')' to check the quantifier after it
             size_t content_start = i;
@@ -641,9 +663,12 @@ extract_literals_from_regex(const std::string& pattern) {
                     close_pos += 2;
                     continue;
                 }
-                if (pattern[close_pos] == '(') ++depth;
-                if (pattern[close_pos] == ')') --depth;
-                if (depth > 0) ++close_pos;
+                if (pattern[close_pos] == '(')
+                    ++depth;
+                if (pattern[close_pos] == ')')
+                    --depth;
+                if (depth > 0)
+                    ++close_pos;
             }
             // close_pos now points at the matching ')'
             size_t after_close = close_pos + 1;
@@ -689,10 +714,10 @@ extract_literals_from_regex(const std::string& pattern) {
         // ── Close group ')' ──
         if (c == ')') {
             ++i;
-            size_t group_start = group_start_stack.empty()
-                                     ? 0
-                                     : group_start_stack.back();
-            if (!group_start_stack.empty()) group_start_stack.pop_back();
+            size_t group_start =
+                group_start_stack.empty() ? 0 : group_start_stack.back();
+            if (!group_start_stack.empty())
+                group_start_stack.pop_back();
             std::string group_content = current.substr(group_start);
 
             if (i < pattern.size()) {
@@ -713,8 +738,7 @@ extract_literals_from_regex(const std::string& pattern) {
                                 current += group_content;
                         } else {
                             // {n,m} variable: expand min, break
-                            flush_variable_quantifier(
-                                group_content, min_count);
+                            flush_variable_quantifier(group_content, min_count);
                         }
                         i = end_pos;
                         continue;
