@@ -11,6 +11,7 @@
 
 #include "common/type_c.h"
 #include "parquet/encryption/encryption.h"
+#include "parquet/properties.h"
 
 namespace milvus::storage {
 
@@ -22,6 +23,13 @@ class KeyRetriever : public parquet::DecryptionKeyRetriever {
 
 parquet::ReaderProperties
 GetReaderProperties();
+
+parquet::ArrowReaderProperties
+GetArrowReaderProperties();
+
+void
+ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
+                               int64_t range_size_limit_bytes);
 
 std::string
 EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key);

@@ -1451,7 +1451,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             fs,
             column_group_file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties());
+            GetReaderProperties(),
+            GetArrowReaderProperties());
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to create file row group reader: " +
                        result.status().ToString());
@@ -1699,7 +1700,8 @@ GetFieldIDList(FieldId column_group_id,
         filepath,
         arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-        GetReaderProperties());
+        GetReaderProperties(),
+        GetArrowReaderProperties());
     AssertInfo(result.ok(),
                "[StorageV2] Failed to create file row group reader: " +
                    result.status().ToString());
