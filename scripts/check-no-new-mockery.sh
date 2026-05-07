@@ -22,6 +22,16 @@ resolve_base() {
   fi
 
   local candidate
+  local base_ref="${CHANGE_TARGET:-${GITHUB_BASE_REF:-}}"
+  if [[ -n "${base_ref}" ]]; then
+    for candidate in "milvus/${base_ref}" "origin/${base_ref}" "upstream/${base_ref}" "${base_ref}"; do
+      if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
+        echo "${candidate}"
+        return
+      fi
+    done
+  fi
+
   for candidate in milvus/master origin/master upstream/master "@{u}"; do
     if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
       echo "${candidate}"

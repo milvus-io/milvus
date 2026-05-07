@@ -37,6 +37,31 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+type testPredicate struct {
+	target        predicates.PredicateTarget
+	predicateType predicates.PredicateType
+}
+
+func (p testPredicate) Target() predicates.PredicateTarget {
+	return p.target
+}
+
+func (p testPredicate) Type() predicates.PredicateType {
+	return p.predicateType
+}
+
+func (p testPredicate) IsTrue(any) bool {
+	return false
+}
+
+func (p testPredicate) Key() string {
+	return ""
+}
+
+func (p testPredicate) TargetValue() any {
+	return nil
+}
+
 func TestEmbedEtcd(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ComponentParam)
@@ -885,9 +910,7 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
-	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Type().Return(0)
-	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+	badPredicate := testPredicate{target: predicates.PredTargetValue}
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string
