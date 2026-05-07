@@ -597,11 +597,13 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
 
     if (op != proto::plan::OpType::Match &&
         op != proto::plan::OpType::PostfixMatch &&
-        op != proto::plan::OpType::InnerMatch) {
-        ThrowInfo(Unsupported,
-                  "StringIndexMarisa::PatternMatch only supports Match, "
-                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
-                  static_cast<int>(op));
+        op != proto::plan::OpType::InnerMatch &&
+        op != proto::plan::OpType::RegexMatch) {
+        ThrowInfo(
+            Unsupported,
+            "StringIndexMarisa::PatternMatch only supports Match, "
+            "PrefixMatch, PostfixMatch, InnerMatch, RegexMatch, got op: {}",
+            static_cast<int>(op));
     }
 
     // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys
@@ -619,7 +621,17 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
         }
     };
 
-    if (op == proto::plan::OpType::Match) {
+    if (op == proto::plan::OpType::RegexMatch) {
+        PartialRegexMatcher matcher(pattern);
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && matcher(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
+        }
+    } else if (op == proto::plan::OpType::Match) {
         LikePatternMatcher matcher(pattern);
         for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
             auto val = Reverse_Lookup(offsets[0]);

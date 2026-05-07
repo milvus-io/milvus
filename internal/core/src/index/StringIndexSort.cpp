@@ -457,11 +457,13 @@ StringIndexSort::PatternMatch(const std::string& pattern,
     // All can benefit from unique value deduplication
     if (op != proto::plan::OpType::Match &&
         op != proto::plan::OpType::PostfixMatch &&
-        op != proto::plan::OpType::InnerMatch) {
-        ThrowInfo(Unsupported,
-                  "StringIndexSort::PatternMatch only supports Match, "
-                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
-                  static_cast<int>(op));
+        op != proto::plan::OpType::InnerMatch &&
+        op != proto::plan::OpType::RegexMatch) {
+        ThrowInfo(
+            Unsupported,
+            "StringIndexSort::PatternMatch only supports Match, "
+            "PrefixMatch, PostfixMatch, InnerMatch, RegexMatch, got op: {}",
+            static_cast<int>(op));
     }
 
     return impl_->PatternMatch(pattern, op, total_num_rows_);
@@ -1105,6 +1107,20 @@ StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
                                         size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
 
+    // For RegexMatch, use PartialRegexMatcher over all unique values
+    if (op == proto::plan::OpType::RegexMatch) {
+        PartialRegexMatcher matcher(pattern);
+        for (size_t idx = 0; idx < unique_values_.size(); ++idx) {
+            if (matcher(unique_values_[idx])) {
+                const auto& posting_list = posting_lists_[idx];
+                for (uint32_t row_id : posting_list) {
+                    bitset[row_id] = true;
+                }
+            }
+        }
+        return bitset;
+    }
+
     // For PostfixMatch and InnerMatch, no prefix optimization possible
     // Still benefits from unique value deduplication
     if (op == proto::plan::OpType::PostfixMatch ||
@@ -1532,6 +1548,21 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
                                       proto::plan::OpType op,
                                       size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
+
+    // For RegexMatch, use PartialRegexMatcher over all unique values
+    if (op == proto::plan::OpType::RegexMatch) {
+        PartialRegexMatcher matcher(pattern);
+        for (size_t idx = 0; idx < unique_count_; ++idx) {
+            MmapEntry entry = GetEntry(idx);
+            std::string_view sv = entry.get_string_view();
+
+            if (matcher(sv)) {
+                entry.for_each_row_id(
+                    [&bitset](uint32_t row_id) { bitset.set(row_id); });
+            }
+        }
+        return bitset;
+    }
 
     // For PostfixMatch and InnerMatch, no prefix optimization possible
     // Still benefits from unique value deduplication

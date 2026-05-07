@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -520,6 +521,254 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 					ColumnInfo: column,
 					Op:         op,
 					Value:      NewString(operand),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// extractRegexPattern extracts a regex pattern from an ANTLR string literal
+// token. Unlike convertEscapeSingle which uses strconv.Unquote (which rejects
+// regex escapes like \d, \., \p), this function preserves all backslash
+// sequences as-is, only processing quote delimiters.
+func extractRegexPattern(literal string) (string, error) {
+	if len(literal) < 2 {
+		return "", fmt.Errorf("invalid string literal: %s", literal)
+	}
+	quote := literal[0]
+	if (quote != '"' && quote != '\'') || literal[len(literal)-1] != quote {
+		return "", fmt.Errorf("invalid string literal: %s", literal)
+	}
+	// Strip surrounding quotes, preserve all escape sequences as-is
+	inner := literal[1 : len(literal)-1]
+	var result strings.Builder
+	result.Grow(len(inner))
+	for i := 0; i < len(inner); i++ {
+		if inner[i] == '\\' && i+1 < len(inner) {
+			next := inner[i+1]
+			switch next {
+			case quote:
+				// Escaped quote → literal quote character
+				result.WriteByte(quote)
+				i++
+			case '\\':
+				// Escaped backslash → single backslash
+				result.WriteByte('\\')
+				i++
+			default:
+				// All other escapes: pass through as-is (e.g. \d, \., \p, \n)
+				result.WriteByte('\\')
+				result.WriteByte(next)
+				i++
+			}
+		} else {
+			result.WriteByte(inner[i])
+		}
+	}
+	return result.String(), nil
+}
+
+// tryOptimizeRegexToLike attempts to convert anchored simple regex patterns to
+// more efficient LIKE operations. Returns (op, operand, true) if optimization is
+// possible, or (_, _, false) if the pattern must remain as RegexMatch.
+//
+// Only patterns composed entirely of literal characters and ^/$ anchors are
+// converted. Any regex metacharacter causes the function to return false.
+func tryOptimizeRegexToLike(pattern string) (planpb.OpType, string, bool) {
+	if len(pattern) == 0 {
+		// Empty pattern matches everything in PartialMatch — cannot be
+		// simplified to a single LIKE op.
+		return 0, "", false
+	}
+
+	hasStart := false
+	hasEnd := false
+	inner := pattern
+
+	if inner[0] == '^' {
+		hasStart = true
+		inner = inner[1:]
+	}
+	if len(inner) > 0 && inner[len(inner)-1] == '$' {
+		// Make sure the $ is not escaped
+		if len(inner) < 2 || inner[len(inner)-2] != '\\' {
+			hasEnd = true
+			inner = inner[:len(inner)-1]
+		}
+	}
+
+	// Check that the remaining string is purely literal (no metacharacters).
+	// Walk character by character, handling escape sequences.
+	var literal []byte
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if c == '\\' && i+1 < len(inner) {
+			next := inner[i+1]
+			// Only escaped metacharacters produce a literal character.
+			// Shorthand classes (\d, \w, \s, etc.) are not literal.
+			switch next {
+			case '.', '+', '*', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\':
+				literal = append(literal, next)
+				i++ // skip next
+			default:
+				// \d, \w, \s, \b, etc. — not purely literal
+				return 0, "", false
+			}
+		} else if c == '.' || c == '+' || c == '*' || c == '?' ||
+			c == '{' || c == '}' || c == '(' || c == ')' ||
+			c == '|' || c == '[' || c == ']' || c == '^' || c == '$' {
+			// Unescaped metacharacter — cannot optimize
+			return 0, "", false
+		} else {
+			literal = append(literal, c)
+		}
+	}
+
+	lit := string(literal)
+	if len(lit) == 0 {
+		// After stripping anchors, nothing left (e.g., "^$" matches only "")
+		if hasStart && hasEnd {
+			return planpb.OpType_Equal, "", true
+		}
+		return 0, "", false
+	}
+
+	switch {
+	case hasStart && hasEnd:
+		return planpb.OpType_Equal, lit, true
+	case hasStart:
+		return planpb.OpType_PrefixMatch, lit, true
+	case hasEnd:
+		return planpb.OpType_PostfixMatch, lit, true
+	default:
+		// Keep unanchored literal regex as RegexMatch. RE2's literal
+		// PartialMatch path is faster than Milvus InnerMatch in current
+		// growing-segment benchmarks.
+		return 0, "", false
+	}
+}
+
+func isRegexMatchSupportedType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
+	return typeutil.IsStringType(dataType) ||
+		typeutil.IsJSONType(dataType) ||
+		(typeutil.IsArrayType(dataType) && typeutil.IsStringType(elementType))
+}
+
+// VisitRegexMatch handles =~ regex match operations.
+func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface{} {
+	left := ctx.Expr().Accept(v)
+	if err := getError(left); err != nil {
+		return err
+	}
+
+	leftExpr := getExpr(left)
+	if leftExpr == nil {
+		return errors.New("the left operand of =~ is invalid")
+	}
+
+	column := toColumnInfo(leftExpr)
+	if column == nil {
+		return errors.New("regex match on complicated expr is unsupported")
+	}
+	if err := checkDirectComparisonBinaryField(column); err != nil {
+		return err
+	}
+
+	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
+		return errors.New("regex match on non-string or non-json field is unsupported")
+	}
+
+	pattern, err := extractRegexPattern(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	// Validate regex syntax
+	if _, err := regexp.Compile(pattern); err != nil {
+		return fmt.Errorf("invalid regex pattern: %s", err)
+	}
+
+	// Try to optimize simple regex patterns to faster LIKE operations.
+	op := planpb.OpType_RegexMatch
+	operand := pattern
+	if optOp, optOperand, ok := tryOptimizeRegexToLike(pattern); ok {
+		op = optOp
+		operand = optOperand
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo: column,
+					Op:         op,
+					Value:      NewString(operand),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// VisitRegexNotMatch handles !~ regex not match operations.
+func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) interface{} {
+	left := ctx.Expr().Accept(v)
+	if err := getError(left); err != nil {
+		return err
+	}
+
+	leftExpr := getExpr(left)
+	if leftExpr == nil {
+		return errors.New("the left operand of !~ is invalid")
+	}
+
+	column := toColumnInfo(leftExpr)
+	if column == nil {
+		return errors.New("regex match on complicated expr is unsupported")
+	}
+	if err := checkDirectComparisonBinaryField(column); err != nil {
+		return err
+	}
+
+	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
+		return errors.New("regex match on non-string or non-json field is unsupported")
+	}
+
+	pattern, err := extractRegexPattern(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	// Validate regex syntax
+	if _, err := regexp.Compile(pattern); err != nil {
+		return fmt.Errorf("invalid regex pattern: %s", err)
+	}
+
+	// Try to optimize simple regex patterns to faster LIKE operations.
+	op := planpb.OpType_RegexMatch
+	operand := pattern
+	if optOp, optOperand, ok := tryOptimizeRegexToLike(pattern); ok {
+		op = optOp
+		operand = optOperand
+	}
+
+	innerExpr := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: column,
+				Op:         op,
+				Value:      NewString(operand),
+			},
+		},
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryExpr{
+				UnaryExpr: &planpb.UnaryExpr{
+					Op:    planpb.UnaryExpr_Not,
+					Child: innerExpr,
 				},
 			},
 		},

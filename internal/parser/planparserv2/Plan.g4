@@ -18,6 +18,8 @@ expr:
 	| EmptyArray                                                                                            # EmptyArray
 	| EXISTS expr                                                                                           # Exists
 	| expr LIKE StringLiteral                                                                               # Like
+	| expr REGEXMATCH StringLiteral                                                                          # RegexMatch
+	| expr REGEXNOTMATCH StringLiteral                                                                       # RegexNotMatch
 	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'                                    # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
@@ -78,6 +80,8 @@ INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
 THRESHOLD: 'threshold' | 'THRESHOLD';
+REGEXMATCH: '=~';
+REGEXNOTMATCH: '!~';
 ASSIGN: '=';
 
 ADD: '+';
@@ -188,7 +192,8 @@ fragment EscapeSequence:
 	'\\' ['"?abfnrtv\\]
 	| '\\' OctalDigit OctalDigit? OctalDigit?
 	| '\\x' HexadecimalDigitSequence
-	| UniversalCharacterName;
+	| UniversalCharacterName
+	| '\\' ~[\r\n];
 
 Whitespace: [ \t]+ -> skip;
 
