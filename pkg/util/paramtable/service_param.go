@@ -1470,6 +1470,8 @@ type MinioConfig struct {
 	UseSSL             ParamItem `refreshable:"false"`
 	SslCACert          ParamItem `refreshable:"false"`
 	SslTLSMinVersion   ParamItem `refreshable:"false"`
+	SslClientCert      ParamItem `refreshable:"false"`
+	SslClientKey       ParamItem `refreshable:"false"`
 	BucketName         ParamItem `refreshable:"false"`
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
@@ -1577,6 +1579,22 @@ We recommend using version 1.2 and above.`,
 		Export: true,
 	}
 	p.SslTLSMinVersion.Init(base.mgr)
+
+	p.SslClientCert = ParamItem{
+		Key:     "minio.ssl.tlsClientCert",
+		Version: "2.6.13",
+		Doc:     "path to client certificate for mTLS authentication with S3 endpoint",
+		Export:  true,
+	}
+	p.SslClientCert.Init(base.mgr)
+
+	p.SslClientKey = ParamItem{
+		Key:     "minio.ssl.tlsClientKey",
+		Version: "2.6.13",
+		Doc:     "path to client key for mTLS authentication with S3 endpoint",
+		Export:  true,
+	}
+	p.SslClientKey.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",
