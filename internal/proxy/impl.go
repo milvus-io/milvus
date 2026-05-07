@@ -7954,6 +7954,7 @@ func convertToExternalCollectionJobInfo(internal *datapb.ExternalCollectionRefre
 		Progress:       internal.GetProgress(),
 		Reason:         internal.GetFailReason(),
 		ExternalSource: internal.GetExternalSource(),
+		ExternalSpec:   externalspec.RedactExternalSpec(internal.GetExternalSpec()),
 		StartTime:      internal.GetStartTime(),
 		EndTime:        internal.GetEndTime(),
 	}
