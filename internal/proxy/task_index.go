@@ -364,6 +364,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("supported field", err.Error())
 			}
 
+			if typeutil.IsJSONType(cit.fieldSchema.DataType) && indexType == indexparamcheck.IndexHybrid {
+				// Full JSON cast is only implemented by the inverted JSON
+				// index; HYBRID supports typed JSON path indexes.
+				if castType, ok := indexParamsMap[common.JSONCastTypeKey]; ok && strings.EqualFold(castType, "JSON") {
+					indexType = indexparamcheck.IndexINVERTED
+				}
+			}
 			indexParamsMap[common.IndexTypeKey] = indexType
 			cit.isAutoIndex = true
 		}

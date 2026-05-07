@@ -80,15 +80,19 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
-        auto result = ConvertJsonToTypedFieldData<T>(field_datas,
-                                                     json_schema_,
-                                                     nested_path_,
-                                                     cast_type_,
-                                                     cast_function_);
-        non_exist_offsets_ = std::move(result.non_exist_offsets);
-        auto total_rows = result.field_data->get_num_rows();
-        BaseIndex::BuildWithFieldData({result.field_data});
-        BuildExistsBitset(total_rows);
+        if constexpr (kIsInverted) {
+            BuildInvertedWithJsonFieldData(field_datas);
+        } else {
+            auto result = ConvertJsonToTypedFieldData<T>(field_datas,
+                                                         json_schema_,
+                                                         nested_path_,
+                                                         cast_type_,
+                                                         cast_function_);
+            non_exist_offsets_ = std::move(result.non_exist_offsets);
+            auto total_rows = result.field_data->get_num_rows();
+            BaseIndex::BuildWithFieldData({result.field_data});
+            BuildExistsBitset(total_rows);
+        }
     }
 
     void
@@ -96,16 +100,20 @@ class JsonScalarIndexWrapper : public BaseIndex {
         auto json_field_datas =
             storage::CacheRawDataAndFillMissing(json_file_manager_, config);
 
-        auto result = ConvertJsonToTypedFieldData<T>(json_field_datas,
-                                                     json_schema_,
-                                                     nested_path_,
-                                                     cast_type_,
-                                                     cast_function_);
+        if constexpr (kIsInverted) {
+            BuildInvertedWithJsonFieldData(json_field_datas);
+        } else {
+            auto result = ConvertJsonToTypedFieldData<T>(json_field_datas,
+                                                         json_schema_,
+                                                         nested_path_,
+                                                         cast_type_,
+                                                         cast_function_);
 
-        non_exist_offsets_ = std::move(result.non_exist_offsets);
-        auto total_rows = result.field_data->get_num_rows();
-        BaseIndex::BuildWithFieldData({result.field_data});
-        BuildExistsBitset(total_rows);
+            non_exist_offsets_ = std::move(result.non_exist_offsets);
+            auto total_rows = result.field_data->get_num_rows();
+            BaseIndex::BuildWithFieldData({result.field_data});
+            BuildExistsBitset(total_rows);
+        }
     }
 
     // Returns a bitmap indicating which rows have the indexed JSON path
@@ -278,10 +286,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
                 auto datas = this->file_manager_->LoadIndexToMemory(
                     sliced, load_priority);
                 auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
-                auto non_exist_codecs = CompactIndexDatasByKey(
-                    INDEX_NON_EXIST_OFFSET_FILE_NAME,
-                    std::move(slice_meta),
-                    datas);
+                auto non_exist_codecs =
+                    CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                                           std::move(slice_meta),
+                                           datas);
                 for (auto&& c : non_exist_codecs.codecs_) {
                     fill(c->PayloadData(), c->PayloadSize());
                 }
@@ -327,6 +335,38 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
  protected:
+    template <typename B = BaseIndex>
+    std::enable_if_t<std::is_base_of_v<InvertedIndexTantivy<T>, B>>
+    BuildInvertedWithJsonFieldData(
+        const std::vector<FieldDataPtr>& field_datas) {
+        int64_t total_rows = 0;
+        for (const auto& data : field_datas) {
+            total_rows += data->get_num_rows();
+        }
+
+        ProcessJsonFieldData<T>(
+            field_datas,
+            json_schema_,
+            nested_path_,
+            cast_type_,
+            cast_function_,
+            [this](const T* data, int64_t size, int64_t offset) {
+                if (!this->inverted_index_single_segment_) {
+                    this->wrapper_->template add_array_data<T>(
+                        data, size, offset);
+                } else {
+                    this->wrapper_
+                        ->template add_array_data_by_single_segment_writer<T>(
+                            data, size);
+                }
+            },
+            [this](int64_t offset) { this->null_offset_.push_back(offset); },
+            [this](int64_t offset) { non_exist_offsets_.push_back(offset); },
+            [](const Json&, const std::string&, simdjson::error_code) {});
+
+        BuildExistsBitset(total_rows);
+    }
+
     // Build the exists bitmap. The caller must supply the total row count
     // explicitly at build time because InvertedIndexTantivy::Count() requires
     // finish()+create_reader() which haven't been called yet during

@@ -169,6 +169,8 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": ["x", "y"]})",
         R"({"a": [{"nested": true}, {"nested": false}]})",
         R"({"a": []})",
+        R"({"a": [0, 2, 3]})",
+        R"({"a": [{"b": 1}, 2.0, 3.0, "4", true, [1, 3.0], null]})",
     };
 
     auto json_path = "/a";
@@ -225,6 +227,11 @@ TEST(JsonIndexTest, TestJsonContains) {
     value.set_int64_val(1);
     test_cases.push_back(std::make_tuple(value, std::vector<int64_t>{17, 18}));
 
+    proto::plan::GenericValue value2;
+    value2.set_int64_val(2);
+    test_cases.push_back(
+        std::make_tuple(value2, std::vector<int64_t>{17, 18, 23, 24}));
+
     // proto::plan::GenericValue value2;
     // value2.set_bool_val(true);
     // test_cases.push_back(std::make_tuple(value2, std::vector<int64_t>{8}));
@@ -234,12 +241,13 @@ TEST(JsonIndexTest, TestJsonContains) {
     // test_cases.push_back(std::make_tuple(value3, std::vector<int64_t>{9}));
 
     for (auto& test_case : test_cases) {
+        auto query_value = std::get<0>(test_case);
         auto expr = std::make_shared<expr::JsonContainsExpr>(
             expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
             proto::plan::JSONContainsExpr_JSONOp::
                 JSONContainsExpr_JSONOp_Contains,
             true,
-            std::vector<proto::plan::GenericValue>{value});
+            std::vector<proto::plan::GenericValue>{query_value});
 
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
