@@ -60,6 +60,7 @@ set(MILVUS_TEST_FILES
         test_minhash.cpp
         test_async_warmup.cpp
         test_sort_buffer.cpp
+        test_row_container.cpp
         test_query_order_by.cpp
         test_determine_use_index.cpp
         test_virtual_pk.cpp
