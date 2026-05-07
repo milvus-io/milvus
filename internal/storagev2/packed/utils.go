@@ -324,6 +324,9 @@ func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
 	isExternal := schema.GetExternalSource() != ""
 	var columns []string
 	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue // function output fields don't exist in external data
+		}
 		extField := field.GetExternalField()
 		if extField != "" {
 			columns = append(columns, extField)

@@ -425,16 +425,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
-	isExternalCollection := typeutil.IsExternalCollection(t.schema)
-	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
-		return err
-	}
-
+	// validateFunction must run first: it sets IsFunctionOutput=true on output fields.
+	// NormalizeAndValidateExternalCollectionSchema depends on this flag.
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
 	}
 	if err := validateFunction(t.schema, "", disableCheck); err != nil {
+		return err
+	}
+
+	isExternalCollection := typeutil.IsExternalCollection(t.schema)
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
 

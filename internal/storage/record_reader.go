@@ -249,7 +249,7 @@ func NewManifestReader(manifest string,
 }
 
 func (mr *ManifestReader) init() error {
-	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext)
+	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext, packed.ExternalReaderContext{})
 	if err != nil {
 		return err
 	}

@@ -35,10 +35,14 @@ type PackedWriter struct {
 }
 
 type FFIPackedWriter struct {
-	basePath      string
-	baseVersion   int64
-	cWriterHandle C.LoonWriterHandle
-	cProperties   *C.LoonProperties
+	basePath           string
+	baseVersion        int64
+	cWriterHandle      C.LoonWriterHandle
+	cProperties        *C.LoonProperties
+	addNewColumnGroups bool
+	// destroyed guards Destroy() against double-free when both Close() and a
+	// caller-side defer Destroy() run.
+	destroyed bool
 }
 
 type PackedReader struct {
