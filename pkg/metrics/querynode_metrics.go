@@ -175,6 +175,7 @@ var (
 			nodeIDLabelName,
 			queryTypeLabelName,
 			requestScope,
+			collectionIDLabelName,
 		})
 
 	QueryNodeSQLatencyWaitTSafe = prometheus.NewHistogramVec(
