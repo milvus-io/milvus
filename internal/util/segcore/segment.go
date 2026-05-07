@@ -9,7 +9,6 @@ package segcore
 #include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
-#include "segcore/segment_c.h"
 */
 import "C"
 
