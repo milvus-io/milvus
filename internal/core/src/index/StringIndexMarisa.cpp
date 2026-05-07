@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -727,6 +728,7 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string tmp_dir =
         local_cm ? local_cm->GetRootPath() : std::string("/tmp");
+    std::filesystem::create_directories(tmp_dir);
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = tmp_dir + "/" + uuid_string;
@@ -762,6 +764,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string tmp_dir =
         local_cm ? local_cm->GetRootPath() : std::string("/tmp");
+    std::filesystem::create_directories(tmp_dir);
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file_name = tmp_dir + "/" + uuid_string;
