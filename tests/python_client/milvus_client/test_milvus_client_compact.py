@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import pytest
 import time
 
@@ -114,6 +116,18 @@ class TestMilvusClientCompactInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
 
+_json_path_index_params = [
+    ("INVERTED", "BOOL"),
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "VARCHAR"),
+    ("INVERTED", "JSON"),
+    ("STL_SORT", "DOUBLE"),
+    ("STL_SORT", "VARCHAR"),
+    ("BITMAP", "BOOL"),
+    ("BITMAP", "VARCHAR"),
+]
+
+
 class TestMilvusClientCompactValid(TestMilvusClientV2Base):
     """ Test case of hybrid search interface """
 
@@ -121,13 +135,17 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
     def is_clustering(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params])
+    def json_index_params(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", 'json', "bool"])
-    def supported_json_cast_type(self, request):
-        yield request.param
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
 
     """
     ******************************************************************

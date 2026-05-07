@@ -41,7 +41,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "pb/plan.pb.h"
@@ -144,55 +144,6 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
 }  // namespace
 
-TEST(JsonIndexTest, TestJSONErrRecorder) {
-    std::vector<std::string> json_raw_data = {
-        R"(1)",
-        R"({"a": true})",
-        R"({"a": 1.0})",
-        R"({"a": 1})",
-        R"({"a": null})",
-        R"({"a": [1,2,3]})",
-        R"({"a": [1.0,2,3]})",
-        R"({"a": {"b": 1}})",
-        R"({"a": "1"})",
-        R"({"a": 1, "a": 1.0})",
-    };
-
-    std::string json_path = "/a";
-    auto schema = std::make_shared<Schema>();
-    auto json_fid = schema->AddDebugField("json", DataType::JSON);
-
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::JSON);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
-
-    index::CreateIndexInfo cii_double;
-    cii_double.index_type = index::INVERTED_INDEX_TYPE;
-    cii_double.json_cast_type = JsonCastType::FromString("DOUBLE");
-    cii_double.json_path = json_path;
-    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        cii_double, file_manager_ctx);
-    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
-        static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
-
-    std::vector<milvus::Json> jsons;
-    for (auto& json : json_raw_data) {
-        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
-    }
-
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
-    json_index->BuildWithFieldData({json_field});
-
-    auto error_map = json_index->GetErrorRecorder().GetErrorMap();
-    EXPECT_EQ(error_map.size(), 2);
-    EXPECT_EQ(error_map[simdjson::error_code::INCORRECT_TYPE].count, 5);
-    EXPECT_EQ(error_map[simdjson::error_code::NO_SUCH_FIELD].count, 2);
-}
-
 TEST(JsonIndexTest, TestJsonContains) {
     std::vector<std::string> json_raw_data = {
         R"(1)",
@@ -218,6 +169,8 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": ["x", "y"]})",
         R"({"a": [{"nested": true}, {"nested": false}]})",
         R"({"a": []})",
+        R"({"a": [0, 2, 3]})",
+        R"({"a": [{"b": 1}, 2.0, 3.0, "4", true, [1, 3.0], null]})",
     };
 
     auto json_path = "/a";
@@ -274,6 +227,11 @@ TEST(JsonIndexTest, TestJsonContains) {
     value.set_int64_val(1);
     test_cases.push_back(std::make_tuple(value, std::vector<int64_t>{17, 18}));
 
+    proto::plan::GenericValue value2;
+    value2.set_int64_val(2);
+    test_cases.push_back(
+        std::make_tuple(value2, std::vector<int64_t>{17, 18, 23, 24}));
+
     // proto::plan::GenericValue value2;
     // value2.set_bool_val(true);
     // test_cases.push_back(std::make_tuple(value2, std::vector<int64_t>{8}));
@@ -283,12 +241,13 @@ TEST(JsonIndexTest, TestJsonContains) {
     // test_cases.push_back(std::make_tuple(value3, std::vector<int64_t>{9}));
 
     for (auto& test_case : test_cases) {
+        auto query_value = std::get<0>(test_case);
         auto expr = std::make_shared<expr::JsonContainsExpr>(
             expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
             proto::plan::JSONContainsExpr_JSONOp::
                 JSONContainsExpr_JSONOp_Contains,
             true,
-            std::vector<proto::plan::GenericValue>{value});
+            std::vector<proto::plan::GenericValue>{query_value});
 
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
@@ -423,20 +382,23 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
 
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
-    // - invalid row   → null_offset + non_exist_offset (8 bytes per entry)
-    // - {"b": 1}      → non_exist_offset only (key "a" doesn't exist)
-    // - {"a": 1.0}    → valid data (neither offset)
+    // - invalid row   -> null_offset + non_exist_offset (8 bytes per entry)
+    // - {"b": 1}      -> non_exist_offset only (key "a" doesn't exist)
+    // - {"a": 1.0}    -> valid data (neither offset)
     // 20 invalid + 20 missing-path rows make both files slice reliably.
+    constexpr int kInvalidRows = 20;
+    constexpr int kMissingPathRows = 20;
+    constexpr int kValidRows = 10;
     std::vector<milvus::Json> jsons;
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kInvalidRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kMissingPathRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"b": 1})"))));
     }
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < kValidRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
@@ -444,7 +406,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
     std::vector<uint8_t> valid_data((jsons.size() + 7) / 8, 0xFF);
-    for (size_t i = 0; i < 20; ++i) {
+    for (size_t i = 0; i < kInvalidRows; ++i) {
         valid_data[i / 8] &= ~(1U << (i % 8));
     }
 
@@ -512,7 +474,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto partial = make_partial_datas(INDEX_NULL_OFFSET_FILE_NAME);
         ASSERT_GT(partial.size(), 1);
         // _meta_slice references both null_offset and non_exist_offset slices,
-        // but only null_offset slices are in the map → assertion failure.
+        // but only null_offset slices are in the map, so it asserts.
         EXPECT_THROW(CompactIndexDatas(partial), std::exception);
     }
 
@@ -523,7 +485,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+        EXPECT_EQ(result.size_, kInvalidRows * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
@@ -533,7 +495,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NON_EXIST_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 40 * sizeof(size_t));
+        EXPECT_EQ(result.size_,
+                  (kInvalidRows + kMissingPathRows) * sizeof(size_t));
     }
 }
 

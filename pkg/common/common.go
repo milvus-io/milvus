@@ -115,9 +115,19 @@ const (
 	// - Packed single-file index layout (file format v3) becomes the default
 	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
 	//   INVERTED to STL_SORT
+	//
+	// Scalar index engine version 4:
+	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
+	//   the existing INVERTED / NGRAM)
+	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(3)
-	MaximumScalarIndexEngineVersion = int32(3)
+	CurrentScalarIndexEngineVersion = int32(4)
+	MaximumScalarIndexEngineVersion = int32(4)
+
+	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
+	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
+	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
+	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

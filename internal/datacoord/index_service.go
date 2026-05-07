@@ -180,6 +180,36 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		// set nested path as json path
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
+
+		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index
+		// engine version >= MinScalarIndexVersionForJsonPathMultiType.
+		//
+		// For AutoIndex requests, transparently downgrade the requested type
+		// to INVERTED if the cluster version is too low — this keeps AutoIndex
+		// creating *some* usable index during rolling upgrade instead of
+		// failing outright. For explicit user requests, return an error.
+		indexType := common.GetIndexType(req.GetIndexParams())
+		if indexType == indexparamcheck.IndexSTLSORT ||
+			indexType == indexparamcheck.IndexBitmap ||
+			indexType == indexparamcheck.IndexHybrid {
+			resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
+			if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+				if req.GetIsAutoIndex() {
+					log.Info("downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
+						zap.String("requestedType", indexType),
+						zap.Int32("resolvedVersion", resolved),
+						zap.Int32("requiredVersion", common.MinScalarIndexVersionForJsonPathMultiType))
+					setIndexParam(req.GetIndexParams(), common.IndexTypeKey,
+						indexparamcheck.IndexINVERTED)
+				} else {
+					err := merr.WrapErrParameterInvalidMsg(
+						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
+						indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+					log.Warn("scalar index engine version too low for JSON path index", zap.Error(err))
+					return merr.Status(err), nil
+				}
+			}
+		}
 	}
 
 	if req.GetIndexName() == "" {
