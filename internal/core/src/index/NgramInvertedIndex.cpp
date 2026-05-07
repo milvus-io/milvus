@@ -194,15 +194,7 @@ NgramInvertedIndex::BuildWithJsonFieldData(
 
 BinarySet
 NgramInvertedIndex::Serialize(const Config& config) {
-    auto res_set = InvertedIndexTantivy<std::string>::Serialize(config);
-
-    // Serialize avg_row_size
-    std::shared_ptr<uint8_t[]> avg_row_size_data(new uint8_t[sizeof(size_t)]);
-    memcpy(avg_row_size_data.get(), &avg_row_size_, sizeof(size_t));
-    res_set.Append(
-        NGRAM_AVG_ROW_SIZE_FILE_NAME, avg_row_size_data, sizeof(size_t));
-
-    return res_set;
+    return InvertedIndexTantivy<std::string>::Serialize(config);
 }
 
 IndexStatsPtr
