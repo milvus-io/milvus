@@ -18,6 +18,7 @@ package merr
 
 import (
 	"github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors/markers"
 	"github.com/samber/lo"
 )
 
@@ -36,6 +37,11 @@ const (
 var ErrorTypeName = map[ErrorType]string{
 	SystemError: "system_error",
 	InputError:  "input_error",
+}
+
+// ErrorClassifier defines the method to get the broad classification of a Milvus error.
+type ErrorClassifier interface {
+	GetErrorType() ErrorType
 }
 
 func (err ErrorType) String() string {
@@ -60,20 +66,23 @@ var (
 	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 	ErrServiceTimeTickLongDelay    = newMilvusError("time tick long delay", 11, false)
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
+	ErrOldSessionExists            = newMilvusError("old session exists", 13, false)
+	ErrOperationNotSupported       = newMilvusError("unsupported operation", 14, false)
 
 	// Collection related
-	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false)
+	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false, WithErrorType(InputError))
 	ErrCollectionNotLoaded                     = newMilvusError("collection not loaded", 101, false)
-	ErrCollectionNumLimitExceeded              = newMilvusError("exceeded the limit number of collections", 102, false)
+	ErrCollectionNumLimitExceeded              = newMilvusError("exceeded the limit number of collections", 102, false, WithErrorType(InputError))
 	ErrCollectionNotFullyLoaded                = newMilvusError("collection not fully loaded", 103, true)
-	ErrCollectionLoaded                        = newMilvusError("collection already loaded", 104, false)
-	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
+	ErrCollectionLoaded                        = newMilvusError("collection already loaded", 104, false, WithErrorType(InputError))
+	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false, WithErrorType(InputError))
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
-	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
+	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false, WithErrorType(InputError))
 	// Deprecated, keep it only for reserving the error code
-	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false)
-	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false)
+	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false, WithErrorType(InputError))
+	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false, WithErrorType(InputError))
 	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
+
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
@@ -83,13 +92,13 @@ var (
 	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)
 
 	// ResourceGroup related
-	ErrResourceGroupNotFound      = newMilvusError("resource group not found", 300, false)
-	ErrResourceGroupAlreadyExist  = newMilvusError("resource group already exist, but create with different config", 301, false)
-	ErrResourceGroupReachLimit    = newMilvusError("resource group num reach limit", 302, false)
-	ErrResourceGroupIllegalConfig = newMilvusError("resource group illegal config", 303, false)
+	ErrResourceGroupNotFound      = newMilvusError("resource group not found", 300, false, WithErrorType(InputError))
+	ErrResourceGroupAlreadyExist  = newMilvusError("resource group already exist, but create with different config", 301, false, WithErrorType(InputError))
+	ErrResourceGroupReachLimit    = newMilvusError("resource group num reach limit", 302, false, WithErrorType(InputError))
+	ErrResourceGroupIllegalConfig = newMilvusError("resource group illegal config", 303, false, WithErrorType(InputError))
 	// go:deprecated
-	ErrResourceGroupNodeNotEnough    = newMilvusError("resource group node not enough", 304, false)
-	ErrResourceGroupServiceAvailable = newMilvusError("resource group service available", 305, true)
+	ErrResourceGroupNodeNotEnough      = newMilvusError("resource group node not enough", 304, false)
+	ErrResourceGroupServiceUnAvailable = newMilvusError("resource group service unavailable", 305, true)
 
 	// Replica related
 	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)
@@ -117,13 +126,13 @@ var (
 	// Index related
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)
 	ErrIndexNotSupported = newMilvusError("index type not supported", 701, false)
-	ErrIndexDuplicate    = newMilvusError("index duplicates", 702, false)
+	ErrIndexDuplicate    = newMilvusError("index duplicates", 702, false, WithErrorType(InputError))
 	ErrTaskDuplicate     = newMilvusError("task duplicates", 703, false)
 
 	// Database related
-	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false)
-	ErrDatabaseNumLimitExceeded = newMilvusError("exceeded the limit number of database", 801, false)
-	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false)
+	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false, WithErrorType(InputError))
+	ErrDatabaseNumLimitExceeded = newMilvusError("exceeded the limit number of database", 801, false, WithErrorType(InputError))
+	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false, WithErrorType(InputError))
 
 	// Node related
 	ErrNodeNotFound        = newMilvusError("node not found", 901, false)
@@ -166,7 +175,7 @@ var (
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first
-	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false)
+	ErrPrivilegeNotAuthenticated = newMilvusError("not authenticated", 1400, false, WithErrorType(InputError))
 	// this operation is denied because the user has no permission to do this, user need higher privilege
 	ErrPrivilegeNotPermitted     = newMilvusError("privilege not permitted", 1401, false)
 	ErrPrivilegeGroupInvalidName = newMilvusError("invalid privilege group name", 1402, false)
@@ -212,7 +221,7 @@ var (
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)
 
 	// import
-	ErrImportFailed = newMilvusError("importing data failed", 2100, false)
+	ErrImportFailed = newMilvusError("importing data failed", 2100, false, WithErrorType(InputError))
 
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
@@ -250,11 +259,6 @@ var (
 	// Snapshot related
 	ErrSnapshotNotFound = newMilvusError("snapshot not found", 2600, false)
 	ErrSnapshotPinned   = newMilvusError("snapshot is pinned", 2601, false)
-
-	// General
-	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
-
-	ErrOldSessionExists = newMilvusError("old session exists", 3001, false)
 )
 
 type errorOption func(*milvusError)
@@ -313,6 +317,53 @@ func (e milvusError) Is(err error) bool {
 	return false
 }
 
+// GetErrorType implements the ErrorClassifier interface.
+// It returns the predefined classification of the error (SystemError or InputError).
+func (e milvusError) GetErrorType() ErrorType {
+	return e.errType
+}
+
+// wrappedMilvusError wraps an underlying error with a milvus sentinel and a
+// contextual message, while preserving the inner error chain. Designed so
+// all of the following work on the result, under both stdlib and cockroachdb
+// errors.Is semantics:
+//
+//   - errors.Is(result, sentinel)      → true   (matched via Is)
+//   - errors.Is(result, originalInner) → true   (inner reachable via Unwrap)
+//   - merr.Code(result)                → sentinel's errCode
+//
+// Cause is intentionally NOT overridden: cockroachdb's errors.Is walks the
+// Cause chain first, so returning the sentinel from Cause would hide the
+// inner error. Instead, merr.Code special-cases this type.
+type wrappedMilvusError struct {
+	msg      string
+	inner    error
+	sentinel milvusError
+}
+
+func (w *wrappedMilvusError) Error() string { return w.msg + ": " + w.inner.Error() }
+
+// Unwrap exposes the original error so errors.Is(w, originalInner) works
+// under both stdlib and cockroachdb chain walkers.
+func (w *wrappedMilvusError) Unwrap() error { return w.inner }
+
+// Is matches any milvus sentinel by delegating to the wrapped sentinel.
+func (w *wrappedMilvusError) Is(target error) bool {
+	return errors.Is(w.sentinel, target)
+}
+
+// code lets merr.Code retrieve the milvus error code without needing to
+// resolve the cause chain (which has been redirected to the inner error).
+func (w *wrappedMilvusError) code() int32 {
+	return w.sentinel.errCode
+}
+
+// GetErrorType lets ErrorClassifier consumers (proxy metrics, retry policy)
+// see the same classification as the sentinel.
+func (w *wrappedMilvusError) GetErrorType() ErrorType {
+	return w.sentinel.errType
+}
+
 type multiErrors struct {
 	errs []error
 }
@@ -357,4 +408,16 @@ func Combine(errs ...error) error {
 	return multiErrors{
 		errs,
 	}
+}
+
+func Wrap(err error, msg string) error {
+	return errors.Wrap(err, msg)
+}
+
+func Wrapf(err error, format string, args ...interface{}) error {
+	return errors.Wrapf(err, format, args...)
+}
+
+func Mark(err error, reference error) error {
+	return markers.Mark(err, reference)
 }
