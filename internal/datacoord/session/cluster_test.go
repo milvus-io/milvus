@@ -294,7 +294,10 @@ func TestCluster_Import(t *testing.T) {
 		// Mock response
 		properties := taskcommon.NewProperties(nil)
 		properties.AppendTaskState(taskcommon.Finished)
-		expectedResult := &datapb.QueryPreImportResponse{}
+		expectedResult := &datapb.QueryPreImportResponse{
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Completed,
+		}
 		payload, _ := proto.Marshal(expectedResult)
 		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
 			Status:     merr.Success(),
@@ -319,7 +322,10 @@ func TestCluster_Import(t *testing.T) {
 		// Mock response
 		properties := taskcommon.NewProperties(nil)
 		properties.AppendTaskState(taskcommon.Finished)
-		expectedResult := &datapb.QueryImportResponse{}
+		expectedResult := &datapb.QueryImportResponse{
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Completed,
+		}
 		payload, _ := proto.Marshal(expectedResult)
 		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
 			Status:     merr.Success(),
@@ -331,6 +337,27 @@ func TestCluster_Import(t *testing.T) {
 		result, err := cluster.QueryImport(1, &datapb.QueryImportRequest{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
+	})
+
+	t.Run("query import finished with empty payload returns error", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		properties.AppendReason("result payload is empty")
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryImport(1, &datapb.QueryImportRequest{TaskID: 1})
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "result payload is empty")
 	})
 
 	t.Run("drop import", func(t *testing.T) {
@@ -346,6 +373,117 @@ func TestCluster_Import(t *testing.T) {
 		err := cluster.DropImport(1, 1)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCluster_QueryTerminalEmptyPayloadReturnsError(t *testing.T) {
+	testCases := []struct {
+		name      string
+		taskType  taskcommon.Type
+		queryFunc func(Cluster) error
+	}{
+		{
+			name:     "compaction",
+			taskType: taskcommon.Compaction,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 1})
+				return err
+			},
+		},
+		{
+			name:     "preimport",
+			taskType: taskcommon.PreImport,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryPreImport(1, &datapb.QueryPreImportRequest{TaskID: 1})
+				return err
+			},
+		},
+		{
+			name:     "import",
+			taskType: taskcommon.Import,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryImport(1, &datapb.QueryImportRequest{TaskID: 1})
+				return err
+			},
+		},
+		{
+			name:     "index",
+			taskType: taskcommon.Index,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryIndex(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+				return err
+			},
+		},
+		{
+			name:     "stats",
+			taskType: taskcommon.Stats,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryStats(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+				return err
+			},
+		},
+		{
+			name:     "analyze",
+			taskType: taskcommon.Analyze,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryAnalyze(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+				return err
+			},
+		},
+		{
+			name:     "refresh external collection",
+			taskType: taskcommon.RefreshExternalCollection,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryRefreshExternalCollectionTask(1, 1)
+				return err
+			},
+		},
+		{
+			name:     "copy segment",
+			taskType: taskcommon.CopySegment,
+			queryFunc: func(cluster Cluster) error {
+				_, err := cluster.QueryCopySegment(1, &datapb.QueryCopySegmentRequest{TaskID: 1})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		for _, state := range []taskcommon.State{taskcommon.Finished, taskcommon.Failed} {
+			for _, payloadCase := range []struct {
+				name    string
+				payload []byte
+			}{
+				{name: "nil_payload"},
+				{name: "empty_payload", payload: []byte{}},
+			} {
+				t.Run(tc.name+"_"+state.String()+"_"+payloadCase.name, func(t *testing.T) {
+					mockNodeManager := NewMockNodeManager(t)
+					cluster := NewCluster(mockNodeManager)
+
+					mockClient := mocks.NewMockDataNodeClient(t)
+					mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+					properties := taskcommon.NewProperties(nil)
+					properties.AppendTaskState(state)
+					properties.AppendReason("result payload is empty")
+					mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+						Status:     merr.Success(),
+						Properties: properties,
+						Payload:    payloadCase.payload,
+					}, nil)
+
+					var err error
+					assert.NotPanics(t, func() {
+						err = tc.queryFunc(cluster)
+					})
+					assert.Error(t, err)
+					assert.Contains(t, err.Error(), tc.taskType)
+					assert.Contains(t, err.Error(), state.String())
+					assert.Contains(t, err.Error(), "result payload is empty")
+				})
+			}
+		}
+	}
 }
 
 func TestCluster_Index(t *testing.T) {
