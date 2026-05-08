@@ -95,7 +95,7 @@ func (w *LoadConfigWatcher) background() {
 
 // applyLoadConfigChanges applies the load config changes.
 func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
-	w.s.tryPromoteReadyReplicaVisibility(w.notifier.Context())
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 
 	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
 	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
@@ -137,15 +137,11 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Info("no collection to update load config, skip it")
 	}
 
-	batchID := w.s.replicaVisibilityManager.BeginBatch()
-	err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true)
-	if err != nil {
-		w.s.replicaVisibilityManager.CancelBatch(batchID)
+	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
 		w.Logger().Warn("failed to update load config", zap.Error(err))
 		return err
 	}
-	w.s.replicaVisibilityManager.EndBatch(batchID)
-	w.s.tryPromoteReadyReplicaVisibility(w.notifier.Context())
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 	w.Logger().Info("apply load config changes",
 		zap.Int64s("collectionIDs", collectionIDs),
 		zap.Int32("previousReplicaNum", w.previousReplicaNum),

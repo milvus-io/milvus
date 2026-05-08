@@ -45,11 +45,6 @@ type UpdateLoadConfigJob struct {
 	proxyManager             proxyutil.ProxyClientManagerInterface
 	userSpecifiedReplicaMode bool
 	needWaitRGReady          bool
-	replicaVisibilityManager ReplicaVisibilityManager
-}
-
-type ReplicaVisibilityManager interface {
-	AddInvisibleReplicas(collectionID int64, replicas ...*meta.Replica)
 }
 
 func NewUpdateLoadConfigJob(ctx context.Context,
@@ -61,13 +56,8 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 	proxyManager proxyutil.ProxyClientManagerInterface,
 	userSpecifiedReplicaMode bool,
 	needWaitRGReady bool,
-	replicaVisibilityManagers ...ReplicaVisibilityManager,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
-	var replicaVisibilityManager ReplicaVisibilityManager
-	if len(replicaVisibilityManagers) > 0 {
-		replicaVisibilityManager = replicaVisibilityManagers[0]
-	}
 	return &UpdateLoadConfigJob{
 		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), collectionID),
 		meta:                     meta,
@@ -80,7 +70,6 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 		newResourceGroups:        req.GetResourceGroups(),
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		needWaitRGReady:          needWaitRGReady,
-		replicaVisibilityManager: replicaVisibilityManager,
 	}
 }
 
@@ -125,15 +114,13 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	var spawnOpts []meta.SpawnOption
 	if job.needWaitRGReady {
 		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+		spawnOpts = append(spawnOpts, meta.WithQueryVisible(false))
 	}
 	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
 		log.Warn("failed to spawn replica", zap.Error(spawnErr))
 		err := spawnErr
 		return err
-	}
-	if job.replicaVisibilityManager != nil {
-		job.replicaVisibilityManager.AddInvisibleReplicas(job.collectionID, newReplicas...)
 	}
 	defer func() {
 		if err != nil {
