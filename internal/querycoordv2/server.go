@@ -133,8 +133,7 @@ type Server struct {
 	nodeIdx atomic.Uint32
 
 	// load config watcher
-	loadConfigWatcher        *LoadConfigWatcher
-	replicaVisibilityManager *replicaVisibilityManager
+	loadConfigWatcher *LoadConfigWatcher
 }
 
 type FileResourceObserver interface {
@@ -145,10 +144,9 @@ type FileResourceObserver interface {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:                      ctx,
-		cancel:                   cancel,
-		metricsRequest:           metricsinfo.NewMetricsRequest(),
-		replicaVisibilityManager: newReplicaVisibilityManager(),
+		ctx:            ctx,
+		cancel:         cancel,
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator

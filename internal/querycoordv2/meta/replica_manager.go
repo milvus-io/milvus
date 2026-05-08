@@ -164,6 +164,39 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 	return m.replicas[id]
 }
 
+func (m *ReplicaManager) GetQueryInvisibleReplicas(ctx context.Context) []*Replica {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	replicas := make([]*Replica, 0)
+	for _, replica := range m.replicas {
+		if !replica.IsQueryVisible() {
+			replicas = append(replicas, replica)
+		}
+	}
+	return replicas
+}
+
+func (m *ReplicaManager) SetReplicasQueryVisible(ctx context.Context, replicaIDs ...typeutil.UniqueID) []typeutil.UniqueID {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collections := typeutil.NewUniqueSet()
+	modifiedReplicas := make([]*Replica, 0, len(replicaIDs))
+	for _, replicaID := range replicaIDs {
+		replica := m.replicas[replicaID]
+		if replica == nil || replica.IsQueryVisible() {
+			continue
+		}
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.SetQueryVisible(true)
+		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
+		collections.Insert(replica.GetCollectionID())
+	}
+	m.putReplicaInMemory(modifiedReplicas...)
+	return collections.Collect()
+}
+
 type SpawnWithReplicaConfigParams struct {
 	CollectionID int64
 	Channels     []string
@@ -244,7 +277,8 @@ func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
 type SpawnOption func(*spawnConfig)
 
 type spawnConfig struct {
-	waitRGReady bool
+	waitRGReady  bool
+	queryVisible bool
 }
 
 // WithNeedWaitRGReady returns a SpawnOption that enables waiting for resource group readiness.
@@ -258,11 +292,19 @@ func WithNeedWaitRGReady() SpawnOption {
 	}
 }
 
+func WithQueryVisible(visible bool) SpawnOption {
+	return func(cfg *spawnConfig) {
+		cfg.queryVisible = visible
+	}
+}
+
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
 func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
 	channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption,
 ) ([]*Replica, error) {
-	cfg := &spawnConfig{}
+	cfg := &spawnConfig{
+		queryVisible: true,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -290,6 +332,7 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 			if cfg.waitRGReady {
 				mutableReplica.SetWaitRGReadyAt(time.Now())
 			}
+			mutableReplica.SetQueryVisible(cfg.queryVisible)
 			if enableChannelExclusiveMode {
 				mutableReplica.TryEnableChannelExclusiveMode(channels...)
 			}
