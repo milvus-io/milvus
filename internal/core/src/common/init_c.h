@@ -53,6 +53,9 @@ void
 SetDefaultOptimizeExprEnable(bool val);
 
 void
+SetDefaultJSONKeyStatsEnable(bool val);
+
+void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);
 
 void

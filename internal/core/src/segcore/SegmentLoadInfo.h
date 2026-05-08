@@ -98,6 +98,19 @@ struct LoadDiff {
                        std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
         text_indexes_to_load;
 
+    // JSON stats that need to be loaded from pre-built files
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>>
+        json_stats_to_load;
+
+    // JSON stats that need to replace existing stats
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>>
+        json_stats_to_replace;
+
+    // JSON stats that need to be dropped
+    std::unordered_set<FieldId> json_stats_to_drop;
+
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
@@ -122,7 +135,8 @@ struct LoadDiff {
                !column_groups_to_lazyreplace.empty() ||
                !fields_to_reload.empty() || !indexes_to_drop.empty() ||
                !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
-               !text_indexes_to_load.empty() ||
+               !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
+               !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
                !text_indexes_to_create.empty() || manifest_updated ||
                load_external_manifest;
     }
@@ -299,6 +313,39 @@ struct LoadDiff {
         oss << "text_indexes_to_load=[";
         first = true;
         for (const auto& [field_id, stats] : text_indexes_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_load
+        oss << "json_stats_to_load=[";
+        first = true;
+        for (const auto& [field_id, stats] : json_stats_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_replace
+        oss << "json_stats_to_replace=[";
+        first = true;
+        for (const auto& [field_id, stats] : json_stats_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_drop
+        oss << "json_stats_to_drop=[";
+        first = true;
+        for (const auto& field_id : json_stats_to_drop) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -971,6 +1018,11 @@ class SegmentLoadInfo {
         const proto::segcore::TextIndexStats& text_index_stats,
         FieldId field_id) const;
 
+    [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
+    ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+        const proto::segcore::JsonKeyStats& json_key_stats,
+        FieldId field_id) const;
+
  private:
     void
     BuildCache() {
@@ -1021,6 +1073,9 @@ class SegmentLoadInfo {
 
     void
     ComputeDiffTextIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    void
+    ComputeDiffJsonKeyStats(LoadDiff& diff, SegmentLoadInfo& new_info);
 
     ProtoType info_;
 
