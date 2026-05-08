@@ -107,6 +107,7 @@ func (s *SyncTaskSuite) SetupTest() {
 	s.chunkManager = mocks.NewChunkManager(s.T())
 	s.chunkManager.EXPECT().RootPath().Return("/tmp").Maybe()
 	s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.chunkManager.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())

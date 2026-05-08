@@ -30,44 +30,52 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type PackWriter interface {
-	Write(ctx context.Context, pack *SyncPack) (
-		inserts []*datapb.Binlog, deletes *datapb.Binlog, stats *datapb.Binlog, bm25Stats *datapb.Binlog,
-		size int64, err error)
-}
 
 type BulkPackWriter struct {
 	metaCache      metacache.MetaCache
 	schema         *schemapb.CollectionSchema
 	chunkManager   storage.ChunkManager
 	allocator      allocator.Interface
+	pack           *SyncPack
+	segmentWriter  *SegmentWriter
 	writeRetryOpts []retry.Option
 
-	// prefetched log ids
 	sizeWritten int64
 }
 
 func NewBulkPackWriter(metaCache metacache.MetaCache,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
-	allocator allocator.Interface, writeRetryOpts ...retry.Option,
+	allocator allocator.Interface,
+	pack *SyncPack,
+	writeRetryOpts ...retry.Option,
 ) *BulkPackWriter {
 	return &BulkPackWriter{
-		metaCache:      metaCache,
-		schema:         schema,
-		chunkManager:   chunkManager,
-		allocator:      allocator,
+		metaCache:    metaCache,
+		schema:       schema,
+		chunkManager: chunkManager,
+		allocator:    allocator,
+		pack:         pack,
+		segmentWriter: &SegmentWriter{SegmentWriteContext: SegmentWriteContext{
+			CollectionID: pack.collectionID,
+			PartitionID:  pack.partitionID,
+			SegmentID:    pack.segmentID,
+			TsFrom:       pack.tsFrom,
+			TsTo:         pack.tsTo,
+			Schema:       schema,
+			ChunkManager: chunkManager,
+			Allocator:    allocator,
+			RetryOptions: writeRetryOpts,
+		}},
 		writeRetryOpts: writeRetryOpts,
 	}
 }
 
-func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
+func (bw *BulkPackWriter) Write(ctx context.Context) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
@@ -75,19 +83,19 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
+	if inserts, err = bw.writeInserts(ctx); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
 	}
-	if stats, err = bw.writeStats(ctx, pack); err != nil {
+	if stats, err = bw.writeStats(ctx); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	if deltas, err = bw.writeDelta(ctx); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
-	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
+	if bm25Stats, err = bw.writeBM25Stasts(ctx); err != nil {
 		log.Error("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
@@ -97,37 +105,8 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	return
 }
 
-func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
-	root, p string, pack *SyncPack,
-) (*datapb.Binlog, error) {
-	key := path.Join(bw.chunkManager.RootPath(), root, p)
-	err := retry.Handle(ctx, func() (bool, error) {
-		err := bw.chunkManager.Write(ctx, key, blob.Value)
-		if err == nil {
-			return false, nil
-		}
-		err = storage.ToMilvusIoError(key, err)
-		if merr.IsNonRetryableErr(err) {
-			return false, err
-		}
-		return true, err
-	}, bw.writeRetryOpts...)
-	if err != nil {
-		return nil, err
-	}
-	size := int64(len(blob.GetValue()))
-	bw.sizeWritten += size
-	return &datapb.Binlog{
-		EntriesNum:    blob.RowNum,
-		TimestampFrom: pack.tsFrom,
-		TimestampTo:   pack.tsTo,
-		LogPath:       key,
-		LogSize:       size,
-		MemorySize:    blob.MemorySize,
-	}, nil
-}
-
-func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeInserts(ctx context.Context) (map[int64]*datapb.FieldBinlog, error) {
+	pack := bw.pack
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
@@ -142,26 +121,16 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 		return nil, err
 	}
 
-	logs := make(map[int64]*datapb.FieldBinlog)
-	for fieldID, blob := range binlogBlobs {
-		id, err := bw.allocator.AllocOne()
-		if err != nil {
-			return nil, err
-		}
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, id)
-		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, k, pack)
-		if err != nil {
-			return nil, err
-		}
-		logs[fieldID] = &datapb.FieldBinlog{
-			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{binlog},
-		}
+	logs, size, err := bw.segmentWriter.WriteV1InsertBlobs(ctx, binlogBlobs)
+	if err != nil {
+		return nil, err
 	}
+	bw.sizeWritten += size
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeStats(ctx context.Context) (map[int64]*datapb.FieldBinlog, error) {
+	pack := bw.pack
 	if len(pack.insertData) == 0 {
 		// TODO: we should not skip here, if the flush operation don't carry any insert data,
 		// the merge stats operation will be skipped, which is a bad case.
@@ -180,41 +149,28 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
 
 	pkFieldID := serializer.pkField.GetFieldID()
-	binlogs := make([]*datapb.Binlog, 0)
-	id, err := bw.allocator.AllocOne()
+	var mergedStatsBlob *storage.Blob
+	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
+		mergedStatsBlob, err = serializer.serializeMergedPkStats(pack)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	logs, size, err := bw.segmentWriter.WriteV1StatsBlobs(ctx, V1StatsBlobsInput{
+		FieldID:    pkFieldID,
+		BatchBlob:  batchStatsBlob,
+		MergedBlob: mergedStatsBlob,
+	})
 	if err != nil {
 		return nil, err
 	}
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, id)
-	if binlog, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, k, pack); err != nil {
-		return nil, err
-	} else {
-		binlogs = append(binlogs, binlog)
-	}
-
-	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
-		mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
-		if err != nil {
-			return nil, err
-		}
-
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, int64(storage.CompoundStatsType))
-		binlog, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, k, pack)
-		if err != nil {
-			return nil, err
-		}
-		binlogs = append(binlogs, binlog)
-	}
-
-	logs := make(map[int64]*datapb.FieldBinlog)
-	logs[pkFieldID] = &datapb.FieldBinlog{
-		FieldID: pkFieldID,
-		Binlogs: binlogs,
-	}
+	bw.sizeWritten += size
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context) (map[int64]*datapb.FieldBinlog, error) {
+	pack := bw.pack
 	if len(pack.bm25Stats) == 0 {
 		// TODO: we should not skip here, if the flush operation don't carry any insert data,
 		// the merge stats operation will be skipped, which is a bad case.
@@ -230,55 +186,28 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 		return nil, err
 	}
 
-	logs := make(map[int64]*datapb.FieldBinlog)
-	for fieldID, blob := range bm25Blobs {
-		id, err := bw.allocator.AllocOne()
+	var mergedBM25Blob map[int64]*storage.Blob
+	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 && hasBM25Function(bw.schema) {
+		mergedBM25Blob, err = serializer.serializeMergedBM25Stats(pack)
 		if err != nil {
 			return nil, err
-		}
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, id)
-		binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, k, pack)
-		if err != nil {
-			return nil, err
-		}
-		logs[fieldID] = &datapb.FieldBinlog{
-			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{binlog},
 		}
 	}
-
+	logs, size, err := bw.segmentWriter.WriteV1BM25Blobs(ctx, V1BM25BlobsInput{
+		BatchBlobs:  bm25Blobs,
+		MergedBlobs: mergedBM25Blob,
+	})
+	if err != nil {
+		return nil, err
+	}
 	actions := []metacache.SegmentAction{metacache.MergeBm25Stats(pack.bm25Stats)}
 	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
-
-	if pack.isFlush {
-		if pack.level != datapb.SegmentLevel_L0 {
-			if hasBM25Function(bw.schema) {
-				mergedBM25Blob, err := serializer.serializeMergedBM25Stats(pack)
-				if err != nil {
-					return nil, err
-				}
-				for fieldID, blob := range mergedBM25Blob {
-					k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, int64(storage.CompoundStatsType))
-					binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, k, pack)
-					if err != nil {
-						return nil, err
-					}
-					fieldBinlog, ok := logs[fieldID]
-					if !ok {
-						fieldBinlog = &datapb.FieldBinlog{
-							FieldID: fieldID,
-						}
-						logs[fieldID] = fieldBinlog
-					}
-					fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, binlog)
-				}
-			}
-		}
-	}
+	bw.sizeWritten += size
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeDelta(ctx context.Context) (*datapb.FieldBinlog, error) {
+	pack := bw.pack
 	if pack.deltaData == nil || pack.deltaData.RowCount == 0 {
 		return &datapb.FieldBinlog{}, nil
 	}
@@ -296,43 +225,23 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, logID)
 	deltaPath := path.Join(bw.chunkManager.RootPath(), common.SegmentDeltaLogPath, k)
 
-	writer, err := storage.NewDeltalogWriter(
-		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, deltaPath,
-		storage.WithVersion(storage.StorageV1),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+	deltalog, size, err := bw.segmentWriter.WriteDelta(ctx, DeltaWriteParams{
+		LogID:      logID,
+		PKType:     pkField.DataType,
+		Path:       deltaPath,
+		DeleteData: pack.deltaData,
+		Version:    storage.StorageV1,
+		Uploader: func(ctx context.Context, kvs map[string][]byte) error {
 			for k, blob := range kvs {
 				return bw.chunkManager.Write(ctx, k, blob)
 			}
 			return nil
-		}),
-	)
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// Use existing utility to build delete record
-	record, tsFrom, tsTo, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
-	if err != nil {
-		return nil, err
-	}
-	defer record.Release()
-
-	if err = writer.Write(record); err != nil {
-		return nil, err
-	}
-	if err = writer.Close(); err != nil {
-		return nil, err
-	}
-
-	deltalog := &datapb.Binlog{
-		EntriesNum:    pack.deltaData.RowCount,
-		TimestampFrom: tsFrom,
-		TimestampTo:   tsTo,
-		LogPath:       deltaPath,
-		LogSize:       pack.deltaData.Size() / 4,
-		MemorySize:    pack.deltaData.Size(),
-	}
-	bw.sizeWritten += deltalog.LogSize
+	bw.sizeWritten += size
 
 	return &datapb.FieldBinlog{
 		FieldID: pkField.GetFieldID(),

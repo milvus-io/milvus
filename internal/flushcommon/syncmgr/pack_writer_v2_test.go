@@ -149,9 +149,9 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, pack, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	gotInserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, _, _, err := bw.Write(context.Background())
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
@@ -168,9 +168,9 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, pack, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, err := bw.Write(context.Background())
 	s.NoError(err)
 }
 
@@ -197,9 +197,9 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, pack, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, err := bw.Write(context.Background())
 	s.Error(err)
 }
 
@@ -214,9 +214,9 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, pack, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, err := bw.Write(context.Background())
 	s.Error(err)
 }
 
@@ -235,9 +235,9 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, pack, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
 
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	_, _, _, _, _, _, err := bw.Write(context.Background())
 	s.Error(err)
 }
 

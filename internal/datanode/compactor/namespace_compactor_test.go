@@ -113,11 +113,11 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		}).Return().Maybe()
 		fields := typeutil.GetAllFieldSchemas(s.schema)
 		columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
-		bw := syncmgr.NewBulkPackWriterV2(mc, s.schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+		bw := syncmgr.NewBulkPackWriterV2(mc, s.schema, cm, alloc, pack, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 			StorageType: "local",
 			RootPath:    rootPath,
 		}, columnGroups)
-		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+		inserts, _, _, _, _, _, err := bw.Write(context.Background())
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           int64(i),

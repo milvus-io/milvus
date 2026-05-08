@@ -41,12 +41,21 @@ type storageV1Serializer struct {
 }
 
 func NewStorageSerializer(metacache metacache.MetaCache, schema *schemapb.CollectionSchema) (*storageV1Serializer, error) {
+	serializer, err := NewStorageSerializerWithCollectionID(metacache.Collection(), schema)
+	if err != nil {
+		return nil, err
+	}
+	serializer.metacache = metacache
+	return serializer, nil
+}
+
+func NewStorageSerializerWithCollectionID(collectionID int64, schema *schemapb.CollectionSchema) (*storageV1Serializer, error) {
 	pkField := lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
 	if pkField == nil {
 		return nil, merr.WrapErrServiceInternal("cannot find pk field")
 	}
 	meta := &etcdpb.CollectionMeta{
-		ID:     metacache.Collection(),
+		ID:     collectionID,
 		Schema: schema,
 	}
 	inCodec := storage.NewInsertCodecWithSchema(meta)
@@ -54,17 +63,20 @@ func NewStorageSerializer(metacache metacache.MetaCache, schema *schemapb.Collec
 		schema:  schema,
 		pkField: pkField,
 
-		inCodec:   inCodec,
-		metacache: metacache,
+		inCodec: inCodec,
 	}, nil
 }
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
-	if len(pack.insertData) == 0 {
+	return s.SerializeBinlog(ctx, pack.partitionID, pack.segmentID, pack.insertData)
+}
+
+func (s *storageV1Serializer) SerializeBinlog(ctx context.Context, partitionID, segmentID int64, insertData []*storage.InsertData) (map[int64]*storage.Blob, error) {
+	if len(insertData) == 0 {
 		return make(map[int64]*storage.Blob), nil
 	}
 	log := log.Ctx(ctx)
-	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData...)
+	blobs, err := s.inCodec.Serialize(partitionID, segmentID, insertData...)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +95,15 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 }
 
 func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
-	if len(pack.bm25Stats) == 0 {
+	return s.SerializeBM25Stats(pack.bm25Stats)
+}
+
+func (s *storageV1Serializer) SerializeBM25Stats(bm25Stats map[int64]*storage.BM25Stats) (map[int64]*storage.Blob, error) {
+	if len(bm25Stats) == 0 {
 		return make(map[int64]*storage.Blob), nil
 	}
 	blobs := make(map[int64]*storage.Blob)
-	for fieldID, stats := range pack.bm25Stats {
+	for fieldID, stats := range bm25Stats {
 		bytes, err := stats.Serialize()
 		if err != nil {
 			return nil, err
@@ -103,12 +119,16 @@ func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*sto
 }
 
 func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
-	if len(pack.insertData) == 0 {
+	return s.SerializeStatslog(pack.insertData, pack.batchRows)
+}
+
+func (s *storageV1Serializer) SerializeStatslog(insertData []*storage.InsertData, batchRows int64) (*storage.PrimaryKeyStats, *storage.Blob, error) {
+	if len(insertData) == 0 {
 		return nil, nil, nil
 	}
 	var rowNum int64
 	var pkFieldData []storage.FieldData
-	for _, chunk := range pack.insertData {
+	for _, chunk := range insertData {
 		chunkPKData := chunk.Data[s.pkField.GetFieldID()]
 		pkFieldData = append(pkFieldData, chunkPKData)
 		rowNum += int64(chunkPKData.RowNum())
@@ -122,11 +142,23 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 		stats.UpdateByMsgs(chunkPkData)
 	}
 
-	blob, err := s.inCodec.SerializePkStats(stats, pack.batchRows)
+	blob, err := s.inCodec.SerializePkStats(stats, batchRows)
 	if err != nil {
 		return nil, nil, err
 	}
 	return stats, blob, nil
+}
+
+func (s *storageV1Serializer) PKFieldID() int64 {
+	return s.pkField.GetFieldID()
+}
+
+func (s *storageV1Serializer) PKFieldType() schemapb.DataType {
+	return s.pkField.GetDataType()
+}
+
+func (s *storageV1Serializer) SerializePKStatsList(stats []*storage.PrimaryKeyStats, rowNum int64) (*storage.Blob, error) {
+	return s.inCodec.SerializePkStatsList(stats, rowNum)
 }
 
 func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.Blob, error) {

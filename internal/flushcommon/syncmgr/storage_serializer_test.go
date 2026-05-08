@@ -243,6 +243,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 
 func (s *StorageV1SerializerSuite) TestBadSchema() {
 	mockCache := metacache.NewMockMetaCache(s.T())
+	mockCache.EXPECT().Collection().Return(s.collectionID).Maybe()
 	_, err := NewStorageSerializer(mockCache, &schemapb.CollectionSchema{})
 	s.Error(err)
 }

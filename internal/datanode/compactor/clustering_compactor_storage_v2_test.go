@@ -210,11 +210,11 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	sch := genCollectionSchema()
 	fields := typeutil.GetAllFieldSchemas(sch)
 	columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
-	bw := syncmgr.NewBulkPackWriterV2(mc, sch, cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+	bw := syncmgr.NewBulkPackWriterV2(mc, sch, cm, s.mockAlloc, pack, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups)
-	return bw.Write(context.Background(), pack)
+	return bw.Write(context.Background())
 }
 
 func genInsertData(size int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {

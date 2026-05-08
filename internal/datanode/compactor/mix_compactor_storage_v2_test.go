@@ -316,11 +316,11 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 	sch := s.meta.Schema
 	fields := typeutil.GetAllFieldSchemas(sch)
 	columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
-	bw := syncmgr.NewBulkPackWriterV2(mc, s.meta.Schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+	bw := syncmgr.NewBulkPackWriterV2(mc, s.meta.Schema, cm, alloc, pack, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups)
-	return bw.Write(context.Background(), pack)
+	return bw.Write(context.Background())
 }
 
 func getRowWithoutNil(magic int64) map[int64]interface{} {

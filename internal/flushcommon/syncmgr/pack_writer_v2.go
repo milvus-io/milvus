@@ -36,8 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -52,17 +50,11 @@ type BulkPackWriterV2 struct {
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
-	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
+	allocator allocator.Interface, pack *SyncPack, bufferSize, multiPartUploadSize int64,
 	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
-		BulkPackWriter: &BulkPackWriter{
-			metaCache:      metaCache,
-			schema:         schema,
-			chunkManager:   chunkManager,
-			allocator:      allocator,
-			writeRetryOpts: writeRetryOpts,
-		},
+		BulkPackWriter:      NewBulkPackWriter(metaCache, schema, chunkManager, allocator, pack, writeRetryOpts...),
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 		storageConfig:       storageConfig,
@@ -70,7 +62,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 	}
 }
 
-func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
+func (bw *BulkPackWriterV2) Write(ctx context.Context) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
@@ -79,19 +71,19 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
+	if inserts, manifest, err = bw.writeInserts(ctx); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
 	}
-	if stats, err = bw.writeStats(ctx, pack); err != nil {
+	if stats, err = bw.writeStats(ctx); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	if deltas, err = bw.writeDelta(ctx); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
-	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
+	if bm25Stats, err = bw.writeBM25Stasts(ctx); err != nil {
 		log.Error("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
@@ -99,23 +91,6 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size = bw.sizeWritten
 
 	return
-}
-
-// getRootPath returns the rootPath current task shall use.
-// when storageConfig is set, use the rootPath in it.
-// otherwise, use chunkManager.RootPath() instead.
-func (bw *BulkPackWriterV2) getRootPath() string {
-	if bw.storageConfig != nil {
-		return bw.storageConfig.RootPath
-	}
-	return bw.chunkManager.RootPath()
-}
-
-func (bw *BulkPackWriterV2) getBucketName() string {
-	if bw.storageConfig != nil {
-		return bw.storageConfig.BucketName
-	}
-	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
 func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) *indexcgopb.StoragePluginContext {
@@ -155,12 +130,13 @@ func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64)
 	return tsFrom, tsTo
 }
 
-func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
+func (bw *BulkPackWriterV2) writeInserts(ctx context.Context) (map[int64]*datapb.FieldBinlog, string, error) {
+	pack := bw.pack
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), "", nil
 	}
 
-	rec, err := bw.serializeBinlog(ctx, pack)
+	rec, err := bw.serializeBinlog(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -174,7 +150,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	if err := retry.Do(ctx, func() error {
 		var err error
-		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
+		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, rec, tsFrom, tsTo)
 		if err != nil {
 			log.Warn("failed to write inserts into storage",
 				zap.Int64("collectionID", pack.collectionID),
@@ -189,80 +165,24 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
-func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
+func (bw *BulkPackWriterV2) writeInsertsIntoStorage(ctx context.Context,
 	pluginContextPtr *indexcgopb.StoragePluginContext,
-	pack *SyncPack,
 	rec storage.Record,
 	tsFrom typeutil.Timestamp,
 	tsTo typeutil.Timestamp,
 ) (map[int64]*datapb.FieldBinlog, string, error) {
-	logs := make(map[int64]*datapb.FieldBinlog)
-	columnGroups := bw.columnGroups
-	bucketName := bw.getBucketName()
-
-	var err error
-	doWrite := func(w storage.RecordWriter) error {
-		if err = w.Write(rec); err != nil {
-			if closeErr := w.Close(); closeErr != nil {
-				log.Error("failed to close writer after write failed", zap.Error(closeErr))
-			}
-			return err
-		}
-		// close first the get stats & output
-		return w.Close()
-	}
-
-	var manifestPath string
-	getFieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
-		result := make(map[int64]int64, len(columnGroup.Fields))
-		for _, fieldID := range columnGroup.Fields {
-			if col := rec.Column(fieldID); col != nil {
-				result[fieldID] = int64(col.NullN())
-			}
-		}
-		return result
-	}
-
-	paths := make([]string, 0)
-	for _, columnGroup := range columnGroups {
-		id, err := bw.allocator.AllocOne()
-		if err != nil {
-			return nil, "", err
-		}
-		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
-		paths = append(paths, path)
-	}
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
-	if err != nil {
-		return nil, "", err
-	}
-	if err = doWrite(w); err != nil {
-		return nil, "", err
-	}
-	// workaround to store row num
-	for _, columnGroup := range columnGroups {
-		columnGroupID := columnGroup.GroupID
-		logs[columnGroupID] = &datapb.FieldBinlog{
-			FieldID:     columnGroupID,
-			ChildFields: columnGroup.Fields,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-					MemorySize:      int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
-					LogPath:         w.GetWrittenPaths(columnGroupID),
-					EntriesNum:      w.GetWrittenRowNum(),
-					TimestampFrom:   tsFrom,
-					TimestampTo:     tsTo,
-					FieldNullCounts: getFieldNullCounts(columnGroup),
-				},
-			},
-		}
-	}
-
-	return logs, manifestPath, nil
+	return (&PackedSegmentWriter{
+		SegmentWriter:       bw.segmentWriter.WithTimeRange(tsFrom, tsTo),
+		StorageConfig:       bw.storageConfig,
+		ColumnGroups:        bw.columnGroups,
+		BufferSize:          bw.bufferSize,
+		MultiPartUploadSize: bw.multiPartUploadSize,
+		PluginContext:       pluginContextPtr,
+	}).WritePackedInsert(ctx, rec)
 }
 
-func (bw *BulkPackWriterV2) serializeBinlog(_ context.Context, pack *SyncPack) (storage.Record, error) {
+func (bw *BulkPackWriterV2) serializeBinlog(_ context.Context) (storage.Record, error) {
+	pack := bw.pack
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}

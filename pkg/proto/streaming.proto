@@ -707,6 +707,21 @@ message SegmentAssignmentMeta {
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
+    L1SegmentPersistedStorage persisted_storage = 9; // L1 segment persisted storage.
+}
+
+message L1SegmentPersistedStorage {
+    string manifest_path = 1; // latest manifest path of current segment.
+    repeated L1SegmentBinLogs binlogs = 2;
+    data.FieldBinlog merged_stats_binlog = 3;
+}
+
+message L1SegmentBinLogs {
+    repeated data.FieldBinlog field_binlog = 1;
+    repeated data.FieldBinlog stats_binlog = 2;
+    repeated data.FieldBinlog bm25_binlog = 3;
+    uint64 from_time_tick = 4; // the time tick of the first message in the binlogs.
+    uint64 to_time_tick = 5; // the time tick of the last message in the binlogs.
 }
 
 enum SegmentAssignmentState {
@@ -726,6 +741,9 @@ message SegmentAssignmentStat {
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
     data.SegmentLevel level                   = 8; // The level of the segment, only L0 or L1.
     uint64 max_rows                           = 9; // The max rows of the segment.
+    uint64 begin_time_tick                    = 10; // The begin of first modified message in wal.
+    uint64 end_time_tick                      = 11; // The end of last modified message in wal.
+    uint64 flush_segment_time_tick            = 12; // The timetick of message with flush semantics in wal.
 }
 
 // The WALCheckpoint that is used to recovery the wal scanner.
