@@ -32,7 +32,7 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 		s.targetMgr == nil || s.dist == nil || s.dist.ChannelDistManager == nil || s.nodeMgr == nil {
 		return
 	}
-	replicas := s.meta.ReplicaManager.GetQueryInvisibleReplicas(ctx)
+	replicas := s.meta.GetQueryInvisibleReplicas(ctx)
 	if len(replicas) == 0 {
 		return
 	}
@@ -46,7 +46,7 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	for _, replica := range replicas {
 		replicaIDs = append(replicaIDs, replica.GetID())
 	}
-	collections := s.meta.ReplicaManager.SetReplicasQueryVisible(ctx, replicaIDs...)
+	collections := s.meta.SetReplicasQueryVisible(ctx, replicaIDs...)
 	if len(collections) == 0 {
 		return
 	}
