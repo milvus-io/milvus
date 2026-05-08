@@ -108,6 +108,11 @@ func (pool *Pool[T]) Free() int {
 	return pool.inner.Free()
 }
 
+// Waiting returns the number of tasks waiting to be executed
+func (pool *Pool[T]) Waiting() int {
+	return pool.inner.Waiting()
+}
+
 func (pool *Pool[T]) IsClosed() bool {
 	return pool.inner.IsClosed()
 }
