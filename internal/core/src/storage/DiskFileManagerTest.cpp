@@ -272,6 +272,36 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path);
 }
 
+TEST_F(DiskAnnFileManagerTest, ReadFullRelativeIndexPathWithStream) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "diskann_full_path";
+
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    EXPECT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    index_meta.index_store_path = "index_files_v1/1/2/3/1000/1";
+
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
+
+    uint64_t expected = 123456789;
+    auto os = diskAnnFileManager->OpenOutputStream("index_file");
+    os->Write(expected);
+    os->Close();
+
+    auto is = diskAnnFileManager->OpenInputStream(index_meta.index_store_path +
+                                                  "/index_file");
+    uint64_t actual = 0;
+    is->Read(actual);
+    EXPECT_EQ(actual, expected);
+
+    boost::filesystem::remove_all(conf.root_path);
+}
+
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};

@@ -192,10 +192,7 @@ class FileManagerImpl : public milvus::FileManager {
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         std::string remote_file_path;
-        // IndexFilePaths may contain either:
-        // - v0 legacy basename: "file1"; use IndexMeta to build the v0 prefix.
-        // - v0/v1 full object path: "root/index_files.../file1"; open it directly.
-        if (is_index_file && filename.find('/') != std::string::npos) {
+        if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
             remote_file_path = NormalizePath(filename);
         } else {
             auto local_file_name = GetFileName(filename);
@@ -324,6 +321,23 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
+    }
+
+    bool
+    ShouldOpenIndexFileDirectly(const std::string& filename,
+                                bool is_index_file) const {
+        if (!is_index_file || filename.find('/') == std::string::npos) {
+            return false;
+        }
+
+        // Absolute local paths are legacy caller inputs, not object keys.
+        // Local Arrow FS already applies its own root path.
+        if (milvus_storage::IsLocalFileSystem(fs_) &&
+            boost::filesystem::path(filename).is_absolute()) {
+            return false;
+        }
+
+        return true;
     }
 
     std::string
