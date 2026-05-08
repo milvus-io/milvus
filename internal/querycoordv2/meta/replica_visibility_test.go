@@ -34,7 +34,7 @@ func TestReplicaQueryVisibility(t *testing.T) {
 	assert.True(t, replica.IsQueryVisible())
 
 	mutableReplica := replica.CopyForWrite()
-	mutableReplica.SetQueryVisible(false)
+	mutableReplica.SetQueryInvisible(true)
 	replica = mutableReplica.IntoReplica()
 	assert.False(t, replica.IsQueryVisible())
 
@@ -59,7 +59,7 @@ func TestReplicaManagerQueryVisibility(t *testing.T) {
 		Nodes:        []int64{2},
 	})
 	mutableReplica := invisibleReplica.CopyForWrite()
-	mutableReplica.SetQueryVisible(false)
+	mutableReplica.SetQueryInvisible(true)
 	invisibleReplica = mutableReplica.IntoReplica()
 	manager.putReplicaInMemory(visibleReplica, invisibleReplica)
 
@@ -75,7 +75,7 @@ func TestReplicaManagerQueryVisibility(t *testing.T) {
 	manager.putReplicaInMemory(invisibleReplica)
 	assert.Len(t, manager.GetQueryInvisibleReplicas(ctx), 1)
 	mutableReplica = invisibleReplica.CopyForWrite()
-	mutableReplica.SetQueryVisible(true)
+	mutableReplica.SetQueryInvisible(false)
 	manager.putReplicaInMemory(mutableReplica.IntoReplica())
 	assert.Empty(t, manager.GetQueryInvisibleReplicas(ctx))
 }
