@@ -21,9 +21,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
-	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
