@@ -1565,7 +1565,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
         error = {
-            ct.err_code: 999,
+            ct.err_code: 1100,
             ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported",
         }
         index, _ = self.index_wrap.init_index(

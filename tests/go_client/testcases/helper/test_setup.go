@@ -1,8 +1,14 @@
 package helper
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -113,6 +119,56 @@ func teardown() {
 			_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(db))
 		}
 	}
+}
+
+// managementBaseURL returns the Milvus management API base URL (port 9091)
+// derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
+func managementBaseURL() string {
+	u, err := url.Parse(*addr)
+	if err != nil {
+		return "http://localhost:9091"
+	}
+	host := u.Hostname()
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:9091", host)
+}
+
+// AlterServerConfig changes a Milvus server config via the management HTTP API.
+// It returns the previous value so the caller can restore it.
+// If the management API is unreachable, it returns ("", error).
+func AlterServerConfig(key, value string) (string, error) {
+	// Get current value first
+	prev, _ := GetServerConfig(key)
+
+	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
+	resp, err := http.Post(managementBaseURL()+"/management/config/alter",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("management API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("alter config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+	log.Info("AlterServerConfig", zap.String("key", key), zap.String("value", value), zap.String("prev", prev))
+	return prev, nil
+}
+
+// GetServerConfig reads a config value from the management API.
+func GetServerConfig(key string) (string, error) {
+	resp, err := http.Get(managementBaseURL() + "/management/config/get?key=" + url.QueryEscape(key))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("get config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+	return string(respBody), nil
 }
 
 func RunTests(m *testing.M) int {
