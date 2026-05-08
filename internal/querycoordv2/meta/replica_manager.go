@@ -79,7 +79,7 @@ type ReplicaManager struct {
 	idAllocator            func() (int64, error)
 	replicas               map[typeutil.UniqueID]*Replica
 	coll2Replicas          map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
-	queryInvisibleReplicas map[typeutil.UniqueID]*Replica
+	queryInvisibleReplicas typeutil.UniqueSet
 	catalog                metastore.QueryCoordCatalog
 }
 
@@ -113,7 +113,7 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 		idAllocator:            idAllocator,
 		replicas:               make(map[int64]*Replica),
 		coll2Replicas:          make(map[int64]*collectionReplicas),
-		queryInvisibleReplicas: make(map[int64]*Replica),
+		queryInvisibleReplicas: typeutil.NewUniqueSet(),
 		catalog:                catalog,
 	}
 }
@@ -170,9 +170,11 @@ func (m *ReplicaManager) GetQueryInvisibleReplicas(ctx context.Context) []*Repli
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	replicas := make([]*Replica, 0, len(m.queryInvisibleReplicas))
-	for _, replica := range m.queryInvisibleReplicas {
-		replicas = append(replicas, replica)
+	replicas := make([]*Replica, 0, m.queryInvisibleReplicas.Len())
+	for replicaID := range m.queryInvisibleReplicas {
+		if replica := m.replicas[replicaID]; replica != nil {
+			replicas = append(replicas, replica)
+		}
 	}
 	return replicas
 }
@@ -189,7 +191,7 @@ func (m *ReplicaManager) SetReplicasQueryVisible(ctx context.Context, replicaIDs
 			continue
 		}
 		mutableReplica := replica.CopyForWrite()
-		mutableReplica.SetQueryVisible(true)
+		mutableReplica.SetQueryInvisible(false)
 		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		collections.Insert(replica.GetCollectionID())
 	}
@@ -277,8 +279,8 @@ func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
 type SpawnOption func(*spawnConfig)
 
 type spawnConfig struct {
-	waitRGReady  bool
-	queryVisible bool
+	waitRGReady    bool
+	queryInvisible bool
 }
 
 // WithNeedWaitRGReady returns a SpawnOption that enables waiting for resource group readiness.
@@ -292,9 +294,9 @@ func WithNeedWaitRGReady() SpawnOption {
 	}
 }
 
-func WithQueryVisible(visible bool) SpawnOption {
+func WithQueryInvisible() SpawnOption {
 	return func(cfg *spawnConfig) {
-		cfg.queryVisible = visible
+		cfg.queryInvisible = true
 	}
 }
 
@@ -302,9 +304,7 @@ func WithQueryVisible(visible bool) SpawnOption {
 func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
 	channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption,
 ) ([]*Replica, error) {
-	cfg := &spawnConfig{
-		queryVisible: true,
-	}
+	cfg := &spawnConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -332,7 +332,9 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 			if cfg.waitRGReady {
 				mutableReplica.SetWaitRGReadyAt(time.Now())
 			}
-			mutableReplica.SetQueryVisible(cfg.queryVisible)
+			if cfg.queryInvisible {
+				mutableReplica.SetQueryInvisible(true)
+			}
 			if enableChannelExclusiveMode {
 				mutableReplica.TryEnableChannelExclusiveMode(channels...)
 			}
@@ -375,18 +377,18 @@ func (m *ReplicaManager) put(ctx context.Context, replicas ...*Replica) error {
 // putReplicaInMemory puts replicas into in-memory map and collIDToReplicaIDs.
 func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
 	if m.queryInvisibleReplicas == nil {
-		m.queryInvisibleReplicas = make(map[typeutil.UniqueID]*Replica)
+		m.queryInvisibleReplicas = typeutil.NewUniqueSet()
 	}
 	for _, replica := range replicas {
 		if oldReplica, ok := m.replicas[replica.GetID()]; ok {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(oldReplica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(oldReplica.RONodesCount()))
-			delete(m.queryInvisibleReplicas, oldReplica.GetID())
+			m.queryInvisibleReplicas.Remove(oldReplica.GetID())
 		}
 		// update in-memory replicas.
 		m.replicas[replica.GetID()] = replica
 		if !replica.IsQueryVisible() {
-			m.queryInvisibleReplicas[replica.GetID()] = replica
+			m.queryInvisibleReplicas.Insert(replica.GetID())
 		}
 		metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Inc()
 		metrics.QueryCoordReplicaRONodeTotal.Add(float64(replica.RONodesCount()))
@@ -484,7 +486,7 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
 			delete(m.replicas, replica.GetID())
-			delete(m.queryInvisibleReplicas, replica.GetID())
+			m.queryInvisibleReplicas.Remove(replica.GetID())
 		}
 		delete(m.coll2Replicas, collectionID)
 	}
@@ -511,7 +513,7 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID typeut
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
 			delete(m.replicas, replicaID)
-			delete(m.queryInvisibleReplicas, replicaID)
+			m.queryInvisibleReplicas.Remove(replicaID)
 		}
 	}
 

@@ -280,7 +280,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 			ResourceGroup: "rg1",
 		}, typeutil.NewUniqueSet())
 		mutableReplica := replica.CopyForWrite()
-		mutableReplica.SetQueryVisible(false)
+		mutableReplica.SetQueryInvisible(true)
 		replicas := []*meta.Replica{mutableReplica.IntoReplica()}
 
 		coord := &mixCoordImpl{
