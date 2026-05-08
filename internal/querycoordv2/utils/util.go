@@ -172,6 +172,19 @@ func GetShardLeadersWithChannels(
 	channels map[string]*meta.DmChannel,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, nil)
+}
+
+func GetShardLeadersWithChannelsAndReplicaFilter(
+	ctx context.Context,
+	m *meta.Meta,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	channels map[string]*meta.DmChannel,
+	withUnserviceableShards bool,
+	replicaFilter func(*meta.Replica) bool,
+) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
 	replicas := m.GetByCollection(ctx, collectionID)
@@ -182,6 +195,9 @@ func GetShardLeadersWithChannels(
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
 		for _, replica := range replicas {
+			if replicaFilter != nil && !replicaFilter(replica) {
+				continue
+			}
 			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
 			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
 				log.WithRateGroup("util.GetShardLeaders", 1, 60).
@@ -222,6 +238,18 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
+	return GetShardLeadersWithReplicaFilter(ctx, m, targetMgr, dist, nodeMgr, collectionID, withUnserviceableShards, nil)
+}
+
+func GetShardLeadersWithReplicaFilter(ctx context.Context,
+	m *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	withUnserviceableShards bool,
+	replicaFilter func(*meta.Replica) bool,
+) ([]*querypb.ShardLeadersList, error) {
 	if err := checkLoadStatus(ctx, m, collectionID, withUnserviceableShards); err != nil {
 		return nil, err
 	}
@@ -233,7 +261,7 @@ func GetShardLeaders(ctx context.Context,
 		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
 		return nil, err
 	}
-	return GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards)
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
