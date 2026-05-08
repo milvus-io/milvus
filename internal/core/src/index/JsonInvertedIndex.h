@@ -173,7 +173,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
                            non_exist_data_length);
         }
         if (!row_to_element_start_.empty()) {
-            ArrayOffsetsSealed tmp({}, row_to_element_start_);
+            ArrayOffsetsSealed tmp(row_to_element_start_);
             auto array_offsets_buf = tmp.Serialize();
             std::shared_ptr<uint8_t[]> array_offsets_data(
                 new uint8_t[array_offsets_buf.size()]);

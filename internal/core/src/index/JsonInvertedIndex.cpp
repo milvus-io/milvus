@@ -91,16 +91,8 @@ JsonInvertedIndex<T>::build_index_for_json(
             null_adder,
             non_exist_adder,
             error_adder);
-        std::vector<int32_t> element_row_ids(row_to_element_start_.back());
-        for (int32_t row = 0;
-             row < static_cast<int32_t>(row_to_element_start_.size()) - 1;
-             ++row) {
-            std::fill(element_row_ids.begin() + row_to_element_start_[row],
-                      element_row_ids.begin() + row_to_element_start_[row + 1],
-                      row);
-        }
-        array_offsets_ = std::make_shared<ArrayOffsetsSealed>(
-            std::move(element_row_ids), row_to_element_start_);
+        array_offsets_ =
+            std::make_shared<ArrayOffsetsSealed>(row_to_element_start_);
     } else {
         ProcessJsonFieldData<T>(
             field_datas,
@@ -291,7 +283,7 @@ JsonInvertedIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     bool has_array_offsets = !this->row_to_element_start_.empty();
     writer->PutMeta("has_array_offsets", has_array_offsets);
     if (has_array_offsets) {
-        ArrayOffsetsSealed tmp({}, this->row_to_element_start_);
+        ArrayOffsetsSealed tmp(this->row_to_element_start_);
         auto buf = tmp.Serialize();
         writer->WriteEntry(
             INDEX_ARRAY_OFFSETS_FILE_NAME, buf.data(), buf.size());

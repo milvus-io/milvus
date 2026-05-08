@@ -144,7 +144,6 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
     // Binary layout:
     //   [row_count: int32][offset_0 = 0][offset_1]...[offset_row_count]
-    // element_row_ids_ is derived on deserialize, not stored.
     std::vector<uint8_t>
     Serialize() const;
 

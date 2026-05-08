@@ -262,7 +262,7 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     // Memory usage: only row_to_element_start_ (4 bytes per entry)
-    result->resource_size_ = 4 * (row_count + 1);
+    result->resource_size_ = sizeof(int32_t) * (row_count + 1);
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -318,8 +318,6 @@ ArrayOffsetsSealed::Deserialize(const uint8_t* data, size_t size) {
                "ArrayOffsetsSealed::Deserialize: invalid total_elements {}",
                total_elements);
 
-    // Derive element_row_ids_ from row_to_element_start_
-    std::vector<int32_t> element_row_ids(total_elements);
     for (int32_t row = 0; row < row_count; ++row) {
         const int32_t s = row_to_element_start[row];
         const int32_t e = row_to_element_start[row + 1];
@@ -329,13 +327,11 @@ ArrayOffsetsSealed::Deserialize(const uint8_t* data, size_t size) {
                    row,
                    s,
                    e);
-        std::fill(
-            element_row_ids.begin() + s, element_row_ids.begin() + e, row);
     }
 
-    auto result = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
-    result->resource_size_ = 4 * (row_count + 1) + 4 * total_elements;
+    auto result =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    result->resource_size_ = sizeof(int32_t) * (row_count + 1);
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
