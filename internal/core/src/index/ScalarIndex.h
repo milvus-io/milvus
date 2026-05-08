@@ -27,6 +27,13 @@
 #include "fmt/format.h"
 #include "index/Meta.h"
 
+namespace milvus::storage {
+class IndexEntryWriter;
+class IndexEntryReader;
+class MemFileManagerImpl;
+using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
+}  // namespace milvus::storage
+
 namespace milvus::index {
 
 enum class ScalarIndexType {
@@ -62,6 +69,27 @@ ToString(ScalarIndexType type) {
             return "NGRAM";
         default:
             return "UNKNOWN";
+    }
+}
+
+inline ScalarIndexType
+FromString(const std::string& type) {
+    if (type == "BITMAP") {
+        return ScalarIndexType::BITMAP;
+    } else if (type == "STLSORT" || type == "STL_SORT") {
+        return ScalarIndexType::STLSORT;
+    } else if (type == "MARISA" || type == "Trie" || type == "TRIE") {
+        return ScalarIndexType::MARISA;
+    } else if (type == "INVERTED") {
+        return ScalarIndexType::INVERTED;
+    } else if (type == "HYBRID") {
+        return ScalarIndexType::HYBRID;
+    } else if (type == "RTREE") {
+        return ScalarIndexType::RTREE;
+    } else if (type == "NGRAM") {
+        return ScalarIndexType::NGRAM;
+    } else {
+        return ScalarIndexType::NONE;
     }
 }
 
@@ -117,12 +145,12 @@ class ScalarIndex : public IndexBase {
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
-    Range(T value, OpType op) = 0;
+    Range(const T& value, OpType op) = 0;
 
     virtual const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) = 0;
 
     virtual std::optional<T>
@@ -149,6 +177,11 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::MARISA_TRIE ||
                index_type_ == milvus::index::MARISA_TRIE_UPPER ||
                index_type_ == milvus::index::ASCENDING_SORT;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return false;
     }
 
     virtual int64_t
@@ -178,6 +211,40 @@ class ScalarIndex : public IndexBase {
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
         ThrowInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
+
+    // Packed single-file streaming upload — subclasses must implement
+    // WriteEntries() instead. The current on-disk file format is V3
+    // (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h, and the ".v3"
+    // filename suffix produced by the implementation); the method name is
+    // kept format-agnostic so future format versions can reuse this entry
+    // point and dispatch by reading the file header.
+    IndexStatsPtr
+    UploadUnified(const Config& config) override;
+
+    // Packed single-file streaming load — opens the file and calls
+    // LoadEntries() for subclass-specific loading. Currently handles the V3
+    // file format (see UploadUnified above for naming rationale).
+    void
+    LoadUnified(const Config& config) override;
+
+    virtual void
+    WriteEntries(storage::IndexEntryWriter* writer) {
+        ThrowInfo(Unsupported, "WriteEntries is not implemented");
+    }
+
+    virtual void
+    LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
+        ThrowInfo(Unsupported, "LoadEntries is not implemented");
+    }
+
+ protected:
+    // File manager for V3 upload/load operations
+    storage::MemFileManagerImplPtr file_manager_;
+
+    // Controls the remote path prefix for V3 upload/load.
+    // true  → index_files/...  (default, for normal scalar indexes)
+    // false → text_log/...     (for TextMatchIndex)
+    bool is_index_file_ = true;
 };
 
 template <typename T>

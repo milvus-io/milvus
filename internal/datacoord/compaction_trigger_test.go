@@ -1827,6 +1827,8 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	mockVersionManager := NewMockVersionManager(t)
 	mockVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(2)).Maybe()
 	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	mockVersionManager.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
+	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
 	trigger.indexEngineVersionManager = mockVersionManager
 	info4 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -3083,6 +3085,151 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 	}
 }
 
+func newTestIndexMeta(collID, segID, indexID int64, indexType string, segIdx *model.SegmentIndex) *indexMeta {
+	im := newSegmentIndexMeta(nil)
+	im.indexes[collID] = map[UniqueID]*model.Index{
+		indexID: {
+			CollectionID: collID,
+			IndexID:      indexID,
+			IndexName:    "test_idx",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexType},
+			},
+		},
+	}
+	segIdxMap := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdxMap.Insert(indexID, segIdx)
+	im.segmentIndexes.Insert(segID, segIdxMap)
+	return im
+}
+
+func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testing.T) {
+	paramtable.Init()
+	Params.Save("dataCoord.autoUpgradeSegmentIndex", "true")
+
+	collID, segID, indexID := int64(1), int64(100), int64(10)
+
+	t.Run("scalar auto-upgrade compares CurrentScalarIndexVersion", func(t *testing.T) {
+		// Scalar index with CurrentIndexVersion=5 (vector field) but CurrentScalarIndexVersion=1
+		// Engine scalar version is 2, so 1 < 2 should trigger rebuild
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentIndexVersion:       5, // vector version field - should NOT be used for scalar
+			CurrentScalarIndexVersion: 1, // scalar version field - should be used
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
+		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.True(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("scalar auto-upgrade no rebuild when version matches", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentIndexVersion:       1, // vector version - irrelevant
+			CurrentScalarIndexVersion: 2, // matches engine version
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
+		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
+}
+
+func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testing.T) {
+	paramtable.Init()
+	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
+
+	collID, segID, indexID := int64(1), int64(100), int64(10)
+
+	t.Run("scalar force-rebuild compares CurrentScalarIndexVersion", func(t *testing.T) {
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		defer func() {
+			Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+			Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		}()
+
+		// CurrentScalarIndexVersion=2 != resolved target=3, should trigger
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentIndexVersion:       3, // vector version - should NOT be used
+			CurrentScalarIndexVersion: 2, // scalar version - should be used
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(3)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.True(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("scalar force-rebuild no trigger when version matches resolved target", func(t *testing.T) {
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		defer func() {
+			Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+			Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		}()
+
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentIndexVersion:       1, // irrelevant
+			CurrentScalarIndexVersion: 3, // matches resolved target
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(3)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+}
+
 func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *testing.T) {
 	paramtable.Init()
 	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
@@ -3105,24 +3252,42 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 			IndexFileKeys:       []string{"file1"},
 			CurrentIndexVersion: 20, // matches resolved (clamped) target
 		}
-		im := newSegmentIndexMeta(nil)
-		im.indexes[collID] = map[UniqueID]*model.Index{
-			indexID: {
-				CollectionID: collID,
-				IndexID:      indexID,
-				IndexName:    "test_idx",
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: "HNSW"},
-				},
-			},
-		}
-		segIdxMap := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxMap.Insert(indexID, segIdx)
-		im.segmentIndexes.Insert(segID, segIdxMap)
+		im := newTestIndexMeta(collID, segID, indexID, "HNSW", segIdx)
 
 		mockVM := NewMockVersionManager(t)
 		// ResolveVecIndexVersion clamps target=30 to max=20
 		mockVM.On("ResolveVecIndexVersion").Return(int32(20)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
+			indexEngineVersionManager: mockVM,
+		}
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("scalar force-rebuild with target>max converges after clamp", func(t *testing.T) {
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+		Params.Save("dataCoord.targetScalarIndexVersion", "10")
+		defer func() {
+			Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+			Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		}()
+
+		// Index was already rebuilt to clamped version (5), should NOT trigger again
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexFileKeys:             []string{"file1"},
+			CurrentScalarIndexVersion: 5, // matches resolved (clamped) target
+		}
+		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
+
+		mockVM := NewMockVersionManager(t)
+		// ResolveScalarIndexVersion clamps target=10 to max=5
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(5)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},

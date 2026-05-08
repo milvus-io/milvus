@@ -24,8 +24,8 @@ include_directories(
 # Plan parser shared library
 set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
 set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+set(PLANPARSER_CPP_LIB ${PLANPARSER_LIB_DIR}/libmilvus-planparser-cpp${CMAKE_SHARED_LIBRARY_SUFFIX})
 include_directories(${PLANPARSER_INCLUDE_DIR})
-link_directories(${PLANPARSER_LIB_DIR})
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
 
@@ -119,8 +119,9 @@ target_link_libraries(all_tests
         knowhere
         milvus-storage
         milvus-common
-        milvus-planparser-cpp
+        ${PLANPARSER_CPP_LIB}
         )
+target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
 
 # Add RPATH for plan parser library to find libmilvus-planparser.so at runtime
 set_target_properties(all_tests PROPERTIES

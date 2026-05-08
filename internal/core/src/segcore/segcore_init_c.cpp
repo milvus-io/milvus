@@ -221,7 +221,9 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float max_disk_usage_percentage,
                        const char* disk_path,
                        const int64_t loading_timeout_ms,
-                       const int64_t warmup_loading_timeout_ms) {
+                       const int64_t warmup_loading_timeout_ms,
+                       const uint32_t prefetch_pool_threads) {
+    (void)prefetch_pool_threads;
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
         {scalarFieldCacheWarmupPolicy,

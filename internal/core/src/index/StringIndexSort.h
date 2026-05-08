@@ -25,6 +25,7 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <boost/container/vector.hpp>
 #include <folly/small_vector.h>
 
 #include "index/StringIndex.h"
@@ -47,7 +48,8 @@ class StringIndexSort : public StringIndex {
 
     explicit StringIndexSort(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     virtual ~StringIndexSort();
 
@@ -75,6 +77,9 @@ class StringIndexSort : public StringIndex {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
+
     // See detailed format in StringIndexSortMemoryImpl::SerializeToBinary
     BinarySet
     Serialize(const Config& config) override;
@@ -92,6 +97,11 @@ class StringIndexSort : public StringIndex {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
+
     // Query methods - delegated to impl
     const TargetBitmap
     In(size_t n, const std::string* values) override;
@@ -106,12 +116,12 @@ class StringIndexSort : public StringIndex {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(std::string value, OpType op) override;
+    Range(const std::string& value, OpType op) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override;
 
     const TargetBitmap
@@ -136,6 +146,13 @@ class StringIndexSort : public StringIndex {
     void
     ComputeByteSize() override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     int64_t
     CalculateTotalSize() const;
@@ -144,7 +161,6 @@ class StringIndexSort : public StringIndex {
     int64_t field_id_ = 0;
     bool is_built_ = false;
     Config config_;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     size_t total_num_rows_{0};
     TargetBitmap valid_bitset_;
     std::vector<int32_t> idx_to_offsets_;
@@ -152,6 +168,8 @@ class StringIndexSort : public StringIndex {
 
     int64_t total_size_{0};
     std::unique_ptr<StringIndexSortImpl> impl_;
+
+    bool is_nested_index_ = false;
 };
 
 // Abstract interface for implementations
@@ -164,6 +182,14 @@ class StringIndexSortImpl {
                    size_t total_num_rows,
                    TargetBitmap& valid_bitset,
                    std::vector<int32_t>& idx_to_offsets) = 0;
+
+    // Load directly from raw data pointer (used by V3 streaming load)
+    virtual void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) = 0;
 
     struct ParsedData {
         uint32_t unique_count;
@@ -192,12 +218,12 @@ class StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) = 0;
 
     virtual const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) = 0;
+    Range(const std::string& value, OpType op, size_t total_num_rows) = 0;
 
     virtual const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) = 0;
 
@@ -240,6 +266,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                        TargetBitmap& valid_bitset,
                        std::vector<int32_t>& idx_to_offsets);
 
+    void
+    BuildFromArrayDataNested(const std::vector<FieldDataPtr>& field_datas,
+                             size_t total_num_rows,
+                             TargetBitmap& valid_bitset,
+                             std::vector<int32_t>& idx_to_offsets);
+
     // Serialize to binary format
     // The binary format is : [unique_count][string_offsets][string_data][post_list_offsets][post_list_data][magic_code]
     // string_offsets: array of offsets into string_data section
@@ -258,6 +290,13 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                    TargetBitmap& valid_bitset,
                    std::vector<int32_t>& idx_to_offsets) override;
 
+    void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) override;
+
     const TargetBitmap
     In(size_t n, const std::string* values, size_t total_num_rows) override;
 
@@ -274,12 +313,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 
@@ -386,6 +425,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                    std::vector<int32_t>& idx_to_offsets) override;
 
     void
+    LoadFromData(const uint8_t* data,
+                 size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets) override;
+
+    void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
     }
@@ -406,12 +452,12 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 
@@ -483,8 +529,10 @@ using StringIndexSortPtr = std::unique_ptr<StringIndexSort>;
 
 inline StringIndexSortPtr
 CreateStringIndexSort(const storage::FileManagerContext& file_manager_context =
-                          storage::FileManagerContext()) {
-    return std::make_unique<StringIndexSort>(file_manager_context);
+                          storage::FileManagerContext(),
+                      bool is_nested_index = false) {
+    return std::make_unique<StringIndexSort>(file_manager_context,
+                                             is_nested_index);
 }
 
 }  // namespace milvus::index

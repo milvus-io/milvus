@@ -9,26 +9,51 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
 #include <arrow/type.h>
-#include <arrow/type_fwd.h>
-#include <gtest/gtest.h>
+#include <folly/FBVector.h>
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <random>
+#include <string>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
-#include "gtest/gtest-typed-test.h"
-#include "index/IndexFactory.h"
-#include "index/BitmapIndex.h"
-#include "index/InvertedIndexTantivy.h"
-#include "index/ScalarIndex.h"
+#include "bitset/bitset.h"
 #include "common/CDataType.h"
 #include "common/Types.h"
-#include "knowhere/comp/index_param.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/ScalarIndex.h"
+#include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "index/StringIndexMarisa.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
-#include <boost/filesystem.hpp>
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/TmpPath.h"
-#include "storage/Util.h"
 
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;
@@ -61,9 +86,13 @@ GetTempFileManagerCtx(CDataType data_type) {
     storage_config.storage_type = "local";
     storage_config.root_path = TestLocalPath;
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto ctx = milvus::storage::FileManagerContext(chunk_manager);
-    ctx.fieldDataMeta.field_schema.set_data_type(
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
+    milvus::storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    auto ctx = milvus::storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
     return ctx;
 }
 
@@ -212,11 +241,16 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
 
-        auto binary_set = index->Serialize(nullptr);
+        auto create_index_result = index->UploadUnified({});
+        auto index_files = create_index_result->GetIndexFiles();
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, GetTempFileManagerCtx(dtype));
-        copy_index->Load(binary_set);
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadUnified(load_config);
 
         auto copy_scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(copy_index.get());
@@ -371,18 +405,19 @@ TestBuildIndex(int N, int cardinality, int index_type) {
     if (index_type == 0) {
         auto index = std::make_unique<milvus::index::BitmapIndex<T>>();
         index->Build(N, raw_data.data());
-        return std::move(index);
+        return index;
     } else if (index_type == 1) {
         if constexpr (std::is_same_v<T, std::string>) {
             auto index = std::make_unique<milvus::index::StringIndexMarisa>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         } else {
             auto index = milvus::index::CreateScalarIndexSort<T>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         }
     }
+    throw std::invalid_argument("unsupported index_type");
 }
 
 template <typename T>

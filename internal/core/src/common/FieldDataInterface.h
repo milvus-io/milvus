@@ -127,6 +127,9 @@ class FieldDataBase {
     virtual bool
     is_valid(ssize_t offset) const = 0;
 
+    virtual int64_t
+    get_valid_rows() const = 0;
+
  protected:
     const DataType data_type_;
     const bool nullable_;
@@ -307,6 +310,12 @@ class FieldBitsetImpl : public FieldDataBase {
     is_valid(ssize_t offset) const override {
         ThrowInfo(NotImplemented,
                   "is_valid(ssize_t offset) not implemented for bitset");
+    }
+
+    int64_t
+    get_valid_rows() const override {
+        ThrowInfo(NotImplemented,
+                  "get_valid_rows() not implemented for bitset");
     }
 
  private:
@@ -490,6 +499,12 @@ class FieldDataImpl : public FieldDataBase {
     get_num_rows() const override {
         std::shared_lock lck(num_rows_mutex_);
         return num_rows_;
+    }
+
+    int64_t
+    get_valid_rows() const override {
+        std::shared_lock lck(tell_mutex_);
+        return static_cast<int64_t>(length_) - null_count_;
     }
 
     void
@@ -804,6 +819,9 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 class FieldDataSparseVectorImpl
     : public FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>, true> {
  public:
+    using FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>,
+                        true>::FillFieldData;
+
     explicit FieldDataSparseVectorImpl(DataType data_type,
                                        int64_t total_num_rows = 0)
         : FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>, true>(

@@ -31,12 +31,14 @@
 #include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
+#include "segcore/Types.h"
 #include "futures/Future.h"
 #include "futures/future_c.h"
 #include "segcore/load_index_c.h"
 #include "DataGen.h"
 #include "PbHelper.h"
 #include "indexbuilder_test_utils.h"
+#include "cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -392,6 +394,27 @@ generate_index(void* raw_data,
     EXPECT_EQ(vec_indexing->GetDim(), dim);
 
     return indexing;
+}
+
+// Helper function to create LoadIndexInfo for tests using C++ API directly
+inline milvus::segcore::LoadIndexInfo
+CreateTestLoadIndexInfo(IndexBasePtr indexing,
+                        DataType field_type,
+                        int64_t field_id = 100) {
+    milvus::segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = field_id;
+    load_index_info.field_type = field_type;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    if (auto vec_index =
+            dynamic_cast<const milvus::index::VectorIndex*>(indexing.get())) {
+        load_index_info.index_params["metric_type"] =
+            vec_index->GetMetricType();
+    }
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    return load_index_info;
 }
 
 }  // namespace

@@ -1003,6 +1003,55 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
+    template <typename T, typename FUNC>
+    int64_t
+    ProcessDataChunkForRange(FUNC func,
+                             TargetBitmapView res,
+                             int64_t segment_offset,
+                             int64_t size) {
+        static_assert(std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>,
+                      "ProcessDataChunkForRange only supports string_view, "
+                      "Json, and ArrayView types");
+
+        AssertInfo(segment_->is_chunked(),
+                   "ProcessDataChunkForRange requires chunked segment");
+        AssertInfo(segment_->type() == SegmentType::Sealed,
+                   "ProcessDataChunkForRange requires sealed segment");
+
+        int64_t processed_size = 0;
+        int64_t remaining = size;
+
+        auto [start_chunk_id, start_chunk_offset] =
+            segment_->get_chunk_by_offset(field_id_, segment_offset);
+
+        for (size_t chunk_id = start_chunk_id;
+             chunk_id < num_data_chunk_ && remaining > 0;
+             chunk_id++) {
+            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_offset =
+                chunk_id == start_chunk_id ? start_chunk_offset : 0;
+
+            while (chunk_offset < chunk_size && remaining > 0) {
+                int64_t batch_size = std::min(
+                    {batch_size_, chunk_size - chunk_offset, remaining});
+
+                auto pw = segment_->get_batch_views<T>(
+                    op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
+                auto data_vec = std::move(pw.get().first);
+
+                func(data_vec.data(), batch_size, res + processed_size);
+
+                chunk_offset += batch_size;
+                processed_size += batch_size;
+                remaining -= batch_size;
+            }
+        }
+
+        return processed_size;
+    }
+
     int
     ProcessIndexOneChunk(TargetBitmap& result,
                          TargetBitmap& valid_result,

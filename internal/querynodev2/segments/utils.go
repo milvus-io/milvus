@@ -32,6 +32,11 @@ import (
 
 var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
 
+func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
+	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
+}
+
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -159,7 +164,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 	return pks, nil
 }
 
-// mergeRequestCost merge the costs of request, the cost may came from different worker in same channel
+// mergeRequestCost merge the costs of request, the cost may come from different worker in same channel
 // or different channel in same collection, for now we just choose the part with the highest response time
 func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
 	var result *internalpb.CostAggregation
@@ -188,13 +193,6 @@ func FilterZeroValuesFromSlice(intVals []int64) []int64 {
 		}
 	}
 	return result
-}
-
-// withLazyLoadTimeoutContext returns a new context with lazy load timeout.
-func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
 }
 
 func GetSegmentRelatedDataSize(segment Segment) int64 {

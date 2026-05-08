@@ -22,7 +22,7 @@ TRIE: only support varchar
 STL_SORT: only support numeric (not include Array field)
 INVERTED: all supported except Json
 Bitmap: all supported except Json, float, double. (If Array field, according to its ElementType)
-ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "INVERTED"}
+ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "HYBRID"}
 	- except Json
 	- if Array field, according to its ElementType
 */

@@ -122,6 +122,7 @@ const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 // storage version
 const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
+const int64_t STORAGE_V3 = 3;
 
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
 
@@ -143,3 +144,9 @@ const std::string WARMUP_VECTOR_INDEX_KEY = "warmup.vectorIndex";
 const std::string WARMUP_SCALAR_INDEX_KEY = "warmup.scalarIndex";
 const std::string WARMUP_SCALAR_FIELD_KEY = "warmup.scalarField";
 const std::string WARMUP_VECTOR_FIELD_KEY = "warmup.vectorField";
+
+// Scalar index version constants
+// Version 3 introduces hybrid index configuration support
+constexpr int32_t kHybridIndexConfigVersion = 3;
+// The last version before hybrid index config support was added
+constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;

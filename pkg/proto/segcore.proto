@@ -28,6 +28,7 @@ message TextIndexStats {
   int64 log_size = 4;
   int64 memory_size = 5;
   int64 buildID = 6;
+  int32 current_scalar_index_version = 7;
 }
 
 message JsonKeyStats {
@@ -94,7 +95,8 @@ message FieldIndexInfo {
   int64 index_version = 9;
   int64 num_rows = 10;
   int32 current_index_version = 11;
-  int64 index_store_version = 12;
+  int64 index_store_version = 12 [deprecated = true];
+  int32 current_scalar_index_version = 13;
 }
 
 message SegmentLoadInfo {
