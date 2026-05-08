@@ -133,15 +133,17 @@ type Server struct {
 	nodeIdx atomic.Uint32
 
 	// load config watcher
-	loadConfigWatcher *LoadConfigWatcher
+	loadConfigWatcher        *LoadConfigWatcher
+	replicaVisibilityManager *replicaVisibilityManager
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:            ctx,
-		cancel:         cancel,
-		metricsRequest: metricsinfo.NewMetricsRequest(),
+		ctx:                      ctx,
+		cancel:                   cancel,
+		metricsRequest:           metricsinfo.NewMetricsRequest(),
+		replicaVisibilityManager: newReplicaVisibilityManager(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
