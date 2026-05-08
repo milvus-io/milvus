@@ -71,4 +71,11 @@ func TestReplicaManagerQueryVisibility(t *testing.T) {
 	assert.ElementsMatch(t, []int64{100}, collections)
 	assert.True(t, manager.Get(ctx, 11).IsQueryVisible())
 	assert.Empty(t, manager.GetQueryInvisibleReplicas(ctx))
+
+	manager.putReplicaInMemory(invisibleReplica)
+	assert.Len(t, manager.GetQueryInvisibleReplicas(ctx), 1)
+	mutableReplica = invisibleReplica.CopyForWrite()
+	mutableReplica.SetQueryVisible(true)
+	manager.putReplicaInMemory(mutableReplica.IntoReplica())
+	assert.Empty(t, manager.GetQueryInvisibleReplicas(ctx))
 }

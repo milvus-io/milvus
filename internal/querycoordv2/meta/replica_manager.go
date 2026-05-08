@@ -76,10 +76,11 @@ var _ ReplicaManagerInterface = (*ReplicaManager)(nil)
 type ReplicaManager struct {
 	rwmutex sync.RWMutex
 
-	idAllocator   func() (int64, error)
-	replicas      map[typeutil.UniqueID]*Replica
-	coll2Replicas map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
-	catalog       metastore.QueryCoordCatalog
+	idAllocator            func() (int64, error)
+	replicas               map[typeutil.UniqueID]*Replica
+	coll2Replicas          map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
+	queryInvisibleReplicas map[typeutil.UniqueID]*Replica
+	catalog                metastore.QueryCoordCatalog
 }
 
 // collectionReplicas maintains collection secondary index mapping
@@ -109,10 +110,11 @@ func newCollectionReplicas() *collectionReplicas {
 
 func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
 	return &ReplicaManager{
-		idAllocator:   idAllocator,
-		replicas:      make(map[int64]*Replica),
-		coll2Replicas: make(map[int64]*collectionReplicas),
-		catalog:       catalog,
+		idAllocator:            idAllocator,
+		replicas:               make(map[int64]*Replica),
+		coll2Replicas:          make(map[int64]*collectionReplicas),
+		queryInvisibleReplicas: make(map[int64]*Replica),
+		catalog:                catalog,
 	}
 }
 
@@ -168,11 +170,9 @@ func (m *ReplicaManager) GetQueryInvisibleReplicas(ctx context.Context) []*Repli
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	replicas := make([]*Replica, 0)
-	for _, replica := range m.replicas {
-		if !replica.IsQueryVisible() {
-			replicas = append(replicas, replica)
-		}
+	replicas := make([]*Replica, 0, len(m.queryInvisibleReplicas))
+	for _, replica := range m.queryInvisibleReplicas {
+		replicas = append(replicas, replica)
 	}
 	return replicas
 }
@@ -374,13 +374,20 @@ func (m *ReplicaManager) put(ctx context.Context, replicas ...*Replica) error {
 
 // putReplicaInMemory puts replicas into in-memory map and collIDToReplicaIDs.
 func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
+	if m.queryInvisibleReplicas == nil {
+		m.queryInvisibleReplicas = make(map[typeutil.UniqueID]*Replica)
+	}
 	for _, replica := range replicas {
 		if oldReplica, ok := m.replicas[replica.GetID()]; ok {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(oldReplica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(oldReplica.RONodesCount()))
+			delete(m.queryInvisibleReplicas, oldReplica.GetID())
 		}
 		// update in-memory replicas.
 		m.replicas[replica.GetID()] = replica
+		if !replica.IsQueryVisible() {
+			m.queryInvisibleReplicas[replica.GetID()] = replica
+		}
 		metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Inc()
 		metrics.QueryCoordReplicaRONodeTotal.Add(float64(replica.RONodesCount()))
 
@@ -477,6 +484,7 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
 			delete(m.replicas, replica.GetID())
+			delete(m.queryInvisibleReplicas, replica.GetID())
 		}
 		delete(m.coll2Replicas, collectionID)
 	}
@@ -503,6 +511,7 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID typeut
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
 			delete(m.replicas, replicaID)
+			delete(m.queryInvisibleReplicas, replicaID)
 		}
 	}
 
