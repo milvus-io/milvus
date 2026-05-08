@@ -178,6 +178,12 @@ std::map<std::string, IndexDataCodec>
 CompactIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
 
+IndexDataCodec
+CompactIndexDatasByKey(
+    const std::string& key,
+    std::unique_ptr<storage::DataCodec> slice_meta,
+    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
+
 void
 AssembleIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,

@@ -9,26 +9,40 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "tantivy-binding.h"
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
+#include <optional>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "InvertedIndexTantivy.h"
+#include "boost/container/vector.hpp"
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
+#include "common/Array.h"
+#include "common/FieldDataInterface.h"
 #include "common/Slice.h"
 #include "common/RegexQuery.h"
 #include "common/Tracer.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/InvertedIndexUtil.h"
-#include "log/Log.h"
 #include "index/Utils.h"
+#include "log/Log.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
-
-#include <algorithm>
-#include <boost/filesystem.hpp>
-#include <boost/uuid/random_generator.hpp>
-#include <boost/uuid/uuid_io.hpp>
-#include <cstddef>
-#include <shared_mutex>
-#include <type_traits>
-#include <vector>
-#include "InvertedIndexTantivy.h"
+#include "tantivy-binding.h"
 
 namespace milvus::index {
 inline TantivyDataType
@@ -211,8 +225,9 @@ void
 InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-        null_offset_.resize((size_t)size / sizeof(size_t));
-        memcpy(null_offset_.data(), data, (size_t)size);
+        auto prev_size = null_offset_.size();
+        null_offset_.resize(prev_size + (size_t)size / sizeof(size_t));
+        memcpy(null_offset_.data() + prev_size, data, (size_t)size);
     };
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -235,26 +250,31 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         return;
     }
     std::vector<std::string> null_offset_files;
+    std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
         if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
 
-        // add slice meta file for null offset file compact
         if (file_name == INDEX_FILE_SLICE_META) {
-            null_offset_files.push_back(file);
+            slice_meta_file = file;
         }
     }
 
     if (null_offset_files.size() > 0) {
+        AssertInfo(slice_meta_file.has_value(),
+                   "null offset slices found but _meta_slice is missing");
+        null_offset_files.push_back(slice_meta_file.value());
         // null offset file is sliced
         auto index_datas = mem_file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
-        auto null_offsets_data = CompactIndexDatas(index_datas);
-        auto null_offsets_data_codecs =
-            std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto null_offsets_data_codecs = CompactIndexDatasByKey(
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
+        AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
+                   "null offset file is empty");
         for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());

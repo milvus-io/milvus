@@ -100,8 +100,9 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
     auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
-        non_exist_offsets_.resize((size_t)size / sizeof(size_t));
-        memcpy(non_exist_offsets_.data(), data, (size_t)size);
+        auto prev_size = non_exist_offsets_.size();
+        non_exist_offsets_.resize(prev_size + (size_t)size / sizeof(size_t));
+        memcpy(non_exist_offsets_.data() + prev_size, data, (size_t)size);
     };
     auto non_exist_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -124,27 +125,33 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         return;
     }
     std::vector<std::string> non_exist_offset_files;
+    std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
         if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
             std::string::npos) {
             non_exist_offset_files.push_back(file);
         }
-        // add slice meta file for null offset file compact
         if (file_name == INDEX_FILE_SLICE_META) {
-            non_exist_offset_files.push_back(file);
+            slice_meta_file = file;
         }
     }
     if (non_exist_offset_files.size() > 0) {
-        // null offset file is sliced
+        AssertInfo(slice_meta_file.has_value(),
+                   "non_exist_offset slices found but _meta_slice is missing");
+        non_exist_offset_files.push_back(slice_meta_file.value());
+        // non_exist offset file is sliced
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
             non_exist_offset_files, load_priority);
 
-        auto non_exist_offset_data = CompactIndexDatas(index_datas);
-        auto non_exist_offset_data_codecs = std::move(
-            non_exist_offset_data.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
-        for (auto&& non_exist_offset_codec :
-             non_exist_offset_data_codecs.codecs_) {
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto non_exist_offset_data =
+            CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                                   std::move(slice_meta),
+                                   index_datas);
+        AssertInfo(non_exist_offset_data.codecs_.size() > 0,
+                   "non exist offset file is empty");
+        for (auto&& non_exist_offset_codec : non_exist_offset_data.codecs_) {
             fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
                                   non_exist_offset_codec->PayloadSize());
         }
