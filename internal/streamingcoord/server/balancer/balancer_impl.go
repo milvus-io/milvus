@@ -539,7 +539,7 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
 	rgName := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
-	b.Logger().Info("collect all status...", zap.String("resourceGroup", rgName))
+	b.Logger().Info("collect all status...", zap.String("resourceGroupHint", rgName))
 	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, rgName)
 	if err != nil {
 		return false, err
