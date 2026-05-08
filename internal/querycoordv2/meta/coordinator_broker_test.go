@@ -449,6 +449,28 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 		s.resetMock()
 	})
 
+	s.Run("propagate_index_store_path_version", func() {
+		s.mixcoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
+			Return(&indexpb.GetIndexInfoResponse{
+				Status: merr.Status(nil),
+				SegmentInfo: map[int64]*indexpb.SegmentInfo{
+					segmentID: {
+						SegmentID: segmentID,
+						IndexInfos: []*indexpb.IndexFilePathInfo{{
+							IndexID:               1,
+							IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+						}},
+					},
+				},
+			}, nil)
+
+		infos, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
+		s.NoError(err)
+		s.Len(infos[segmentID], 1)
+		s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, infos[segmentID][0].GetIndexStorePathVersion())
+		s.resetMock()
+	})
+
 	s.Run("datacoord_return_error", func() {
 		s.mixcoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))

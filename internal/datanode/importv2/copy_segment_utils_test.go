@@ -268,18 +268,20 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		sourcePath string
-		indexType  string
-		wantPath   string
-		wantErr    bool
+		name        string
+		sourcePath  string
+		indexType   string
+		pathVersion indexpb.IndexStorePathVersion
+		wantPath    string
+		wantErr     bool
 	}{
 		{
-			name:       "vector scalar index path",
-			sourcePath: "files/index_files/1001/1/222/333/scalar_index",
-			indexType:  IndexTypeVectorScalar,
-			wantPath:   "files/index_files/1001/1/555/666/scalar_index",
-			wantErr:    false,
+			name:        "vector scalar index path v0 format",
+			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			indexType:   IndexTypeVectorScalar,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			wantPath:    "files/index_files/1001/1/555/666/scalar_index",
+			wantErr:     false,
 		},
 		{
 			name:       "text index path",
@@ -330,11 +332,19 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			wantPath:   "",
 			wantErr:    true,
 		},
+		{
+			name:        "vector scalar index path v1 format",
+			sourcePath:  "files/index_files/111/222/333/1001/1/scalar_index",
+			indexType:   IndexTypeVectorScalar,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			wantPath:    "files/index_files/444/555/666/1001/1/scalar_index",
+			wantErr:     false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPath, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType)
+			gotPath, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType, tt.pathVersion)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -343,6 +353,105 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateTargetIndexPath_BuildIDMapping verifies that NewBuildIds mapping
+// is applied at the correct offset for each index path format.
+// Regression test: v1 VectorScalar places buildID at offset 4 (not 1).
+func TestGenerateTargetIndexPath_BuildIDMapping(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001},
+	}
+
+	tests := []struct {
+		name        string
+		sourcePath  string
+		indexType   string
+		pathVersion indexpb.IndexStorePathVersion
+		wantPath    string
+	}{
+		{
+			name:        "v0 vector scalar maps buildID at offset 1",
+			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			indexType:   IndexTypeVectorScalar,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			wantPath:    "files/index_files/2001/1/555/666/scalar_index",
+		},
+		{
+			name:        "v1 vector scalar maps buildID at offset 4",
+			sourcePath:  "files/index_files/111/222/333/1001/1/scalar_index",
+			indexType:   IndexTypeVectorScalar,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			wantPath:    "files/index_files/444/555/666/2001/1/scalar_index",
+		},
+		{
+			name:       "text index maps buildID at offset 1",
+			sourcePath: "files/text_log/1001/1/111/222/333/100/idx",
+			indexType:  IndexTypeText,
+			wantPath:   "files/text_log/2001/1/444/555/666/100/idx",
+		},
+		{
+			name:       "json stats maps buildID at offset 2",
+			sourcePath: "files/json_stats/2/1001/1/111/222/333/100/shared_key_index/idx",
+			indexType:  IndexTypeJSONStats,
+			wantPath:   "files/json_stats/2/2001/1/444/555/666/100/shared_key_index/idx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType, tt.pathVersion)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantPath, got)
+		})
+	}
+}
+
+func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				BuildID:               1001,
+				IndexVersion:          1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+			},
+			{
+				BuildID:               1002,
+				IndexVersion:          1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/111/222/333/1002/1/v1_file"},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
+	}
+	files := &SegmentFiles{
+		VectorScalarIndex: []string{
+			"files/index_files/1001/1/222/333/v0_file",
+			"files/index_files/111/222/333/1002/1/v1_file",
+		},
+	}
+
+	mappings, err := generateMappingsFromFiles(files, source, target)
+	assert.NoError(t, err)
+	assert.Equal(t, "files/index_files/2001/1/555/666/v0_file", mappings["files/index_files/1001/1/222/333/v0_file"])
+	assert.Equal(t, "files/index_files/444/555/666/2002/1/v1_file", mappings["files/index_files/111/222/333/1002/1/v1_file"])
 }
 
 func TestTransformFieldBinlogs(t *testing.T) {
@@ -690,6 +799,51 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	})
 }
 
+func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				FieldID:               100,
+				IndexID:               10,
+				BuildID:               1001,
+				IndexName:             "idx_v0",
+				IndexVersion:          1,
+				SerializedSize:        1024,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+			},
+			{
+				FieldID:               101,
+				IndexID:               11,
+				BuildID:               1002,
+				IndexName:             "idx_v1",
+				IndexVersion:          1,
+				SerializedSize:        2048,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/111/222/333/1002/1/v1_file"},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
+	}
+	mappings := map[string]string{
+		"files/index_files/1001/1/222/333/v0_file":     "files/index_files/2001/1/555/666/v0_file",
+		"files/index_files/111/222/333/1002/1/v1_file": "files/index_files/444/555/666/2002/1/v1_file",
+	}
+
+	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+}
+
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
 		mCopy := mockey.Mock(copyFile).Return(nil).Build()
@@ -807,7 +961,7 @@ func TestGenerateTargetIndexPath_PathTooShort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := generateTargetIndexPath(tt.path, source, target, tt.indexType)
+			_, err := generateTargetIndexPath(tt.path, source, target, tt.indexType, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid")
 		})
@@ -829,7 +983,7 @@ func TestGenerateTargetIndexPath_VectorScalarPreservesIDs(t *testing.T) {
 	// Verify buildID (1001) and indexVersion (1) are preserved, NOT replaced
 	// partitionID (222->555) and segmentID (333->666) ARE replaced
 	// collectionID is NOT in path at all
-	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalar)
+	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalar, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	assert.NoError(t, err)
 	assert.Equal(t, "files/index_files/1001/1/555/666/HNSW_SQ_3", result)
 

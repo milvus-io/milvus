@@ -289,8 +289,9 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
-		Cancel: taskCancel,
-		State:  commonpb.IndexState_InProgress,
+		Cancel:                taskCancel,
+		State:                 commonpb.IndexState_InProgress,
+		IndexStorePathVersion: req.GetIndexStorePathVersion(),
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))

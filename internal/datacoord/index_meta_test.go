@@ -1396,6 +1396,86 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 }
 
+func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
+	setup := func(t *testing.T, requested indexpb.IndexStorePathVersion, indexFileKeys []string) *indexMeta {
+		t.Helper()
+
+		sc := catalogmocks.NewDataCoordCatalog(t)
+		sc.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		segIdx := &model.SegmentIndex{
+			SegmentID:             segID,
+			CollectionID:          collID,
+			PartitionID:           partID,
+			NumRows:               1025,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			IndexState:            commonpb.IndexState_InProgress,
+			IndexFileKeys:         indexFileKeys,
+			IndexStorePathVersion: requested,
+		}
+
+		indexBuildInfo := newSegmentIndexBuildInfo()
+		indexBuildInfo.Add(model.CloneSegmentIndex(segIdx))
+
+		m := &indexMeta{
+			ctx:              context.Background(),
+			catalog:          sc,
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			segmentBuildInfo: indexBuildInfo,
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						CollectionID: collID,
+						IndexID:      indexID,
+					},
+				},
+			},
+		}
+
+		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdxes.Insert(indexID, model.CloneSegmentIndex(segIdx))
+		m.segmentIndexes.Insert(segID, segIdxes)
+		return m
+	}
+
+	t.Run("actual lower than requested persists actual version", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, []string{"old-file"})
+
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:               buildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"file1", "file2"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		})
+		assert.NoError(t, err)
+
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
+		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
+	})
+
+	t.Run("actual higher than requested returns error and leaves metadata unchanged", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, []string{"old-file"})
+
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:               buildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"file1", "file2"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		})
+		assert.Error(t, err)
+
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
+		assert.Equal(t, []string{"old-file"}, segIdx.IndexFileKeys)
+		assert.Equal(t, commonpb.IndexState_InProgress, segIdx.IndexState)
+	})
+}
+
 func TestMeta_BuildIndex(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 	ec := catalogmocks.NewDataCoordCatalog(t)
@@ -2400,4 +2480,92 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		assert.Equal(t, float64(0), val,
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
+}
+
+func TestIndexMeta_HasCollectionWithPathVersion(t *testing.T) {
+	m := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+	}
+
+	// Add a v0 index for collection 100
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1000,
+		CollectionID:          100,
+		IndexStorePathVersion: 0,
+	})
+
+	// Add a v1 index for collection 200
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2000,
+		CollectionID:          200,
+		IndexStorePathVersion: 1,
+	})
+
+	// Collection 100 has no v1 indexes
+	assert.False(t, m.HasCollectionWithPathVersion(100, 1))
+	// Collection 200 has v1 indexes
+	assert.True(t, m.HasCollectionWithPathVersion(200, 1))
+	// Collection 300 doesn't exist
+	assert.False(t, m.HasCollectionWithPathVersion(300, 1))
+	// Collection 100 has v0 indexes (version >= 0)
+	assert.True(t, m.HasCollectionWithPathVersion(100, 0))
+}
+
+func TestIndexMeta_ListCollectionRootedIndexCollections(t *testing.T) {
+	m := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1,
+		CollectionID:          100,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2,
+		CollectionID:          200,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               3,
+		CollectionID:          300,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion(2),
+	})
+
+	collections := m.ListCollectionRootedIndexCollections()
+	assert.NotContains(t, collections, int64(100))
+	assert.Contains(t, collections, int64(200))
+	assert.Contains(t, collections, int64(300))
+}
+
+func TestIndexMeta_GetDeletedIndexesWithPathVersion(t *testing.T) {
+	m := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+	}
+
+	// Add: deleted v0, deleted v1, not-deleted v1
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1000,
+		CollectionID:          100,
+		IndexStorePathVersion: 0,
+		IsDeleted:             true,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2000,
+		CollectionID:          200,
+		IndexStorePathVersion: 1,
+		IsDeleted:             true,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               3000,
+		CollectionID:          300,
+		IndexStorePathVersion: 1,
+		IsDeleted:             false,
+	})
+
+	// Get deleted with pathVersion >= 1
+	result := m.GetDeletedIndexesWithPathVersion(1)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(2000), result[0].BuildID)
+
+	// Get deleted with pathVersion >= 0 (all deleted)
+	result = m.GetDeletedIndexesWithPathVersion(0)
+	assert.Len(t, result, 2)
 }
