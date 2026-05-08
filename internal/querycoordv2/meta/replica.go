@@ -86,6 +86,11 @@ type Replica struct {
 	// This prevents unbalanced segment loading during replica scale-up.
 	// The field is explicitly cleared after the first successful node assignment.
 	waitRGReadyAt time.Time
+
+	// queryVisible is an in-memory only state. Newly spawned replicas during
+	// cluster-level load-config changes can be hidden from Proxy shard leader
+	// discovery until the whole change is ready to serve.
+	queryVisible bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -108,6 +113,7 @@ func newReplica(replica *querypb.Replica) *Replica {
 		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
 		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
 		loadPriority: commonpb.LoadPriority_HIGH,
+		queryVisible: true,
 	}
 }
 
@@ -119,6 +125,7 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
 		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
 		loadPriority: priority,
+		queryVisible: true,
 	}
 }
 
@@ -135,6 +142,10 @@ func (replica *Replica) NeedWaitRGReady() bool {
 	}
 	timeout := paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.GetAsDurationByParse()
 	return time.Since(replica.waitRGReadyAt) < timeout
+}
+
+func (replica *Replica) IsQueryVisible() bool {
+	return replica.queryVisible
 }
 
 // GetID returns the id of the replica.
@@ -297,6 +308,7 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 			roSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
 			loadPriority:  replica.LoadPriority(),
 			waitRGReadyAt: replica.waitRGReadyAt,
+			queryVisible:  replica.queryVisible,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -323,6 +335,10 @@ func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 // Pass zero time to clear the wait.
 func (replica *mutableReplica) SetWaitRGReadyAt(t time.Time) {
 	replica.waitRGReadyAt = t
+}
+
+func (replica *mutableReplica) SetQueryVisible(visible bool) {
+	replica.queryVisible = visible
 }
 
 // AddRWNode adds the node to rw nodes of the replica.
