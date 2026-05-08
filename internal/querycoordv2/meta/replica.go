@@ -87,10 +87,11 @@ type Replica struct {
 	// The field is explicitly cleared after the first successful node assignment.
 	waitRGReadyAt time.Time
 
-	// queryVisible is an in-memory only state. Newly spawned replicas during
-	// cluster-level load-config changes can be hidden from Proxy shard leader
-	// discovery until the whole change is ready to serve.
-	queryVisible bool
+	// queryInvisible is an in-memory only state. The zero value means visible to
+	// keep existing and recovered replicas queryable unless explicitly hidden.
+	// Newly spawned replicas during cluster-level load-config changes can be hidden
+	// from Proxy shard leader discovery until the whole change is ready to serve.
+	queryInvisible bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -113,7 +114,6 @@ func newReplica(replica *querypb.Replica) *Replica {
 		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
 		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
 		loadPriority: commonpb.LoadPriority_HIGH,
-		queryVisible: true,
 	}
 }
 
@@ -125,7 +125,6 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
 		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
 		loadPriority: priority,
-		queryVisible: true,
 	}
 }
 
@@ -145,7 +144,7 @@ func (replica *Replica) NeedWaitRGReady() bool {
 }
 
 func (replica *Replica) IsQueryVisible() bool {
-	return replica.queryVisible
+	return !replica.queryInvisible
 }
 
 // GetID returns the id of the replica.
@@ -301,14 +300,14 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:     proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:       typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:       typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority:  replica.LoadPriority(),
-			waitRGReadyAt: replica.waitRGReadyAt,
-			queryVisible:  replica.queryVisible,
+			replicaPB:      proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:        typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:        typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:   replica.LoadPriority(),
+			waitRGReadyAt:  replica.waitRGReadyAt,
+			queryInvisible: replica.queryInvisible,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -337,8 +336,8 @@ func (replica *mutableReplica) SetWaitRGReadyAt(t time.Time) {
 	replica.waitRGReadyAt = t
 }
 
-func (replica *mutableReplica) SetQueryVisible(visible bool) {
-	replica.queryVisible = visible
+func (replica *mutableReplica) SetQueryInvisible(invisible bool) {
+	replica.queryInvisible = invisible
 }
 
 // AddRWNode adds the node to rw nodes of the replica.
