@@ -139,11 +139,7 @@ check_untracked() {
 
 resolved_base="$(resolve_base)"
 if [[ -n "${resolved_base}" ]]; then
-  if git merge-base --is-ancestor "${resolved_base}" "${target}" 2>/dev/null; then
-    check_diff "${resolved_base}...${target}" "${resolved_base}...${target}"
-  else
-    check_diff "${resolved_base}..${target}" "${resolved_base}..${target}"
-  fi
+  check_diff "${resolved_base}...${target}" "${resolved_base}...${target}"
 else
   echo "mockery check failed: no base ref found" >&2
   echo "Pass a base ref or set MOCKERY_CHECK_BASE." >&2
