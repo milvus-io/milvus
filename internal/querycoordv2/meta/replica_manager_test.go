@@ -704,7 +704,40 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 	allExpectedNodes := []int64{101, 102, 201, 202, 203, 301}
 	assert.ElementsMatch(t, allExpectedNodes, allNodes)
 
-	// Test case 3: Strict isolation mode (with config enabled).
+	// Test case 3: Rolling upgrade compatibility mode.
+	// Old StreamingNodes without RG labels are reported under the default RG. Replicas
+	// in old/uncovered RGs should use only that legacy default pool, while replicas in
+	// newly covered RGs should keep strict RG isolation.
+	replica8 := newReplica(&querypb.Replica{
+		ID:            8,
+		CollectionID:  250,
+		ResourceGroup: "RG_OLD_REPLICA", // Not covered by labeled streaming nodes.
+		Nodes:         []int64{},
+	})
+	replica9 := newReplica(&querypb.Replica{
+		ID:            9,
+		CollectionID:  250,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+	})
+
+	err = mgr.put(ctx, replica8, replica9)
+	assert.NoError(t, err)
+
+	rollingUpgradeSQNodesByRG := map[string]typeutil.UniqueSet{
+		DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
+		"RG1":                    typeutil.NewUniqueSet(101, 102),
+	}
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 250, rollingUpgradeSQNodesByRG)
+	assert.NoError(t, err)
+
+	updatedReplica8 := mgr.Get(ctx, 8)
+	updatedReplica9 := mgr.Get(ctx, 9)
+	assert.ElementsMatch(t, []int64{901, 902}, updatedReplica8.GetRWSQNodes())
+	assert.ElementsMatch(t, []int64{101, 102}, updatedReplica9.GetRWSQNodes())
+
+	// Test case 4: Strict isolation mode (with config enabled).
 	// When streaming.queryNodeResourceGroupIsolation.enabled is true, uncovered replicas
 	// should not get any streaming query nodes.
 	paramtable.Get().Save(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key, "true")

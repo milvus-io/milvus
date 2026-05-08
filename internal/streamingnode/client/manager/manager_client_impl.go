@@ -83,9 +83,10 @@ func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64
 	return result, nil
 }
 
-// CollectAllStatus collects status in all underlying streamingnode.
-// If resourceGroup is not empty, only nodes with matching resource group will be collected.
-func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
+// CollectAllStatus collects status in underlying streamingnodes.
+// If resourceGroupHint has discovered nodes, only nodes in that resource group are collected.
+// Otherwise, it falls back to another discovered resource group.
+func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
 	}
@@ -99,9 +100,12 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup 
 	if len(state.State.Addresses) == 0 {
 		return make(map[int64]*types.StreamingNodeStatus), nil
 	}
+	resourceGroupHint = filterStreamingNodeStatusByResourceGroupHint(state, resourceGroupHint)
 
-	// Collect status of all streamingnode.
-	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroup)
+	// Collect status from the selected resource group only. The hint fallback
+	// is decided from service discovery before RPC to avoid broadcasting to
+	// resource groups that will not be used for WAL balance.
+	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroupHint)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +128,73 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup 
 	return result, nil
 }
 
+func filterStreamingNodeStatusByResourceGroupHint(state discoverer.VersionedState, resourceGroupHint string) string {
+	resourceGroupHint = effectiveResourceGroupHintForCollectAllStatus(state, resourceGroupHint)
+	if resourceGroupHint == "" {
+		return ""
+	}
+	statsByRG := groupStreamingNodeSessionStatsByResourceGroup(state)
+	if _, ok := statsByRG[resourceGroupHint]; ok {
+		return resourceGroupHint
+	}
+	if fallbackRG, ok := chooseFallbackResourceGroup(statsByRG); ok {
+		return fallbackRG
+	}
+	return ""
+}
+
+func effectiveResourceGroupHintForCollectAllStatus(state discoverer.VersionedState, resourceGroupHint string) string {
+	if resourceGroupHint != "" {
+		return resourceGroupHint
+	}
+	for _, session := range state.Sessions() {
+		rg := session.GetResourceGroupName()
+		if rg == "" || rg == common.DefaultResourceGroupName {
+			return common.DefaultResourceGroupName
+		}
+	}
+	return ""
+}
+
+type resourceGroupSessionStats struct {
+	count       int
+	maxServerID int64
+}
+
+func groupStreamingNodeSessionStatsByResourceGroup(state discoverer.VersionedState) map[string]resourceGroupSessionStats {
+	statsByRG := make(map[string]resourceGroupSessionStats)
+	for serverID, session := range state.Sessions() {
+		rg := session.GetResourceGroupName()
+		if rg == "" {
+			rg = common.DefaultResourceGroupName
+		}
+		stats := statsByRG[rg]
+		stats.count++
+		if serverID > stats.maxServerID {
+			stats.maxServerID = serverID
+		}
+		statsByRG[rg] = stats
+	}
+	return statsByRG
+}
+
+func chooseFallbackResourceGroup(statsByRG map[string]resourceGroupSessionStats) (string, bool) {
+	var selectedRG string
+	var selectedCount int
+	var selectedMaxServerID int64
+	for rg, stats := range statsByRG {
+		if stats.count == 0 {
+			continue
+		}
+		if selectedRG == "" || stats.count > selectedCount || (stats.count == selectedCount && stats.maxServerID > selectedMaxServerID) {
+			selectedRG = rg
+			selectedCount = stats.count
+			selectedMaxServerID = stats.maxServerID
+		}
+	}
+	return selectedRG, selectedRG != ""
+}
+
 func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
 	log := log.Ctx(ctx)
 	// wait for manager service ready.
@@ -144,7 +215,6 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 			rg = common.DefaultResourceGroupName
 		}
 		if resourceGroup != "" && rg != resourceGroup {
-			// skip the streaming node if the resource group is not matched.
 			continue
 		}
 		g.Go(func() error {
