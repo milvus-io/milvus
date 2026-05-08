@@ -3,9 +3,10 @@ package planparserv2
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestReduceJsonMatchElementType(t *testing.T) {
@@ -30,7 +31,7 @@ func TestReduceJsonMatchElementType(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := reduceJsonMatchElementType(c.input)
+			got, err := reduceJSONMatchElementType(c.input)
 			if c.wantErr {
 				assert.Error(t, err)
 				return

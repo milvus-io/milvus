@@ -28,9 +28,9 @@ func genericValueScalarType(v *planpb.GenericValue) schemapb.DataType {
 	return schemapb.DataType_None
 }
 
-// isJsonMatchElementColumn reports whether a ColumnInfo references the JSON
+// isJSONMatchElementColumn reports whether a ColumnInfo references the JSON
 // element being matched by the current MATCH_* call.
-func isJsonMatchElementColumn(ci *planpb.ColumnInfo, mctx *matchContext) bool {
+func isJSONMatchElementColumn(ci *planpb.ColumnInfo, mctx *matchContext) bool {
 	if ci == nil || mctx == nil || mctx.sourceType != matchSourceJSON {
 		return false
 	}
@@ -42,29 +42,29 @@ func isJsonMatchElementColumn(ci *planpb.ColumnInfo, mctx *matchContext) bool {
 		slices.Equal(nestedPath[:len(mctx.jsonPath)], mctx.jsonPath)
 }
 
-// collectJsonMatchLiteralTypes walks the predicate tree and collects the
+// collectJSONMatchLiteralTypes walks the predicate tree and collects the
 // scalar types of every literal that sits opposite a JSON element-level
 // column reference produced inside the current MATCH_*. Only well-formed
 // column-vs-literal shapes contribute: UnaryRange, BinaryRange, Term,
 // BinaryArithOpEvalRange.
-func collectJsonMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]schemapb.DataType) {
+func collectJSONMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]schemapb.DataType) {
 	if expr == nil {
 		return
 	}
 	switch e := expr.GetExpr().(type) {
 	case *planpb.Expr_BinaryExpr:
-		collectJsonMatchLiteralTypes(e.BinaryExpr.GetLeft(), mctx, acc)
-		collectJsonMatchLiteralTypes(e.BinaryExpr.GetRight(), mctx, acc)
+		collectJSONMatchLiteralTypes(e.BinaryExpr.GetLeft(), mctx, acc)
+		collectJSONMatchLiteralTypes(e.BinaryExpr.GetRight(), mctx, acc)
 	case *planpb.Expr_UnaryExpr:
-		collectJsonMatchLiteralTypes(e.UnaryExpr.GetChild(), mctx, acc)
+		collectJSONMatchLiteralTypes(e.UnaryExpr.GetChild(), mctx, acc)
 	case *planpb.Expr_UnaryRangeExpr:
-		if isJsonMatchElementColumn(e.UnaryRangeExpr.GetColumnInfo(), mctx) {
+		if isJSONMatchElementColumn(e.UnaryRangeExpr.GetColumnInfo(), mctx) {
 			if t := genericValueScalarType(e.UnaryRangeExpr.GetValue()); t != schemapb.DataType_None {
 				*acc = append(*acc, t)
 			}
 		}
 	case *planpb.Expr_BinaryRangeExpr:
-		if isJsonMatchElementColumn(e.BinaryRangeExpr.GetColumnInfo(), mctx) {
+		if isJSONMatchElementColumn(e.BinaryRangeExpr.GetColumnInfo(), mctx) {
 			if t := genericValueScalarType(e.BinaryRangeExpr.GetLowerValue()); t != schemapb.DataType_None {
 				*acc = append(*acc, t)
 			}
@@ -73,7 +73,7 @@ func collectJsonMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]
 			}
 		}
 	case *planpb.Expr_TermExpr:
-		if isJsonMatchElementColumn(e.TermExpr.GetColumnInfo(), mctx) {
+		if isJSONMatchElementColumn(e.TermExpr.GetColumnInfo(), mctx) {
 			for _, v := range e.TermExpr.GetValues() {
 				if t := genericValueScalarType(v); t != schemapb.DataType_None {
 					*acc = append(*acc, t)
@@ -81,7 +81,7 @@ func collectJsonMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]
 			}
 		}
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
-		if isJsonMatchElementColumn(e.BinaryArithOpEvalRangeExpr.GetColumnInfo(), mctx) {
+		if isJSONMatchElementColumn(e.BinaryArithOpEvalRangeExpr.GetColumnInfo(), mctx) {
 			if t := genericValueScalarType(e.BinaryArithOpEvalRangeExpr.GetValue()); t != schemapb.DataType_None {
 				*acc = append(*acc, t)
 			}
@@ -89,7 +89,7 @@ func collectJsonMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]
 	}
 }
 
-// reduceJsonMatchElementType collapses a set of collected literal types into
+// reduceJSONMatchElementType collapses a set of collected literal types into
 // a single element scalar type, enforcing compatibility:
 //   - all string → VarChar
 //   - all bool   → Bool
@@ -97,7 +97,7 @@ func collectJsonMatchLiteralTypes(expr *planpb.Expr, mctx *matchContext, acc *[]
 //   - mixing families → error
 //
 // Returns error if types are incompatible or the set is empty.
-func reduceJsonMatchElementType(types []schemapb.DataType) (schemapb.DataType, error) {
+func reduceJSONMatchElementType(types []schemapb.DataType) (schemapb.DataType, error) {
 	if len(types) == 0 {
 		return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg(
 			"MATCH_* on JSON requires at least one typed literal comparison " +
@@ -161,12 +161,12 @@ func jsonMatchLiteralTypeError() error {
 			"all literals must belong to a single scalar family (bool | string | numeric)")
 }
 
-// validateJsonMatchElementType runs the collect+reduce pass on a JSON
+// validateJSONMatchElementType runs the collect+reduce pass on a JSON
 // MATCH_* predicate. It only validates; the inferred element_type is
 // intentionally not written into the plan. C++ dispatch routes by rhs
 // val_case and the JsonInvertedIndex's own T; ElementType on the $ column
 // would be dead weight.
-func validateJsonMatchElementType(predicate *planpb.Expr, mctx *matchContext) error {
+func validateJSONMatchElementType(predicate *planpb.Expr, mctx *matchContext) error {
 	if mctx == nil || mctx.sourceType != matchSourceJSON {
 		return nil
 	}
@@ -175,7 +175,7 @@ func validateJsonMatchElementType(predicate *planpb.Expr, mctx *matchContext) er
 			"MATCH_* on JSON does not support template placeholders in predicate")
 	}
 	var types []schemapb.DataType
-	collectJsonMatchLiteralTypes(predicate, mctx, &types)
-	_, err := reduceJsonMatchElementType(types)
+	collectJSONMatchLiteralTypes(predicate, mctx, &types)
+	_, err := reduceJSONMatchElementType(types)
 	return err
 }

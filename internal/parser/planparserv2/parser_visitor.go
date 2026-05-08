@@ -2605,7 +2605,7 @@ func (v *ParserVisitor) parseMatchExpr(mctx *matchContext, exprCtx parser.IExprC
 		return err
 	}
 
-	if err := validateJsonMatchElementType(predicateExpr.expr, mctx); err != nil {
+	if err := validateJSONMatchElementType(predicateExpr.expr, mctx); err != nil {
 		return err
 	}
 
