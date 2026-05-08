@@ -2638,9 +2638,21 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_ALL(struct_array, $[sub_int] > 1)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
+		column := expr.GetMatchExpr().GetColumn()
+		assert.Equal(t, int64(132), column.GetFieldId())
+		assert.Equal(t, "struct_array", column.GetFieldName())
+		assert.Equal(t, schemapb.DataType_ArrayOfStruct, column.GetDataType())
+		assert.Equal(t, schemapb.DataType_None, column.GetElementType())
+		assert.Empty(t, column.GetNestedPath())
 		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
+
+		predicateColumn := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr().GetColumnInfo()
+		require.NotNil(t, predicateColumn)
+		assert.Equal(t, int64(134), predicateColumn.GetFieldId())
+		assert.Equal(t, schemapb.DataType_Array, predicateColumn.GetDataType())
+		assert.Equal(t, schemapb.DataType_Int32, predicateColumn.GetElementType())
+		assert.True(t, predicateColumn.GetIsElementLevel())
 	})
 
 	t.Run("MatchAny_Proto", func(t *testing.T) {
@@ -2750,8 +2762,20 @@ func TestExpr_MatchArray(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_ALL(StringArrayField, $ == "Red")`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "StringArrayField", expr.GetMatchExpr().GetColumn().GetFieldName())
+		column := expr.GetMatchExpr().GetColumn()
+		assert.Equal(t, int64(131), column.GetFieldId())
+		assert.Equal(t, "StringArrayField", column.GetFieldName())
+		assert.Equal(t, schemapb.DataType_Array, column.GetDataType())
+		assert.Equal(t, schemapb.DataType_VarChar, column.GetElementType())
+		assert.Empty(t, column.GetNestedPath())
 		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
+
+		predicateColumn := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr().GetColumnInfo()
+		require.NotNil(t, predicateColumn)
+		assert.Equal(t, int64(131), predicateColumn.GetFieldId())
+		assert.Equal(t, schemapb.DataType_Array, predicateColumn.GetDataType())
+		assert.Equal(t, schemapb.DataType_VarChar, predicateColumn.GetElementType())
+		assert.True(t, predicateColumn.GetIsElementLevel())
 	})
 
 	invalidExprs := []string{
@@ -2785,18 +2809,40 @@ func TestExpr_MatchRejectsNonCurrentElementSources(t *testing.T) {
 		`MATCH_ANY(StringArrayField, $ == "Red" && Int64Field > 0)`,
 		`MATCH_ANY(StringArrayField, $ == "Red" && array_contains(StringArrayField, "Red"))`,
 		`MATCH_ANY(StringArrayField, $ == "Red" && array_length(struct_array[sub_int]) > 0)`,
+		`MATCH_ANY(StringArrayField, $ == "Red" && element_filter(struct_array, true == true))`,
 		`MATCH_ANY(JSONField["items"], $)`,
 		`MATCH_ANY(JSONField["items"], true)`,
 		`MATCH_ANY(JSONField["items"], true == true)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && Int64Field > 0)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && JSONField["other"] > 0)`,
 		`MATCH_ANY(JSONField["items"], $ > 1 && array_length(struct_array[sub_int]) > 0)`,
+		`MATCH_ANY(JSONField["items"], $ > 1 && element_filter(struct_array, true == true))`,
 	}
 	for _, expr := range invalidExprs {
 		_, err := ParseExpr(helper, expr, nil)
 		assert.Error(t, err, expr)
 		if err != nil {
 			assert.Contains(t, err.Error(), "current element accessor", expr)
+		}
+	}
+}
+
+func TestExpr_MatchRejectsCallExpr(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	invalidExprs := []string{
+		`MATCH_ANY(StringArrayField, f($))`,
+		`MATCH_ANY(StringArrayField, $ == "Red" && f($))`,
+		`MATCH_ALL(struct_array, f($[sub_int]))`,
+		`MATCH_ANY(JSONField["items"], f($))`,
+	}
+	for _, expr := range invalidExprs {
+		_, err := ParseExpr(helper, expr, nil)
+		assert.Error(t, err, expr)
+		if err != nil {
+			assert.Contains(t, err.Error(), "function calls", expr)
 		}
 	}
 }
@@ -2891,6 +2937,13 @@ func TestExpr_MatchJson(t *testing.T) {
 		assert.Equal(t, schemapb.DataType_JSON, column.GetDataType())
 		assert.Equal(t, []string{"items", "admins"}, column.GetNestedPath())
 		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
+
+		predicateColumn := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr().GetColumnInfo()
+		require.NotNil(t, predicateColumn)
+		assert.Equal(t, column.GetFieldId(), predicateColumn.GetFieldId())
+		assert.Equal(t, schemapb.DataType_JSON, predicateColumn.GetDataType())
+		assert.Equal(t, []string{"items", "admins"}, predicateColumn.GetNestedPath())
+		assert.True(t, predicateColumn.GetIsElementLevel())
 	})
 
 	t.Run("MatchJson_SingleQuote_Proto", func(t *testing.T) {
@@ -2936,6 +2989,7 @@ func TestExpr_MatchJson(t *testing.T) {
 		// $["key"] is not supported inside JSON MATCH predicates; put the
 		// JSON path in the first argument and use bare $ for the element.
 		`MATCH_ALL(JSONField["items"], $["color"] == "Red")`,
+		`MATCH_ALL(JSONField, $["color"] == "Red")`,
 		// $[ident] (no quotes) is struct-only
 		`MATCH_ALL(JSONField, $[color] == "Red")`,
 		// Path-style first arg requires the resolved column to be JSON

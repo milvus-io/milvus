@@ -3,9 +3,9 @@ package planparserv2
 import (
 	"slices"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // genericValueScalarType maps a GenericValue oneof payload to its scalar
@@ -103,44 +103,62 @@ func reduceJsonMatchElementType(types []schemapb.DataType) (schemapb.DataType, e
 			"MATCH_* on JSON requires at least one typed literal comparison " +
 				"against the element accessor ($)")
 	}
-	var hasBool, hasStr, hasInt, hasFloat bool
+
+	family := jsonMatchLiteralFamilyNone
+	result := schemapb.DataType_None
 	for _, t := range types {
-		switch t {
-		case schemapb.DataType_Bool:
-			hasBool = true
-		case schemapb.DataType_VarChar, schemapb.DataType_String:
-			hasStr = true
-		case schemapb.DataType_Int64:
-			hasInt = true
-		case schemapb.DataType_Double:
-			hasFloat = true
+		curFamily, curType := jsonMatchLiteralFamilyOf(t)
+		if curFamily == jsonMatchLiteralFamilyNone {
+			return schemapb.DataType_None, jsonMatchLiteralTypeError()
+		}
+
+		if family == jsonMatchLiteralFamilyNone {
+			family = curFamily
+			result = curType
+			continue
+		}
+
+		if family != curFamily {
+			return schemapb.DataType_None, jsonMatchLiteralTypeError()
+		}
+
+		if family == jsonMatchLiteralFamilyNumeric {
+			if curType == schemapb.DataType_Double {
+				result = schemapb.DataType_Double
+			}
 		}
 	}
-	families := 0
-	if hasBool {
-		families++
-	}
-	if hasStr {
-		families++
-	}
-	if hasInt || hasFloat {
-		families++
-	}
-	if families != 1 {
-		return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg(
-			"MATCH_* on JSON has inconsistent literal types across element comparisons; " +
-				"all literals must belong to a single scalar family (bool | string | numeric)")
-	}
-	switch {
-	case hasBool:
-		return schemapb.DataType_Bool, nil
-	case hasStr:
-		return schemapb.DataType_VarChar, nil
-	case hasFloat:
-		return schemapb.DataType_Double, nil
+	return result, nil
+}
+
+type jsonMatchLiteralFamily int
+
+const (
+	jsonMatchLiteralFamilyNone jsonMatchLiteralFamily = iota
+	jsonMatchLiteralFamilyBool
+	jsonMatchLiteralFamilyString
+	jsonMatchLiteralFamilyNumeric
+)
+
+func jsonMatchLiteralFamilyOf(t schemapb.DataType) (jsonMatchLiteralFamily, schemapb.DataType) {
+	switch t {
+	case schemapb.DataType_Bool:
+		return jsonMatchLiteralFamilyBool, schemapb.DataType_Bool
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return jsonMatchLiteralFamilyString, schemapb.DataType_VarChar
+	case schemapb.DataType_Int64:
+		return jsonMatchLiteralFamilyNumeric, schemapb.DataType_Int64
+	case schemapb.DataType_Double:
+		return jsonMatchLiteralFamilyNumeric, schemapb.DataType_Double
 	default:
-		return schemapb.DataType_Int64, nil
+		return jsonMatchLiteralFamilyNone, schemapb.DataType_None
 	}
+}
+
+func jsonMatchLiteralTypeError() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"MATCH_* on JSON has inconsistent literal types across element comparisons; " +
+			"all literals must belong to a single scalar family (bool | string | numeric)")
 }
 
 // validateJsonMatchElementType runs the collect+reduce pass on a JSON

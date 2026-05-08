@@ -244,7 +244,7 @@ func (VectorType) EnumDescriptor() ([]byte, []int) {
 	return file_plan_proto_rawDescGZIP(), []int{2}
 }
 
-// MatchType defines the type of match operation for struct array queries
+// MatchType defines the type of match operation for MATCH_* queries.
 type MatchType int32
 
 const (

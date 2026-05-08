@@ -951,6 +951,12 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, st
 
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
+	if v.currentMatchContext != nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"MATCH_* predicate does not support function calls: %s",
+			ctx.GetText())
+	}
+
 	functionName := strings.ToLower(ctx.Identifier().GetText())
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
@@ -2367,6 +2373,10 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 
 // VisitElementFilter handles ElementFilter(structArrayField, elementExpr) syntax.
 func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) interface{} {
+	if err := v.rejectNonElementAccessorInMatchPredicate(ctx.GetText()); err != nil {
+		return err
+	}
+
 	// Check for nested ElementFilter - not allowed
 	if v.currentStructArrayField != "" {
 		return merr.WrapErrParameterInvalidMsg("nested ElementFilter is not supported, already inside ElementFilter for field: %s", v.currentStructArrayField)

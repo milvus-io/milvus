@@ -256,7 +256,7 @@ message ElementFilterExpr {
   Expr predicate = 3;
 }
 
-// MatchType defines the type of match operation for struct array queries
+// MatchType defines the type of match operation for MATCH_* queries.
 enum MatchType {
   MatchAll = 0;    // All elements must match the predicate
   MatchAny = 1;    // At least one element matches the predicate

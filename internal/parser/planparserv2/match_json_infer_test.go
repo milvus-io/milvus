@@ -3,8 +3,8 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,6 +18,7 @@ func TestReduceJsonMatchElementType(t *testing.T) {
 		{"empty", nil, schemapb.DataType_None, true},
 		{"single_int", []schemapb.DataType{schemapb.DataType_Int64}, schemapb.DataType_Int64, false},
 		{"single_str", []schemapb.DataType{schemapb.DataType_VarChar}, schemapb.DataType_VarChar, false},
+		{"single_string_alias", []schemapb.DataType{schemapb.DataType_String}, schemapb.DataType_VarChar, false},
 		{"single_bool", []schemapb.DataType{schemapb.DataType_Bool}, schemapb.DataType_Bool, false},
 		{"single_double", []schemapb.DataType{schemapb.DataType_Double}, schemapb.DataType_Double, false},
 		{"int_and_double_widen", []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Double}, schemapb.DataType_Double, false},
@@ -56,6 +57,7 @@ func TestExpr_Match_JSON(t *testing.T) {
 		`MATCH_ALL(JSONField["path"], $ != "")`,
 		`MATCH_ANY(JSONField["path"], $ in ["a", "b", "c"])`,
 		// int family
+		`MATCH_ANY(JSONField, $ > 1)`,
 		`MATCH_ANY(JSONField["path"]["n"], $ > 5)`,
 		`MATCH_ALL(JSONField["path"], $ > 5 && $ < 10)`,
 		`MATCH_ANY(JSONField["path"], $ in [1, 2, 3])`,
@@ -81,6 +83,7 @@ func TestExpr_Match_JSON(t *testing.T) {
 
 	invalid := []string{
 		// cross-family: string + numeric
+		`MATCH_ANY(JSONField, $ == "x" || $ > 5)`,
 		`MATCH_ANY(JSONField["path"], $ == "x" || $ > 5)`,
 		// cross-family: bool + numeric
 		`MATCH_ANY(JSONField["path"], $ == true || $ == 1)`,
