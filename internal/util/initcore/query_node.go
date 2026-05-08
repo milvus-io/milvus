@@ -145,6 +145,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
 	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
+	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
 	InitLocalChunkManager(localDataRootPath)
