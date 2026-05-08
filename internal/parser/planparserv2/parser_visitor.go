@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -1431,6 +1432,9 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 	}
 
 	if len(column.NestedPath) != 0 {
+		if typeutil.IsArrayType(column.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on array element access, got: %s", ctx.GetText())
+		}
 		// convert json not null expr to exists expr, eg: json['a'] is not null -> exists json['a']
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_ExistsExpr{
@@ -1471,6 +1475,9 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	}
 
 	if len(column.NestedPath) != 0 {
+		if typeutil.IsArrayType(column.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on array element access, got: %s", ctx.GetText())
+		}
 		// convert json is null expr to not exists expr, eg: json['a'] is null -> not exists json['a']
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_ExistsExpr{
