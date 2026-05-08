@@ -102,9 +102,9 @@ func (_c *MockManagerClient_Close_Call) RunAndReturn(run func()) *MockManagerCli
 	return _c
 }
 
-// CollectAllStatus provides a mock function with given fields: ctx, resourceGroup
-func (_m *MockManagerClient) CollectAllStatus(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
-	ret := _m.Called(ctx, resourceGroup)
+// CollectAllStatus provides a mock function with given fields: ctx, resourceGroupHint
+func (_m *MockManagerClient) CollectAllStatus(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
+	ret := _m.Called(ctx, resourceGroupHint)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CollectAllStatus")
@@ -113,10 +113,10 @@ func (_m *MockManagerClient) CollectAllStatus(ctx context.Context, resourceGroup
 	var r0 map[int64]*types.StreamingNodeStatus
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, string) (map[int64]*types.StreamingNodeStatus, error)); ok {
-		return rf(ctx, resourceGroup)
+		return rf(ctx, resourceGroupHint)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string) map[int64]*types.StreamingNodeStatus); ok {
-		r0 = rf(ctx, resourceGroup)
+		r0 = rf(ctx, resourceGroupHint)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*types.StreamingNodeStatus)
@@ -124,7 +124,7 @@ func (_m *MockManagerClient) CollectAllStatus(ctx context.Context, resourceGroup
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, resourceGroup)
+		r1 = rf(ctx, resourceGroupHint)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -139,12 +139,12 @@ type MockManagerClient_CollectAllStatus_Call struct {
 
 // CollectAllStatus is a helper method to define mock.On call
 //   - ctx context.Context
-//   - resourceGroup string
-func (_e *MockManagerClient_Expecter) CollectAllStatus(ctx interface{}, resourceGroup interface{}) *MockManagerClient_CollectAllStatus_Call {
-	return &MockManagerClient_CollectAllStatus_Call{Call: _e.mock.On("CollectAllStatus", ctx, resourceGroup)}
+//   - resourceGroupHint string
+func (_e *MockManagerClient_Expecter) CollectAllStatus(ctx interface{}, resourceGroupHint interface{}) *MockManagerClient_CollectAllStatus_Call {
+	return &MockManagerClient_CollectAllStatus_Call{Call: _e.mock.On("CollectAllStatus", ctx, resourceGroupHint)}
 }
 
-func (_c *MockManagerClient_CollectAllStatus_Call) Run(run func(ctx context.Context, resourceGroup string)) *MockManagerClient_CollectAllStatus_Call {
+func (_c *MockManagerClient_CollectAllStatus_Call) Run(run func(ctx context.Context, resourceGroupHint string)) *MockManagerClient_CollectAllStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})
