@@ -32,6 +32,31 @@ resolve_base() {
     done
   fi
 
+  local ref
+  local inferred_base=""
+  local inferred_count=-1
+  local merge_base
+  local candidate_count
+  for ref in master 3.0 2.6 2.5 2.4 2.3; do
+    for candidate in "milvus/${ref}" "origin/${ref}" "upstream/${ref}"; do
+      if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
+        merge_base="$(git merge-base "${candidate}" "${target}" 2>/dev/null || true)"
+        if [[ -z "${merge_base}" ]]; then
+          continue
+        fi
+        candidate_count="$(git rev-list --count "${merge_base}")"
+        if (( candidate_count > inferred_count )); then
+          inferred_base="${candidate}"
+          inferred_count="${candidate_count}"
+        fi
+      fi
+    done
+  done
+  if [[ -n "${inferred_base}" ]]; then
+    echo "${inferred_base}"
+    return
+  fi
+
   for candidate in milvus/master origin/master upstream/master "@{u}"; do
     if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
       echo "${candidate}"
