@@ -24,6 +24,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
@@ -213,8 +214,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         storage_config.root_path = TestLocalPath;
         chunk_manager_ = storage::CreateChunkManager(storage_config);
 
-        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+        fs_ = milvus::segcore::GetDefaultArrowFileSystem();
 
         Init(collection_id,
              partition_id,
@@ -361,8 +361,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         storage_config.root_path = root_path_;
         chunk_manager_ = storage::CreateChunkManager(storage_config);
 
-        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+        fs_ = milvus::segcore::GetDefaultArrowFileSystem();
     }
 
     void

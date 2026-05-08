@@ -75,7 +75,7 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 
 func (s *NamespaceCompactorTestSuite) TearDownSuite() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
-	initcore.CleanArrowFileSystemSingleton()
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *NamespaceCompactorTestSuite) setupSortedSegments() {

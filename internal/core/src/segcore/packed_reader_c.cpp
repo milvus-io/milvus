@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "segcore/packed_reader_c.h"
+#include "segcore/default_fs.h"
 
 #include <arrow/c/bridge.h>
 #include <arrow/status.h>
@@ -110,8 +111,7 @@ NewPackedReader(char** paths,
 
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+        auto trueFs = milvus::segcore::GetDefaultArrowFileSystem();
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,

@@ -166,9 +166,8 @@ func TestGetFilesystemKeyFromStorageConfigWithOtherFields(t *testing.T) {
 	assert.Equal(t, "/var/lib/milvus/data", result)
 }
 
-// TestGetCachedFilesystemMetricsDefault tests GetCachedFilesystemMetrics with empty key (default filesystem)
-func TestGetCachedFilesystemMetricsDefault(t *testing.T) {
-	// Set up local storage for testing
+// TestGetFilesystemMetricsWithConfig tests GetFilesystemMetricsWithConfig with local storage
+func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	dir := t.TempDir()
 	pt := paramtable.Get()
 	pt.Save(pt.CommonCfg.StorageType.Key, "local")
@@ -179,22 +178,20 @@ func TestGetCachedFilesystemMetricsDefault(t *testing.T) {
 		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
-	// Initialize local arrow filesystem
 	err := initcore.InitLocalArrowFileSystem(dir)
 	require.NoError(t, err, "Failed to initialize local arrow filesystem")
 
-	// Test getting metrics from default filesystem (empty key)
-	metrics, err := GetCachedFilesystemMetrics("")
+	localConfig := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    dir,
+	}
+	metrics, err := GetFilesystemMetricsWithConfig(localConfig)
 	if err != nil {
-		// If CGO libraries aren't available, skip the test
 		t.Skipf("Skipping CGO test: %v", err)
 		return
 	}
 
-	// Verify metrics struct is not nil
 	require.NotNil(t, metrics, "Metrics should not be nil")
-
-	// Verify all 8 metrics fields are present (values may be 0 or positive)
 	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
@@ -205,9 +202,8 @@ func TestGetCachedFilesystemMetricsDefault(t *testing.T) {
 	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
 }
 
-// TestPublishCachedFilesystemMetrics tests PublishCachedFilesystemMetrics function
-func TestPublishCachedFilesystemMetrics(t *testing.T) {
-	// Set up local storage for testing
+// TestPublishFilesystemMetricsWithLocalConfig tests PublishFilesystemMetricsWithConfig
+func TestPublishFilesystemMetricsWithLocalConfig(t *testing.T) {
 	dir := t.TempDir()
 	pt := paramtable.Get()
 	pt.Save(pt.CommonCfg.StorageType.Key, "local")
@@ -218,22 +214,20 @@ func TestPublishCachedFilesystemMetrics(t *testing.T) {
 		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
-	// Initialize local arrow filesystem
 	err := initcore.InitLocalArrowFileSystem(dir)
 	require.NoError(t, err, "Failed to initialize local arrow filesystem")
 
-	// Test with empty key (default filesystem)
-	metrics, err := PublishCachedFilesystemMetrics("")
+	localConfig := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    dir,
+	}
+	metrics, err := PublishFilesystemMetricsWithConfig(localConfig)
 	if err != nil {
-		// If CGO libraries aren't available, skip the test
 		t.Skipf("Skipping CGO test: %v", err)
 		return
 	}
 
-	// Verify metrics struct is not nil
 	require.NotNil(t, metrics, "Metrics should not be nil")
-
-	// Verify all 8 metrics fields are present
 	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
@@ -284,29 +278,6 @@ func TestPublishFilesystemMetricsWithConfig(t *testing.T) {
 	assert.GreaterOrEqual(t, metrics.MultiPartUploadFinished, int64(0))
 }
 
-// TestPublishFilesystemMetricsWithNilConfig tests PublishFilesystemMetricsWithConfig with nil config
-func TestPublishFilesystemMetricsWithNilConfig(t *testing.T) {
-	// Set up local storage for testing
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	// Initialize local arrow filesystem
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	// Test with nil config - should use empty key (default filesystem)
-	metrics, err := PublishFilesystemMetricsWithConfig(nil)
-	assert.NoError(t, err)
-	assert.NotNil(t, metrics, "Metrics should not be nil")
-}
-
 // TestPublishDefaultFilesystemMetrics tests PublishDefaultFilesystemMetrics function
 func TestPublishDefaultFilesystemMetrics(t *testing.T) {
 	// Set up local storage for testing
@@ -330,29 +301,12 @@ func TestPublishDefaultFilesystemMetrics(t *testing.T) {
 	assert.NotNil(t, metrics, "Metrics should not be nil")
 }
 
-// TestGetCachedFilesystemMetricsWithInvalidKey tests error handling for non-existent cache key
-func TestInvalidKey(t *testing.T) {
-	// Set up local storage for testing
-	dir := t.TempDir()
-	pt := paramtable.Get()
-	pt.Save(pt.CommonCfg.StorageType.Key, "local")
-	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
-
-	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.StorageType.Key)
-		pt.Reset(pt.LocalStorageCfg.Path.Key)
-	})
-
-	// Initialize local arrow filesystem
-	err := initcore.InitLocalArrowFileSystem(dir)
-	require.NoError(t, err, "Failed to initialize local arrow filesystem")
-
-	// Test with a key that doesn't exist in cache
-	// FIXME: FilesystemCache::get from milvus-storage will return default filesystem if the key is not in cache and path is schemeless.
-	_, err = GetCachedFilesystemMetrics("s3://non-existent-key")
+// TestNilConfig tests error handling for nil config
+func TestNilConfig(t *testing.T) {
+	_, err := GetFilesystemMetricsWithConfig(nil)
 	assert.Error(t, err)
 
-	_, err = PublishCachedFilesystemMetrics("s3://non-existent-key")
+	_, err = PublishFilesystemMetricsWithConfig(nil)
 	assert.Error(t, err)
 }
 

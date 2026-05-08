@@ -1,4 +1,5 @@
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "segcore/default_fs.h"
 
 #include <exception>
 #include <optional>
@@ -137,8 +138,7 @@ V1SealedIndexTranslator::LoadVecIndex() {
         auto remote_chunk_manager =
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             index_load_info_.index_params);

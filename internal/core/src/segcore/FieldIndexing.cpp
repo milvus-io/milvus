@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
@@ -585,8 +586,7 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             auto chunk_manager =
                 milvus::storage::LocalChunkManagerSingleton::GetInstance()
                     .GetChunkManager();
-            auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+            auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
             // Create FieldDataMeta for RTree index
             storage::FieldDataMeta field_data_meta;
