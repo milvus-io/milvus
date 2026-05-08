@@ -785,6 +785,7 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
     for (const auto& [field_id, stats] : new_info.GetJsonKeyStatsLogs()) {
         auto fid = FieldId(field_id);
         new_fields.insert(fid);
+        auto current_stats = GetJsonKeyStatsLog(field_id);
         if (stats.json_key_stats_data_format() != expected_format) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "
@@ -797,10 +798,17 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
                 stats.json_key_stats_data_format(),
                 expected_format,
                 stats.files_size());
+            if (current_stats != nullptr) {
+                diff.json_stats_to_drop.insert(fid);
+                LOG_INFO(
+                    "json key stats diff drop invalid format, segment:{}, "
+                    "field:{}",
+                    new_info.GetSegmentID(),
+                    field_id);
+            }
             continue;
         }
 
-        auto current_stats = GetJsonKeyStatsLog(field_id);
         if (current_stats == nullptr) {
             diff.json_stats_to_load[fid] =
                 new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);

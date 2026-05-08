@@ -1650,7 +1650,8 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
     auto invalid_diff = current_info.ComputeDiff(invalid_info);
     EXPECT_TRUE(invalid_diff.json_stats_to_load.empty());
     EXPECT_TRUE(invalid_diff.json_stats_to_replace.empty());
-    EXPECT_TRUE(invalid_diff.json_stats_to_drop.empty());
+    EXPECT_EQ(invalid_diff.json_stats_to_drop.size(), 1);
+    EXPECT_TRUE(invalid_diff.json_stats_to_drop.count(FieldId(102)) > 0);
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsDisabled) {

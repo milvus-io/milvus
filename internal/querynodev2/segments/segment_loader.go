@@ -96,10 +96,6 @@ type Loader interface {
 		info *querypb.SegmentLoadInfo,
 		version int64) error
 
-	LoadJSONIndex(ctx context.Context,
-		segment Segment,
-		info *querypb.SegmentLoadInfo) error
-
 	// ReopenSegments update segment data according to new load info.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
@@ -352,7 +348,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 		// L0 segment has no index or data to be load.
 		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
-			// s := segment.(*LocalSegment)
 			// lazy load segment do not load segment at first time.
 			if err = loader.LoadSegment(ctx, segment, loadInfo); err != nil {
 				return errors.Wrap(err, "At LoadSegment")
@@ -2389,49 +2384,6 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 		}
 	}
 
-	return nil
-}
-
-func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
-	seg Segment,
-	loadInfo *querypb.SegmentLoadInfo,
-) error {
-	segment, ok := seg.(*LocalSegment)
-	if !ok {
-		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
-	}
-
-	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
-	if statsResult.Err() != nil {
-		return statsResult.Err()
-	}
-	jsonKeyIndexInfo := statsResult.JSONKeyStats
-	jsonBasePaths := statsResult.JSONBasePaths
-	if len(jsonKeyIndexInfo) == 0 {
-		return nil
-	}
-	if jsonBasePaths == nil {
-		jsonBasePaths = make(map[int64]string)
-	}
-
-	// Compute V2 basePaths for non-manifest segments
-	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
-	for fieldID, stats := range jsonKeyIndexInfo {
-		if _, ok := jsonBasePaths[fieldID]; !ok {
-			jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
-				stats.GetBuildID(), stats.GetVersion(),
-				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
-		}
-	}
-
-	collection := segment.GetCollection()
-	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-
-	for fieldID, info := range jsonKeyIndexInfo {
-		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper, jsonBasePaths[fieldID]); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
