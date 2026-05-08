@@ -1408,10 +1408,12 @@ TEST(Growing, ResourceEstimationAfterInsert) {
     // Memory should include at least:
     // - Vector data: N * dim * sizeof(float) = 1000 * 128 * 4 = 512000 bytes
     // - Timestamps: N * sizeof(Timestamp) = 1000 * 8 = 8000 bytes
+    // - RowIDs: N * sizeof(int64_t) = 1000 * 8 = 8000 bytes
     // - PK field: N * sizeof(int64_t) = 1000 * 8 = 8000 bytes
     // Plus safety margin of 1.2x
-    int64_t expected_min_size =
-        N * dim * sizeof(float) + N * sizeof(Timestamp) + N * sizeof(int64_t);
+    int64_t expected_min_size = N * dim * sizeof(float) +
+                                N * sizeof(Timestamp) + N * sizeof(int64_t) +
+                                N * sizeof(int64_t);
     EXPECT_GE(resource.memory_bytes, expected_min_size);
 }
 

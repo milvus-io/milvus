@@ -13,10 +13,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestResumableConsumer(t *testing.T) {
@@ -27,7 +27,8 @@ func TestResumableConsumer(t *testing.T) {
 	c.EXPECT().Error().Return(errors.New("test"))
 	c.EXPECT().Close().Return(nil)
 	rc := NewResumableConsumer(func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error) {
-		if i == 0 {
+		switch i {
+		case 0:
 			i++
 			result := opts.MessageHandler.Handle(message.HandleParam{
 				Ctx: context.Background(),
@@ -45,7 +46,7 @@ func TestResumableConsumer(t *testing.T) {
 			assert.True(t, result.MessageHandled)
 			assert.NoError(t, result.Error)
 			return c, nil
-		} else if i == 1 {
+		case 1:
 			i++
 			return nil, errors.New("test")
 		}

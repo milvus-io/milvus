@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func TestInitialWALState(t *testing.T) {
@@ -125,11 +125,7 @@ func TestStateWithCond(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			oldState := stateCond.GetState()
-			for {
-				if !isStateBefore(oldState, targetState) {
-					break
-				}
-
+			for isStateBefore(oldState, targetState) {
 				err := stateCond.WatchChanged(context.Background(), oldState)
 				assert.NoError(t, err)
 				newState := stateCond.GetState()

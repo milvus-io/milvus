@@ -18,18 +18,19 @@ package importv2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func TestGenerateTargetPath(t *testing.T) {
@@ -99,6 +100,159 @@ func TestGenerateTargetPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateTargetLOBPath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	tests := []struct {
+		name       string
+		sourcePath string
+		wantPath   string
+		wantErr    bool
+	}{
+		{
+			name:       "standard LOB file path",
+			sourcePath: "files/insert_log/111/222/lobs/100/_data/abc123.vx",
+			wantPath:   "files/insert_log/444/555/lobs/100/_data/abc123.vx",
+			wantErr:    false,
+		},
+		{
+			name:       "LOB file with nested field path",
+			sourcePath: "root/data/insert_log/111/222/lobs/200/_data/xyz.vx",
+			wantPath:   "root/data/insert_log/444/555/lobs/200/_data/xyz.vx",
+			wantErr:    false,
+		},
+		{
+			name:       "invalid path - no insert_log",
+			sourcePath: "files/other/111/222/lobs/100/_data/abc.vx",
+			wantPath:   "",
+			wantErr:    true,
+		},
+		{
+			name:       "invalid path - too short after insert_log",
+			sourcePath: "files/insert_log/111",
+			wantPath:   "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath, err := generateTargetLOBPath(tt.sourcePath, source, target)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantPath, gotPath)
+			}
+		})
+	}
+}
+
+func TestLobFileInfosToPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		infos    []packed.LobFileInfo
+		expected []string
+	}{
+		{
+			name:     "empty input",
+			infos:    nil,
+			expected: []string{},
+		},
+		{
+			name: "single LOB file - absolute path preserved",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/abc.vx", FieldID: 300, TotalRows: 1000, ValidRows: 900},
+			},
+			expected: []string{"root/insert_log/100/200/lobs/300/_data/abc.vx"},
+		},
+		{
+			name: "multiple LOB files from same segment",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/file1.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+				{Path: "root/insert_log/100/200/lobs/300/_data/file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 400},
+				{Path: "root/insert_log/100/200/lobs/301/_data/file3.vx", FieldID: 301, TotalRows: 200, ValidRows: 200},
+			},
+			expected: []string{
+				"root/insert_log/100/200/lobs/300/_data/file1.vx",
+				"root/insert_log/100/200/lobs/300/_data/file2.vx",
+				"root/insert_log/100/200/lobs/301/_data/file3.vx",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lobFileInfosToPaths(tt.infos)
+			if len(tt.expected) == 0 {
+				assert.Empty(t, result)
+			} else {
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestCollectSegmentFiles_LOBFromManifest verifies that LOB file collection
+// reads from the segment manifest (not the partition directory), ensuring
+// only this segment's LOB files are collected.
+func TestCollectSegmentFiles_LOBFromManifest(t *testing.T) {
+	// This segment owns only 2 LOB files
+	segmentLobFiles := []packed.LobFileInfo{
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", FieldID: 300, TotalRows: 1000, ValidRows: 1000},
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+	}
+
+	// Mock CreateStorageConfig to avoid paramtable dependency
+	mocker0 := mockey.Mock(compaction.CreateStorageConfig).Return(&indexpb.StorageConfig{}).Build()
+	defer mocker0.UnPatch()
+
+	// Mock GetManifestLobFiles to return only this segment's LOB files
+	mocker1 := mockey.Mock(packed.GetManifestLobFiles).Return(segmentLobFiles, nil).Build()
+	defer mocker1.UnPatch()
+
+	// Mock UnmarshalManifestPath
+	mocker2 := mockey.Mock(packed.UnmarshalManifestPath).Return("root/insert_log/100/200/1001", int64(1), nil).Build()
+	defer mocker2.UnPatch()
+
+	// Mock listAllFiles for insert binlogs (via WalkWithPrefix)
+	mocker3 := mockey.Mock(listAllFiles).Return(
+		[]string{"root/insert_log/100/200/1001/_data/cg0.parquet"}, nil).Build()
+	defer mocker3.UnPatch()
+
+	source := &datapb.CopySegmentSource{
+		SegmentId:      1001,
+		CollectionId:   100,
+		PartitionId:    200,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   `{"basePath":"root/insert_log/100/200/1001","version":1}`,
+	}
+
+	files, err := collectSegmentFiles(context.Background(), nil, source)
+	assert.NoError(t, err)
+	assert.NotNil(t, files)
+
+	// Verify LOB files come from manifest, not from directory listing.
+	// GetManifestLobFiles returns absolute paths (after ToAbsolutePaths in C++),
+	// so lobFileInfosToPaths uses them directly.
+	assert.Equal(t, 2, len(files.LobFiles))
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", files.LobFiles[0])
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", files.LobFiles[1])
+
+	// Key invariant: only this segment's files are returned.
+	// The old code used listAllFiles(partition/lobs/) which would have also
+	// returned seg2_file3.vx, seg2_file4.vx from other segments.
 }
 
 func TestGenerateTargetIndexPath(t *testing.T) {
@@ -1087,7 +1241,7 @@ func TestShortenSingleJsonStatsPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shortenSingleJsonStatsPath(tt.inputPath)
+			result := shortenSingleJSONStatsPath(tt.inputPath)
 			assert.Equal(t, tt.expectedPath, result)
 		})
 	}
@@ -1119,7 +1273,7 @@ func TestShortenJsonStatsPath(t *testing.T) {
 		},
 	}
 
-	result := shortenJsonStatsPath(jsonStats)
+	result := shortenJSONStatsPath(jsonStats)
 
 	assert.Equal(t, 2, len(result))
 
@@ -1160,7 +1314,7 @@ func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
 		},
 	}
 
-	result := shortenJsonStatsPath(jsonStats)
+	result := shortenJSONStatsPath(jsonStats)
 
 	assert.Equal(t, 1, len(result))
 	assert.NotNil(t, result[102])
@@ -1171,24 +1325,24 @@ func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
 
 func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
 	t.Run("already_shortened_meta", func(t *testing.T) {
-		result := shortenSingleJsonStatsPath("meta.json")
+		result := shortenSingleJSONStatsPath("meta.json")
 		assert.Equal(t, "meta.json", result)
 	})
 
 	t.Run("already_shortened_shared_key", func(t *testing.T) {
-		result := shortenSingleJsonStatsPath("shared_key_index/inverted_index_0")
+		result := shortenSingleJSONStatsPath("shared_key_index/inverted_index_0")
 		assert.Equal(t, "shared_key_index/inverted_index_0", result)
 	})
 
 	t.Run("full_path_meta_json", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/meta.json"
-		result := shortenSingleJsonStatsPath(fullPath)
+		result := shortenSingleJSONStatsPath(fullPath)
 		assert.Equal(t, "meta.json", result)
 	})
 
 	t.Run("full_path_nested_file", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/subdir/file.dat"
-		result := shortenSingleJsonStatsPath(fullPath)
+		result := shortenSingleJSONStatsPath(fullPath)
 		assert.Equal(t, "subdir/file.dat", result)
 	})
 }
@@ -1456,13 +1610,13 @@ func TestExtractJsonFiles(t *testing.T) {
 				Files:                  []string{"new/b", "new/c"},
 			},
 		}
-		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(jsonInfos)
+		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(jsonInfos)
 		assert.Equal(t, []string{"legacy/a"}, jsonKeyFiles)
 		assert.ElementsMatch(t, []string{"new/b", "new/c"}, jsonStatsFiles)
 	})
 
 	t.Run("empty input", func(t *testing.T) {
-		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(nil)
+		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(nil)
 		assert.Empty(t, jsonKeyFiles)
 		assert.Empty(t, jsonStatsFiles)
 	})
@@ -1488,8 +1642,8 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
 			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
 			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
-			JsonKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
-			JsonStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
+			JSONKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
+			JSONStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
 		}
 
 		mappings, err := generateMappingsFromFiles(files, source, target)
@@ -1830,8 +1984,8 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 			"files/insert_log/111/222/333/_metadata/manifest.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/tokenizer.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/index.data",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_0",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_1",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_0",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_1",
 		}, nil
 	}).Build()
 	defer mList.UnPatch()

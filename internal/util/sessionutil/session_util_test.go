@@ -25,12 +25,12 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGetServerIDConcurrently(t *testing.T) {
@@ -827,7 +827,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	session.Stop()
 
-	common.Version = semver.MustParse("2.6.4")
+	common.Version = semver.MustParse("3.0.0-beta")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
@@ -839,7 +839,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	session.Stop()
 
-	common.Version = semver.MustParse("2.6.7")
+	common.Version = semver.MustParse("3.1.0")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
@@ -850,7 +850,7 @@ func (s *SessionSuite) TestVersionKey() {
 	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
 	session.Stop()
 
-	common.Version = semver.MustParse("3.0.0")
+	common.Version = semver.MustParse("4.0.0")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
@@ -874,13 +874,13 @@ func (s *SessionSuite) TestSessionLifetime() {
 	s.Require().NoError(err)
 	s.Equal(string(resp.Kvs[0].Value), string(str))
 
-	ttlResp, err := s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	ttlResp, err := s.client.TimeToLive(ctx, *session.LeaseID)
 	s.Require().NoError(err)
 	s.Greater(ttlResp.TTL, int64(0))
 
 	session.GoingStop()
 	resp, err = s.client.Get(ctx, session.getCompleteKey())
-	s.Require().True(session.SessionRaw.Stopping)
+	s.Require().True(session.Stopping)
 	s.Require().NoError(err)
 	s.Equal(1, len(resp.Kvs))
 	str, err = json.Marshal(session.SessionRaw)
@@ -894,7 +894,7 @@ func (s *SessionSuite) TestSessionLifetime() {
 	s.Require().NoError(err)
 	s.Equal(0, len(resp.Kvs))
 
-	ttlResp, err = s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	ttlResp, err = s.client.TimeToLive(ctx, *session.LeaseID)
 	s.Require().NoError(err)
 	s.Equal(int64(-1), ttlResp.TTL)
 }
@@ -909,7 +909,7 @@ func TestForceKill(t *testing.T) {
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */
+	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */ //nolint:gosec // os.Args[0] is the test binary, not user input
 	cmd.Env = append(os.Environ(), "TEST_EXIT=1")
 
 	err := cmd.Run()

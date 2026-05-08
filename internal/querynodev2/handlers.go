@@ -25,23 +25,23 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
@@ -84,7 +84,7 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segmentID", segmentID))
 				continue
 			}
-			if len(segmentInfo.GetBinlogs()) > 0 {
+			if len(segmentInfo.GetBinlogs()) > 0 || segmentInfo.GetManifestPath() != "" {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
 					SegmentID:      segmentInfo.ID,
 					Level:          segmentInfo.GetLevel(),
@@ -101,7 +101,9 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 					ManifestPath:   segmentInfo.GetManifestPath(),
 				})
 			} else {
-				log.Info("skip segment which binlog is empty", zap.Int64("segmentID", segmentInfo.ID))
+				log.Info("skip segment which has no binlog and no manifest path",
+					zap.Int64("segmentID", segmentInfo.ID),
+					zap.String("manifestPath", segmentInfo.GetManifestPath()))
 			}
 		}
 	}
@@ -472,8 +474,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
 		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
-			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
-			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
+			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).
+			WithGroupSize(req.GetReq().GetGroupSize()).
+			WithGroupByFieldIdsFromProto(req.GetReq().GetGroupByFieldId(), req.GetReq().GetGroupByFieldIds()).
+			WithAdvance(req.GetReq().GetIsAdvanced()))
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.

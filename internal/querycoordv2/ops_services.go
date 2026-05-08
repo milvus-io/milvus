@@ -23,17 +23,17 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
@@ -130,7 +130,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 		return 0, false // Discard this node
 	})
 
-	nodesSuspended := s.meta.ResourceManager.GetNodesSuspended(nodeIDs)
+	nodesSuspended := s.meta.GetNodesSuspended(nodeIDs)
 
 	// Loop through each node in the `nodes` slice.
 	for _, node := range nodes {
@@ -313,7 +313,7 @@ func (s *Server) IsNodeSuspended(ctx context.Context, nodeID int64) (bool, error
 		log.Warn(errMsg, zap.Error(err))
 		return false, err
 	}
-	isSuspended := s.meta.ResourceManager.IsNodeSuspended(nodeID)
+	isSuspended := s.meta.IsNodeSuspended(nodeID)
 	return isSuspended, nil
 }
 
@@ -335,7 +335,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeDown(ctx, req.GetNodeID())
+	s.meta.HandleNodeDown(ctx, req.GetNodeID())
 	return merr.Success(), nil
 }
 
@@ -362,7 +362,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 			merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be resumed")), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeUp(ctx, req.GetNodeID())
+	s.meta.HandleNodeUp(ctx, req.GetNodeID())
 
 	return merr.Success(), nil
 }
@@ -391,7 +391,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
+	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -470,7 +470,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
+	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()

@@ -13,6 +13,8 @@ import (
 
 // test connect and close, connect again
 func TestConnectClose(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc, errConnect := base.NewMilvusClient(ctx, hp.GetDefaultClientConfig())
@@ -50,6 +52,8 @@ func genInvalidClientConfig() []client.ClientConfig {
 
 // test connect with timeout and invalid addr
 func TestConnectInvalidAddr(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*5)
 	for _, invalidCfg := range genInvalidClientConfig() {
@@ -61,6 +65,8 @@ func TestConnectInvalidAddr(t *testing.T) {
 
 // test connect repeatedly
 func TestConnectRepeat(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*10)
 
@@ -77,6 +83,8 @@ func TestConnectRepeat(t *testing.T) {
 
 // test close repeatedly
 func TestCloseRepeat(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*10)
 	mc, errConnect2 := base.NewMilvusClient(ctx, hp.GetDefaultClientConfig())

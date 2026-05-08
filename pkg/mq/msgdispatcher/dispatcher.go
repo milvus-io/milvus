@@ -26,16 +26,16 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type signal int32
@@ -210,7 +210,7 @@ func (d *Dispatcher) Handle(signal signal) {
 	log.Debug("get signal")
 	switch signal {
 	case start:
-		d.ctx, d.cancel = context.WithCancel(context.Background())
+		d.ctx, d.cancel = context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in d.cancel and called in pause/terminate cases
 		d.wg.Add(1)
 		go d.work()
 	case pause:
@@ -218,7 +218,7 @@ func (d *Dispatcher) Handle(signal signal) {
 		d.cancel()
 		d.wg.Wait()
 	case resume:
-		d.ctx, d.cancel = context.WithCancel(context.Background())
+		d.ctx, d.cancel = context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in d.cancel and called in pause/terminate cases
 		d.wg.Add(1)
 		go d.work()
 	case terminate:

@@ -26,19 +26,19 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 // getQuotaMetrics returns DataCoordQuotaMetrics.
@@ -65,7 +65,7 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 }
 
 func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	channels, err := getMetrics[*metricsinfo.Channel](s, ctx, req)
+	channels, err := getMetrics[*metricsinfo.Channel](ctx, s, req)
 	// fill checkpoint timestamp
 	channel2Checkpoints := s.meta.GetChannelCheckpoints()
 	for _, channel := range channels {
@@ -156,12 +156,12 @@ func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsReques
 }
 
 func (s *Server) getDataNodeSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	ret, err := getMetrics[*metricsinfo.Segment](s, ctx, req)
+	ret, err := getMetrics[*metricsinfo.Segment](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }
 
 func (s *Server) getSyncTaskJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	ret, err := getMetrics[*metricsinfo.SyncTask](s, ctx, req)
+	ret, err := getMetrics[*metricsinfo.SyncTask](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }
 
@@ -252,7 +252,7 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 		CollectionMetrics: s.getCollectionMetrics(ctx),
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
+	metricsinfo.FillDeployMetricsWithEnv(&ret.SystemInfo)
 
 	return ret
 }
@@ -275,17 +275,17 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	if err != nil {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
 	}
-	infos.BaseComponentInfos.Name = metrics.GetComponentName()
+	infos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
 			zap.Any("error_reason", metrics.GetStatus().GetReason()))
-		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
+		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
 
@@ -293,10 +293,10 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	if err != nil {
 		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
-	infos.BaseComponentInfos.HasError = false
+	infos.HasError = false
 	return infos, nil
 }
 
@@ -315,17 +315,17 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	if err != nil {
 		log.Warn("invalid metrics of IndexNode was found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
 	}
-	infos.BaseComponentInfos.Name = metrics.GetComponentName()
+	infos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
 			zap.Any("error_reason", metrics.GetStatus().GetReason()))
-		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
+		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
 
@@ -333,15 +333,15 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	if err != nil {
 		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
-	infos.BaseComponentInfos.HasError = false
+	infos.HasError = false
 	return infos, nil
 }
 
 // getMetrics retrieves and aggregates the metrics of the datanode to a slice
-func getMetrics[T any](s *Server, ctx context.Context, req *milvuspb.GetMetricsRequest) ([]T, error) {
+func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsRequest) ([]T, error) {
 	var metrics []T
 	var mu sync.Mutex
 	errorGroup, ctx := errgroup.WithContext(ctx)

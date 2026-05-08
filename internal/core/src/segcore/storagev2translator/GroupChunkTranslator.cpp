@@ -41,16 +41,13 @@
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
-#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/format/parquet/file_reader.h"
 #include "mmap/Types.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
-#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -69,6 +66,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
+    std::vector<milvus_storage::RowGroupMetadataVector>&& row_group_meta_list,
     bool use_mmap,
     bool mmap_populate,
     int64_t num_fields,
@@ -94,7 +92,8 @@ GroupChunkTranslator::GroupChunkTranslator(
       }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
-      insert_files_(insert_files),
+      insert_files_(std::move(insert_files)),
+      row_group_meta_list_(std::move(row_group_meta_list)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       load_priority_(load_priority),
@@ -127,72 +126,6 @@ GroupChunkTranslator::GroupChunkTranslator(
                 }(),
                 /* is_index */ false),
             /* support_eviction */ true) {
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
-
-    // Get row group metadata from files in parallel using HIGH POOL
-    // to avoid blocking the MIDDLE POOL thread with serial S3 I/O
-    struct FileMetaResult {
-        std::shared_ptr<parquet::FileMetaData> parquet_metadata;
-        milvus_storage::RowGroupMetadataVector row_group_meta;
-        std::map<int64_t, milvus_storage::ColumnOffset> field_id_mapping;
-    };
-    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-    std::vector<std::future<FileMetaResult>> futures;
-    futures.reserve(insert_files_.size());
-    for (const auto& file : insert_files_) {
-        futures.push_back(pool.Submit([&fs, file, this]() {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            FileMetaResult meta_result;
-            meta_result.parquet_metadata =
-                reader->file_metadata()->GetParquetMetadata();
-            meta_result.row_group_meta =
-                reader->file_metadata()->GetRowGroupMetadataVector();
-            meta_result.field_id_mapping =
-                reader->file_metadata()->GetFieldIDMapping();
-            auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] translator {} failed to close file reader when "
-                "get row group "
-                "metadata from file {} with error {}",
-                key_,
-                file + " with error: " + status.ToString());
-            return meta_result;
-        }));
-    }
-    // Ensure all futures are awaited even if one throws, to prevent
-    // use-after-free on captured references (&fs, this) in background tasks.
-    auto futures_guard = folly::makeGuard([&futures]() {
-        for (auto& f : futures) {
-            if (f.valid()) {
-                try {
-                    f.get();
-                } catch (...) {
-                }
-            }
-        }
-    });
-    parquet_file_metadata_.reserve(insert_files_.size());
-    row_group_meta_list_.reserve(insert_files_.size());
-    for (auto& f : futures) {
-        auto meta_result = f.get();
-        parquet_file_metadata_.push_back(
-            std::move(meta_result.parquet_metadata));
-        row_group_meta_list_.push_back(std::move(meta_result.row_group_meta));
-        if (field_id_mapping_.empty()) {
-            field_id_mapping_ = std::move(meta_result.field_id_mapping);
-        }
-    }
-
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
@@ -217,15 +150,19 @@ GroupChunkTranslator::GroupChunkTranslator(
     }
 
     // Build cell mapping: cells DO NOT span files — each cell's row groups
-    // come entirely from one file.
+    // come entirely from one file. Derive row-groups-per-cell from the
+    // runtime-configurable target cell byte size so avg cell size ≈ target.
+    const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     meta_.total_row_groups_ = total_row_groups;
+    const size_t rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
     size_t global_rg_offset = 0;
     for (const auto& rg_meta : row_group_meta_list_) {
         size_t file_rg_count = rg_meta.size();
         for (size_t local_start = 0; local_start < file_rg_count;
-             local_start += kRowGroupsPerCell) {
+             local_start += rgs_per_cell) {
             size_t local_end =
-                std::min(local_start + kRowGroupsPerCell, file_rg_count);
+                std::min(local_start + rgs_per_cell, file_rg_count);
             meta_.cell_row_group_ranges_.push_back(
                 {global_rg_offset + local_start, global_rg_offset + local_end});
         }
@@ -261,12 +198,12 @@ GroupChunkTranslator::GroupChunkTranslator(
             column_group_info_.row_count));
 
     LOG_INFO(
-        "[StorageV2] translator {} merged {} row groups into {} cells ({} "
-        "row groups per cell)",
+        "[StorageV2] translator {} merged {} row groups into {} cells "
+        "(cell_target_size_bytes={})",
         key_,
         total_row_groups,
         num_cells,
-        kRowGroupsPerCell);
+        cell_target_size_bytes);
 
     // Set loading overhead config to cap total overhead reservation.
     // During get_cells, decoded Arrow Tables exist simultaneously in:

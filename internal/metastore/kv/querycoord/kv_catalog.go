@@ -12,13 +12,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/compressor"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/compressor"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var ErrInvalidKey = errors.New("invalid load info key")
@@ -162,7 +162,7 @@ func (s Catalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[
 
 	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
 	for i, partitions := range collectionPartitions {
-		result[collectionIDs[i]] = partitions
+		result[collectionIDs[i]] = partitions //nolint:gosec // collectionPartitions and collectionIDs have same length
 	}
 	return result, nil
 }

@@ -36,10 +36,10 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -55,20 +55,20 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const maxOperationsPerTxn = int64(64)
@@ -253,6 +253,176 @@ func TestGetCollectionStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+}
+
+func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
+	// All subtests share one server to avoid spawning 6 etcd connections.
+	// Each subtest uses a unique collectionID and segmentID range to stay isolated.
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	statsMap := func(resp *datapb.GetCollectionStatisticsResponse) map[string]string {
+		m := map[string]string{}
+		for _, kv := range resp.GetStats() {
+			m[kv.Key] = kv.Value
+		}
+		return m
+	}
+
+	// schema version == 0: no consistency stats emitted
+	t.Run("schema version 0 emits no consistency stats", func(t *testing.T) {
+		collectionID := int64(9001)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 0},
+		})
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9100, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.NotContains(t, m, common.SchemaVersionConsistentSegmentsKey)
+		assert.NotContains(t, m, common.SchemaVersionTotalSegmentsKey)
+	})
+
+	// schema version > 0 but no healthy segments: no consistency stats emitted
+	t.Run("no healthy segments emits no consistency stats", func(t *testing.T) {
+		collectionID := int64(9002)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 1},
+		})
+		// Dropped segment is not healthy — should be excluded
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9101, CollectionID: collectionID, State: commonpb.SegmentState_Dropped,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.NotContains(t, m, common.SchemaVersionConsistentSegmentsKey)
+		assert.NotContains(t, m, common.SchemaVersionTotalSegmentsKey)
+	})
+
+	// L0 segment must not be counted in the consistency gate
+	t.Run("L0 segment excluded from consistency gate", func(t *testing.T) {
+		collectionID := int64(9003)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 2},
+		})
+		// L0 segment with outdated schema version — must not contribute to total
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9102, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L0, SchemaVersion: 1,
+		})))
+		// Normal L1 flushed segment that IS consistent
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9103, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L1, SchemaVersion: 2,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "1", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "1", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// importing segment must not affect the consistency gate
+	t.Run("importing segment excluded from consistency gate", func(t *testing.T) {
+		collectionID := int64(9004)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 3},
+		})
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9104, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			IsImporting: true, SchemaVersion: 1,
+		})))
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9105, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			SchemaVersion: 3,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "1", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "1", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// all segments consistent: consistent == total
+	t.Run("all segments consistent", func(t *testing.T) {
+		collectionID := int64(9005)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 5},
+		})
+		for _, id := range []int64{9200, 9201, 9202} {
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 5,
+			})))
+		}
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "3", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "3", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// partial segments consistent: consistent < total
+	t.Run("partial segments consistent", func(t *testing.T) {
+		collectionID := int64(9006)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 7},
+		})
+		for _, id := range []int64{9300, 9301} {
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 7,
+			})))
+		}
+		// 1 stale segment (not yet backfilled)
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9302, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 6,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "2", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "3", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// Growing segments must be excluded from the consistency gate (workaround for #48865).
+	// Streaming-created growing segments carry SchemaVersion=0 — including them would
+	// permanently block schema-change DDLs under any write traffic.
+	t.Run("growing segments excluded from consistency gate", func(t *testing.T) {
+		collectionID := int64(9007)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 9},
+		})
+		// One flushed segment matching the current schema version
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9400, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 9,
+		})))
+		// Growing segment with SchemaVersion=0 (streaming-created post-alter) — must NOT
+		// count toward total; otherwise the gate would report 1/2 and block DDL forever.
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9401, CollectionID: collectionID, State: commonpb.SegmentState_Growing, SchemaVersion: 0,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "1", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "1", m[common.SchemaVersionTotalSegmentsKey])
 	})
 }
 
@@ -1881,7 +2051,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		dataNodes = svr.nodeManager.GetClientIDs()
+		_ = svr.nodeManager.GetClientIDs()
 	})
 
 	t.Run("nil evt", func(t *testing.T) {
@@ -2116,10 +2286,10 @@ func WithMeta(meta *meta) Option {
 		svr.meta = meta
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		metaRootPath := Params.EtcdCfg.MetaRootPath.GetValue()
 		svr.kv = etcdkv.NewEtcdKV(svr.etcdCli, metaRootPath,
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	}
 }
 

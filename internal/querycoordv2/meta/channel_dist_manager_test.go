@@ -24,9 +24,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 type ChannelDistManagerSuite struct {
@@ -419,13 +419,14 @@ func TestGetChannelDistJSON(t *testing.T) {
 	assert.Equal(t, 2, len(channels))
 
 	checkResult := func(channel *metricsinfo.DmChannel) {
-		if channel.NodeID == 1 {
+		switch channel.NodeID {
+		case 1:
 			assert.Equal(t, "channel-1", channel.ChannelName)
 			assert.Equal(t, int64(100), channel.CollectionID)
-		} else if channel.NodeID == 2 {
+		case 2:
 			assert.Equal(t, "channel-2", channel.ChannelName)
 			assert.Equal(t, int64(200), channel.CollectionID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected node id", "unexpected node id %d", channel.NodeID)
 		}
 	}

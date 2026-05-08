@@ -26,21 +26,21 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // newTestResourceGroup creates a ResourceGroup for testing with given nodes.
@@ -888,17 +888,18 @@ func TestGetReplicasJSON(t *testing.T) {
 	assert.Len(t, replicas, 2)
 
 	checkResult := func(replica *metricsinfo.Replica) {
-		if replica.ID == 1 {
+		switch replica.ID {
+		case 1:
 			assert.Equal(t, int64(100), replica.CollectionID)
 			assert.Equal(t, "rg1", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{1, 2, 3}, replica.RWNodes)
 			assert.Equal(t, int64(1), replica.DatabaseID)
-		} else if replica.ID == 2 {
+		case 2:
 			assert.Equal(t, int64(200), replica.CollectionID)
 			assert.Equal(t, "rg2", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{4, 5, 6}, replica.RWNodes)
 			assert.Equal(t, int64(0), replica.DatabaseID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected replica id", "unexpected replica id %d", replica.ID)
 		}
 	}

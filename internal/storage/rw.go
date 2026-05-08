@@ -25,17 +25,17 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -73,6 +73,7 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
+	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
 }
 
 func (o *rwOptions) validate() error {
@@ -160,6 +161,15 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 	}
 }
 
+// GetStorageConfig extracts the storage config from the given options.
+func GetStorageConfig(option ...RwOption) *indexpb.StorageConfig {
+	opts := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(opts)
+	}
+	return opts.storageConfig
+}
+
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
@@ -175,6 +185,15 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+	}
+}
+
+// WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
+// when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
+// the writer to expand TEXT LOB references and write to new LOB files.
+func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
+	return func(options *rwOptions) {
+		options.textColumnConfigs = configs
 	}
 }
 
@@ -405,6 +424,15 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 		)
 	case StorageV3:
+		// if TEXT column configs are provided, use the text writer with TEXT column support
+		if len(rwOptions.textColumnConfigs) > 0 {
+			return NewPackedTextManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				rwOptions.textColumnConfigs,
+			)
+		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
@@ -478,7 +506,7 @@ func NewDeltalogReader(
 	switch rwOptions.version {
 	case StorageV1:
 		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
-	case StorageV2:
+	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -503,30 +531,4 @@ func NewDeltalogReader(
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
-}
-
-// NewDeltalogReaderFromManifest creates a deltalog reader from segment manifest path.
-// It extracts delta log file paths from the manifest and reads them as V2 parquet files.
-func NewDeltalogReaderFromManifest(
-	pkType schemapb.DataType,
-	manifestPath string,
-	option ...RwOption,
-) (RecordReader, error) {
-	rwOptions := DefaultReaderOptions()
-	for _, opt := range option {
-		opt(rwOptions)
-	}
-	if err := rwOptions.validate(); err != nil {
-		return nil, err
-	}
-
-	paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, rwOptions.storageConfig)
-	if err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, io.EOF
-	}
-
-	return NewDeltalogReader(pkType, paths, WithVersion(StorageV2), WithStorageConfig(rwOptions.storageConfig))
 }

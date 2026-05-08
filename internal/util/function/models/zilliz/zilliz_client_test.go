@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/modelservicepb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb"
 )
 
 const bufSize = 1024 * 1024
@@ -515,7 +515,7 @@ func TestNewZilliClient_WithMockServer(t *testing.T) {
 		// because grpc.NewClient creates lazy connections
 		if err != nil {
 			// Connection error is expected since we can't easily mock the global client manager
-			assert.Contains(t, err.Error(), "Connect model serving failed")
+			assert.Contains(t, err.Error(), "connect model serving failed")
 		} else {
 			assert.NotNil(t, client)
 			assert.Equal(t, "test-deployment", client.modelDeploymentID)

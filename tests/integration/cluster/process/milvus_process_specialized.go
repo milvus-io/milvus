@@ -67,7 +67,7 @@ type specializedMilvusProcess[T any] struct {
 
 // GetClient returns a client of type T.
 func (mp *specializedMilvusProcess[T]) MustGetClient(ctx context.Context) T {
-	client, err := mp.MilvusProcess.GetClient(ctx)
+	client, err := mp.GetClient(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -76,7 +76,7 @@ func (mp *specializedMilvusProcess[T]) MustGetClient(ctx context.Context) T {
 
 // MustWaitForReady waits for the Milvus process to be ready.
 func (mp *specializedMilvusProcess[T]) MustWaitForReady(ctx context.Context) {
-	if err := mp.MilvusProcess.waitForReady(ctx); err != nil {
+	if err := mp.waitForReady(ctx); err != nil {
 		panic(err)
 	}
 }

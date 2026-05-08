@@ -35,8 +35,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
 )
@@ -371,10 +371,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Batching() {
 		callCount++
 
 		// First batch should have 3 texts, second batch should have 2 texts
-		if callCount == 1 {
+		switch callCount {
+		case 1:
 			s.Len(texts, 3)
 			s.Equal([]string{"text1", "text2", "text3"}, texts)
-		} else if callCount == 2 {
+		case 2:
 			s.Len(texts, 2)
 			s.Equal([]string{"text4", "text5"}, texts)
 		}

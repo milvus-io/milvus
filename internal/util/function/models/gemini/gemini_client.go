@@ -29,7 +29,7 @@ type GeminiClient struct {
 
 func NewGeminiClient(apiKey string) (*GeminiClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.GeminiAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.GeminiAKEnvStr)
 	}
 	return &GeminiClient{
 		apiKey: apiKey,

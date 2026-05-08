@@ -22,9 +22,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestBaseMsg(t *testing.T) {
@@ -189,10 +189,10 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 			Version:    msgpb.InsertDataVersion_RowBased,
 		},
 	}
-	msg1.InsertRequest.NumRows = 1
+	msg1.NumRows = 1
 	assert.NoError(t, msg1.CheckAligned())
-	msg1.InsertRequest.RowData = nil
-	msg1.InsertRequest.FieldsData = []*schemapb.FieldData{
+	msg1.RowData = nil
+	msg1.FieldsData = []*schemapb.FieldData{
 		{
 			Type: schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{

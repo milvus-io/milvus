@@ -39,6 +39,91 @@ default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
 
 
+# =====================================================================
+# Shared collection for TestMilvusClientQueryInvalidShared
+# Used by invalid-parameter query tests that do not mutate data/schema/state.
+# =====================================================================
+INVALID_SHARED_COLLECTION = "test_query_invalid_shared_" + cf.gen_unique_str("_")
+INVALID_SHARED_NB = 2000
+QUERY_COUNT_DEFAULT_SHARED_COLLECTION = "test_query_count_default_shared_" + cf.gen_unique_str("_")
+QUERY_COUNT_EXPR_SHARED_COLLECTION = "test_query_count_expr_shared_" + cf.gen_unique_str("_")
+QUERY_COUNT_EXPR_SHARED_ROWS = []
+QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION = "test_query_string_non_primary_shared_" + cf.gen_unique_str("_")
+QUERY_STRING_NON_PRIMARY_SHARED_ROWS = []
+QUERY_STRING_PRIMARY_SHARED_COLLECTION = "test_query_string_primary_shared_" + cf.gen_unique_str("_")
+QUERY_STRING_PRIMARY_SHARED_ROWS = []
+
+
+def build_query_invalid_schema(client):
+    """Schema for TestMilvusClientQueryInvalidShared.
+    int64 PK (auto_id=False) + float_vec + float + varchar + json fields, enable_dynamic_field=True.
+
+    enable_dynamic_field=True matches pymilvus quick-setup's default — unknown tokens in
+    filter expressions (e.g. "s" in "12-s", "int64" when not a schema field) are treated
+    as dynamic field references, so parser errors surface at the intended later stages
+    ("predicate is not a boolean expression", "not can only apply on boolean", etc.) rather
+    than bailing out at "field X not exist"."""
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=True)
+    schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+    schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    schema.add_field(default_float_field_name, DataType.FLOAT)
+    schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
+    schema.add_field(ct.default_json_field_name, DataType.JSON)
+    return schema
+
+
+def build_query_count_default_schema(client):
+    """Build the default schema used by read-only count(*) tests."""
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+    schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    return schema
+
+
+def build_query_count_expression_schema(client):
+    """Build a superset schema for read-only count(*) expression tests."""
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+    schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+    schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+    schema.add_field(ct.default_bool_field_name, DataType.BOOL)
+    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    return schema
+
+
+def build_query_string_non_primary_schema(client):
+    """Build a schema with int64 primary key and varchar as a scalar field."""
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+    schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+    return schema
+
+
+def build_query_string_primary_schema(client):
+    """Build a schema with varchar primary key plus numeric fields for string query tests."""
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+    schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+    schema.add_field(ct.default_int64_field_name, DataType.INT64)
+    return schema
+
+
+def gen_query_string_primary_rows(nb=default_nb):
+    """Generate deterministic rows where float <= int64 for compare-field tests."""
+    rows = []
+    vectors = cf.gen_vectors(nb, default_dim)
+    for i in range(nb):
+        rows.append({
+            default_string_field_name: str(i),
+            default_vector_field_name: vectors[i],
+            ct.default_float_field_name: float(i),
+            ct.default_int64_field_name: i + 10,
+        })
+    return rows
+
+
 class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
@@ -56,104 +141,35 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_not_all_required_params(self):
-        """
-        target: test query (high level api) normal case
-        method: create connection, collection, insert and search
-        expected: search/query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
-        # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        # 3. query using ids
-        error = {ct.err_code: 65535, ct.err_msg: f"empty expression should be used with limit"}
-        self.query(client, collection_name,
-                   check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_no_collection(self):
+    def test_milvus_client_query_expr_non_constant_array_term(self):
         """
-        target: test the scenario which query the non-exist collection
-        method: 1. create collection
-                2. drop collection
-                3. query the dropped collection
-        expected: raise exception and report the error
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        # 2. drop collection
-        self.drop_collection(client, collection_name)
-        # 3. query the dropped collection
-        error = {"err_code": 1, "err_msg": "collection not found"}
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expr", ["12-s", "中文", "a"])
-    def test_milvus_client_query_expr_invalid_string(self, expr):
-        """
-        target: test query with invalid expr
-        method: query with invalid string expr
+        target: test query with non-constant array term expr
+        method: query with non-constant array expr
         expected: raise exception
+
+        Stays independent (not in TestMilvusClientQueryInvalidShared): the test expects a
+        parse error for 'int64 in [[1]]', which requires enable_dynamic_field=False so the
+        parser rejects the non-constant list element. With dynamic=True the server accepts
+        the expression (int64 becomes a dynamic field) and just returns empty results.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=False)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
-        # 3. query with invalid string expression
-        if expr == "中文":
-            error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression"}
-        elif expr == "a" or expr == "12-s":
-            error = {ct.err_code: 1100, ct.err_msg: f"predicate is not a boolean expression: {expr}"}
-        self.query(client, collection_name, filter=expr,
-                   check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("filter", [None, ""])
-    def test_milvus_client_query_expr_none(self, filter):
-        """
-        target: test query with none expr
-        method: query with expr None
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. query with None filter with no limit and no offset
-        error = {ct.err_code: 0, ct.err_msg: "empty expression should be used with limit: invalid parameter"}
-        self.query(client, collection_name, filter=filter,
-                   check_task=CheckTasks.err_res, check_items=error)
-        # 4. query with offset but no limit
-        self.query(client, collection_name, filter=filter, offset=1,
-                   check_task=CheckTasks.err_res, check_items=error)
+        # 3. test non-constant array term expressions
+        constants = [[1], (), {}]
+        for constant in constants:
+            error = {ct.err_code: 1100,
+                    ct.err_msg: f"cannot parse expression: int64 in [{constant}]"}
+            term_expr = f'{ct.default_int64_field_name} in [{constant}]'
+            self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
+        # 4. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -192,8 +208,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("output_fields", [["int"], [default_primary_key_field_name, "int"]])
-    def test_milvus_client_query_output_not_existed_field(self, enable_dynamic_field, output_fields):
+    def test_milvus_client_query_output_not_existed_field(self, enable_dynamic_field):
         """
         target: test query output not existed field
         method: query with not existed output field
@@ -216,138 +231,23 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. test query with non-existent fields
-        if enable_dynamic_field:
-            exp_res = [{default_primary_key_field_name: i} for i in range(default_nb)]
-            self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name})
-        else:
-            error = {ct.err_code: 65535, ct.err_msg: 'field int not exist'}
-            self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
-                       check_task=CheckTasks.err_res, check_items=error)
+        output_fields = [["int"], [default_primary_key_field_name, "int"]]
+        for output_field in output_fields:
+            if enable_dynamic_field:
+                exp_res = [{default_primary_key_field_name: i} for i in range(default_nb)]
+                self.query(client, collection_name, filter=default_search_exp, output_fields=output_field,
+                        check_task=CheckTasks.check_query_results,
+                        check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name})
+            else:
+                error = {ct.err_code: 65535, ct.err_msg: 'field int not exist'}
+                self.query(client, collection_name, filter=default_search_exp, output_fields=output_field,
+                        check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_expr_wrong_term_keyword(self):
-        """
-        target: test query with wrong term expr keyword
-        method: query with wrong keyword term expr
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 4. test wrong term expressions
-        expr_1 = f'{ct.default_int64_field_name} inn [1, 2]'
-        error_1 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 inn [1, 2], "
-                                                   "error: invalid expression: int64 inn [1, 2]"}
-        self.query(client, collection_name, filter=expr_1, check_task=CheckTasks.err_res, check_items=error_1)
-
-        expr_2 = f'{ct.default_int64_field_name} in not [1, 2]'
-        error_2 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-                                                   "error: not can only apply on boolean: invalid parameter"}
-        self.query(client, collection_name, filter=expr_2, check_task=CheckTasks.err_res, check_items=error_2)
-        # 5. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_expr_non_array_term(self):
-        """
-        target: test query with non-array term expr
-        method: query with non-array term expr
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. test non-array term expressions
-        exprs = [f'{ct.default_int64_field_name} in 1',
-                 f'{ct.default_int64_field_name} in "in"']
-        for expr in exprs:
-            error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
-                                                    "error: the right-hand side of 'in' must be a list"}
-            self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
-
-        expr = f'{ct.default_int64_field_name} in (mn)'
-        error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
-                                                "error: value '(mn)' in list cannot be a non-const expression"}
-        self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("constant", [[1], (), {}])
-    def test_milvus_client_query_expr_non_constant_array_term(self, constant):
-        """
-        target: test query with non-constant array term expr
-        method: query with non-constant array expr
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
-                               enable_dynamic_field=False)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. test non-constant array term expressions
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"cannot parse expression: int64 in [{constant}]"}
-        term_expr = f'{ct.default_int64_field_name} in [{constant}]'
-        self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
-        # 4. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_expr_inconsistent_mix_term_array(self):
-        """
-        target: test query with term expr that field and array are inconsistent or mix type
-        method: 1.query with int field and float values
-                2.query with term expr that has int and float type value
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
-                               enable_dynamic_field=False, auto_id=False)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. test inconsistent mix term array
-        values = [1., 2.]
-        term_expr = f'{default_primary_key_field_name} in {values}'
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-                             "error: value 'float_val:1' in list cannot be casted to Int64"}
-        self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
-
-        values = [1, 2.]
-        term_expr = f'{default_primary_key_field_name} in {values}'
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-                             "error: value 'float_val:2' in list cannot be casted to Int64"}
-        self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
-        # 4. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
-                                             "json_contains_all", "JSON_CONTAINS_ALL"])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("not_list", ["str", {1, 2, 3}, (1, 2, 3), 10])
-    def test_milvus_client_query_expr_json_contains_invalid_type(self, expr_prefix, enable_dynamic_field, not_list):
+    def test_milvus_client_query_expr_json_contains_invalid_type(self, enable_dynamic_field):
         """
         target: test query with expression using json_contains_any
         method: query with expression using json_contains_any
@@ -374,72 +274,14 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with invalid type
-        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {not_list})"
-        error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
-        self.query(client, collection_name, filter=expression, check_task=CheckTasks.err_res, check_items=error)
+        expr_prefix_s = ["json_contains_any", "JSON_CONTAINS_ANY", "json_contains_all", "JSON_CONTAINS_ALL"]
+        not_list_s = ["str", {1, 2, 3}, (1, 2, 3), 10]
+        for expr_prefix in expr_prefix_s:
+            for not_list in not_list_s:
+                expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {not_list})"
+                error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
+                self.query(client, collection_name, filter=expression, check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_query_expr_with_limit_offset_out_of_range(self):
-        """
-        target: test query with empty expression
-        method: query empty expression with limit and offset out of range
-        expected: raise error
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. create index and load
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with limit > 16384
-        error = {ct.err_code: 1,
-                 ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
-        self.query(client, collection_name, filter="", limit=16385, check_task=CheckTasks.err_res, check_items=error)
-        # 5. query with offset + limit > 16384
-        self.query(client, collection_name, filter="", limit=1, offset=16384, check_task=CheckTasks.err_res,
-                   check_items=error)
-        self.query(client, collection_name, filter="", limit=16384, offset=1, check_task=CheckTasks.err_res,
-                   check_items=error)
-        # 6. query with offset < 0
-        error = {ct.err_code: 1,
-                 ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
-        self.query(client, collection_name, filter="", limit=2, offset=-1, check_task=CheckTasks.err_res,
-                   check_items=error)
-        # 7. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
-    def test_milvus_client_query_invalid_wildcard(self, output_fields):
-        """
-        target: test query with invalid output wildcard
-        method: output_fields is invalid output wildcard
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. query with invalid output_fields wildcard
-        error = {ct.err_code: 65535, ct.err_msg: f"parse output field name failed"}
-        self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields,
-                   check_task=CheckTasks.err_res, check_items=error)
-        # 4. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -504,364 +346,284 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. clean up
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_empty_partition_names(self):
-        """
-        target: test query with empty partition_names
-        method: query with partition_names=[]
-        expected: query from all partitions
-        """
+
+@pytest.mark.xdist_group("TestMilvusClientQueryInvalidShared")
+class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
+    """Invalid-parameter query tests that share one static-schema collection.
+
+    Every test here only verifies error paths for query arguments — none of them
+    mutates the collection's data, schema, index, or load state, so a single
+    module-scoped collection is safe to share across them."""
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_invalid_shared_collection(self, request):
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str("partition")
-        # 1. create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.create_partition(client, collection_name, partition_name)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. insert [0, half) into partition_w, [half, nb) into _default
-        half = default_nb // 2
-        schema_info = self.describe_collection(client, collection_name)[0]
-        # Insert first half into custom partition
-        rows_partition = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
-        self.insert(client, collection_name, rows_partition, partition_name=partition_name)
-        # Insert second half into default partition
-        rows_default = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
-        self.insert(client, collection_name, rows_default)
-        # 3. create index and load both partitions
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_partitions(client, collection_name, [partition_name, ct.default_partition_name])
-        # 4. query from empty partition_names (should query all partitions)
-        term_expr = f'{default_primary_key_field_name} in [0, {half}, {default_nb - 1}]'
-        # Prepare expected results by combining data from both partitions
-        all_rows = rows_partition + rows_default
-        exp_res = [all_rows[0], all_rows[half], all_rows[default_nb - 1]]
-        self.query(client, collection_name, filter=term_expr, partition_names=[],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": exp_res, "with_vec": True, "pk_name": default_primary_key_field_name})
-        # 5. clean up
-        self.drop_collection(client, collection_name)
+        collection_name = INVALID_SHARED_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = build_query_invalid_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW",
+                               metric_type="L2", M=16, efConstruction=200)
+        client.create_collection(collection_name=collection_name, schema=schema,
+                                 index_params=index_params, consistency_level="Strong")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(INVALID_SHARED_NB):
+            rows.append({
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: float(i),
+                default_string_field_name: str(i),
+                ct.default_json_field_name: {"number": i, "list": list(range(i, i + 10))},
+            })
+        client.insert(collection_name=collection_name, data=rows)
+        client.flush(collection_name=collection_name)
+
+        def teardown():
+            try:
+                if self.has_collection(client, INVALID_SHARED_COLLECTION)[0]:
+                    self.drop_collection(client, INVALID_SHARED_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_on_specific_partition(self):
+    def test_milvus_client_query_not_all_required_params(self):
         """
-        Target: Verify that querying a specific partition only returns data from that partition.
-        Method:
-        1. Create a collection and two partitions (partition1 and partition2).
-        2. Insert the first half of the data into partition1 and the second half into partition2.
-        3. Create an index and load both partitions.
-        4. Query only partition1 and check that the returned results only contain data from partition1.
-        5. Clean up the collection.
-        Expected: Only data from partition1 is returned and matches the inserted data.
+        target: test query without required limit parameter
+        method: call query with no filter and no limit
+        expected: raise error (empty filter requires explicit limit)
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name1 = cf.gen_unique_str("partition1")
-        partition_name2 = cf.gen_unique_str("partition2")
-        # 1. create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.create_partition(client, collection_name, partition_name1)
-        self.create_partition(client, collection_name, partition_name2)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. insert data to partition
-        half = default_nb // 2
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
-        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
-        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
-        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
-        # 4. query on partition
-        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name1],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": rows_partition1, "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
-        # 5. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_multi_partitions_multi_results(self):
-        """
-        target: test query on multi partitions and get multi results
-        method: 1.create two partitions and insert entities into them
-                2.query on two partitions and get multi results
-        expected: query results from two partitions
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name1 = cf.gen_unique_str("partition1")
-        partition_name2 = cf.gen_unique_str("partition2")
-        # 1. create collection and two partitions
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.create_partition(client, collection_name, partition_name1)
-        self.create_partition(client, collection_name, partition_name2)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. insert data into two partitions
-        half = default_nb // 2
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
-        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
-        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
-        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
-        self.flush(client, collection_name)
-        # 3. create index and load both partitions
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
-        # 4. query on two partitions to get multi results
-        term_expr = f'{default_primary_key_field_name} in [{half - 1}, {half}]'
-        rows = rows_partition1 + rows_partition2
-        self.query(client, collection_name, filter=term_expr,
-                   partition_names=[partition_name1, partition_name2],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": rows[half - 1:half + 1], "with_vec": True,
-                                "pk_name": default_primary_key_field_name})[0]
-        # 6. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_multi_partitions_single_results(self):
-        """
-        target: test query on multi partitions and get multi results
-        method: 1.create two partitions and insert entities into them
-                2.query on two partitions and query single results
-        expected: query from two partitions and get single result
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name1 = cf.gen_unique_str("partition1")
-        partition_name2 = cf.gen_unique_str("partition2")
-        # 1. create collection and two partitions
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.create_partition(client, collection_name, partition_name1)
-        self.create_partition(client, collection_name, partition_name2)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. insert data into two partitions
-        half = default_nb // 2
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
-        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
-        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
-        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
-        self.flush(client, collection_name)
-        # 3. create index and load both partitions
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
-        # 4. query on two partitions to get multi results
-        term_expr = f'{default_primary_key_field_name} in [{half}]'
-        rows = rows_partition1 + rows_partition2
-        self.query(client, collection_name, filter=term_expr,
-                   partition_names=[partition_name1, partition_name2],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": rows[half:half + 1], "with_vec": True,
-                                "pk_name": default_primary_key_field_name})[0]
-        # 6. clean up
-        self.drop_collection(client, collection_name)
+        error = {ct.err_code: 65535, ct.err_msg: f"empty expression should be used with limit"}
+        self.query(client, INVALID_SHARED_COLLECTION,
+                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_empty_partition(self):
+    def test_milvus_client_query_no_collection(self):
         """
-        target: test query on empty partition
-        method: query on an empty partition
-        expected: empty query result
+        target: test the scenario which query a non-existent collection
+        method: query a collection name that was never created
+        expected: raise collection-not-found error
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str("partition")
-        # 1. create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.create_partition(client, collection_name, partition_name)
-        # 2. verify partition is empty
-        partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
-        assert partition_info['row_count'] == 0
-        # 3. create index and load partition
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_partitions(client, collection_name, [partition_name])
-        # 4. query on empty partition
-        res = self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name])[0]
-        assert len(res) == 0
-        # 5. clean up
-        self.drop_collection(client, collection_name)
+        error = {"err_code": 1, "err_msg": "collection not found"}
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("filter", [None, ""])
+    def test_milvus_client_query_expr_none(self, filter):
+        """
+        target: test query with None/empty filter and no limit
+        method: 1. query with filter=None/"" without limit
+                2. query with filter=None/"" with offset but no limit
+        expected: raise error in both cases (empty filter requires explicit limit)
+        """
+        client = self._client()
+        error = {ct.err_code: 0, ct.err_msg: "empty expression should be used with limit: invalid parameter"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=filter,
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, INVALID_SHARED_COLLECTION, filter=filter, offset=1,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr", ["12-s", "中文", "a"])
+    def test_milvus_client_query_expr_invalid_string(self, expr):
+        """
+        target: test query with invalid filter expressions
+        method: query with syntactically invalid filter strings
+        expected: raise parse error
+        """
+        client = self._client()
+        if expr == "中文":
+            error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression"}
+        elif expr == "a" or expr == "12-s":
+            error = {ct.err_code: 1100, ct.err_msg: f"predicate is not a boolean expression: {expr}"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_expr_wrong_term_keyword(self):
+        """
+        target: test query with wrong term expr keywords
+        method: query with mistyped / invalid term keywords (e.g. "inn", "in not")
+        expected: raise parse error
+        """
+        client = self._client()
+        expr_1 = f'{ct.default_int64_field_name} inn [1, 2]'
+        error_1 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 inn [1, 2], "
+                                                   "error: invalid expression: int64 inn [1, 2]"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=expr_1,
+                   check_task=CheckTasks.err_res, check_items=error_1)
+
+        expr_2 = f'{ct.default_int64_field_name} in not [1, 2]'
+        error_2 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
+                                                   "error: not can only apply on boolean: invalid parameter"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=expr_2,
+                   check_task=CheckTasks.err_res, check_items=error_2)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_expr_non_array_term(self):
+        """
+        target: test query with non-array RHS in term expr
+        method: query with term expressions whose RHS is not a list
+        expected: raise parse error
+        """
+        client = self._client()
+        exprs = [f'{ct.default_int64_field_name} in 1',
+                 f'{ct.default_int64_field_name} in "in"']
+        for expr in exprs:
+            error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
+                                                    "error: the right-hand side of 'in' must be a list"}
+            self.query(client, INVALID_SHARED_COLLECTION, filter=expr,
+                       check_task=CheckTasks.err_res, check_items=error)
+
+        expr = f'{ct.default_int64_field_name} in (mn)'
+        error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
+                                                "error: value '(mn)' in list cannot be a non-const expression"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_expr_inconsistent_mix_term_array(self):
+        """
+        target: test query with mismatched types in term expr on int64 PK
+        method: 1. query with all-float values against int64 PK
+                2. query with mixed int and float values against int64 PK
+        expected: raise casting error in both cases
+        """
+        client = self._client()
+        values = [1., 2.]
+        term_expr = f'{default_primary_key_field_name} in {values}'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
+                             "error: value 'float_val:1' in list cannot be casted to Int64"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=term_expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+        values = [1, 2.]
+        term_expr = f'{default_primary_key_field_name} in {values}'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
+                             "error: value 'float_val:2' in list cannot be casted to Int64"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=term_expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_query_expr_with_limit_offset_out_of_range(self):
+        """
+        target: test query with limit/offset outside the [1, 16384] window
+        method: 1. limit > 16384
+                2. offset + limit > 16384
+                3. offset < 0
+        expected: raise invalid-window error in all cases
+        """
+        client = self._client()
+        error = {ct.err_code: 1,
+                 ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter="", limit=16385,
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, INVALID_SHARED_COLLECTION, filter="", limit=1, offset=16384,
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, INVALID_SHARED_COLLECTION, filter="", limit=16384, offset=1,
+                   check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1,
+                 ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter="", limit=2, offset=-1,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
+    def test_milvus_client_query_invalid_wildcard(self, output_fields):
+        """
+        target: test query with malformed wildcards in output_fields
+        method: query with output_fields containing invalid wildcard patterns
+        expected: raise parse error
+        """
+        client = self._client()
+        error = {ct.err_code: 65535, ct.err_msg: f"parse output field name failed"}
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_term_expr,
+                   output_fields=output_fields,
+                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_query_not_existed_partition(self):
         """
-        target: test query on a not existed partition
-        method: query on not existed partition
-        expected: raise exception
+        target: test query against a non-existent partition name
+        method: query with partition_names referencing a partition that was never created
+        expected: raise partition-not-found error
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        # 2. create index and load
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 3. query on non-existent partition
         partition_name = cf.gen_unique_str()
         error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_name} not found'}
-        self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_name],
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_term_expr,
+                   partition_names=[partition_name],
                    check_task=CheckTasks.err_res, check_items=error)
-        # 4. clean up
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ignore_growing", [2.3, "str"])
     def test_milvus_client_query_invalid_ignore_growing_param(self, ignore_growing):
         """
-        target: test query ignoring growing segment param invalid
-        method: 1. create a collection, insert data and load
-                2. insert data again
-                3. query with ignore_growing type invalid
-        expected: raise exception
+        target: test query with invalid ignore_growing param type
+        method: query with ignore_growing set to a non-bool value
+        expected: raise parse error for ignore_growing field
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", auto_id=False)
-        # 2. insert initial data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. insert data again
-        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=100)
-        self.insert(client, collection_name, new_rows)
-        self.flush(client, collection_name)
-        # 5. query with param ignore_growing invalid
         error = {ct.err_code: 999, ct.err_msg: "parse ignore growing field failed"}
-        self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing,
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_search_exp,
+                   ignore_growing=ignore_growing,
                    check_task=CheckTasks.err_res, check_items=error)
-        # 6. clean up
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", ["12 s", " ", [0, 1], {2}])
     def test_milvus_client_query_pagination_with_invalid_limit_type(self, limit):
         """
         target: test query pagination with invalid limit type
-        method: query with invalid limit type
-        expected: raise exception
+        method: query with limit set to non-integer types
+        expected: raise invalid-limit error
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load collection
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid limit type
         error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
-        self.query(client, collection_name, filter=default_search_exp,
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_search_exp,
                    offset=10, limit=limit,
                    check_task=CheckTasks.err_res, check_items=error)
-        # 5. clean up
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [-1, 67890])
     def test_milvus_client_query_pagination_with_invalid_limit_value(self, limit):
         """
-        target: test query pagination with invalid limit value
-        method: query with invalid limit value
-        expected: raise exception
+        target: test query pagination with out-of-range limit value
+        method: query with negative limit or offset+limit exceeding 16384
+        expected: raise invalid-window error
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load collection
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid limit value
         error = {ct.err_code: 65535,
                  ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900"}
         if limit == -1:
             error = {ct.err_code: 65535,
                      ct.err_msg: f"invalid max query result window, limit [{limit}] is invalid, should be greater than 0"}
-        self.query(client, collection_name, filter=default_search_exp,
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_search_exp,
                    offset=10, limit=limit,
                    check_task=CheckTasks.err_res, check_items=error)
-        # 5. clean up
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
     def test_milvus_client_query_pagination_with_invalid_offset_type(self, offset):
         """
         target: test query pagination with invalid offset type
-        method: query with invalid offset type
-        expected: raise exception
+        method: query with offset set to non-integer types
+        expected: raise invalid-offset error
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load collection
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid offset type
         error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
-        self.query(client, collection_name, filter=default_search_exp,
+        self.query(client, INVALID_SHARED_COLLECTION, filter=default_search_exp,
                    offset=offset, limit=10,
                    check_task=CheckTasks.err_res, check_items=error)
-        # 5. clean up
-        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):
@@ -877,10 +639,6 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="function", params=[True, False])
     def enable_dynamic_field(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[0, 10, 100])
-    def offset(self, request):
         yield request.param
 
     """
@@ -1092,8 +850,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("fields", [None, [], ""])
-    def test_milvus_client_query_output_field_none_or_empty(self, enable_dynamic_field, fields):
+    def test_milvus_client_query_output_field_none_or_empty(self, enable_dynamic_field):
         """
         target: test query with none and empty output field
         method: query with output field=None, field=[]
@@ -1116,8 +873,10 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with None and empty output fields
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=fields)[0]
-        assert res[0].keys() == {default_primary_key_field_name, default_vector_field_name}
+        fields = [None, [], ""]
+        for field in fields:
+            res = self.query(client, collection_name, filter=default_search_exp, output_fields=field)[0]
+            assert res[0].keys() == {default_primary_key_field_name, default_vector_field_name}
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -1654,8 +1413,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("field", [ct.default_int64_field_name, ct.default_float_field_name])
-    def test_milvus_client_query_expr_not_in_term(self, field):
+    def test_milvus_client_query_expr_not_in_term(self):
         """
         target: test query with `not in` expr
         method: query with not in expr
@@ -1677,21 +1435,22 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # query with not in expression
-        values = [row[field] for row in rows]
-        pos = 100
-        term_expr = f'{field} not in {values[pos:]}'
-        df = pd.DataFrame(rows)
-        res = df.iloc[:pos, :3].to_dict('records')
-        self.query(client, collection_name, filter=term_expr,
-                   output_fields=[ct.default_float_field_name, ct.default_int64_field_name,
-                                  ct.default_string_field_name],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+        fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        for field in fields:
+            values = [row[field] for row in rows]
+            pos = 100
+            term_expr = f'{field} not in {values[pos:]}'
+            df = pd.DataFrame(rows)
+            res = df.iloc[:pos, :3].to_dict('records')
+            self.query(client, collection_name, filter=term_expr,
+                    output_fields=[ct.default_float_field_name, ct.default_int64_field_name,
+                                    ct.default_string_field_name],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("pos", [0, default_nb])
-    def test_milvus_client_query_expr_not_in_empty_and_all(self, pos):
+    def test_milvus_client_query_expr_not_in_empty_and_all(self):
         """
         target: test query with `not in` expr
         method: query with `not in` expr for (non)empty collection
@@ -1717,13 +1476,15 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with not in expression
         int64_values = [row[ct.default_int64_field_name] for row in rows]
-        term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
-        df = pd.DataFrame(rows)
-        res = df.iloc[:pos, :1].to_dict('records')
-        self.query(client, collection_name, filter=term_expr,
-                   output_fields=[ct.default_int64_field_name],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+        pos_s = [0, default_nb]
+        for pos in pos_s:
+            term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
+            df = pd.DataFrame(rows)
+            res = df.iloc[:pos, :1].to_dict('records')
+            self.query(client, collection_name, filter=term_expr,
+                    output_fields=[ct.default_int64_field_name],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -1806,9 +1567,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS",
-                                             "array_contains", "ARRAY_CONTAINS"])
-    def test_milvus_client_query_expr_json_contains(self, enable_dynamic_field, expr_prefix):
+    # @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS",
+    #                                          "array_contains", "ARRAY_CONTAINS"])
+    def test_milvus_client_query_expr_json_contains(self, enable_dynamic_field):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -1835,15 +1596,16 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query
-        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], 1000)"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit
+        expr_prefix_s = ["json_contains", "JSON_CONTAINS", "array_contains", "ARRAY_CONTAINS"]
+        for expr_prefix in expr_prefix_s:
+            expression = f"{expr_prefix}({ct.default_json_field_name}['list'], 1000)"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit
         # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
-    def test_milvus_client_query_expr_list_json_contains(self, expr_prefix):
+    def test_milvus_client_query_expr_list_json_contains(self):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -1874,16 +1636,17 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query
-        expression = f"{expr_prefix}({ct.default_json_field_name}, '1000')"
-        res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
-        assert res[0]["count(*)"] == limit
+        expr_prefix_s = ["json_contains", "JSON_CONTAINS"]
+        for expr_prefix in expr_prefix_s:
+            expression = f"{expr_prefix}({ct.default_json_field_name}, '1000')"
+            res = self.query(client, collection_name, filter=expression, output_fields=["count(*)"])[0]
+            assert res[0]["count(*)"] == limit
         # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("expr_prefix", ["json_contains", "JSON_CONTAINS"])
-    def test_milvus_client_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field, expr_prefix):
+    def test_milvus_client_query_expr_json_contains_combined_with_normal(self, enable_dynamic_field):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -1916,17 +1679,17 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with combined expression
-        expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {tar}) && {ct.default_float_field_name} > {tar - limit // 2}"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit // 2
+        expr_prefix_s = ["json_contains", "JSON_CONTAINS"]
+        for expr_prefix in expr_prefix_s:
+            expression = f"{expr_prefix}({ct.default_json_field_name}['list'], {tar}) && {ct.default_float_field_name} > {tar - limit // 2}"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit // 2
         # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL",
-                                             "array_contains_all", "ARRAY_CONTAINS_ALL"])
-    def test_milvus_client_query_expr_all_datatype_json_contains_all(self, enable_dynamic_field, expr_prefix):
+    def test_milvus_client_query_expr_all_datatype_json_contains_all(self, enable_dynamic_field):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -1961,36 +1724,38 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with different data types
         _id = random.randint(limit, default_nb - limit)
-        # test for int
-        ids = [i for i in range(_id, _id + limit)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == 1
-        # test for string
-        ids = [str(_id), str(_id + 1), str(_id + 2)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit - len(ids) + 1
-        # test for float
-        ids = [_id * 1.0]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit
-        # test for bool
-        ids = [True]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == default_nb // 2
-        # test for list
-        ids = [[_id, str(_id + 1)]]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == 1
-        # test for mixed data
-        ids = [[_id, str(_id)], bool(_id % 2)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == 1
+        expr_prefix_s = ["json_contains_all", "JSON_CONTAINS_ALL", "array_contains_all", "ARRAY_CONTAINS_ALL"]
+        for expr_prefix in expr_prefix_s:
+            # test for int
+            ids = [i for i in range(_id, _id + limit)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == 1
+            # test for string
+            ids = [str(_id), str(_id + 1), str(_id + 2)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit - len(ids) + 1
+            # test for float
+            ids = [_id * 1.0]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit
+            # test for bool
+            ids = [True]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == default_nb // 2
+            # test for list
+            ids = [[_id, str(_id + 1)]]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == 1
+            # test for mixed data
+            ids = [[_id, str(_id)], bool(_id % 2)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == 1
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -2065,8 +1830,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY"])
-    def test_milvus_client_query_expr_all_datatype_json_contains_any(self, enable_dynamic_field, expr_prefix):
+    def test_milvus_client_query_expr_all_datatype_json_contains_any(self, enable_dynamic_field):
         """
         target: test query with expression using json_contains
         method: query with expression using json_contains
@@ -2100,43 +1864,44 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with different data types
         _id = random.randint(limit, default_nb - limit)
-        # test for int
-        ids = [i for i in range(_id, _id + limit)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == 2 * limit - 1
-        # test for string
-        ids = [str(_id), str(_id + 1), str(_id + 2)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit + len(ids) - 1
-        # test for float
-        ids = [_id * 1.0]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == limit
-        # test for bool
-        ids = [True]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == default_nb // 2
-        # test for list
-        ids = [[_id, str(_id + 1)]]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == 1
-        # test for mixed data
-        ids = [_id, bool(_id % 2)]
-        expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
-        res = self.query(client, collection_name, filter=expression)[0]
-        assert len(res) == default_nb // 2
+        expr_prefix_s = ["json_contains_any", "JSON_CONTAINS_ANY"]
+        for expr_prefix in expr_prefix_s:
+            # test for int
+            ids = [i for i in range(_id, _id + limit)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listInt'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == 2 * limit - 1
+            # test for string
+            ids = [str(_id), str(_id + 1), str(_id + 2)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listStr'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit + len(ids) - 1
+            # test for float
+            ids = [_id * 1.0]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listFlt'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == limit
+            # test for bool
+            ids = [True]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listBool'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == default_nb // 2
+            # test for list
+            ids = [[_id, str(_id + 1)]]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listList'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == 1
+            # test for mixed data
+            ids = [_id, bool(_id % 2)]
+            expression = f"{expr_prefix}({ct.default_json_field_name}['listMix'], {ids})"
+            res = self.query(client, collection_name, filter=expression)[0]
+            assert len(res) == default_nb // 2
         # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("limit", [10, 100, 1000])
     @pytest.mark.parametrize("auto_id", [True, False])
-    def test_milvus_client_query_expr_empty(self, auto_id, limit):
+    def test_milvus_client_query_expr_empty(self, auto_id):
         """
         target: test query with empty expression
         method: query empty expression with a limit
@@ -2158,11 +1923,13 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with empty expression and limit
-        res = self.query(client, collection_name, filter="", limit=limit)[0]
-        # 5. verify results are ordered by primary key
-        if not auto_id:
-            primary_keys = [entity[default_primary_key_field_name] for entity in res]
-            assert primary_keys == sorted(primary_keys)
+        limits = [10, 100, 1000]
+        for limit in limits:
+            res = self.query(client, collection_name, filter="", limit=limit)[0]
+            # 5. verify results are ordered by primary key
+            if not auto_id:
+                primary_keys = [entity[default_primary_key_field_name] for entity in res]
+                assert primary_keys == sorted(primary_keys)
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -2203,10 +1970,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("offset", [100, 1000])
-    @pytest.mark.parametrize("limit", [100, 1000])
     @pytest.mark.parametrize("auto_id", [True, False])
-    def test_milvus_client_query_expr_empty_with_pagination(self, auto_id, limit, offset):
+    def test_milvus_client_query_expr_empty_with_pagination(self, auto_id):
         """
         target: test query with empty expression
         method: query empty expression with a limit
@@ -2228,19 +1993,21 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with limit and offset
-        res = self.query(client, collection_name, filter="", limit=limit, offset=offset)[0]
-        # 5. verify results are ordered by primary key
-        if not auto_id:
-            primary_keys = [entity[default_primary_key_field_name] for entity in res]
-            expected_ids = list(range(offset, offset + limit))
-            assert primary_keys == expected_ids
+        offsets = [100, 1000]
+        limits = [100, 1000]
+        for offset in offsets:
+            for limit in limits:
+                res = self.query(client, collection_name, filter="", limit=limit, offset=offset)[0]
+                # 5. verify results are ordered by primary key
+                if not auto_id:
+                    primary_keys = [entity[default_primary_key_field_name] for entity in res]
+                    expected_ids = list(range(offset, offset + limit))
+                    assert primary_keys == expected_ids
         # 6. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [100, 1000])
-    @pytest.mark.parametrize("limit", [100, 1000])
-    def test_milvus_client_query_expr_empty_with_random_pk(self, limit, offset):
+    def test_milvus_client_query_expr_empty_with_random_pk(self):
         """
         target: test query with empty expression
         method: create a collection using random pk, query empty expression with a limit
@@ -2274,20 +2041,24 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with empty expr and check the result
-        exp_ids, res = sorted(unordered_ids)[:limit], []
-        for ids in exp_ids:
-            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
-        res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
-        # 5. query with pagination
-        exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
-        for ids in exp_ids:
-            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
-        res = self.query(client, collection_name, filter="", limit=limit, offset=offset,
-                         output_fields=[ct.default_string_field_name],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        limits = [100, 1000]
+        offsets = [100, 1000]
+        for limit in limits:
+            for offset in offsets:
+                exp_ids, res = sorted(unordered_ids)[:limit], []
+                for ids in exp_ids:
+                    res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+                res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
+                                check_task=CheckTasks.check_query_results,
+                                check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+                # 5. query with pagination
+                exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
+                for ids in exp_ids:
+                    res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+                res = self.query(client, collection_name, filter="", limit=limit, offset=offset,
+                                output_fields=[ct.default_string_field_name],
+                                check_task=CheckTasks.check_query_results,
+                                check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -2897,8 +2668,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("ignore_growing", [True, False])
-    def test_milvus_client_query_ignore_growing(self, ignore_growing):
+    def test_milvus_client_query_ignore_growing(self):
         """
         target: test search ignoring growing segment
         method: 1. create a collection, insert data, create index and load
@@ -2927,17 +2697,19 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, new_rows)
         self.flush(client, collection_name)
         # 5. query with param ignore_growing
-        if ignore_growing:
-            res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
-            assert len(res) == default_nb
-            # verify that only original data (id < 10000) is returned
-            for item in res:
-                assert item[default_primary_key_field_name] < 10000
-        else:
-            res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
-            assert len(res) == default_nb * 2
-            for item in res:
-                assert item[default_primary_key_field_name] < 10000 or item[default_primary_key_field_name] >= 10000
+        ignore_growings = [True, False]
+        for ignore_growing in ignore_growings:
+            if ignore_growing:
+                res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
+                assert len(res) == default_nb
+                # verify that only original data (id < 10000) is returned
+                for item in res:
+                    assert item[default_primary_key_field_name] < 10000
+            else:
+                res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
+                assert len(res) == default_nb * 2
+                for item in res:
+                    assert item[default_primary_key_field_name] < 10000 or item[default_primary_key_field_name] >= 10000
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -2982,7 +2754,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_pagination(self, offset):
+    def test_milvus_client_query_pagination(self):
         """
         target: test query pagination
         method: create collection and query with pagination params,
@@ -3006,24 +2778,25 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 3. prepare pagination query
         int_values = [row[default_primary_key_field_name] for row in rows]
         pos = 10
-        term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
-        # Expected results: primary key values from offset to pos+offset
-        res = []
-        for i in range(offset, min(pos + offset, len(rows))):
-            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
-        # 4. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr,
-                               output_fields=[default_primary_key_field_name],
-                               limit=10,
-                               check_task=CheckTasks.check_query_results,
-                               check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
-        # 5. verify primary key order 
-        key_res = [item[key] for item in query_res for key in item]
-        assert key_res == int_values[offset: pos + offset]
+        for offset in [0, 10, 100]:
+            term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
+            # Expected results: primary key values from offset to pos+offset
+            res = []
+            for i in range(offset, min(pos + offset, len(rows))):
+                res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+            # 4. query with pagination params
+            query_res = self.query(client, collection_name, filter=term_expr,
+                                   output_fields=[default_primary_key_field_name],
+                                   limit=10,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+            # 5. verify primary key order
+            key_res = [item[key] for item in query_res for key in item]
+            assert key_res == int_values[offset: pos + offset]
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_binary_pagination(self, offset):
+    def test_milvus_client_query_binary_pagination(self):
         """
         target: test query binary pagination
         method: create collection and query with pagination params,
@@ -3048,25 +2821,26 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 3. prepare pagination query
         int_values = [row[default_primary_key_field_name] for row in rows]
         pos = 10
-        term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
-        # Expected results: primary key values from offset to pos+offset
-        res = []
-        for i in range(offset, min(pos + offset, len(rows))):
-            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
-        # 4. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr,
-                               output_fields=[default_primary_key_field_name],
-                               limit=10,
-                               check_task=CheckTasks.check_query_results,
-                               check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
-        # 5. verify primary key order
-        key_res = [item[key] for item in query_res for key in item]
-        assert key_res == int_values[offset: pos + offset]
+        for offset in [0, 10, 100]:
+            term_expr = f'{default_primary_key_field_name} in {int_values[offset: pos + offset]}'
+            # Expected results: primary key values from offset to pos+offset
+            res = []
+            for i in range(offset, min(pos + offset, len(rows))):
+                res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+            # 4. query with pagination params
+            query_res = self.query(client, collection_name, filter=term_expr,
+                                   output_fields=[default_primary_key_field_name],
+                                   limit=10,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+            # 5. verify primary key order
+            key_res = [item[key] for item in query_res for key in item]
+            assert key_res == int_values[offset: pos + offset]
         # 6. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_pagination_with_partition(self, offset):
+    def test_milvus_client_query_pagination_with_partition(self):
         """
         target: test query pagination on partition
         method: create a partition and query with different offset
@@ -3093,22 +2867,23 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_partitions(client, collection_name, [partition_name])
-        # 5. prepare expected results (first 2 records)
-        res = []
-        for i in range(offset, min(10 + offset, len(rows))):
-            res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
-        # 6. query with pagination params on partition
-        self.query(client, collection_name, filter=default_search_exp,
-                   output_fields=[default_primary_key_field_name],
-                   partition_names=[partition_name],
-                   offset=offset, limit=10,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: res, "pk_name": default_primary_key_field_name})
+        for offset in [0, 10, 100]:
+            # 5. prepare expected results (first 2 records)
+            res = []
+            for i in range(offset, min(10 + offset, len(rows))):
+                res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
+            # 6. query with pagination params on partition
+            self.query(client, collection_name, filter=default_search_exp,
+                       output_fields=[default_primary_key_field_name],
+                       partition_names=[partition_name],
+                       offset=offset, limit=10,
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: res, "pk_name": default_primary_key_field_name})
         # 7. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_query_pagination_with_insert_data(self, offset):
+    def test_milvus_client_query_pagination_with_insert_data(self):
         """
         target: test query pagination on partition
         method: create a partition and query with pagination
@@ -3134,23 +2909,24 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. prepare expected results (first 2 records)
         int_values = [row[ct.default_int64_field_name] for row in rows]
         pos = 10
-        term_expr = f'{ct.default_int64_field_name} in {int_values[offset: pos + offset]}'
-        # Expected results: primary key values from offset to pos+offset
-        res = []
-        for i in range(offset, min(pos + offset, len(rows))):
-            res.append({ct.default_int64_field_name: rows[i][ct.default_int64_field_name]})
-        # 5. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr,
-                               output_fields=[ct.default_int64_field_name],
-                               limit=10,
-                               check_task=CheckTasks.check_query_results,
-                               check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
-        key_res = [item[ct.default_int64_field_name] for item in query_res]
-        assert key_res == int_values[offset: pos + offset]
+        for offset in [0, 10, 100]:
+            term_expr = f'{ct.default_int64_field_name} in {int_values[offset: pos + offset]}'
+            # Expected results: primary key values from offset to pos+offset
+            res = []
+            for i in range(offset, min(pos + offset, len(rows))):
+                res.append({ct.default_int64_field_name: rows[i][ct.default_int64_field_name]})
+            # 5. query with pagination params
+            query_res = self.query(client, collection_name, filter=term_expr,
+                                   output_fields=[ct.default_int64_field_name],
+                                   limit=10,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+            key_res = [item[ct.default_int64_field_name] for item in query_res]
+            assert key_res == int_values[offset: pos + offset]
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_pagination_without_limit(self, offset):
+    def test_milvus_client_query_pagination_without_limit(self):
         """
         target: test query pagination without limit
         method: create collection and query with pagination params(only offset),
@@ -3174,22 +2950,21 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with only offset parameter (no limit)
-        query_res_with_offset = self.query(client, collection_name, filter="id in [0, 1]",
-                                           offset=offset,
-                                           check_task=CheckTasks.check_query_results,
-                                           check_items={exp_res: rows[:2], "with_vec": True,
-                                                        "pk_name": default_primary_key_field_name})[0]
-        # 5. query without pagination params
         query_res_without_pagination = self.query(client, collection_name, filter="id in [0, 1]",
                                                   check_task=CheckTasks.check_query_results,
                                                   check_items={exp_res: rows[:2], "with_vec": True,
                                                                "pk_name": default_primary_key_field_name})[0]
-        assert query_res_with_offset == query_res_without_pagination
+        for offset in [0, 10, 100]:
+            query_res_with_offset = self.query(client, collection_name, filter="id in [0, 1]",
+                                               offset=offset,
+                                               check_task=CheckTasks.check_query_results,
+                                               check_items={exp_res: rows[:2], "with_vec": True,
+                                                            "pk_name": default_primary_key_field_name})[0]
+            assert query_res_with_offset == query_res_without_pagination
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [3000, 5000])
-    def test_milvus_client_query_pagination_with_offset_over_num_entities(self, offset):
+    def test_milvus_client_query_pagination_with_offset_over_num_entities(self):
         """
         target: test query pagination with offset over num_entities
         method: query with offset over num_entities
@@ -3213,10 +2988,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with offset over num_entities
         # Use a broader query that could return results, but offset is too large
-        res = self.query(client, collection_name, filter=default_search_exp,
-                         offset=offset, limit=10)[0]
-        # 5. verify empty result
-        assert len(res) == 0
+        for offset in [3000, 5000]:
+            res = self.query(client, collection_name, filter=default_search_exp,
+                             offset=offset, limit=10)[0]
+            # 5. verify empty result
+            assert len(res) == 0
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -3275,8 +3051,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [0, 10, 100])
-    def test_milvus_client_query_pagination_with_expression(self, offset):
+    def test_milvus_client_query_pagination_with_expression(self):
         """
         target: test query pagination with different expression
         method: query with different expression and verify the result
@@ -3305,6 +3080,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for expressions in cf.gen_normal_expressions_and_templates()[1:]:
             log.debug(f"test_milvus_client_query_pagination_with_expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
+            template_expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
             filter_ids = []
             for i, row in enumerate(rows):
                 int64 = row[ct.default_int64_field_name]
@@ -3312,19 +3089,19 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
 
-            # query and verify result
-            query_params = {"offset": offset, "limit": 10}
-            res = self.query(client, collection_name, filter=expr, **query_params)[0]
-            query_ids = [item[ct.default_int64_field_name] for item in res]
-            expected_ids = filter_ids[offset:offset + 10]
-            assert query_ids == expected_ids
+            for offset in [0, 10, 100]:
+                # query and verify result
+                query_params = {"offset": offset, "limit": 10}
+                res = self.query(client, collection_name, filter=expr, **query_params)[0]
+                query_ids = [item[ct.default_int64_field_name] for item in res]
+                expected_ids = filter_ids[offset:offset + 10]
+                assert query_ids == expected_ids
 
-            # query again with expression template
-            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
-            expr_params = cf.get_expr_params_from_template(expressions[1])
-            res = self.query(client, collection_name, filter=expr, filter_params=expr_params, **query_params)[0]
-            query_ids = [item[ct.default_int64_field_name] for item in res]
-            assert query_ids == expected_ids
+                # query again with expression template
+                res = self.query(client, collection_name, filter=template_expr,
+                                 filter_params=expr_params, **query_params)[0]
+                query_ids = [item[ct.default_int64_field_name] for item in res]
+                assert query_ids == expected_ids
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -3534,8 +3311,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vachar_expression", [perfix_expr, suffix_expr, inner_match_expr])
-    def test_milvus_client_mmap_query_string_expr_with_prefixes_and_suffix(self, vachar_expression):
+    def test_milvus_client_mmap_query_string_expr_with_prefixes_and_suffix(self):
         """
         target: test query with prefix string expression when mmap enabled
         method: specify string is primary field, use prefix string expr with mmap
@@ -3558,30 +3334,34 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query before enabling mmap
-        # Prepare expected results based on the specific expression
-        exp_res = []
-        if vachar_expression == perfix_expr:  # varchar like "0%"
-            for row in rows:
-                varchar_value = row[ct.default_string_field_name]
-                if varchar_value.startswith("0"):
-                    exp_res.append({ct.default_string_field_name: varchar_value,
-                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
-                    break  # Only take the first match like original test
-        elif vachar_expression == suffix_expr:  # varchar like "%0"
-            for row in rows:
-                varchar_value = row[ct.default_string_field_name]
-                if varchar_value.endswith("0"):
-                    exp_res.append({ct.default_string_field_name: varchar_value,
-                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
-        elif vachar_expression == inner_match_expr:  # varchar like "%0%"
-            for row in rows:
-                varchar_value = row[ct.default_string_field_name]
-                if "0" in varchar_value:
-                    exp_res.append({ct.default_string_field_name: varchar_value,
-                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
-        normal_res = self.query(client, collection_name, filter=vachar_expression,
-                                check_task=CheckTasks.check_query_results,
-                                check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
+        expected_results = {}
+        normal_results = {}
+        for varchar_expression in [perfix_expr, suffix_expr, inner_match_expr]:
+            exp_res = []
+            if varchar_expression == perfix_expr:  # varchar like "0%"
+                for row in rows:
+                    varchar_value = row[ct.default_string_field_name]
+                    if varchar_value.startswith("0"):
+                        exp_res.append({ct.default_string_field_name: varchar_value,
+                                        ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+                        break  # Only take the first match like original test
+            elif varchar_expression == suffix_expr:  # varchar like "%0"
+                for row in rows:
+                    varchar_value = row[ct.default_string_field_name]
+                    if varchar_value.endswith("0"):
+                        exp_res.append({ct.default_string_field_name: varchar_value,
+                                        ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+            elif varchar_expression == inner_match_expr:  # varchar like "%0%"
+                for row in rows:
+                    varchar_value = row[ct.default_string_field_name]
+                    if "0" in varchar_value:
+                        exp_res.append({ct.default_string_field_name: varchar_value,
+                                        ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+            expected_results[varchar_expression] = exp_res
+            normal_results[varchar_expression] = self.query(
+                client, collection_name, filter=varchar_expression,
+                check_task=CheckTasks.check_query_results,
+                check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
         # 5. enable mmap and reload
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
@@ -3589,10 +3369,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                                     properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 6. query after enabling mmap
-        mmap_res = self.query(client, collection_name, filter=vachar_expression,
-                              check_task=CheckTasks.check_query_results,
-                              check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
-        assert normal_res == mmap_res
+        for varchar_expression, exp_res in expected_results.items():
+            mmap_res = self.query(client, collection_name, filter=varchar_expression,
+                                  check_task=CheckTasks.check_query_results,
+                                  check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
+            assert normal_results[varchar_expression] == mmap_res
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3815,6 +3596,202 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                          check_task=CheckTasks.check_query_results,
                          check_items={"exp_res": rows[:60], "pk_name": default_primary_key_field_name})[0]
         # 6. clean up
+        self.drop_collection(client, collection_name)
+        
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_empty_partition_names(self):
+        """
+        target: test query with empty partition_names
+        method: query with partition_names=[]
+        expected: query from all partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert [0, half) into partition_w, [half, nb) into _default
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        # Insert first half into custom partition
+        rows_partition = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition, partition_name=partition_name)
+        # Insert second half into default partition
+        rows_default = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_default)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name, ct.default_partition_name])
+        # 4. query from empty partition_names (should query all partitions)
+        term_expr = f'{default_primary_key_field_name} in [0, {half}, {default_nb - 1}]'
+        # Prepare expected results by combining data from both partitions
+        all_rows = rows_partition + rows_default
+        exp_res = [all_rows[0], all_rows[half], all_rows[default_nb - 1]]
+        self.query(client, collection_name, filter=term_expr, partition_names=[],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "with_vec": True, "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_on_specific_partition(self):
+        """
+        Target: Verify that querying a specific partition only returns data from that partition.
+        Method:
+        1. Create a collection and two partitions (partition1 and partition2).
+        2. Insert the first half of the data into partition1 and the second half into partition2.
+        3. Create an index and load both partitions.
+        4. Query only partition1 and check that the returned results only contain data from partition1.
+        5. Clean up the collection.
+        Expected: Only data from partition1 is returned and matches the inserted data.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data to partition
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on partition
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name1],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows_partition1, "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_multi_partitions_multi_results(self):
+        """
+        target: test query on multi partitions and get multi results
+        method: 1.create two partitions and insert entities into them
+                2.query on two partitions and get multi results
+        expected: query results from two partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and two partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data into two partitions
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on two partitions to get multi results
+        term_expr = f'{default_primary_key_field_name} in [{half - 1}, {half}]'
+        rows = rows_partition1 + rows_partition2
+        self.query(client, collection_name, filter=term_expr,
+                   partition_names=[partition_name1, partition_name2],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows[half - 1:half + 1], "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_multi_partitions_single_results(self):
+        """
+        target: test query on multi partitions and get multi results
+        method: 1.create two partitions and insert entities into them
+                2.query on two partitions and query single results
+        expected: query from two partitions and get single result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name1 = cf.gen_unique_str("partition1")
+        partition_name2 = cf.gen_unique_str("partition2")
+        # 1. create collection and two partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name1)
+        self.create_partition(client, collection_name, partition_name2)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 2. insert data into two partitions
+        half = default_nb // 2
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows_partition1 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=0)
+        self.insert(client, collection_name, rows_partition1, partition_name=partition_name1)
+        rows_partition2 = cf.gen_row_data_by_schema(nb=half, schema=schema_info, start=half)
+        self.insert(client, collection_name, rows_partition2, partition_name=partition_name2)
+        self.flush(client, collection_name)
+        # 3. create index and load both partitions
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name1, partition_name2])
+        # 4. query on two partitions to get multi results
+        term_expr = f'{default_primary_key_field_name} in [{half}]'
+        rows = rows_partition1 + rows_partition2
+        self.query(client, collection_name, filter=term_expr,
+                   partition_names=[partition_name1, partition_name2],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows[half:half + 1], "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        # 6. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_query_empty_partition(self):
+        """
+        target: test query on empty partition
+        method: query on an empty partition
+        expected: empty query result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. create collection and partition
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
+        self.create_partition(client, collection_name, partition_name)
+        # 2. verify partition is empty
+        partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
+        assert partition_info['row_count'] == 0
+        # 3. create index and load partition
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_partitions(client, collection_name, [partition_name])
+        # 4. query on empty partition
+        res = self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name])[0]
+        assert len(res) == 0
+        # 5. clean up
         self.drop_collection(client, collection_name)
 
 
@@ -4339,6 +4316,176 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
             assert id_list == compare_dict[f'{i}']["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
 
+@pytest.mark.xdist_group("TestQueryStringNonPrimaryShared")
+class TestQueryStringNonPrimaryShared(TestMilvusClientV2Base):
+    """Read-only string query tests that share one int64-primary collection."""
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_query_string_non_primary_collection(self, request):
+        client = self._client()
+        collection_name = QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = build_query_string_non_primary_schema(client)
+        client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        client.insert(collection_name=collection_name, data=rows)
+        client.flush(collection_name=collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name=collection_name, index_params=index_params)
+        client.load_collection(collection_name=collection_name)
+
+        global QUERY_STRING_NON_PRIMARY_SHARED_ROWS
+        QUERY_STRING_NON_PRIMARY_SHARED_ROWS = rows
+
+        def teardown():
+            try:
+                if client.has_collection(QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION):
+                    client.drop_collection(QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_is_not_primary(self):
+        """
+        target: test query data with string field is not primary
+        method: create collection and insert data, query with string expr
+        expected: query successfully
+        """
+        client = self._client()
+        expected = []
+        for row in QUERY_STRING_NON_PRIMARY_SHARED_ROWS:
+            if row[default_string_field_name] >= "0":
+                expected.append({default_string_field_name: row[default_string_field_name],
+                                 default_primary_key_field_name: row[default_primary_key_field_name]})
+        self.query(client, QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION, filter=default_search_string_exp,
+                   output_fields=[default_string_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": expected, "pk_name": default_primary_key_field_name})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_with_invalid_string_expr(self):
+        """
+        target: test query data
+        method: query with invalid string expressions
+        expected: raise exception
+        """
+        client = self._client()
+        for expression in cf.gen_invalid_string_expressions():
+            error = {ct.err_code: 1100,
+                     ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
+            self.query(client, QUERY_STRING_NON_PRIMARY_SHARED_COLLECTION, filter=expression,
+                       check_task=CheckTasks.err_res, check_items=error)
+
+
+@pytest.mark.xdist_group("TestQueryStringPrimaryShared")
+class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
+    """Read-only string query tests that share one varchar-primary collection."""
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_query_string_primary_collection(self, request):
+        client = self._client()
+        collection_name = QUERY_STRING_PRIMARY_SHARED_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = build_query_string_primary_schema(client)
+        client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+        rows = gen_query_string_primary_rows()
+        client.insert(collection_name=collection_name, data=rows)
+        client.flush(collection_name=collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name=collection_name, index_params=index_params)
+        client.load_collection(collection_name=collection_name)
+
+        global QUERY_STRING_PRIMARY_SHARED_ROWS
+        QUERY_STRING_PRIMARY_SHARED_ROWS = rows
+
+        def teardown():
+            try:
+                if client.has_collection(QUERY_STRING_PRIMARY_SHARED_COLLECTION):
+                    client.drop_collection(QUERY_STRING_PRIMARY_SHARED_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_with_mix_expr(self):
+        """
+        target: test query data
+        method: query with mix expr in string field and int field
+        expected: query successfully
+        """
+        client = self._client()
+        expected = []
+        for row in QUERY_STRING_PRIMARY_SHARED_ROWS:
+            if row[ct.default_int64_field_name] >= 0 and row[default_string_field_name] >= "0":
+                expected.append({
+                    ct.default_float_field_name: row[ct.default_float_field_name],
+                    default_string_field_name: row[default_string_field_name]
+                })
+        output_fields = [ct.default_float_field_name, default_string_field_name]
+        self.query(client, QUERY_STRING_PRIMARY_SHARED_COLLECTION, filter=default_search_mix_exp,
+                   output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": expected, "pk_name": default_string_field_name})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_string_with_invalid_prefix_expr(self):
+        """
+        target: test query with invalid prefix string expression
+        method: use invalid prefix string expr on float field
+        expected: raise error
+        """
+        client = self._client()
+        expression = 'float like "0%"'
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported"}
+        self.query(client, QUERY_STRING_PRIMARY_SHARED_COLLECTION, filter=expression,
+                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_compare_two_fields(self):
+        """
+        target: test query with bool expression comparing two fields
+        method: specify string primary field, compare two fields
+        expected: verify query successfully
+        """
+        client = self._client()
+        expected = []
+        for row in QUERY_STRING_PRIMARY_SHARED_ROWS:
+            expected.append({
+                ct.default_float_field_name: row[ct.default_float_field_name],
+                default_string_field_name: row[default_string_field_name],
+                ct.default_int64_field_name: row[ct.default_int64_field_name]
+            })
+        expression = 'float <= int64'
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
+        self.query(client, QUERY_STRING_PRIMARY_SHARED_COLLECTION, filter=expression, output_fields=output_fields,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": expected, "pk_name": ct.default_string_field_name})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_compare_invalid_fields(self):
+        """
+        target: test query with invalid field comparison
+        method: compare string and int field
+        expected: raise error
+        """
+        client = self._client()
+        expression = 'varchar == int64'
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
+                             f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
+        self.query(client, QUERY_STRING_PRIMARY_SHARED_COLLECTION, filter=expression,
+                   check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestQueryString(TestMilvusClientV2Base):
     """
@@ -4348,125 +4495,10 @@ class TestQueryString(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_string_is_not_primary(self):
+    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "BITMAP"])
+    def test_milvus_client_query_string_expr_with_like_index(self, index_type):
         """
-        target: test query data with string field is not primary
-        method: create collection and insert data
-                collection.load()
-                query with string expr in string field is not primary
-        expected: query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # Prepare expected results in correct format for CheckTasks
-        exp_res = []
-        for row in rows:
-            if row[default_string_field_name] >= "0":
-                result_item = {default_string_field_name: row[default_string_field_name],
-                               default_primary_key_field_name: row[default_primary_key_field_name]}
-                exp_res.append(result_item)
-        self.query(client, collection_name, filter=default_search_string_exp, output_fields=[default_string_field_name],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
-        # 7. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_string_with_mix_expr(self):
-        """
-        target: test query data
-        method: create collection and insert data
-                query with mix expr in string field and int field
-        expected: query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection with string as primary field
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_int64_field_name, DataType.INT64)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. prepare expected results based on mix expression: int64 >= 0 && varchar >= "0"
-        exp_res = []
-        for row in rows:
-            # Apply the same filter logic as the query expression
-            if row[ct.default_int64_field_name] >= 0 and row[default_string_field_name] >= "0":
-                result_item = {
-                    ct.default_float_field_name: row[ct.default_float_field_name],
-                    default_string_field_name: row[default_string_field_name]
-                }
-                exp_res.append(result_item)
-        # 5. query with mix expression
-        output_fields = [ct.default_float_field_name, default_string_field_name]
-        self.query(client, collection_name, filter=default_search_mix_exp, output_fields=output_fields,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": exp_res, "pk_name": default_string_field_name})
-        # 6. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_invalid_string_expressions())
-    def test_milvus_client_query_with_invalid_string_expr(self, expression):
-        """
-        target: test query data
-        method: create collection and insert data
-                query with invalid expr
-        expected: Raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid string expression - should raise exception
-        error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
-        self.query(client, collection_name, filter=expression,
-                   check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
-    def test_milvus_client_query_string_expr_with_like_auto_index(self, expression):
-        """
-        target: test query with like string expression and indexed with auto index
+        target: test query with like string expression and indexed varchar field
         expected: verify query successfully
         """
         client = self._client()
@@ -4480,139 +4512,29 @@ class TestQueryString(TestMilvusClientV2Base):
         # 2. insert data
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
-        # 3. create indexes with auto index for varchar field
+        # 3. create indexes for varchar field
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        index_params.add_index(field_name=ct.default_string_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type)
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        # 4. query with auto index and get baseline result count
-        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len = len(result)
-        # 5. drop auto index and verify query result remains same
+        # 4. query with string index and get baseline result count
+        expressions = [perfix_expr, suffix_expr, inner_match_expr]
+        indexed_result_lens = {}
+        for expression in expressions:
+            result = self.query(client, collection_name, filter=expression,
+                                output_fields=[ct.default_string_field_name])[0]
+            indexed_result_lens[expression] = len(result)
+
+        # 5. drop string index and verify query result remains same
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
-        result_without_index = \
-        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len_without_index = len(result_without_index)
-        assert res_len_without_index == res_len
+        for expression in expressions:
+            result_without_index = self.query(client, collection_name, filter=expression,
+                                             output_fields=[ct.default_string_field_name])[0]
+            assert len(result_without_index) == indexed_result_lens[expression]
         # 6. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_string_with_invalid_prefix_expr(self):
-        """
-        target: test query with invalid prefix string expression
-        method: specify string primary field, use invalid prefix string expr
-        expected: raise error
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid prefix expression
-        expression = 'float like "0%"'
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported"}
-        self.query(client, collection_name, filter=expression,
-                   check_task=CheckTasks.err_res, check_items=error)
-        # 5. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_compare_two_fields(self):
-        """
-        target: test query with bool expression comparing two fields
-        method: specify string primary field, compare two fields
-        expected: verify query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection with string primary key
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
-        schema.add_field(ct.default_int64_field_name, DataType.INT64)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data with controlled values to ensure consistent comparison results
-        rows = []
-        for i in range(default_nb):
-            row = {
-                ct.default_string_field_name: str(i),
-                ct.default_int64_field_name: i + 10,  # int64 values: 10, 11, 12, ...
-                ct.default_float_field_name: float(i),  # float values: 0.0, 1.0, 2.0, ...
-                default_vector_field_name: [random.random() for _ in range(default_dim)]
-            }
-            rows.append(row)
-        self.insert(client, collection_name, rows)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with expression comparing two fields - should return all rows
-        exp_res = []
-        for row in rows:
-            result_item = {
-                ct.default_float_field_name: row[ct.default_float_field_name],
-                ct.default_string_field_name: row[ct.default_string_field_name],
-                ct.default_int64_field_name: row[ct.default_int64_field_name]
-            }
-            exp_res.append(result_item)
-        expression = 'float <= int64'
-        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
-        self.query(client, collection_name, filter=expression, output_fields=output_fields,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})
-        # 5. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_compare_invalid_fields(self):
-        """
-        target: test query with invalid field comparison
-        method: specify string primary field, compare string and int field
-        expected: raise error
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection with string primary key
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
-        schema.add_field(ct.default_int64_field_name, DataType.INT64)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with invalid field comparison - should raise error
-        expression = 'varchar == int64'
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-                             f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
-        self.query(client, collection_name, filter=expression,
-                   check_task=CheckTasks.err_res, check_items=error)
-        # 5. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4656,48 +4578,8 @@ class TestQueryString(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
-    def test_milvus_client_query_string_expr_with_prefixes_bitmap(self, expression):
-        """
-        target: test query with prefix string expression and indexed with bitmap
-        expected: verify query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        # 3. create indexes with bitmap index for varchar field
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        index_params.add_index(field_name=ct.default_string_field_name, index_type="BITMAP")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. query with bitmap index and get baseline result count
-        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len = len(result)
-        # 5. drop bitmap index and verify query result remains same
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, ct.default_string_field_name)
-        self.load_collection(client, collection_name)
-        result_without_index = \
-        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len_without_index = len(result_without_index)
-        assert res_len_without_index == res_len
-        # 6. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression",
-                             ['TEXT_MATCH(varchar, "0")', 'TEXT_MATCH(varchar, "1")', 'TEXT_MATCH(varchar, "test")'])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "BITMAP"])
-    def test_milvus_client_query_string_expr_with_match_auto_index_and_bitmap(self, expression, index_type):
+    def test_milvus_client_query_string_expr_with_match_auto_index_and_bitmap(self, index_type):
         """
         target: test query with match string expression and indexed with auto index and bitmap
         expected: verify query successfully
@@ -4729,18 +4611,12 @@ class TestQueryString(TestMilvusClientV2Base):
             rows.append(row)
         self.insert(client, collection_name, rows)
 
-        # Calculate expected results based on the expression
-        exp_len = 0
-        if 'TEXT_MATCH(varchar, "0")' in expression:
-            # Should match "test data 0" (every 10th record starting from 0)
-            exp_len = default_nb // 10
-        elif 'TEXT_MATCH(varchar, "1")' in expression:
-            # Should match "content with 1" (every 10th record starting from 1)
-            exp_len = default_nb // 10
-        elif 'TEXT_MATCH(varchar, "test")' in expression:
-            # Should match both "test data 0" and "this is test content" 
-            exp_len = (default_nb // 10) * 2
-            # 3. create indexes
+        expressions = [
+            ('TEXT_MATCH(varchar, "0")', default_nb // 10),
+            ('TEXT_MATCH(varchar, "1")', default_nb // 10),
+            ('TEXT_MATCH(varchar, "test")', (default_nb // 10) * 2),
+        ]
+        # 3. create indexes
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type,
@@ -4750,16 +4626,21 @@ class TestQueryString(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         time.sleep(ct.default_graceful_time)
         # 4. query
-        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        assert len(result) == exp_len
+        indexed_result_lens = {}
+        for expression, exp_len in expressions:
+            result = self.query(client, collection_name, filter=expression,
+                                output_fields=[ct.default_string_field_name])[0]
+            assert len(result) == exp_len
+            indexed_result_lens[expression] = len(result)
         # 5. drop index and verify query result remains same
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
         time.sleep(ct.default_graceful_time)
-        result_without_index = \
-        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        assert len(result_without_index) == len(result) == exp_len
+        for expression, exp_len in expressions:
+            result_without_index = self.query(client, collection_name, filter=expression,
+                                             output_fields=[ct.default_string_field_name])[0]
+            assert len(result_without_index) == indexed_result_lens[expression] == exp_len
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -4875,12 +4756,7 @@ class TestQueryArray(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("use_index", [True, False])
     @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
-    @pytest.mark.parametrize("array_expression", [
-        'string_array[0] like "0%"',
-        'string_array[0] like "%0"',
-        'string_array[0] like "%0%"'
-    ])
-    def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type, array_expression):
+    def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type):
         """
         target: test query with array element using different like patterns
         method: create collection with string array field, query with various like patterns
@@ -4924,34 +4800,64 @@ class TestQueryArray(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with array element prefix like
-        res = self.query(client, collection_name, filter=array_expression, limit=default_nb)[0]
-        # 5. verify result based on expression type
-        if 'like "0%"' in array_expression:
-            # Prefix match: first element starts with "0"
-            filter_data = [row for row in string_field_value if row[0].startswith('0')]
-            match_func = lambda x: x.startswith("0")
-        elif 'like "%0"' in array_expression:
-            # Suffix match: first element ends with "0"  
-            filter_data = [row for row in string_field_value if row[0].endswith('0')]
-            match_func = lambda x: x.endswith("0")
-        elif 'like "%0%"' in array_expression:
-            # Inner match: first element contains "0"
-            filter_data = [row for row in string_field_value if '0' in row[0]]
-            match_func = lambda x: '0' in x
+        array_expressions = [
+            'string_array[0] like "0%"',
+            'string_array[0] like "%0"',
+            'string_array[0] like "%0%"'
+        ]
+        for array_expression in array_expressions:
+            res = self.query(client, collection_name, filter=array_expression, limit=default_nb)[0]
+            # 5. verify result based on expression type
+            if 'like "0%"' in array_expression:
+                # Prefix match: first element starts with "0"
+                filter_data = [row for row in string_field_value if row[0].startswith('0')]
+                match_func = lambda x: x.startswith("0")
+            elif 'like "%0"' in array_expression:
+                # Suffix match: first element ends with "0"
+                filter_data = [row for row in string_field_value if row[0].endswith('0')]
+                match_func = lambda x: x.endswith("0")
+            elif 'like "%0%"' in array_expression:
+                # Inner match: first element contains "0"
+                filter_data = [row for row in string_field_value if '0' in row[0]]
+                match_func = lambda x: '0' in x
 
-        assert len(res) == len(filter_data)
+            assert len(res) == len(filter_data)
 
-        # Verify the returned records have correct first elements
-        for record in res:
-            first_element = record[ct.default_string_array_field_name][0]
-            assert match_func(first_element)
+            # Verify the returned records have correct first elements
+            for record in res:
+                first_element = record[ct.default_string_array_field_name][0]
+                assert match_func(first_element)
         self.drop_collection(client, collection_name)
 
+@pytest.mark.xdist_group("TestQueryCountDefaultShared")
+class TestQueryCountDefaultShared(TestMilvusClientV2Base):
+    """Read-only count(*) tests that share one default-schema collection."""
 
-class TestQueryCount(TestMilvusClientV2Base):
-    """
-    test query count(*)
-    """
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_query_count_default_collection(self, request):
+        client = self._client()
+        collection_name = QUERY_COUNT_DEFAULT_SHARED_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = build_query_count_default_schema(client)
+        client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        client.insert(collection_name=collection_name, data=rows)
+        client.flush(collection_name=collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name=collection_name, index_params=index_params)
+        client.load_collection(collection_name=collection_name)
+
+        def teardown():
+            try:
+                if client.has_collection(QUERY_COUNT_DEFAULT_SHARED_COLLECTION):
+                    client.drop_collection(QUERY_COUNT_DEFAULT_SHARED_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_count_with_expr(self):
@@ -4961,32 +4867,172 @@ class TestQueryCount(TestMilvusClientV2Base):
         expected: verify count
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection, insert data, create index and load
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. count with default expr 
-        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+        self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter=default_search_exp, output_fields=["count(*)"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": default_nb}],
                                 "pk_name": default_primary_key_field_name})
-        # 5. count with term expr (should return 2 entities: id in [0, 1])
-        self.query(client, collection_name, filter="id in [0, 1]", output_fields=["count(*)"],
+        self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter="id in [0, 1]", output_fields=["count(*)"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": 2}],
                                 "pk_name": default_primary_key_field_name})
-        # 6. clean up
-        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_invalid_output_field(self):
+        """
+        target: test count with invalid output field
+        method: query with invalid count output field
+        expected: raise exception with field not exist error
+        """
+        client = self._client()
+        invalid_output_fields = ["count", "count(int64)", "count(**)"]
+        for invalid_output_field in invalid_output_fields:
+            if invalid_output_field == "count":
+                err_msg = "field count not exist"
+            else:
+                err_msg = "for aggregation:count does not exist"
+            self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter=default_search_exp,
+                       output_fields=[invalid_output_field],
+                       check_task=CheckTasks.err_res,
+                       check_items={"err_code": 1, "err_msg": err_msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_with_pagination_param(self):
+        """
+        target: test count with pagination params
+        method: count with pagination params: offset, limit
+        expected: exception
+        """
+        client = self._client()
+        res = self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter=default_search_exp,
+                         output_fields=["count(*)"], offset=10)[0]
+        assert res[0]["count(*)"] == default_nb
+        self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter=default_search_exp,
+                   output_fields=["count(*)"], limit=10,
+                   check_task=CheckTasks.err_res,
+                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+        self.query(client, QUERY_COUNT_DEFAULT_SHARED_COLLECTION, filter=default_search_exp,
+                   output_fields=["count(*)"], offset=10, limit=10,
+                   check_task=CheckTasks.err_res,
+                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+
+
+@pytest.mark.xdist_group("TestQueryCountExpressionShared")
+class TestQueryCountExpressionShared(TestMilvusClientV2Base):
+    """Read-only count(*) expression tests that share one superset-schema collection."""
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_query_count_expression_collection(self, request):
+        client = self._client()
+        collection_name = QUERY_COUNT_EXPR_SHARED_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = build_query_count_expression_schema(client)
+        client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        client.insert(collection_name=collection_name, data=rows)
+        client.flush(collection_name=collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name=collection_name, index_params=index_params)
+        client.load_collection(collection_name=collection_name)
+
+        global QUERY_COUNT_EXPR_SHARED_ROWS
+        QUERY_COUNT_EXPR_SHARED_ROWS = rows
+
+        def teardown():
+            try:
+                if client.has_collection(QUERY_COUNT_EXPR_SHARED_COLLECTION):
+                    client.drop_collection(QUERY_COUNT_EXPR_SHARED_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_count_expressions(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        rows = QUERY_COUNT_EXPR_SHARED_ROWS
+        for expressions in cf.gen_normal_expressions_and_templates():
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for row in rows:
+                int64 = row[ct.default_int64_field_name]
+                float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+
+            expected_count = len(filter_ids)
+            self.query(client, QUERY_COUNT_EXPR_SHARED_COLLECTION, filter=expr, output_fields=["count(*)"],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": expected_count}],
+                                    "pk_name": ct.default_int64_field_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_bool_expressions(self):
+        """
+        target: test count with binary expr
+        method: count with binary expr
+        expected: verify count
+        """
+        client = self._client()
+        rows = QUERY_COUNT_EXPR_SHARED_ROWS
+        for bool_type in [True, False, "true", "false"]:
+            bool_type_cmp = bool_type
+            if bool_type == "true":
+                bool_type_cmp = True
+            if bool_type == "false":
+                bool_type_cmp = False
+
+            filter_ids = []
+            for row in rows:
+                if row[ct.default_bool_field_name] == bool_type_cmp:
+                    filter_ids.append(row[ct.default_int64_field_name])
+            expected_count = len(filter_ids)
+            expression = f"{ct.default_bool_field_name} == {bool_type}"
+            self.query(client, QUERY_COUNT_EXPR_SHARED_COLLECTION, filter=expression, output_fields=["count(*)"],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": expected_count}],
+                                    "pk_name": ct.default_int64_field_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_count_expression_auto_field(self):
+        """
+        target: test count with expr
+        method: count with expr
+        expected: verify count
+        """
+        client = self._client()
+        rows = QUERY_COUNT_EXPR_SHARED_ROWS
+        for expressions in cf.gen_normal_expressions_and_templates_field(ct.default_float_field_name):
+            log.debug(f"query with expression: {expressions}")
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            for row in rows:
+                float = row[ct.default_float_field_name]
+                if not expr or eval(expr):
+                    filter_ids.append(row[ct.default_int64_field_name])
+            expected_count = len(filter_ids)
+
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            self.query(client, QUERY_COUNT_EXPR_SHARED_COLLECTION, filter=expr, filter_params=expr_params,
+                       output_fields=["count(*)"],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": expected_count}],
+                                    "pk_name": ct.default_int64_field_name})
+
+
+class TestQueryCount(TestMilvusClientV2Base):
+    """
+    test query count(*)
+    """
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("consistency_level", ["Bounded", "Strong", "Eventually"])
@@ -5026,40 +5072,6 @@ class TestQueryCount(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": default_nb}],
                                 "pk_name": ct.default_int64_field_name})
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_output_field", ["count", "count(int64)", "count(**)"])
-    def test_milvus_client_count_invalid_output_field(self, invalid_output_field):
-        """
-        target: test count with invalid output field
-        method: query with invalid count output field
-        expected: raise exception with field not exist error
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False,
-                               enable_dynamic_field=False)
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        # 2. create index and load collection
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 3. insert data
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        # 4. query with invalid count output field
-        if invalid_output_field == "count":
-            err_msg = "field count not exist"
-        else:
-            err_msg = "for aggregation:count does not exist"
-        self.query(client, collection_name, filter=default_search_exp, output_fields=[invalid_output_field],
-                   check_task=CheckTasks.err_res,
-                   check_items={"err_code": 1, "err_msg": err_msg})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5569,42 +5581,6 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 6. clean up
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_count_with_pagination_param(self):
-        """
-        target: test count with pagination params
-        method: count with pagination params: offset, limit
-        expected: exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create -> insert -> index -> load
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, default_vector_field_name)
-        schema_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 2. only params offset is not considered pagination
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], offset=10)[0]
-        assert res[0]["count(*)"] == default_nb
-        # 3. count with limit should raise exception
-        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], limit=10,
-                   check_task=CheckTasks.err_res,
-                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
-        # 4. count with pagination params should raise exception
-        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], offset=10, limit=10,
-                   check_task=CheckTasks.err_res,
-                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
-        # 5. clean up
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_count_alias_insert_delete_drop(self):
         """
@@ -5833,148 +5809,6 @@ class TestQueryCount(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": 0}],
                                 "pk_name": default_primary_key_field_name})
-        # clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_count_expressions(self):
-        """
-        target: test count with expr
-        method: count with expr
-        expected: verify count
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create -> insert -> index -> load
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # Create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 2. filter result with expression in collection
-        for expressions in cf.gen_normal_expressions_and_templates():
-            log.debug(f"query with expression: {expressions}")
-            expr = expressions[0].replace("&&", "and").replace("||", "or")
-            # Calculate expected count by filtering the data manually
-            filter_ids = []
-            for i, row in enumerate(rows):
-                # Set up variables that match the expression field names
-                int64 = row[ct.default_int64_field_name]
-                float = row[ct.default_float_field_name]
-                # Evaluate the expression with the actual field values
-                if not expr or eval(expr):
-                    filter_ids.append(row[ct.default_int64_field_name])
-
-            expected_count = len(filter_ids)
-            # count with expr
-            self.query(client, collection_name, filter=expr, output_fields=["count(*)"],
-                       check_task=CheckTasks.check_query_results,
-                       check_items={exp_res: [{"count(*)": expected_count}],
-                                    "pk_name": ct.default_int64_field_name})
-        # clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
-    def test_milvus_client_count_bool_expressions(self, bool_type):
-        """
-        target: test count with binary expr
-        method: count with binary expr
-        expected: verify count
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection with all data types including bool field
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_bool_field_name, DataType.BOOL)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        # 2. insert data 
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # 3. create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 4. filter result with expression in collection
-        filter_ids = []
-        bool_type_cmp = bool_type
-        if bool_type == "true":
-            bool_type_cmp = True
-        if bool_type == "false":
-            bool_type_cmp = False
-
-        # Count matching rows manually
-        for i, row in enumerate(rows):
-            if row[ct.default_bool_field_name] == bool_type_cmp:
-                filter_ids.append(row[ct.default_int64_field_name])
-        expected_count = len(filter_ids)
-        # 5. count with expr
-        expression = f"{ct.default_bool_field_name} == {bool_type}"
-        self.query(client, collection_name, filter=expression, output_fields=["count(*)"],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: [{"count(*)": expected_count}],
-                                "pk_name": ct.default_int64_field_name})
-        # 6. clean up
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_count_expression_auto_field(self):
-        """
-        target: test count with expr
-        method: count with expr
-        expected: verify count
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create -> insert -> index -> load
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        # Create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
-        # 2. filter result with expression in collection for the float field
-        for expressions in cf.gen_normal_expressions_and_templates_field(ct.default_float_field_name):
-            log.debug(f"query with expression: {expressions}")
-            expr = expressions[0].replace("&&", "and").replace("||", "or")
-            # Calculate expected count by filtering the data manually
-            filter_ids = []
-            for i, row in enumerate(rows):
-                float = row[ct.default_float_field_name]
-                if not expr or eval(expr):
-                    filter_ids.append(row[ct.default_int64_field_name])
-            expected_count = len(filter_ids)
-
-            # count with expr
-            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
-            expr_params = cf.get_expr_params_from_template(expressions[1])
-            self.query(client, collection_name, filter=expr, filter_params=expr_params, output_fields=["count(*)"],
-                       check_task=CheckTasks.check_query_results,
-                       check_items={exp_res: [{"count(*)": expected_count}],
-                                    "pk_name": ct.default_int64_field_name})
         # clean up
         self.drop_collection(client, collection_name)
 

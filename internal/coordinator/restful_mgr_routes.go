@@ -12,20 +12,20 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // this file contains proxy management restful API handler
@@ -312,7 +312,7 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	if err != nil {
 		logger.Info("ListBatchQueryNodes failed to list query nodes", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to list query node, %s"}`, err.Error())))
+		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
 		return
 	}
 
@@ -323,7 +323,7 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	if err != nil {
 		logger.Info("ListBatchQueryNodes failed to encode response", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to list query node, %s"}`, err.Error())))
+		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
 		return
 	}
 	logger.Info("ListBatchQueryNodes success", zap.Any("response", string(bytes)))
@@ -333,13 +333,13 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 // GetStreamingNodeDistribution handles GET requests to retrieve streaming node distribution.
 func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("GetStreamingNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form data, %s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		logger.Info("GetStreamingNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, invalid node_id: %s"}`, err.Error()), http.StatusBadRequest)
@@ -440,13 +440,13 @@ func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *
 // This handler should be registered to the new path.
 func (s *mixCoordImpl) GetBatchNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("GetBatchNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form data, %s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		logger.Info("GetBatchNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, invalid node_id: %s"}`, err.Error()), http.StatusBadRequest)
@@ -551,7 +551,7 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"msg": "OK", "status": "%v"}`, balanceStatus)))
+	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
 }
 
 func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
@@ -751,7 +751,7 @@ func (s *mixCoordImpl) HandleStreamingNodeStatus(w http.ResponseWriter, req *htt
 func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
 	// Parse the request form to access URL query parameters.
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("handleGetStreamingNodeStatus parse form failed", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form, %s"}`, err.Error()), http.StatusBadRequest)
 		return
@@ -891,7 +891,7 @@ func (s *mixCoordImpl) HandleBatchNodeStatus(w http.ResponseWriter, req *http.Re
 func (s *mixCoordImpl) handleGetBatchNodeStatus(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
 	// Parse the request form to access URL query parameters.
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Warn("handleGetBatchNodeStatus", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form, %s"}`, err.Error()), http.StatusBadRequest)
 		return
@@ -1178,7 +1178,7 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 				zap.String("targetWAL", requestBody.TargetWALName))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(`{"msg": "target WAL type '%s' is already configured, no change needed"}`, currentMQType)))
+			fmt.Fprintf(w, `{"msg": "target WAL type '%s' is already configured, no change needed"}`, currentMQType)
 			return
 		}
 	}
@@ -1348,7 +1348,9 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	// Alter configuration(s) in etcd atomically (updates + deletes in one transaction)
+	// Alter configuration(s) in etcd atomically (updates + deletes in one transaction).
+	// AlterConfigsInEtcd also proactively refreshes the local EtcdSource so that the write
+	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
 		logger.Info("HandleAlterConfig failed to atomically alter configs in etcd",
 			zap.Any("updates", configsToUpdate),

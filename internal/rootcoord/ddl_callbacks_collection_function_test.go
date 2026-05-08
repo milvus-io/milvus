@@ -25,15 +25,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DDLCallbacksCollectionFunctionTestSuite struct {
@@ -245,7 +245,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(ctx, fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function non_existent_function not exists")
+	suite.Contains(err.Error(), "function non_existent_function not exists")
 }
 
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCollection_InputFieldNotExists() {
@@ -412,7 +412,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Old version function's output field non_existent_output not exists")
+	suite.Contains(err.Error(), "old version function's output field non_existent_output not exists")
 }
 
 // Test with empty collections and functions
@@ -429,7 +429,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function test_function not exists")
+	suite.Contains(err.Error(), "function test_function not exists")
 }
 
 // Test max function ID calculation

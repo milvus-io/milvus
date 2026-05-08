@@ -10,11 +10,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Chooses qualified L0 segments to do L0 compaction
@@ -24,6 +24,9 @@ type l0CompactionPolicy struct {
 	activeCollections *activeCollections
 	allocator         allocator.Allocator
 }
+
+// Ensure l0CompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*l0CompactionPolicy)(nil)
 
 func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
@@ -35,6 +38,14 @@ func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0Compact
 
 func (policy *l0CompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+}
+
+func (policy *l0CompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
+}
+
+func (policy *l0CompactionPolicy) Name() string {
+	return "L0Compaction"
 }
 
 // Notify policy to record the active updated(when adding a new L0 segment) collections.

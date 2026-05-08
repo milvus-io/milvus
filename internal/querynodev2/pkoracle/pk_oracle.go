@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // PkOracle provides PK-to-segment mapping backed by bloom filters.

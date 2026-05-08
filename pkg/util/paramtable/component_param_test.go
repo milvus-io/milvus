@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
 
 func shouldPanic(t *testing.T, name string, f func()) {
@@ -259,6 +259,11 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
 		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
+		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
+		params.Save(Params.MaxSearchAggregationResultEntries.Key, "1024")
+		assert.Equal(t, int64(1024), Params.MaxSearchAggregationResultEntries.GetAsInt64())
+		params.Reset(Params.MaxSearchAggregationResultEntries.Key)
+		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
@@ -882,10 +887,10 @@ func TestCachedParam(t *testing.T) {
 	assert.True(t, params.CommonCfg.BloomFilterEnabled.GetAsBool())
 	assert.Equal(t, "BlockedBloomFilter", params.CommonCfg.BloomFilterType.GetValue())
 
-	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
-	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
+	assert.Equal(t, uint64(8388608), params.MQCfg.PursuitBufferSize.GetAsUint64())
+	assert.Equal(t, uint64(8388608), params.MQCfg.PursuitBufferSize.GetAsUint64())
 
-	assert.Equal(t, 60, params.ServiceParam.MQCfg.PursuitBufferTime.GetAsInt())
+	assert.Equal(t, 60, params.MQCfg.PursuitBufferTime.GetAsInt())
 
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())
 	assert.Equal(t, int64(1024), params.DataCoordCfg.SegmentMaxSize.GetAsInt64())

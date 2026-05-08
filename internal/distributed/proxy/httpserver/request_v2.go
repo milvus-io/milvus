@@ -23,10 +23,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type EmptyReq struct{}
@@ -571,6 +571,7 @@ type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
 	DataType          string                 `json:"dataType" binding:"required"`
 	ElementDataType   string                 `json:"elementDataType"`
+	ExternalField     string                 `json:"externalField"`
 	IsPrimary         bool                   `json:"isPrimary"`
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
 	IsClusteringKey   bool                   `json:"isClusteringKey"`
@@ -594,6 +595,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		DataType:        dataType,
 		TypeParams:      []*commonpb.KeyValuePair{},
 		Nullable:        field.Nullable,
+		ExternalField:   field.ExternalField,
 	}
 
 	var err error
@@ -638,6 +640,8 @@ type CollectionSchema struct {
 	Functions          []FunctionSchema `json:"functions"`
 	AutoId             bool             `json:"autoID"`
 	EnableDynamicField bool             `json:"enableDynamicField"`
+	ExternalSource     string           `json:"externalSource"`
+	ExternalSpec       string           `json:"externalSpec"`
 }
 
 type CollectionReq struct {
@@ -653,10 +657,45 @@ type CollectionReq struct {
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
 	Description      string                 `json:"description"`
+	// Top-level external config is accepted only for explicit rejection.
+	// Create external collection must use schema.externalSource/schema.externalSpec.
+	TopLevelExternalSource string `json:"externalSource"`
+	TopLevelExternalSpec   string `json:"externalSpec"`
 }
 
 func (req *CollectionReq) GetDbName() string         { return req.DbName }
 func (req *CollectionReq) GetCollectionName() string { return req.CollectionName }
+
+func (req *CollectionReq) GetExternalSource() string {
+	return req.Schema.ExternalSource
+}
+
+func (req *CollectionReq) GetExternalSpec() string {
+	return req.Schema.ExternalSpec
+}
+
+func (req *CollectionReq) HasTopLevelExternalConfig() bool {
+	return req.TopLevelExternalSource != "" || req.TopLevelExternalSpec != ""
+}
+
+type RefreshExternalCollectionReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	ExternalSource string `json:"externalSource"`
+	ExternalSpec   string `json:"externalSpec"`
+}
+
+func (req *RefreshExternalCollectionReq) GetDbName() string { return req.DbName }
+
+func (req *RefreshExternalCollectionReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type RefreshExternalCollectionProgressReq struct {
+	JobID int64 `json:"jobId" binding:"required"`
+}
+
+func (req *RefreshExternalCollectionProgressReq) GetJobID() int64 { return req.JobID }
 
 type AliasReq struct {
 	DbName    string `json:"dbName"`

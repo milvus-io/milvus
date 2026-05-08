@@ -5,7 +5,7 @@ package syncmgr
 import (
 	context "context"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	mock "github.com/stretchr/testify/mock"
 )
 

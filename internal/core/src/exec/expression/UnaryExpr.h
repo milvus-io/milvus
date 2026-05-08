@@ -777,7 +777,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         int64_t active_count,
         int64_t batch_size,
         int32_t consistency_level,
-        const query::PlanOptions& plan_options = {})
+        const query::PlanOptions& plan_options = {},
+        bool enable_sub_expr_cache_write = true)
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -792,7 +793,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       expr->column_.element_level_ &&
                           expr->column_.data_type_ == DataType::JSON,
                       plan_options),
-          expr_(expr) {
+          expr_(expr),
+          enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
         auto val_type = FromValCase(expr_->val_.val_case());
         if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
             (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
@@ -960,6 +962,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
+    bool enable_sub_expr_cache_write_{true};
 };
 }  // namespace exec
 }  // namespace milvus

@@ -28,10 +28,10 @@ import (
 
 	"github.com/x448/float16"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const ElemCountOfArray = 10
@@ -143,16 +143,17 @@ func GenerateStringArray(numRows int) []string {
 func GenerateJSONArray(numRows int) [][]byte {
 	ret := make([][]byte, 0, numRows)
 	for i := 0; i < numRows; i++ {
-		if i%4 == 0 {
+		switch i % 4 {
+		case 0:
 			v, _ := json.Marshal("{\"a\": \"%s\", \"b\": %d}")
 			ret = append(ret, v)
-		} else if i%4 == 1 {
+		case 1:
 			v, _ := json.Marshal(i)
 			ret = append(ret, v)
-		} else if i%4 == 2 {
+		case 2:
 			v, _ := json.Marshal(float32(i) * 0.1)
 			ret = append(ret, v)
-		} else if i%4 == 3 {
+		case 3:
 			v, _ := json.Marshal(strconv.Itoa(i))
 			ret = append(ret, v)
 		}

@@ -81,9 +81,10 @@ func (lim *Limiter) AllowN(now time.Time, n int) bool {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 
-	if lim.limit == Inf {
+	switch lim.limit {
+	case Inf:
 		return true
-	} else if lim.limit == 0 {
+	case 0:
 		var ok bool
 		if lim.burst >= float64(n) {
 			ok = true

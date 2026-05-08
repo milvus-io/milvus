@@ -11,10 +11,10 @@ import (
 	"github.com/twpayne/go-geom"
 	"github.com/twpayne/go-geom/encoding/wkt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -556,6 +556,17 @@ func alwaysTrueExpr() *planpb.Expr {
 	}
 }
 
+func alwaysFalseExpr() *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_UnaryExpr{
+			UnaryExpr: &planpb.UnaryExpr{
+				Op:    planpb.UnaryExpr_Not,
+				Child: alwaysTrueExpr(),
+			},
+		},
+	}
+}
+
 func IsAlwaysTruePlan(plan *planpb.PlanNode) bool {
 	switch realPlan := plan.GetNode().(type) {
 	case *planpb.PlanNode_VectorAnns:
@@ -792,7 +803,7 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 			},
 		}, schemapb.DataType_Array, nil
 	default:
-		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T\n", value, v)
+		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T", value, v)
 	}
 }
 

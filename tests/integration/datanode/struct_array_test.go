@@ -26,14 +26,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -231,7 +231,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 		for i := 0; i < s.rowsPerCollection; i++ {
 			switch fieldData.FieldName {
 			case integration.Int64Field:
-				break
+				// no-op: pk field validation not needed
 			case integration.FloatVecField:
 				for j := 0; j < s.dim; j++ {
 					s.Equal(fieldData.GetVectors().GetFloatVector().Data[j],
@@ -239,7 +239,8 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 				}
 			case integration.StructArrayField:
 				for _, field := range fieldData.GetStructArrays().Fields {
-					if field.FieldName == integration.StructSubInt32Field {
+					switch field.FieldName {
+					case integration.StructSubInt32Field:
 						getData := field.GetScalars().GetArrayData().Data[i]
 						generatedData := s.generatedFieldData[field.FieldId].GetScalars().GetArrayData().Data[i]
 
@@ -249,8 +250,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 						for j := 0; j < arrayLen; j++ {
 							s.Equal(getData.GetIntData().Data[j], generatedData.GetIntData().Data[j])
 						}
-
-					} else if field.FieldName == integration.StructSubFloatVecField {
+					case integration.StructSubFloatVecField:
 						getData := field.GetVectors().GetVectorArray().Data[i]
 						generatedData := s.generatedFieldData[field.FieldId].GetVectors().GetVectorArray().Data[i]
 
@@ -260,7 +260,6 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 						for j := 0; j < length; j++ {
 							s.Equal(getData.GetFloatVector().Data[j], generatedData.GetFloatVector().Data[j])
 						}
-
 					}
 				}
 			default:

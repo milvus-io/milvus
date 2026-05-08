@@ -18,19 +18,19 @@ package importv2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Copy Segment Task for Snapshot Restore
@@ -224,7 +224,7 @@ func (t *CopySegmentTask) GetBufferSize() int64 {
 	return 0 // Copy task doesn't use memory buffer (direct file copy)
 }
 
-// Cancel aborts the task execution by cancelling the context.
+// Cancel aborts the task execution by canceling the context.
 // This will interrupt any ongoing file copy operations.
 func (t *CopySegmentTask) Cancel() {
 	t.cancel()

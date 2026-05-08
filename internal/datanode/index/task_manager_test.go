@@ -22,9 +22,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type statsTaskInfoSuite struct {
@@ -50,7 +50,8 @@ func (s *statsTaskInfoSuite) SetupSuite() {
 
 func (s *statsTaskInfoSuite) Test_Methods() {
 	s.Run("loadOrStoreStatsTask", func() {
-		_, cancel := context.WithCancel(s.manager.ctx)
+		_, cancel := context.WithCancel(s.manager.ctx) //nolint:gosec // cancel is deferred below
+		defer cancel()
 		info := &StatsTaskInfo{
 			Cancel: cancel,
 			State:  indexpb.JobState_JobStateInProgress,

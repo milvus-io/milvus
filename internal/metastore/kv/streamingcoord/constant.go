@@ -4,8 +4,8 @@ const (
 	MetaPrefix          = "streamingcoord-meta/"
 	PChannelMetaPrefix  = MetaPrefix + "pchannel/"
 	BroadcastTaskPrefix = MetaPrefix + "broadcast-task/"
-	VersionPrefix       = MetaPrefix + "version/"
-	CChannelMetaPrefix  = MetaPrefix + "cchannel/"
+	VersionKey          = MetaPrefix + "version"
+	CChannelMetaKey     = MetaPrefix + "cchannel"
 
 	// Replicate
 	ReplicatePChannelMetaPrefix = MetaPrefix + "replicating-pchannel/"

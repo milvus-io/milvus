@@ -6,8 +6,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // AssignSegmentRequest is a request to allocate segment.
@@ -17,6 +17,7 @@ type AssignSegmentRequest struct {
 	ModifiedMetrics stats.ModifiedMetrics
 	TimeTick        uint64
 	TxnSession      TxnSession
+	SchemaVersion   int32
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -124,6 +125,7 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
+// It uses the latest schema version from collection info.
 func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -133,6 +135,14 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	if !ok {
 		return nil, ErrPartitionNotFound
 	}
+
+	// Populate SchemaVersion from the current collection info into req.
+	// Callers construct req without knowing the schema version; this is the
+	// single place that resolves and stamps it before forwarding to partitionManager.
+	if info := m.collections[req.CollectionID]; info != nil {
+		req.SchemaVersion = info.SchemaVersion()
+	}
+
 	result, err := pm.AssignSegment(req)
 	if err == nil {
 		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)

@@ -22,7 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // EventReader is used to parse the events contained in the Binlog file.
@@ -103,7 +103,7 @@ func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer, nullable b
 		return nil, err
 	}
 
-	next := int(reader.EventLength - reader.eventHeader.GetMemoryUsageInBytes() - reader.GetEventDataFixPartSize())
+	next := int(reader.EventLength - reader.GetMemoryUsageInBytes() - reader.GetEventDataFixPartSize())
 	payloadBuffer := buffer.Next(next)
 	payloadReader, err := NewPayloadReader(datatype, payloadBuffer, nullable)
 	if err != nil {

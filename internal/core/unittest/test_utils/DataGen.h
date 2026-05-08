@@ -61,7 +61,7 @@ namespace milvus::segcore {
 struct GeneratedData {
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
-    InsertRecordProto* raw_;
+    InsertRecordProto* raw_ = nullptr;
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
 
@@ -1998,7 +1998,9 @@ class ScopedSchemaHandle {
                 const std::string& search_params = "{}",
                 int64_t round_decimal = -1,
                 const std::string& hints = "",
-                bool materialized_view_involved = false) const {
+                bool materialized_view_involved = false,
+                float search_topk_ratio = 0,
+                float refine_topk_ratio = 0) const {
         // Build QueryInfo protobuf
         milvus::proto::plan::QueryInfo query_info;
         query_info.set_topk(topk);
@@ -2009,6 +2011,12 @@ class ScopedSchemaHandle {
             query_info.set_hints(hints);
         }
         query_info.set_materialized_view_involved(materialized_view_involved);
+        if (search_topk_ratio > 0) {
+            query_info.set_search_topk_ratio(search_topk_ratio);
+        }
+        if (refine_topk_ratio > 0) {
+            query_info.set_refine_topk_ratio(refine_topk_ratio);
+        }
 
         // Serialize QueryInfo
         std::string query_info_bytes;
@@ -2071,11 +2079,47 @@ class ScopedSchemaHandle {
         return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
     }
 
-    // Parse a search iterator expression with vector search parameters.
-    // This creates a VectorANNS plan node with iterator settings for search operations.
-    // batch_size: number of results per batch in iterator
-    // token: iterator token (optional, for continuation)
-    // last_bound: last bound value (optional, for continuation)
+    // Multi-field group_by overload: uses repeated group_by_field_ids proto field
+    std::vector<char>
+    ParseCompositeGroupBySearch(const std::string& expr,
+                                const std::string& vector_field_name,
+                                int64_t topk,
+                                const std::string& metric_type,
+                                const std::string& search_params,
+                                const std::vector<int64_t>& group_by_field_ids,
+                                int64_t group_size,
+                                bool strict_group_size = false,
+                                const std::string& json_path = "",
+                                milvus::proto::schema::DataType json_type =
+                                    milvus::proto::schema::DataType::None,
+                                int64_t round_decimal = -1) const {
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+        query_info.set_group_size(group_size);
+        query_info.set_strict_group_size(strict_group_size);
+        for (auto fid : group_by_field_ids) {
+            query_info.add_group_by_field_ids(fid);
+        }
+        if (!json_path.empty()) {
+            query_info.set_json_path(json_path);
+        }
+        if (json_type != milvus::proto::schema::DataType::None) {
+            query_info.set_json_type(json_type);
+        }
+
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
     std::vector<char>
     ParseSearchIterator(const std::string& expr,
                         const std::string& vector_field_name,

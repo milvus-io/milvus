@@ -1539,7 +1539,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
                                check_items={ct.err_code: 65535,
-                                             ct.err_msg: "Unknown hash function"})
+                                             ct.err_msg: "unknown hash function"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_token_level", ["sentence", "invalid", ""])
@@ -1572,7 +1572,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
                                check_items={ct.err_code: 65535,
-                                             ct.err_msg: "Unknown token_level"})
+                                             ct.err_msg: "unknown token_level"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_seed", ["not_a_number", "abc123"])

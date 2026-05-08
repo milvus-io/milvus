@@ -512,6 +512,16 @@ class SegmentLoadInfo {
         return info_.priority();
     }
 
+    [[nodiscard]] bool
+    GetUseTakeForOutput() const {
+        return info_.use_take_for_output();
+    }
+
+    [[nodiscard]] int64_t
+    GetEstimatedBytesPerRow() const {
+        return info_.estimated_bytes_per_row();
+    }
+
     // ==================== Compaction Info ====================
 
     [[nodiscard]] const google::protobuf::RepeatedField<int64_t>&
@@ -697,11 +707,27 @@ class SegmentLoadInfo {
     // ==================== Column Groups Cache ====================
 
     /**
-     * @brief Get column groups from manifest
+     * @brief Get column groups from manifest (lazy-cached, thread-compatible)
      * @return Shared pointer to ColumnGroups, nullptr if manifest is empty
+     *
+     * The cache is populated on first access. Callers are responsible for
+     * serializing concurrent first-time calls on the same instance; in
+     * ChunkedSegmentSealedImpl this is guaranteed by `reopen_mutex_` since
+     * GetColumnGroups is only invoked from Load/Reopen/SetLoadInfo chains.
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
-    GetColumnGroups();
+    GetColumnGroups() const;
+
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
 
     // ==================== Stats & Delta Logs ====================
 
@@ -812,6 +838,11 @@ class SegmentLoadInfo {
     HasTextIndexCreated(FieldId field_id) const {
         return created_text_indexes_.find(field_id) !=
                created_text_indexes_.end();
+    }
+
+    [[nodiscard]] const std::unordered_set<FieldId>&
+    GetCreatedTextIndexes() const {
+        return created_text_indexes_;
     }
 
     // ==================== Diff Computation ====================
@@ -1010,8 +1041,10 @@ class SegmentLoadInfo {
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
 
-    // Cache for column groups metadata (used with manifest mode)
-    std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+    // Cache for column groups metadata (used with manifest mode). Mutable so
+    // GetColumnGroups() can be const — the cache is a memoization of an
+    // immutable manifest path.
+    mutable std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
 
     // Field IDs where text indexes were created from raw data (not loaded from files)
     // These should NOT be re-loaded in diff computation

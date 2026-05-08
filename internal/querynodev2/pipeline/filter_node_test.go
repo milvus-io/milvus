@@ -25,9 +25,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // test of filter node
@@ -88,7 +88,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	}
 
 	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
+		return !lo.Contains(suite.excludedSegmentIDs, segmentID) || ts > 1
 	})
 	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
@@ -125,7 +125,7 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	}
 
 	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
+		return !lo.Contains(suite.excludedSegmentIDs, segmentID) || ts > 1
 	})
 	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)

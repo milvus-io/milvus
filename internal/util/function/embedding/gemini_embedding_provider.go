@@ -23,11 +23,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type GeminiEmbeddingProvider struct {
@@ -51,7 +51,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	}
 
 	if fieldSchema.DataType != schemapb.DataType_FloatVector {
-		return nil, fmt.Errorf("Gemini embedding only supports FloatVector field, got %s", schemapb.DataType_name[int32(fieldSchema.DataType)])
+		return nil, fmt.Errorf("Gemini embedding only supports FloatVector field, got %s", schemapb.DataType_name[int32(fieldSchema.DataType)]) //nolint:staticcheck // starts with proper noun
 	}
 
 	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.GeminiAKEnvStr, extraInfo)
@@ -139,12 +139,12 @@ func (provider *GeminiEmbeddingProvider) CallEmbedding(ctx context.Context, text
 			return nil, err
 		}
 		if end-i != len(resp.Embeddings) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings))
+			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings))
 		}
 
 		for _, item := range resp.Embeddings {
 			if len(item.Values) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Values))
 			}
 			embRet.Append(item.Values)

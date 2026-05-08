@@ -23,15 +23,15 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Server is the server of cdc.
@@ -48,7 +48,7 @@ type Server struct {
 
 // NewServer create a new CDC server.
 func NewServer(ctx context.Context) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec // cancel is stored in Server and called on Stop()
 	return &Server{
 		ctx:            ctx1,
 		cancel:         cancel,
@@ -85,6 +85,7 @@ func (s *Server) Stop() (err error) {
 func (s *Server) stop() {
 	s.componentState.OnStopping()
 	log := log.Ctx(s.ctx)
+	defer s.cancel()
 
 	log.Info("stopping cdc...")
 

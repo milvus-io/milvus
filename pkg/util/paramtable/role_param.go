@@ -17,8 +17,8 @@
 package paramtable
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 type roleConfig struct {

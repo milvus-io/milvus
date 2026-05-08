@@ -264,6 +264,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_FLOAT16:
                     resource = knowhere::IndexStaticFaced<knowhere::fp16>::
@@ -273,6 +276,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::fp16>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_BFLOAT16:
                     resource = knowhere::IndexStaticFaced<knowhere::bf16>::
@@ -282,6 +288,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::bf16>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_BINARY:
                     resource = knowhere::IndexStaticFaced<knowhere::bin1>::
@@ -291,6 +300,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::bin1>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_INT8:
                     resource = knowhere::IndexStaticFaced<knowhere::int8>::
@@ -300,6 +312,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::int8>::HasRawData(
+                            index_type, index_version, config);
                     break;
 
                 default:
@@ -310,9 +325,6 @@ IndexFactory::VecIndexLoadResource(
                         element_type);
                     return LoadResourceRequest{0, 0, 0, 0, true};
             }
-            // For VectorArray, has_raw_data is always false as get_vector of index does not provide offsets which
-            // is required for reconstructing the raw data
-            has_raw_data = false;
             break;
         }
         default:

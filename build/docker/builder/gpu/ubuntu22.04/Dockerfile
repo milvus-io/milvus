@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 as builder
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 as builder
 
 ARG TARGETARCH
 
@@ -16,12 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.8.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 RUN pip3 install conan==2.25.1
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.89 -y
+    sh -s -- --default-toolchain=1.92 -y
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
 # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild

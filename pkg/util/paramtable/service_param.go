@@ -27,11 +27,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 const (
@@ -310,7 +310,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
 		Export:       true,
@@ -318,24 +318,35 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		panic("embedded etcd can not enable auth")
+		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
 	p.EtcdAuthUserName = ParamItem{
-		Key:     "etcd.auth.userName",
-		Version: "2.3.7",
-		Doc:     "username for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.userName",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "username for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
 	p.EtcdAuthPassword = ParamItem{
-		Key:     "etcd.auth.password",
-		Version: "2.3.7",
-		Doc:     "password for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.password",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "password for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
+
+	if p.EtcdEnableAuth.GetAsBool() && !p.UseEmbedEtcd.GetAsBool() {
+		if p.EtcdAuthUserName.GetValue() == "" || p.EtcdAuthPassword.GetValue() == "" {
+			panic("etcd auth is enabled but userName or password is empty. " +
+				"Set etcd.auth.userName and etcd.auth.password in milvus.yaml, " +
+				"or via environment variables etcd_auth_userName and etcd_auth_password")
+		}
+	}
 }
 
 func (p *EtcdConfig) GetAll() map[string]string {
@@ -1547,10 +1558,11 @@ The default value applies to MinIO or S3 service that started with the default d
 	p.UseSSL.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
-		Key:     "minio.ssl.tlsCACert",
-		Version: "2.3.12",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:          "minio.ssl.tlsCACert",
+		Version:      "2.3.12",
+		DefaultValue: "",
+		Doc:          "path to your CACert file",
+		Export:       true,
 	}
 	p.SslCACert.Init(base.mgr)
 

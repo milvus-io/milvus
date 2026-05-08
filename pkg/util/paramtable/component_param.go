@@ -30,12 +30,12 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -232,6 +232,8 @@ type commonConfig struct {
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -703,6 +705,38 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
+
+	p.ArrowIOThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.ioThreadPoolCoefficient",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Coefficient for arrow's internal IO thread pool size ` +
+			`(threads = CPU cores × coefficient, then clamped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
+			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
+			`S3 GetObject requests — it is the real ceiling on parallel ` +
+			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
+			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
+			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
+			`arrow's default (and the cap is ignored).`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowIOThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.ioThreadPoolMaxCapacity",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
+			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
+			`threads = coefficient × CPU cores is clamped to this value — ` +
+			`useful on very large hosts where the coefficient would otherwise ` +
+			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
+			`can service. 0 disables the cap. Has no effect when coefficient ` +
+			`is 0.`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -1963,45 +1997,47 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval                ParamItem `refreshable:"false"`
-	HealthCheckTimeout              ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize        ParamItem `refreshable:"true"`
-	MaxNameLength                   ParamItem `refreshable:"true"`
-	MaxUsernameLength               ParamItem `refreshable:"true"`
-	MinPasswordLength               ParamItem `refreshable:"true"`
-	MaxPasswordLength               ParamItem `refreshable:"true"`
-	MaxFieldNum                     ParamItem `refreshable:"true"`
-	MaxVectorFieldNum               ParamItem `refreshable:"true"`
-	MaxShardNum                     ParamItem `refreshable:"true"`
-	MaxDimension                    ParamItem `refreshable:"true"`
-	GinLogging                      ParamItem `refreshable:"false"`
-	GinLogSkipPaths                 ParamItem `refreshable:"false"`
-	MaxUserNum                      ParamItem `refreshable:"true"`
-	MaxRoleNum                      ParamItem `refreshable:"true"`
-	NameValidationAllowedChars      ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars  ParamItem `refreshable:"true"`
-	MaxTaskNum                      ParamItem `refreshable:"false"`
-	DDLConcurrency                  ParamItem `refreshable:"true"`
-	DCLConcurrency                  ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval        ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy          ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval    ParamItem `refreshable:"false"`
-	CostMetricsExpireTime           ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum         ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor         ParamItem `refreshable:"false"`
-	RetryTimesOnReplica             ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck         ParamItem `refreshable:"true"`
-	ReplicaBlacklistDuration        ParamItem `refreshable:"true"`
-	ReplicaBlacklistCleanupInterval ParamItem `refreshable:"true"`
-	PartitionNameRegexp             ParamItem `refreshable:"true"`
-	MustUsePartitionKey             ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
-	ResolveAliasForPrivilege        ParamItem `refreshable:"true"`
-	MaxVarCharLength                ParamItem `refreshable:"false"`
-	MaxTextLength                   ParamItem `refreshable:"false"`
-	MaxResultEntries                ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider     ParamItem `refreshable:"true"`
+	TimeTickInterval                  ParamItem `refreshable:"false"`
+	HealthCheckTimeout                ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
+	MaxNameLength                     ParamItem `refreshable:"true"`
+	MaxUsernameLength                 ParamItem `refreshable:"true"`
+	MinPasswordLength                 ParamItem `refreshable:"true"`
+	MaxPasswordLength                 ParamItem `refreshable:"true"`
+	MaxFieldNum                       ParamItem `refreshable:"true"`
+	MaxVectorFieldNum                 ParamItem `refreshable:"true"`
+	MaxShardNum                       ParamItem `refreshable:"true"`
+	MaxDimension                      ParamItem `refreshable:"true"`
+	GinLogging                        ParamItem `refreshable:"false"`
+	GinLogSkipPaths                   ParamItem `refreshable:"false"`
+	MaxUserNum                        ParamItem `refreshable:"true"`
+	MaxRoleNum                        ParamItem `refreshable:"true"`
+	NameValidationAllowedChars        ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
+	MaxTaskNum                        ParamItem `refreshable:"false"`
+	DDLConcurrency                    ParamItem `refreshable:"true"`
+	DCLConcurrency                    ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
+	CostMetricsExpireTime             ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	RetryTimesOnReplica               ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval   ParamItem `refreshable:"true"`
+	PartitionNameRegexp               ParamItem `refreshable:"true"`
+	MustUsePartitionKey               ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
+	MaxVarCharLength                  ParamItem `refreshable:"false"`
+	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxIndexParamsSize                ParamItem `refreshable:"true"`
+	MaxResultEntries                  ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
+	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2459,11 +2495,20 @@ please adjust in embedded Milvus: false`,
 
 	p.MaxTextLength = ParamItem{
 		Key:          "proxy.maxTextLength",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(2 * 1024 * 1024), // 2M
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxIndexParamsSize = ParamItem{
+		Key:          "proxy.maxIndexParamsSize",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(100 * 1024),
+		Doc:          "maximum total size of index params in bytes for create index requests",
+		Export:       true,
+	}
+	p.MaxIndexParamsSize.Init(base.mgr)
 
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",
@@ -2476,6 +2521,18 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxResultEntries.Init(base.mgr)
+
+	p.MaxSearchAggregationResultEntries = ParamItem{
+		Key:          "proxy.maxSearchAggregationResultEntries",
+		Version:      "3.0.0",
+		DefaultValue: "10000",
+		Doc: `maximum number of SearchAggregation result entries, calculated as Nq * DerivedTopK * DerivedGroupSize.
+DerivedTopK is the product of all aggregation level sizes. DerivedGroupSize is the max top_hits size across all levels, or 1 when top_hits is absent.
+If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
+Disabled if the value is less or equal to 0.`,
+		Export: true,
+	}
+	p.MaxSearchAggregationResultEntries.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -3427,7 +3484,8 @@ type queryNodeConfig struct {
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
 
-	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
+	IndexOffsetCacheEnabled            ParamItem `refreshable:"true"`
+	PreferFieldDataWhenIndexHasRawData ParamItem `refreshable:"false"`
 
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
@@ -3446,6 +3504,7 @@ type queryNodeConfig struct {
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
 	DowngradeTsafe            ParamItem `refreshable:"true"`
+	WaitTsafeStallTimeout     ParamItem `refreshable:"true"`
 	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
@@ -3458,7 +3517,6 @@ type queryNodeConfig struct {
 	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
-	IoPoolSize                  ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
 	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
 	TextIndexExpansionFactor    ParamItem `refreshable:"true"`
@@ -3472,6 +3530,10 @@ type queryNodeConfig struct {
 
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
+
+	// Target average byte size per storage v2 cache cell. Parquet row groups
+	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
+	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -3511,10 +3573,17 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFPreload        ParamItem `refreshable:"true"`
-	IDFReadBufferSize ParamItem `refreshable:"true"`
+	IDFPreload             ParamItem `refreshable:"true"`
+	IDFReadBufferSize      ParamItem `refreshable:"true"`
+	BM25StatsBytesPerEntry ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+
+	// external collection
+	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
+	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
+	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3535,6 +3604,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.",
 	}
 	p.IDFReadBufferSize.Init(base.mgr)
+
+	p.BM25StatsBytesPerEntry = ParamItem{
+		Key:          "queryNode.idfOracle.bm25StatsBytesPerEntry",
+		Version:      "2.6.15",
+		Export:       true,
+		DefaultValue: "20",
+		Doc:          "Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.",
+	}
+	p.BM25StatsBytesPerEntry.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -4334,6 +4412,17 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.IndexOffsetCacheEnabled.Init(base.mgr)
 
+	p.PreferFieldDataWhenIndexHasRawData = ParamItem{
+		Key:          "queryNode.preferFieldDataWhenIndexHasRawData",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: "when true, sealed retrieve prefers field data in columns over index raw data when both are available. " +
+			"Note: enabling this keeps both the raw field data and the index resident in memory, " +
+			"roughly doubling the memory footprint for fields whose index normally supplies raw data.",
+		Export: false,
+	}
+	p.PreferFieldDataWhenIndexHasRawData.Init(base.mgr)
+
 	p.DiskCapacityLimit = ParamItem{
 		Key:     "LOCAL_STORAGE_SIZE",
 		Version: "2.2.0",
@@ -4399,6 +4488,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.DowngradeTsafe.Init(base.mgr)
 
+	p.WaitTsafeStallTimeout = ParamItem{
+		Key:          "queryNode.waitTsafeStallTimeout",
+		Version:      "2.6.15",
+		Doc:          "If tSafe does not advance within this duration during waitTSafe, the delegator returns an error to allow proxy failover to another replica",
+		DefaultValue: "3s",
+		Export:       false,
+	}
+	p.WaitTsafeStallTimeout.Init(base.mgr)
+
 	p.CatchUpStreamingDataTsLag = ParamItem{
 		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
 		Version:      "2.6.8",
@@ -4455,14 +4553,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.ForwardBatchSize.Init(base.mgr)
-
-	p.IoPoolSize = ParamItem{
-		Key:          "queryNode.ioPoolSize",
-		Version:      "2.3.0",
-		DefaultValue: "0",
-		Doc:          "Control how many goroutines will the loader use to pull files, if the given value is non-positive, the value will be set to CpuNum * 8, at least 32, and at most 256",
-	}
-	p.IoPoolSize.Init(base.mgr)
 
 	p.DeltaDataExpansionRate = ParamItem{
 		Key:          "querynode.deltaDataExpansionRate",
@@ -4543,6 +4633,27 @@ user-task-polling:
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.StorageV2CellTargetSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.cellTargetSizeBytes",
+		Version:      "3.0.0",
+		DefaultValue: "4194304", // 4 MiB
+		Doc: `Target average byte size per storage v2 cache cell. Parquet row groups are ` +
+			`greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. ` +
+			`Each cell always contains at least one row group and cells never cross file ` +
+			`boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get ` +
+			`finer cache granularity. Default 4 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				log.Warn("queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
+					zap.String("configured", v))
+				return "4194304"
+			}
+			return v
+		},
+	}
+	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
@@ -4702,6 +4813,42 @@ user-task-polling:
 		Export:       true,
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
+
+	p.ExternalCollectionUseTakeForOutput = ParamItem{
+		Key:          "queryNode.externalCollection.useTakeForOutput",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          `When true, use take() API to fetch output fields from external storage instead of bulk_subscript`,
+		Export:       false,
+	}
+	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.ExternalCollectionSamplePerSegment = ParamItem{
+		Key:          "queryNode.externalCollection.samplePerSegment",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "When true, sample each segment for size estimation; when false, sample once per collection",
+		Export:       false,
+	}
+	p.ExternalCollectionSamplePerSegment.Init(base.mgr)
+
+	p.ExternalCollectionSampleRows = ParamItem{
+		Key:          "queryNode.externalCollection.sampleRows",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Number of rows to read via Take API for sampling external segment size",
+		Export:       false,
+	}
+	p.ExternalCollectionSampleRows.Init(base.mgr)
+
+	p.ExternalCollectionRawDataFactor = ParamItem{
+		Key:          "queryNode.externalCollection.rawDataFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "Peak memory amplification factor for external segment loading. External tables always download, decompress, and deserialize entire row groups into Arrow buffers regardless of mmap/eviction settings, so peak transient memory = rawDataSize * this factor.",
+		Export:       false,
+	}
+	p.ExternalCollectionRawDataFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4806,6 +4953,7 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
+	LevelZeroCompactionForceSelectAll        ParamItem `refreshable:"true"`
 
 	// Garbage Collection
 	EnableGarbageCollection                ParamItem `refreshable:"false"`
@@ -4821,6 +4969,11 @@ type dataCoordConfig struct {
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
+
+	// LOB Garbage Collection
+	GCLOBEnabled       ParamItem `refreshable:"false"`
+	GCLOBSafetyWindow  ParamItem `refreshable:"true"`
+	GCLOBCheckInterval ParamItem `refreshable:"true"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -4859,6 +5012,7 @@ type dataCoordConfig struct {
 	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
+	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5433,11 +5587,21 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerDeltalogMaxNum = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMaxNum",
 		Version:      "2.4.0",
-		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30",
-		DefaultValue: "30",
+		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000",
+		DefaultValue: "1000",
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.LevelZeroCompactionForceSelectAll = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.forceSelectAllSegments",
+		Version:      "2.6.15",
+		DefaultValue: "false",
+		Doc: "When enabled, L0 compaction selects all L1/L2 segments regardless of position filtering. " +
+			"Use during repair to bypass wrong StartPosition metadata from the import position bug.",
+		Export: false,
+	}
+	p.LevelZeroCompactionForceSelectAll.Init(base.mgr)
 
 	p.IndexMemSizeEstimateMultiplier = ParamItem{
 		Key:          "dataCoord.index.memSizeEstimateMultiplier",
@@ -5737,6 +5901,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.EnableActiveStandby.Init(base.mgr)
+
+	p.GCLOBEnabled = ParamItem{
+		Key:          "dataCoord.gc.lob.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "Enable garbage collection for LOB (TEXT column) files",
+		Export:       true,
+	}
+	p.GCLOBEnabled.Init(base.mgr)
+
+	p.GCLOBSafetyWindow = ParamItem{
+		Key:          "dataCoord.gc.lob.safetyWindow",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		Doc:          "Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.",
+		Export:       true,
+	}
+	p.GCLOBSafetyWindow.Init(base.mgr)
+
+	p.GCLOBCheckInterval = ParamItem{
+		Key:          "dataCoord.gc.lob.checkInterval",
+		Version:      "3.0.0",
+		DefaultValue: "1800",
+		Doc:          "Interval for LOB GC check in seconds. Default 30 minutes.",
+		Export:       true,
+	}
+	p.GCLOBCheckInterval.Init(base.mgr)
 
 	p.MinSegmentNumRowsToEnableIndex = ParamItem{
 		Key:          "indexCoord.segment.minSegmentNumRowsToEnableIndex",
@@ -6084,11 +6275,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments = ParamItem{
 		Key:          "dataCoord.externalCollectionPreAllocSegments",
 		Version:      "2.6.8",
-		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
-		DefaultValue: "1000",
+		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
+		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
+	p.ExternalCollectionFilesPerTask = ParamItem{
+		Key:          "dataCoord.externalCollectionFilesPerTask",
+		Version:      "3.0.0",
+		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		DefaultValue: "10000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionFilesPerTask.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
@@ -6373,6 +6573,12 @@ type dataNodeConfig struct {
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 	MaxCompactionConcurrency ParamItem `refreshable:"true"`
+	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
+
+	// TEXT column compaction configurations
+	TextInlineThreshold     ParamItem `refreshable:"true"`
+	TextMaxLobFileBytes     ParamItem `refreshable:"true"`
+	TextFlushThresholdBytes ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6767,6 +6973,42 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxSegmentMergeSort.Init(base.mgr)
 
+	p.LOBHoleRatioThreshold = ParamItem{
+		Key:          "dataNode.compaction.lobHoleRatioThreshold",
+		Version:      "3.0.0",
+		Doc:          "The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.",
+		DefaultValue: "0.3",
+		Export:       true,
+	}
+	p.LOBHoleRatioThreshold.Init(base.mgr)
+
+	p.TextInlineThreshold = ParamItem{
+		Key:          "dataNode.text.inlineThreshold",
+		Version:      "3.0.0",
+		Doc:          "TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.",
+		DefaultValue: "65536",
+		Export:       true,
+	}
+	p.TextInlineThreshold.Init(base.mgr)
+
+	p.TextMaxLobFileBytes = ParamItem{
+		Key:          "dataNode.text.maxLobFileBytes",
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a single LOB file for TEXT column storage (in bytes).",
+		DefaultValue: "67108864", // 64MB
+		Export:       true,
+	}
+	p.TextMaxLobFileBytes.Init(base.mgr)
+
+	p.TextFlushThresholdBytes = ParamItem{
+		Key:          "dataNode.text.flushThresholdBytes",
+		Version:      "3.0.0",
+		Doc:          "Flush threshold for TEXT column writer buffer (in bytes).",
+		DefaultValue: "16777216", // 16MB
+		Export:       true,
+	}
+	p.TextFlushThresholdBytes.Init(base.mgr)
+
 	p.MaxCompactionConcurrency = ParamItem{
 		Key:          "dataNode.compaction.maxConcurrency",
 		Version:      "2.6.0",
@@ -6867,7 +7109,7 @@ if this parameter <= 0, will set it as 10`,
 
 	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
 		Key:          "dataNode.externalCollection.targetRowsPerSegment",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1000000",
 		Doc:          "Target number of rows per segment for external collections",
 		Export:       false,

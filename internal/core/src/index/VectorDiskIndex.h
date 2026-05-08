@@ -79,8 +79,15 @@ class VectorDiskAnnIndex : public VectorIndex {
     const bool
     HasRawData() const override;
 
+    bool
+    IsIndexRefineEnabled() const override;
+
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
+
+    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr dataset,
+                    const std::string& metric_type) const override;
 
     std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
     GetSparseVector(const DatasetPtr dataset) const override {
@@ -88,7 +95,16 @@ class VectorDiskAnnIndex : public VectorIndex {
                   "get sparse vector not supported for disk index");
     }
 
-    void CleanLocalData() override;
+    knowhere::expected<knowhere::DataSetPtr> CalcDistByIDs(
+        const knowhere::DataSetPtr query_dataset,
+        const BitsetView& bitset,
+        const int64_t* labels,
+        size_t labels_len,
+        bool is_cosine,
+        milvus::OpContext* op_context = nullptr) const override;
+
+    void
+    CleanLocalData() override;
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,

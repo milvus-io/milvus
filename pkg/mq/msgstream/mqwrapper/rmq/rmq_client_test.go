@@ -27,18 +27,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	client3 "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
-	server2 "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	client3 "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
+	server2 "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
 	exitCode := func() int {
 		paramtable.Init()
 		pt := paramtable.Get()
-		pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+		pt.Save(pt.MQCfg.EnablePursuitMode.Key, "false")
 
 		rand.Seed(time.Now().UnixNano())
 		dir, _ := os.MkdirTemp("", "milvus_rmq_test_*")

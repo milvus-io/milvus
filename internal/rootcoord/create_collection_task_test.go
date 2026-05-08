@@ -28,19 +28,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
@@ -801,7 +801,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of vector")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of vector")
 	})
 
 	t.Run("struct array field - nested array", func(t *testing.T) {
@@ -829,7 +829,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Nested array is not supported")
+		assert.Contains(t, err.Error(), "nested array is not supported")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {
@@ -914,6 +914,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-west-2","anonymous":"true","cloud_provider":"aws"}}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -948,6 +949,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "pk",
@@ -980,6 +982,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -1468,6 +1471,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1498,7 +1504,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1522,6 +1528,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1552,7 +1561,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1569,7 +1578,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		fileResourceObserver := NewMockFileResourceObserver(t)
 		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
-		task.Core.fileResourceObserver = fileResourceObserver
+		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 
@@ -1997,6 +2006,7 @@ func TestNamespaceProperty(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:            collectionName,
 			ExternalSource:  "s3://bucket/path",
+			ExternalSpec:    `{"format":"parquet"}`,
 			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{

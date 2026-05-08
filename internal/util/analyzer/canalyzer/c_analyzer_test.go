@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	pb "github.com/milvus-io/milvus-proto/go-api/v2/tokenizerpb"
+	pb "github.com/milvus-io/milvus-proto/go-api/v3/tokenizerpb"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type mockServer struct {

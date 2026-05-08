@@ -24,9 +24,9 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
@@ -392,6 +392,10 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			elementType = field.GetElementType()
 		}
 		if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		} else if field.DataType == schemapb.DataType_Text {
+			// TEXT fields are stored as binary (LOB references) in manifest storage,
+			// so the builder must use binary type to match what the reader returns.
 			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)

@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -19,7 +20,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
@@ -67,6 +68,23 @@ const (
 	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
+// ensureHTTPScheme prepends http:// or https:// to a bare address so it stays
+// consistent with use_ssl; leaves addresses that already carry a scheme alone.
+func ensureHTTPScheme(address string, useSSL bool) string {
+	if strings.Contains(address, "://") {
+		return address
+	}
+	if useSSL {
+		return "https://" + address
+	}
+	return "http://" + address
+}
+
+// ExtfsPrefixForCollection returns the per-collection extfs property prefix.
+func ExtfsPrefixForCollection(collectionID int64) string {
+	return fmt.Sprintf("extfs.%d.", collectionID)
+}
+
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
 // This function converts a StorageConfig structure into a Properties object by
 // calling the FFI properties_create function. All configuration fields from
@@ -83,13 +101,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, PropertyFSAddress)
-		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-		fsAddr := storageConfig.GetAddress()
-		if !storageConfig.GetUseSSL() && !strings.Contains(fsAddr, "://") {
-			fsAddr = "http://" + fsAddr
-		}
-		values = append(values, fsAddr)
+		values = append(values, ensureHTTPScheme(storageConfig.GetAddress(), storageConfig.GetUseSSL()))
 	}
 	if storageConfig.GetBucketName() != "" {
 		keys = append(keys, PropertyFSBucketName)
@@ -178,100 +190,24 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		values = append(values, "false")
 	}
 
-	// Add extfs.default.* properties (mirrors string fields from fs.* with extfs.default.* prefix)
-	const extfsPrefix = "extfs.default."
-	if storageConfig.GetStorageType() != "" {
-		keys = append(keys, extfsPrefix+"storage_type")
-		values = append(values, storageConfig.GetStorageType())
-	}
-	if storageConfig.GetStorageType() == "local" {
-		keys = append(keys, extfsPrefix+"bucket_name")
-		values = append(values, "local")
-	} else if storageConfig.GetBucketName() != "" {
-		keys = append(keys, extfsPrefix+"bucket_name")
-		values = append(values, storageConfig.GetBucketName())
-	}
-	if storageConfig.GetAddress() != "" {
-		keys = append(keys, extfsPrefix+"address")
-		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-		addr := storageConfig.GetAddress()
-		if !storageConfig.GetUseSSL() && !strings.Contains(addr, "://") {
-			addr = "http://" + addr
-		}
-		values = append(values, addr)
-	}
-	if storageConfig.GetRootPath() != "" {
-		keys = append(keys, extfsPrefix+"root_path")
-		values = append(values, storageConfig.GetRootPath())
-	}
-	if storageConfig.GetAccessKeyID() != "" {
-		keys = append(keys, extfsPrefix+"access_key_id")
-		values = append(values, storageConfig.GetAccessKeyID())
-	}
-	if storageConfig.GetSecretAccessKey() != "" {
-		keys = append(keys, extfsPrefix+"access_key_value")
-		values = append(values, storageConfig.GetSecretAccessKey())
-	}
-	if storageConfig.GetCloudProvider() != "" {
-		keys = append(keys, extfsPrefix+"cloud_provider")
-		values = append(values, storageConfig.GetCloudProvider())
-	}
-	if storageConfig.GetIAMEndpoint() != "" {
-		keys = append(keys, extfsPrefix+"iam_endpoint")
-		values = append(values, storageConfig.GetIAMEndpoint())
-	}
-	if storageConfig.GetRegion() != "" {
-		keys = append(keys, extfsPrefix+"region")
-		values = append(values, storageConfig.GetRegion())
-	}
-	if storageConfig.GetSslCACert() != "" {
-		keys = append(keys, extfsPrefix+"ssl_ca_cert")
-		values = append(values, storageConfig.GetSslCACert())
-	}
-	if storageConfig.GetGcpCredentialJSON() != "" {
-		keys = append(keys, extfsPrefix+"gcp_credential_json")
-		values = append(values, storageConfig.GetGcpCredentialJSON())
-	}
-	// Temporarily disabled: extfs.default.* boolean properties.
-	//
-	// Root cause: extfs.* keys are not registered in milvus-storage's property_infos.
-	// The FFI (loon_properties_create) only accepts string key-value pairs, so
-	// ConvertFFIProperties stores unregistered keys as std::string (e.g.,
-	// extfs.default.use_ssl = string("false")). Later, ExtractExternalFsProperties
-	// copies this variant as-is to fs.use_ssl, but create_file_system_config expects
-	// GetValue<bool>, which fails because the variant holds a string, not a bool.
-	//
-	// Workaround: omit these properties so they are absent from the extfs-mapped
-	// Properties map. GetValue<bool> then falls back to the default value from
-	// property_infos (false), which is correct for non-SSL environments.
-	//
-	// TODO: re-enable once milvus-storage fixes ExtractExternalFsProperties to
-	// perform type conversion when mapping extfs.* → fs.* properties.
-	//
-	// keys = append(keys, extfsPrefix+"use_ssl")
-	// if storageConfig.GetUseSSL() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
-	// keys = append(keys, extfsPrefix+"use_iam")
-	// if storageConfig.GetUseIAM() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
-	// keys = append(keys, extfsPrefix+"use_virtual_host")
-	// if storageConfig.GetUseVirtualHost() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
+	// No extfs.default.* properties here. Per-collection extfs properties
+	// (extfs.{collectionID}.*) are injected downstream via
+	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
 
-	// Add extra kvs
+	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
-		keys = append(keys, k)
-		values = append(values, v)
+		found := false
+		for i, existingKey := range keys {
+			if existingKey == k {
+				values[i] = v
+				found = true
+				break
+			}
+		}
+		if !found {
+			keys = append(keys, k)
+			values = append(values, v)
+		}
 	}
 
 	// Convert to C arrays
@@ -319,6 +255,43 @@ func FreeProperties(props *C.LoonProperties) {
 	}
 }
 
+// ExternalSpecContext carries the raw external-table inputs that C++
+// InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
+// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// from a single external_spec JSON. Zero value (CollectionID=0, Source="")
+// signals an internal (non-external) collection — injectExternalSpecProperties
+// treats it as a no-op.
+type ExternalSpecContext struct {
+	CollectionID int64
+	Source       string
+	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
+}
+
+// injectExternalSpecProperties appends every external_spec-derived property
+// (extfs.<collectionID>.* and format-layer keys) onto an existing
+// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
+// when externalSource is empty.
+func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
+	externalSource, externalSpec string,
+) error {
+	if properties == nil {
+		return fmt.Errorf("injectExternalSpecProperties: properties is nil")
+	}
+	if externalSource == "" {
+		return nil
+	}
+	cSource := C.CString(externalSource)
+	defer C.free(unsafe.Pointer(cSource))
+	var cSpec *C.char
+	if externalSpec != "" {
+		cSpec = C.CString(externalSpec)
+		defer C.free(unsafe.Pointer(cSpec))
+	}
+	result := C.loon_properties_inject_external_spec(
+		properties, C.int64_t(collectionID), cSource, cSpec)
+	return HandleLoonFFIResult(result)
+}
+
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	defer C.loon_ffi_free_result(&ffiResult)
 	if C.loon_ffi_is_success(&ffiResult) == 0 {
@@ -360,12 +333,6 @@ func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 }
 
 // CompareManifestPath compares two manifest paths by their version.
-// Returns:
-//
-//	-1 if a < b (a is older)
-//	 0 if a == b (same version or both empty)
-//	 1 if a > b (a is newer)
-//	 error if the paths are not comparable (parse failure or different base paths)
 func CompareManifestPath(a, b string) (int, error) {
 	if a == b {
 		return 0, nil
@@ -393,4 +360,123 @@ func CompareManifestPath(a, b string) (int, error) {
 	default:
 		return 0, nil
 	}
+}
+
+// LobFileInfo represents metadata for a LOB (Large Object) file.
+// used for TEXT column compaction strategy decision (hole ratio calculation)
+type LobFileInfo struct {
+	Path          string // relative path to the LOB file
+	FieldID       int64  // field ID this LOB file belongs to
+	TotalRows     int64  // total number of rows in the LOB file
+	ValidRows     int64  // number of valid (non-deleted) rows
+	FileSizeBytes int64  // size of the LOB file in bytes
+}
+
+// AddLobFilesToTransaction adds multiple LOB files to a transaction in a single commit.
+// this is used during compaction REUSE_ALL mode to merge LOB file references.
+// returns the new committed version after the transaction.
+func AddLobFilesToTransaction(basePath string, version int64, storageConfig *indexpb.StorageConfig, lobFiles []LobFileInfo) (int64, error) {
+	if len(lobFiles) == 0 {
+		return version, nil
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to make properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// add all LOB files
+	for _, lobFile := range lobFiles {
+		cPath := C.CString(lobFile.Path)
+
+		cLobFile := C.LoonLobFileInfo{
+			path:            cPath,
+			field_id:        C.int64_t(lobFile.FieldID),
+			total_rows:      C.int64_t(lobFile.TotalRows),
+			valid_rows:      C.int64_t(lobFile.ValidRows),
+			file_size_bytes: C.int64_t(lobFile.FileSizeBytes),
+		}
+
+		result = C.loon_transaction_add_lob_file(cTransactionHandle, &cLobFile)
+		C.free(unsafe.Pointer(cPath))
+
+		if err := HandleLoonFFIResult(result); err != nil {
+			return 0, fmt.Errorf("failed to add LOB file %s: %w", lobFile.Path, err)
+		}
+	}
+
+	// commit transaction
+	var committedVersion C.int64_t
+	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return int64(committedVersion), nil
+}
+
+// GetManifestLobFiles retrieves LOB file information from a manifest.
+// this is used by compaction to calculate hole ratios for TEXT columns.
+func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal manifest path: %w", err)
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction to get manifest
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// get manifest
+	var cManifest *C.LoonManifest
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get manifest: %w", err)
+	}
+	defer C.loon_manifest_destroy(cManifest)
+
+	// extract LOB files from manifest
+	numFiles := int(cManifest.lob_files.num_files)
+	lobFiles := make([]LobFileInfo, 0, numFiles)
+
+	if numFiles > 0 && cManifest.lob_files.files != nil {
+		// convert C array to Go slice
+		cFiles := unsafe.Slice(cManifest.lob_files.files, numFiles)
+		for _, cFile := range cFiles {
+			lobFiles = append(lobFiles, LobFileInfo{
+				Path:          C.GoString(cFile.path),
+				FieldID:       int64(cFile.field_id),
+				TotalRows:     int64(cFile.total_rows),
+				ValidRows:     int64(cFile.valid_rows),
+				FileSizeBytes: int64(cFile.file_size_bytes),
+			})
+		}
+	}
+
+	return lobFiles, nil
 }

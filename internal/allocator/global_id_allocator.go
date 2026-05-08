@@ -18,8 +18,8 @@ package allocator
 
 import (
 	"github.com/milvus-io/milvus/internal/tso"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type GlobalIDAllocatorInterface interface {

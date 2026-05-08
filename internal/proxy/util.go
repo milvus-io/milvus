@@ -33,9 +33,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
@@ -47,23 +47,23 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -655,12 +655,12 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	}
 
 	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
-		return fmt.Errorf("Fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
+		return fmt.Errorf("fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
 	}
 
 	if field.ElementType == schemapb.DataType_ArrayOfStruct || field.ElementType == schemapb.DataType_ArrayOfVector ||
 		field.ElementType == schemapb.DataType_Array {
-		return fmt.Errorf("Nested array is not supported %s", field.Name)
+		return fmt.Errorf("nested array is not supported %s", field.Name)
 	}
 
 	if field.DataType == schemapb.DataType_Array {
@@ -670,7 +670,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	} else {
 		// ArrayOfVector: support FloatVector, Float16Vector, BFloat16Vector, Int8Vector, BinaryVector
 		if !typeutil.IsFixDimVectorType(field.GetElementType()) {
-			return fmt.Errorf("Unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
+			return fmt.Errorf("unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
 		}
 
 		err = validateDimension(field)
@@ -765,6 +765,42 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// validateReservedFieldNames rejects user-supplied schema fields whose name
+// collides with a system-reserved identifier (RowID, Timestamp,
+// __virtual_pk__). Must be called BEFORE server-side injection of the
+// virtual PK so the check only applies to user input. Applies to regular
+// and struct-array fields alike. Fix for issue #49314.
+func validateReservedFieldNames(schema *schemapb.CollectionSchema) error {
+	reserved := map[string]struct{}{
+		common.RowIDFieldName:     {},
+		common.TimeStampFieldName: {},
+		common.VirtualPKFieldName: {},
+	}
+	check := func(name string) error {
+		if _, ok := reserved[name]; ok {
+			return merr.WrapErrFieldNameInvalid(name,
+				fmt.Sprintf("field name %q is reserved for internal use and cannot be used in user schemas", name))
+		}
+		return nil
+	}
+	for _, f := range schema.GetFields() {
+		if err := check(f.GetName()); err != nil {
+			return err
+		}
+	}
+	for _, saf := range schema.GetStructArrayFields() {
+		if err := check(saf.GetName()); err != nil {
+			return err
+		}
+		for _, f := range saf.GetFields() {
+			if err := check(f.GetName()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // injectVirtualPKForExternalCollection adds a virtual PK field for external collections
 // if no primary key field exists. External collections use virtual PKs in the format:
 // (segmentID << 32) | offset
@@ -781,7 +817,7 @@ func injectVirtualPKForExternalCollection(schema *schemapb.CollectionSchema) err
 	// will assign the actual field ID during collection creation.
 	virtualPKField := &schemapb.FieldSchema{
 		Name:         common.VirtualPKFieldName,
-		Description:  "Virtual primary key for external collection: (segmentID << 32) | offset",
+		Description:  "auto-generated primary key for external collection",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
 		AutoID:       true, // Virtual PKs are auto-generated
@@ -1259,12 +1295,12 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 	expectColumnNum := 0
 
 	// Count expected columns
-	for _, field := range schema.CollectionSchema.GetFields() {
-		if !(typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema)) {
+	for _, field := range schema.GetFields() {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) && !typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-	for _, structField := range schema.CollectionSchema.GetStructArrayFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		expectColumnNum += len(structField.GetFields())
 	}
 
@@ -1300,14 +1336,15 @@ func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) 
 		fieldData.Type = fieldSchema.DataType
 
 		// Set the ElementType because it may not be set in the insert request.
-		if fieldData.Type == schemapb.DataType_Array {
+		switch fieldData.Type {
+		case schemapb.DataType_Array:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
 			if !ok || fd.Scalars.GetArrayData() == nil {
 				return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
 					fieldData.FieldName, schema.Name)
 			}
 			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-		} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+		case schemapb.DataType_ArrayOfVector:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
 			if !ok || fd.Vectors.GetVectorArray() == nil {
 				return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
@@ -2540,7 +2577,7 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.InsertRequest.Namespace)
+	err := common.CheckNamespace(schema, insertMsg.Namespace)
 	if err != nil {
 		return err
 	}
@@ -2558,8 +2595,8 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	for _, fieldData := range insertMsg.FieldsData {
 		if fieldData.FieldId == namespaceField.FieldID {
 			ns := ""
-			if insertMsg.InsertRequest.Namespace != nil {
-				ns = *insertMsg.InsertRequest.Namespace
+			if insertMsg.Namespace != nil {
+				ns = *insertMsg.Namespace
 			}
 			scalars := fieldData.GetScalars()
 			if scalars == nil {
@@ -2581,7 +2618,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 
 	// set namespace field data
 	namespaceData := make([]string, insertMsg.NRows())
-	namespace := *insertMsg.InsertRequest.Namespace
+	namespace := *insertMsg.Namespace
 	for i := range namespaceData {
 		namespaceData[i] = namespace
 	}
@@ -2724,6 +2761,9 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
 	case *milvuspb.CreateCollectionRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RefreshExternalCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
@@ -3125,7 +3165,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

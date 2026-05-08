@@ -6,10 +6,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // newBroadcasterMetrics creates a new broadcaster metrics.
@@ -61,7 +61,7 @@ func (m *broadcasterMetrics) NewBroadcastTask(msgType message.MessageType, state
 		broadcasterMetrics: m,
 		messageType:        msgType,
 	}
-	g.broadcasterMetrics.fromStateToState(msgType, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
+	g.fromStateToState(msgType, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
 	return g
 }
 
@@ -76,7 +76,7 @@ type taskMetricsGuard struct {
 
 // ObserveStateChanged updates the state of the broadcast task.
 func (g *taskMetricsGuard) ObserveStateChanged(state streamingpb.BroadcastTaskState) {
-	g.broadcasterMetrics.fromStateToState(g.messageType, g.state, state)
+	g.fromStateToState(g.messageType, g.state, state)
 	if state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		g.executionDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.start).Seconds())
 	}

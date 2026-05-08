@@ -24,7 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
@@ -1730,13 +1730,14 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 		// Collection 2: one channel not serviceable
 		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
 			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
-				if collectionID == 1 {
+				switch collectionID {
+				case 1:
 					// All serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					}
-				} else if collectionID == 2 {
+				case 2:
 					// One not serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},

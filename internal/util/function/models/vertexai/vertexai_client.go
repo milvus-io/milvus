@@ -126,11 +126,11 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	ctx := context.Background()
 	creds, err := google.CredentialsFromJSON(ctx, c.jsonKey, c.scopes)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find credentials: %v", err)
+		return "", fmt.Errorf("failed to find credentials: %v", err)
 	}
 	token, err := creds.TokenSource.Token()
 	if err != nil {
-		return "", fmt.Errorf("Failed to get token: %v", err)
+		return "", fmt.Errorf("failed to get token: %v", err)
 	}
 	return token.AccessToken, nil
 }

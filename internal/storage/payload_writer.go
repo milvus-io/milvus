@@ -32,11 +32,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/storage/compress" // register a custom zstd codec here, to avoid to much memory usage when serializing.
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ PayloadWriterInterface = (*NativePayloadWriter)(nil)
@@ -937,12 +937,12 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 				validCount++
 			}
 		}
-		if len(data.SparseFloatArray.Contents) != validCount {
-			msg := fmt.Sprintf("when nullable, Contents length(%d) must equal to valid count(%d)", len(data.SparseFloatArray.Contents), validCount)
+		if len(data.Contents) != validCount {
+			msg := fmt.Sprintf("when nullable, Contents length(%d) must equal to valid count(%d)", len(data.Contents), validCount)
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
 	} else {
-		numRows = len(data.SparseFloatArray.Contents)
+		numRows = len(data.Contents)
 		if !w.nullable && len(data.ValidData) != 0 {
 			msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(data.ValidData))
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -960,7 +960,7 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 		if w.nullable && len(data.ValidData) > 0 && !data.ValidData[i] {
 			builder.AppendNull()
 		} else {
-			builder.Append(data.SparseFloatArray.Contents[dataIdx])
+			builder.Append(data.Contents[dataIdx])
 			dataIdx++
 		}
 	}

@@ -24,6 +24,8 @@ import (
 //
 // Expected: search successfully and results are correct
 func TestSearchByPKFloatVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -70,6 +72,8 @@ func TestSearchByPKFloatVectors(t *testing.T) {
 //
 // Expected: null vectors are filtered out, result count = non-null vector count
 func TestSearchByPKNullableVectorField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -205,6 +209,8 @@ func TestSearchByPKNullableVectorField(t *testing.T) {
 //
 // Expected: search successfully and results are correct
 func TestSearchByPKBinaryVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -251,6 +257,8 @@ func TestSearchByPKBinaryVectors(t *testing.T) {
 //
 // Expected: search should return error for empty IDs
 func TestSearchByPKWithEmptyIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -283,6 +291,8 @@ func TestSearchByPKWithEmptyIDs(t *testing.T) {
 //
 // Expected: search should handle duplicate IDs (may deduplicate or error)
 func TestSearchByPKWithDuplicateIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -321,6 +331,8 @@ func TestSearchByPKWithDuplicateIDs(t *testing.T) {
 //
 // Expected: search successfully and results satisfy both conditions
 func TestSearchByPKWithExpression(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -370,6 +382,8 @@ func TestSearchByPKWithExpression(t *testing.T) {
 //
 // Expected: search successfully with grouped results
 func TestSearchByPKWithGroupBy(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -413,6 +427,8 @@ func TestSearchByPKWithGroupBy(t *testing.T) {
 //
 // Expected: search successfully with sparse vectors
 func TestSearchByPKSparseVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -499,6 +515,8 @@ func TestSearchByPKSparseVectors(t *testing.T) {
 //
 // Expected: search successfully and returns specified fields
 func TestSearchByPKWithOutputFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -553,6 +571,8 @@ func TestSearchByPKWithOutputFields(t *testing.T) {
 //
 // Expected: search should handle gracefully (empty results or error)
 func TestSearchByPKWithInvalidIDs(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -586,6 +606,8 @@ func TestSearchByPKWithInvalidIDs(t *testing.T) {
 //
 // Expected: search successfully and all distances are within [radius, range_filter]
 func TestSearchByPKWithRangeSearch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -649,6 +671,8 @@ func TestSearchByPKWithRangeSearch(t *testing.T) {
 //
 // Expected: hybrid search should fail with error indicating IDs not supported
 func TestSearchByPKWithHybridSearch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -746,6 +770,8 @@ func TestSearchByPKWithHybridSearch(t *testing.T) {
 // search by IDs is not supported for iterators at the API level.
 // This is consistent with Python SDK behavior where search_iterator does not support ids parameter.
 func TestSearchByPKWithSearchIterator(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

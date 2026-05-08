@@ -33,7 +33,7 @@ type MLogger struct {
 // With encapsulates zap.Logger With method to return MLogger instance.
 func (l *MLogger) With(fields ...zap.Field) *MLogger {
 	nl := &MLogger{
-		Logger: l.Logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+		Logger: l.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
 			return NewLazyWith(core, fields)
 		})),
 	}

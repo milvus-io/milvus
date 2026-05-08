@@ -23,9 +23,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 )
 
 const (
@@ -61,10 +61,10 @@ func NewIDAllocator(ctx context.Context, remoteAllocator remoteInterface, peerID
 		PeerID:          peerID,
 	}
 	a.TChan = &EmptyTicker{}
-	a.CachedAllocator.SyncFunc = a.syncID
-	a.CachedAllocator.ProcessFunc = a.processFunc
-	a.CachedAllocator.CheckSyncFunc = a.checkSyncFunc
-	a.CachedAllocator.PickCanDoFunc = a.pickCanDoFunc
+	a.SyncFunc = a.syncID
+	a.ProcessFunc = a.processFunc
+	a.CheckSyncFunc = a.checkSyncFunc
+	a.PickCanDoFunc = a.pickCanDoFunc
 	a.Init()
 	return a, nil
 }

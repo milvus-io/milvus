@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 # Required packages for external table tests (must succeed)
 RUN pip3 install --no-cache-dir --break-system-packages \
-    pyarrow==23.0.1 lance==1.2.1 obstore==0.9.1
+    pyarrow==23.0.1 lance==1.2.1 obstore==0.9.1 'pyiceberg[sql-sqlite]==0.8.1'
 # Optional: vortex-data has Rust native deps that may not build on all platforms.
 # Version must match the Rust vortex crate version in milvus-storage.
 RUN pip3 install --no-cache-dir --break-system-packages \

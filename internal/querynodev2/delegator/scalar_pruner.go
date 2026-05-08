@@ -3,9 +3,9 @@ package delegator
 import (
 	"github.com/bits-and-blooms/bitset"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 type EvalCtx struct {
@@ -72,9 +72,10 @@ func (lbe *LogicalBinaryExpr) Eval(evalCtx *EvalCtx) *bitset.BitSet {
 	}
 
 	// 4. and/or left/right results
-	if lbe.op == planpb.BinaryExpr_LogicalAnd {
+	switch lbe.op {
+	case planpb.BinaryExpr_LogicalAnd:
 		leftRes.InPlaceIntersection(rightRes)
-	} else if lbe.op == planpb.BinaryExpr_LogicalOr {
+	case planpb.BinaryExpr_LogicalOr:
 		leftRes.InPlaceUnion(rightRes)
 	}
 	return leftRes

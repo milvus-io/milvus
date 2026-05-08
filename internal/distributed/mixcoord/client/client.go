@@ -25,25 +25,25 @@ import (
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
@@ -170,21 +170,21 @@ func wrapGrpcCall[T any](ctx context.Context, c *Client, call func(grpcClient Mi
 // GetComponentStates TODO: timeout need to be propagated through ctx
 func (c *Client) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ComponentStates, error) {
-		return client.RootCoordClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 }
 
 // GetTimeTickChannel get timetick channel name
 func (c *Client) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.StringResponse, error) {
-		return client.RootCoordClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 }
 
 // GetStatisticsChannel just define a channel, not used currently
 func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.StringResponse, error) {
-		return client.RootCoordClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 }
 
@@ -300,7 +300,7 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ShowCollectionsResponse, error) {
-		return client.RootCoordClient.ShowCollections(ctx, in)
+		return client.ShowCollections(ctx, in)
 	})
 }
 
@@ -345,7 +345,7 @@ func (c *Client) AlterCollectionSchema(ctx context.Context, request *milvuspb.Al
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.AlterCollectionSchemaResponse, error) {
-		return client.RootCoordClient.AlterCollectionSchema(ctx, request)
+		return client.AlterCollectionSchema(ctx, request)
 	})
 }
 
@@ -426,7 +426,7 @@ func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ShowPartitionsResponse, error) {
-		return client.RootCoordClient.ShowPartitions(ctx, in)
+		return client.ShowPartitions(ctx, in)
 	})
 }
 
@@ -1072,7 +1072,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetSegmentInfoResponse, error) {
-		return client.DataCoordClient.GetSegmentInfo(ctx, req)
+		return client.GetSegmentInfo(ctx, req)
 	})
 }
 
@@ -1311,7 +1311,7 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-			return client.DataCoordClient.CreateIndex(ctx, req)
+			return client.CreateIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1330,7 +1330,7 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 // AlterIndex sends the alter index request to IndexCoord.
 func (c *Client) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-		return client.DataCoordClient.AlterIndex(ctx, req)
+		return client.AlterIndex(ctx, req)
 	})
 }
 
@@ -1341,7 +1341,7 @@ func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexStateResponse, error) {
-			return client.DataCoordClient.GetIndexState(ctx, req)
+			return client.GetIndexState(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1364,7 +1364,7 @@ func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetSegmentIndexStateResponse, error) {
-			return client.DataCoordClient.GetSegmentIndexState(ctx, req)
+			return client.GetSegmentIndexState(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1387,7 +1387,7 @@ func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexInfoResponse, error) {
-			return client.DataCoordClient.GetIndexInfos(ctx, req)
+			return client.GetIndexInfos(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1410,7 +1410,7 @@ func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.DescribeIndexResponse, error) {
-			return client.DataCoordClient.DescribeIndex(ctx, req)
+			return client.DescribeIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1433,7 +1433,7 @@ func (c *Client) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexStatisticsResponse, error) {
-			return client.DataCoordClient.GetIndexStatistics(ctx, req)
+			return client.GetIndexStatistics(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1455,7 +1455,7 @@ func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	var err error
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexBuildProgressResponse, error) {
-			return client.DataCoordClient.GetIndexBuildProgress(ctx, req)
+			return client.GetIndexBuildProgress(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1478,7 +1478,7 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, o
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-			return client.DataCoordClient.DropIndex(ctx, req)
+			return client.DropIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -2139,30 +2139,41 @@ func (c *Client) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 	})
 }
 
+func (c *Client) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest, opts ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.CommitBackfillResultResponse, error) {
+		return client.CommitBackfillResult(ctx, req, opts...)
+	})
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (c *Client) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ClientHeartbeatResponse, error) {
-		return client.RootCoordClient.ClientHeartbeat(ctx, req, opts...)
+		return client.ClientHeartbeat(ctx, req, opts...)
 	})
 }
 
 // GetClientTelemetry retrieves client telemetry data
 func (c *Client) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetClientTelemetryResponse, error) {
-		return client.RootCoordClient.GetClientTelemetry(ctx, req, opts...)
+		return client.GetClientTelemetry(ctx, req, opts...)
 	})
 }
 
 // PushClientCommand pushes a command to clients
 func (c *Client) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.PushClientCommandResponse, error) {
-		return client.RootCoordClient.PushClientCommand(ctx, req, opts...)
+		return client.PushClientCommand(ctx, req, opts...)
 	})
 }
 
 // DeleteClientCommand deletes a client command
 func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DeleteClientCommandResponse, error) {
-		return client.RootCoordClient.DeleteClientCommand(ctx, req, opts...)
+		return client.DeleteClientCommand(ctx, req, opts...)
 	})
 }

@@ -8,21 +8,20 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%d|%d|%d|%t|%t|%t|",
+	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|",
 		c.GetFieldId(),
 		int32(c.GetDataType()),
 		int32(c.GetElementType()),
 		c.GetIsPrimaryKey(),
 		c.GetIsAutoID(),
-		c.GetIsPartitionKey(),
-	))
+		c.GetIsPartitionKey())
 	for _, p := range c.GetNestedPath() {
 		b.WriteString(p)
 		b.WriteByte('|')

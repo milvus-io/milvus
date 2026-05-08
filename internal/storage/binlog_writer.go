@@ -23,10 +23,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 // BinlogType is to distinguish different files saving different data.
@@ -134,10 +134,10 @@ func (writer *baseBinlogWriter) Finish() error {
 		return err
 	}
 	offset += int32(binary.Size(MagicNumber))
-	if err := writer.descriptorEvent.Write(writer.buffer); err != nil {
+	if err := writer.Write(writer.buffer); err != nil {
 		return err
 	}
-	offset += writer.descriptorEvent.GetMemoryUsageInBytes()
+	offset += writer.GetMemoryUsageInBytes()
 
 	eventBuffer := writer.buffer
 	if writer.encryptor != nil {

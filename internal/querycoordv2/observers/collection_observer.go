@@ -26,19 +26,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/eventlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CollectionObserver struct {
@@ -174,7 +174,7 @@ func (ob *CollectionObserver) Observe(ctx context.Context) {
 
 func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
-		collection := ob.meta.CollectionManager.GetCollection(ctx, task.CollectionID)
+		collection := ob.meta.GetCollection(ctx, task.CollectionID)
 		// collection released
 		if collection == nil {
 			log.Info("Load Collection Task canceled, collection removed from meta", zap.Int64("collectionID", task.CollectionID), zap.String("traceID", traceID))
@@ -224,12 +224,12 @@ func (ob *CollectionObserver) observeTimeout(ctx context.Context) {
 					zap.Int64("collectionID", task.CollectionID),
 					zap.Int64s("partitionIDs", task.PartitionIDs))
 				for _, partition := range partitions {
-					ob.meta.CollectionManager.RemovePartition(ctx, partition.CollectionID, partition.GetPartitionID())
+					ob.meta.RemovePartition(ctx, partition.CollectionID, partition.GetPartitionID())
 					ob.targetObserver.ReleasePartition(partition.GetCollectionID(), partition.GetPartitionID())
 				}
 
 				// all partition timeout, remove collection
-				if len(ob.meta.CollectionManager.GetPartitionsByCollection(ctx, task.CollectionID)) == 0 {
+				if len(ob.meta.GetPartitionsByCollection(ctx, task.CollectionID)) == 0 {
 					log.Info("collection timeout due to all partition removed", zap.Int64("collection", task.CollectionID))
 
 					ob.meta.CollectionManager.RemoveCollection(ctx, task.CollectionID)
@@ -258,7 +258,7 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 		observeTaskNum++
 
 		start := time.Now()
-		collection := ob.meta.CollectionManager.GetCollection(ctx, task.CollectionID)
+		collection := ob.meta.GetCollection(ctx, task.CollectionID)
 		if collection == nil {
 			return true
 		}
@@ -392,7 +392,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
-	err := ob.meta.CollectionManager.UpdatePartitionLoadPercent(ctx, partition.PartitionID, loadPercentage)
+	err := ob.meta.UpdatePartitionLoadPercent(ctx, partition.PartitionID, loadPercentage)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to update partition load percentage",
 			zap.Int64("collectionID", partition.GetCollectionID()),
@@ -410,7 +410,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 }
 
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
-	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(ctx, collectionID)
+	collectionPercentage, err := ob.meta.UpdateCollectionLoadPercent(ctx, collectionID)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to update collection load percentage", zap.Int64("collectionID", collectionID))
 	}

@@ -230,7 +230,11 @@ class StringChunkWriter : public ChunkWriterBase {
                     const std::shared_ptr<ChunkTarget>& target) override;
 
  private:
-    std::vector<std::string_view> strs_;
+    // Pre-computed absolute offsets (offsets_[i] = byte offset of row i from
+    // chunk start, offsets_[row_nums_] = end offset). Populated in
+    // calculate_size, consumed in write_to_target to avoid a second pass over
+    // Arrow for sizing.
+    std::vector<uint32_t> offsets_;
 };
 
 class JSONChunkWriter : public ChunkWriterBase {
@@ -245,7 +249,10 @@ class JSONChunkWriter : public ChunkWriterBase {
                     const std::shared_ptr<ChunkTarget>& target) override;
 
  private:
-    std::vector<Json> cached_jsons_;
+    // Same shape as StringChunkWriter::offsets_. No per-row simdjson padding
+    // buffer is kept — we write Arrow bytes directly and emit a single
+    // SIMDJSON_PADDING region at the tail.
+    std::vector<uint32_t> offsets_;
 };
 
 class GeometryChunkWriter : public ChunkWriterBase {
@@ -258,6 +265,9 @@ class GeometryChunkWriter : public ChunkWriterBase {
     void
     write_to_target(const arrow::ArrayVector& array_vec,
                     const std::shared_ptr<ChunkTarget>& target) override;
+
+ private:
+    std::vector<uint32_t> offsets_;
 };
 
 class ArrayChunkWriter : public ChunkWriterBase {
@@ -275,6 +285,13 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
  private:
     const milvus::DataType element_type_;
+    // Parsed protobufs cached by calculate_size so write_to_target does not
+    // pay a second ScalarFieldProto parse per row.
+    std::vector<Array> cached_arrays_;
+    // Interleaved [off0, len0, off1, len1, ..., offN-1, lenN-1, offN] header.
+    // Populated by calculate_size so write_to_target can emit the whole
+    // header in a single target->write call.
+    std::vector<uint32_t> header_;
 };
 
 class VectorArrayChunkWriter : public ChunkWriterBase {

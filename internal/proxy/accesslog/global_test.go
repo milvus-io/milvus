@@ -30,11 +30,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
@@ -108,8 +108,8 @@ func TestAccessLogger_DynamicEnable(t *testing.T) {
 	// enable access log
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	etcdCli.KV.Put(ctx, "by-dev/config/proxy/accessLog/enable", "true")
-	defer etcdCli.KV.Delete(ctx, "by-dev/config/proxy/accessLog/enable")
+	etcdCli.Put(ctx, "by-dev/config/proxy/accessLog/enable", "true")
+	defer etcdCli.Delete(ctx, "by-dev/config/proxy/accessLog/enable")
 
 	assert.Eventually(t, func() bool {
 		accessInfo := info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
@@ -118,7 +118,7 @@ func TestAccessLogger_DynamicEnable(t *testing.T) {
 	}, 10*time.Second, 500*time.Millisecond)
 
 	// disable access log
-	etcdCli.KV.Put(ctx, "by-dev/config/proxy/accessLog/enable", "false")
+	etcdCli.Put(ctx, "by-dev/config/proxy/accessLog/enable", "false")
 	assert.Eventually(t, func() bool {
 		accessInfo := info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
 		ok := _globalL.Write(accessInfo)

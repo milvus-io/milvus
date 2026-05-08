@@ -11,13 +11,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // RecoverBroadcaster recovers the broadcaster from the recovery info.
@@ -361,6 +361,34 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 			continue
 		}
 		result = append(result, task)
+	}
+	return result
+}
+
+// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
+// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
+func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	result := make(map[int64][]int64)
+	for _, task := range bm.tasks {
+		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			continue
+		}
+		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+			continue
+		}
+		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+		if err != nil {
+			continue
+		}
+		body := createMsg.MustBody()
+		ids := body.CollectionSchema.GetFileResourceIds()
+		if len(ids) > 0 {
+			result[createMsg.Header().CollectionId] = ids
+		}
 	}
 	return result
 }

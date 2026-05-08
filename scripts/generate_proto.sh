@@ -44,6 +44,46 @@ export PATH=${INSTALL_PATH}:${GOPATH}/bin:$PATH
 echo "using protoc-gen-go: $(which protoc-gen-go)"
 echo "using protoc-gen-go-grpc: $(which protoc-gen-go-grpc)"
 
+GENERATED_BACKUP_DIR=""
+GENERATED_FILES=()
+
+cleanup_generated_backup() {
+    if [[ -n "${GENERATED_BACKUP_DIR}" && -d "${GENERATED_BACKUP_DIR}" ]]; then
+        rm -rf "${GENERATED_BACKUP_DIR}"
+    fi
+}
+
+backup_generated_files() {
+    GENERATED_BACKUP_DIR=$(mktemp -d "${ROOT_DIR}/cmake_build/.proto-backup.XXXXXX")
+
+    while IFS= read -r -d '' file; do
+        GENERATED_FILES+=("$file")
+        rel_path="${file#"${ROOT_DIR}/"}"
+        mkdir -p "${GENERATED_BACKUP_DIR}/$(dirname "${rel_path}")"
+        cp -p "$file" "${GENERATED_BACKUP_DIR}/${rel_path}"
+    done < <(find \
+        "${ROOT_DIR}/pkg/proto" \
+        "${ROOT_DIR}/pkg/eventlog" \
+        "${ROOT_DIR}/cmd/tools/migration/backend" \
+        "${ROOT_DIR}/cmd/tools/migration/legacy/legacypb" \
+        "${CPP_SRC_DIR}/src/pb" \
+        -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" -o -name "*.pb.cc" -o -name "*.pb.h" \) -print0)
+}
+
+restore_unchanged_generated_files() {
+    local file rel_path backup_path
+
+    for file in "${GENERATED_FILES[@]}"; do
+        rel_path="${file#"${ROOT_DIR}/"}"
+        backup_path="${GENERATED_BACKUP_DIR}/${rel_path}"
+        if [[ -f "${backup_path}" && -f "$file" ]] && cmp -s "${backup_path}" "$file"; then
+            cp -p "${backup_path}" "$file"
+        fi
+    done
+}
+
+trap cleanup_generated_backup EXIT
+
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
@@ -66,6 +106,8 @@ mkdir -p ./streamingpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
+
+backup_generated_files
 
 ${protoc_opt} --go_out=paths=source_relative:./etcdpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./indexcgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
@@ -97,5 +139,7 @@ ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb clustering.proto|| { echo 'generate 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_cgo_msg.proto|| { echo 'generate index_cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
+
+restore_unchanged_generated_files
 
 popd

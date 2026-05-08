@@ -1,10 +1,10 @@
 package util
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
 func IsReplicationRemovedByAlterReplicateConfigMessage(msg message.ImmutableMessage, replicateInfo *streamingpb.ReplicatePChannelMeta) (replicationRemoved bool) {
@@ -18,11 +18,6 @@ func IsReplicationRemovedByAlterReplicateConfigMessage(msg message.ImmutableMess
 	}
 
 	replicateConfig := header.ReplicateConfiguration
-	// Nil or empty config means topology is being cleared — all replication is removed.
-	if replicateConfig == nil || len(replicateConfig.GetClusters()) == 0 {
-		return true
-	}
-
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
 	_, err := currentCluster.GetTargetChannel(replicateInfo.GetSourceChannelName(),

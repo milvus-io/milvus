@@ -98,6 +98,8 @@ func TestHybridSearchTemplateParam(t *testing.T) {
 
 // hybrid search default -> verify success
 func TestHybridSearchMultiVectorsDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -240,6 +242,8 @@ func TestHybridSearchInvalidParams(t *testing.T) {
 // vector type mismatch: vectors: float32, queryVec: binary
 // vector dim mismatch
 func TestHybridSearchInvalidVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -262,6 +266,8 @@ func TestHybridSearchInvalidVectors(t *testing.T) {
 
 // hybrid search Pagination -> verify success
 func TestHybridSearchMultiVectorsPagination(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -397,6 +403,8 @@ func TestHybridSearchSparseVector(t *testing.T) {
 }
 
 func TestHybridSearchGroupBy(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

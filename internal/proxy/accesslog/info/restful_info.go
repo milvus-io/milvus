@@ -25,10 +25,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 const (
@@ -78,6 +78,13 @@ func (i *RestfulInfo) TimeStart() string {
 		return Unknown
 	}
 	return i.start.Format(timeFormat)
+}
+
+// Start returns the request-entry timestamp captured by the access middleware.
+// Exposed so downstream consumers (e.g. audit plugins) can measure end-to-end
+// request latency instead of their own instantiation time.
+func (i *RestfulInfo) Start() time.Time {
+	return i.start
 }
 
 func (i *RestfulInfo) TimeEnd() string {
@@ -286,4 +293,11 @@ func (i *RestfulInfo) TemplateValueLength() string {
 	})
 
 	return fmt.Sprint(m)
+}
+
+func (i *RestfulInfo) PartialUpdate() string {
+	if req, ok := i.req.(*milvuspb.UpsertRequest); ok {
+		return fmt.Sprint(req.GetPartialUpdate())
+	}
+	return NotAny
 }

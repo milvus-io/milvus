@@ -41,31 +41,31 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -161,6 +161,12 @@ type resourceEstimateFactor struct {
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
+	// externalRawDataFactor is the peak-memory safety factor for external
+	// segments. External tables always download, decompress and deserialize
+	// row groups into Arrow buffers regardless of mmap / TieredEviction
+	// settings, so peak transient memory = rawDataSize * factor. Defaults
+	// to 2.0 via paramtable queryNode.externalCollection.rawDataFactor.
+	externalRawDataFactor float64
 }
 
 func NewLoader(
@@ -168,22 +174,6 @@ func NewLoader(
 	manager *Manager,
 	cm storage.ChunkManager,
 ) *segmentLoader {
-	cpuNum := hardware.GetCPUNum()
-	ioPoolSize := cpuNum * 8
-	// make sure small machines could load faster
-	if ioPoolSize < 32 {
-		ioPoolSize = 32
-	}
-	// limit the number of concurrency
-	if ioPoolSize > 256 {
-		ioPoolSize = 256
-	}
-
-	if configPoolSize := paramtable.Get().QueryNodeCfg.IoPoolSize.GetAsInt(); configPoolSize > 0 {
-		ioPoolSize = configPoolSize
-	}
-
-	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
@@ -809,6 +799,8 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 		}
 	}
 
+	preferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+
 	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
 
@@ -822,6 +814,9 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 					IndexInfo:   index,
 				}
 				indexedFieldInfos[index.IndexID] = fieldInfo
+			}
+			if preferFieldData {
+				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 			}
 		} else {
 			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
@@ -877,6 +872,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
+	preferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+
 	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
 
@@ -918,6 +915,9 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 						}
 						indexedFieldInfos[indexInfo.IndexID] = fieldInfo
 					}
+					if preferFieldData {
+						fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+					}
 				} else {
 					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 				}
@@ -940,8 +940,27 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 					}
 					indexedFieldInfos[indexInfo.IndexID] = fieldInfo
 				}
+				if preferFieldData {
+					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+				}
 			} else {
 				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+			}
+		}
+	}
+
+	// For external table segments (ManifestPath set, BinlogPaths empty), extract
+	// indexes directly from fieldID2IndexInfo without a corresponding FieldBinlog,
+	// because the segment data lives in the external store rather than Milvus binlogs.
+	if loadInfo.GetManifestPath() != "" {
+		for _, infos := range fieldID2IndexInfo {
+			for _, indexInfo := range infos {
+				if _, exists := indexedFieldInfos[indexInfo.IndexID]; !exists {
+					indexedFieldInfos[indexInfo.IndexID] = &IndexedFieldInfo{
+						FieldBinlog: &datapb.FieldBinlog{},
+						IndexInfo:   indexInfo,
+					}
+				}
 			}
 		}
 	}
@@ -1381,52 +1400,42 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	// For V3 (manifest) segments, Deltalogs is a pathless placeholder used only
-	// for compaction-trigger decisions. The real delta data is referenced by
-	// the manifest and loaded below.
-	isV3 := loadInfo.GetManifestPath() != ""
-	if !isV3 {
+	// Collect delta paths and reader options based on storage version.
+	var paths []string
+	var opts []storage.RwOption
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
+		// V3: delta data lives in manifest
+		paths, err = packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig())
+		if err != nil {
+			return err
+		}
+		opts = []storage.RwOption{
+			storage.WithStorageConfig(createStorageConfig()),
+			storage.WithVersion(storage.StorageV3),
+		}
+	} else {
+		// V1: delta data referenced by Deltalogs entries
 		for _, deltalog := range deltaLogs {
-			err := func() error {
-				opts := []storage.RwOption{
-					storage.WithDownloader(
-						func(ctx context.Context, paths []string) ([][]byte, error) {
-							return loader.cm.MultiRead(ctx, paths)
-						},
-					),
+			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
+				if p := binlog.GetLogPath(); p != "" {
+					paths = append(paths, p)
 				}
-				paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
-					return binlog.GetLogPath()
-				})
-				reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
-				if err != nil {
-					return err
-				}
-				return readDeltaRecords(reader)
-			}()
-			if err != nil {
-				return err
 			}
+		}
+		opts = []storage.RwOption{
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return loader.cm.MultiRead(ctx, paths)
+			}),
 		}
 	}
 
-	// Read deltalogs from manifest for StorageV3 segments
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
-		reader, err := storage.NewDeltalogReaderFromManifest(
-			pkField.DataType,
-			manifestPath,
-			storage.WithStorageConfig(createStorageConfig()),
-			storage.WithVersion(storage.StorageV2),
-		)
+	if len(paths) > 0 {
+		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return err
-			}
-			// io.EOF means no deltalogs in manifest, not an error
-		} else {
-			if err := readDeltaRecords(reader); err != nil {
-				return err
-			}
+			return err
+		}
+		if err := readDeltaRecords(reader); err != nil {
+			return err
 		}
 	}
 
@@ -1671,6 +1680,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
 		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		externalRawDataFactor:       paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1814,7 +1824,8 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			// could skip binlog or
 			// could be missing for new field or storage v2 group 0
-			if estimateResult.HasRawData {
+			if estimateResult.HasRawData &&
+				!paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool() {
 				delete(id2Binlogs, fieldID)
 				continue
 			}
@@ -2019,7 +2030,8 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			// could skip binlog or
 			// could be missing for new field or storage v2 group 0
-			if estimateResult.HasRawData {
+			if estimateResult.HasRawData &&
+				!paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool() {
 				delete(id2Binlogs, fieldID)
 				continue
 			}
@@ -2134,6 +2146,40 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
+		}
+	}
+
+	// PART 2.5: external segment adjustments
+	//
+	// External segments carry pre-computed MemorySize in fake binlogs (from
+	// DataNode Take sampling). Adjust the memory estimate for two external-
+	// specific behaviors:
+	//   1. Non-lazy path: apply externalRawDataFactor to cover the peak
+	//      transient memory during download + decompress + Arrow deserialize
+	//      (normal packed segments do not have this peak because their
+	//      binlogs are already in Arrow IPC format).
+	//   2. Full-lazy path (all external fields warmup=disable): no eager
+	//      load, so subtract the raw data size that PART 2 added.
+	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
+	// so the tiered-cache layer sizes chunks correctly.
+	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
+		var fakeBinlogMemSize int64
+		for _, fb := range loadInfo.BinlogPaths {
+			fakeBinlogMemSize += getBinlogDataMemorySize(fb)
+		}
+		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
+
+		if isExternalCollectionLazyLoad(schema) {
+			// Full-lazy → zero eager load. Undo PART 2's rawSize addition.
+			// Safety factor does not apply: no peak to cover.
+			if segMemoryLoadingSize >= uint64(fakeBinlogMemSize) {
+				segMemoryLoadingSize -= uint64(fakeBinlogMemSize)
+			} else {
+				segMemoryLoadingSize = 0
+			}
+		} else if factor := multiplyFactor.externalRawDataFactor; factor > 1.0 {
+			// Non-lazy → add peak margin on top of rawSize that PART 2 added.
+			segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
 		}
 	}
 

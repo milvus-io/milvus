@@ -3,7 +3,7 @@ package metricsutil
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 var (
@@ -45,7 +45,7 @@ func (r *CacheLoadRecord) getBytes() float64 {
 
 // Finish finishes the record.
 func (r *CacheLoadRecord) Finish(err error) {
-	r.baseRecord.finish(err)
+	r.finish(err)
 	getGlobalObserver().Observe(r)
 }
 
@@ -74,7 +74,7 @@ func (r *CacheEvictRecord) getBytes() float64 {
 
 // Finish finishes the record.
 func (r *CacheEvictRecord) Finish(err error) {
-	r.baseRecord.finish(err)
+	r.finish(err)
 	getGlobalObserver().Observe(r)
 }
 

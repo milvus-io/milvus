@@ -19,7 +19,7 @@ package datacoord
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 var ErrIgnoredSegmentMetaOperation = errors.New("ignored segment meta operation")

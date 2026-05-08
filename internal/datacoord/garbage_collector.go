@@ -30,23 +30,23 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // GcOption garbage collection options
@@ -139,12 +139,16 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 			records = append(records, record)
 		}
 	}
+	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
+		return r.pauseUntil.UnixNano()
+	})
 
 	if gc.records.Len() < gc.maxLen {
 		gc.records.Push(gcPauseRecord{
 			ticket:     ticket,
 			pauseUntil: pauseUntil,
 		})
+		return nil
 	}
 
 	// too many pause records, refresh heap
@@ -220,10 +224,12 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	ctx, cancel := context.WithCancel(context.Background())
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
+	lobSignal := make(chan gcCmd)
 	// control signal channels
 	controlChannels := map[string]chan gcCmd{
 		"meta":   metaSignal,
 		"orphan": orphanSignal,
+		"lob":    lobSignal,
 	}
 	return &garbageCollector{
 		ctx:                   ctx,
@@ -322,7 +328,7 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, tick
 func (gc *garbageCollector) work(ctx context.Context) {
 	// TODO: fast cancel for gc when closing.
 	// Run gc tasks in parallel.
-	gc.wg.Add(3)
+	gc.wg.Add(4)
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
@@ -343,6 +349,14 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+		})
+	}()
+	go func() {
+		defer gc.wg.Done()
+		// LOB (TEXT column) file GC runs on its own interval
+		lobCheckInterval := Params.DataCoordCfg.GCLOBCheckInterval.GetAsDuration(time.Second)
+		gc.runRecycleTaskWithPauser(ctx, "lob", lobCheckInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleUnusedLOBFiles(ctx)
 		})
 	}()
 	go func() {
@@ -916,7 +930,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		}
 
 		// Skip to GC if all segments meta of the corresponding collection are not removed
-		if gcConfirmed, _ := collectionID2GcStatus[collectionID]; !gcConfirmed {
+		if gcConfirmed := collectionID2GcStatus[collectionID]; !gcConfirmed {
 			skippedCnt++
 			continue
 		}

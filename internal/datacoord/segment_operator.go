@@ -16,7 +16,7 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+import "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
 // SegmentOperator is function type to update segment info.
 type SegmentOperator func(segment *SegmentInfo) bool
@@ -57,7 +57,7 @@ func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
 	}
 }
 
-func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
+func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		if segment.JsonKeyStats == nil {
 			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
@@ -65,6 +65,16 @@ func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) Segmen
 		for field, logs := range jsonKeyIndexLogs {
 			segment.JsonKeyStats[field] = logs
 		}
+		return true
+	}
+}
+
+func SetSchemaVersion(schemaVersion int32) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.GetSchemaVersion() == schemaVersion {
+			return false
+		}
+		segment.SchemaVersion = schemaVersion
 		return true
 	}
 }

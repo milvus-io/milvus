@@ -25,10 +25,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // singleCompactionPolicy is to compact one segment with too many delta logs
@@ -40,12 +40,23 @@ type singleCompactionPolicy struct {
 	handler   Handler
 }
 
+// Ensure singleCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*singleCompactionPolicy)(nil)
+
 func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
 func (policy *singleCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+}
+
+func (policy *singleCompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
+}
+
+func (policy *singleCompactionPolicy) Name() string {
+	return "SingleCompactionPolicy"
 }
 
 func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
@@ -306,6 +317,9 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)
+
+// IsInlineExecutable returns false: mix compaction is real compaction work.
+func (v *MixSegmentView) IsInlineExecutable() bool { return false }
 
 type MixSegmentView struct {
 	label         *CompactionGroupLabel

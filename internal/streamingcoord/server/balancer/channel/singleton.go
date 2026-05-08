@@ -1,8 +1,8 @@
 package channel
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 var singleton = syncutil.NewFuture[*ChannelManager]()

@@ -23,11 +23,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 func TestCreateAlias_all(t *testing.T) {
@@ -71,12 +71,12 @@ func TestCreateAlias_all(t *testing.T) {
 	assert.Equal(t, ts, task.BeginTs())
 	assert.Equal(t, ts, task.EndTs())
 
-	task.CreateAliasRequest.Alias = "illgal-alias:!"
+	task.Alias = "illgal-alias:!"
 	assert.Error(t, task.PreExecute(ctx))
-	task.CreateAliasRequest.Alias = "alias1"
-	task.CreateAliasRequest.CollectionName = "illgal-collection:!"
+	task.Alias = "alias1"
+	task.CollectionName = "illgal-collection:!"
 	assert.Error(t, task.PreExecute(ctx))
-	task.CreateAliasRequest.CollectionName = collectionName
+	task.CollectionName = collectionName
 
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.Error(t, task.Execute(ctx))
@@ -158,12 +158,12 @@ func TestAlterAlias_all(t *testing.T) {
 	assert.Equal(t, ts, task.BeginTs())
 	assert.Equal(t, ts, task.EndTs())
 
-	task.AlterAliasRequest.Alias = "illgal-alias:!"
+	task.Alias = "illgal-alias:!"
 	assert.Error(t, task.PreExecute(ctx))
-	task.AlterAliasRequest.Alias = "alias1"
-	task.AlterAliasRequest.CollectionName = "illgal-collection:!"
+	task.Alias = "alias1"
+	task.CollectionName = "illgal-collection:!"
 	assert.Error(t, task.PreExecute(ctx))
-	task.AlterAliasRequest.CollectionName = collectionName
+	task.CollectionName = collectionName
 
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.Error(t, task.Execute(ctx))

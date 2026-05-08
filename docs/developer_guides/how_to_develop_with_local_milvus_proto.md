@@ -40,10 +40,10 @@ libprotoc 3.21.4
 Back to milvus repo. Golang has provided a "convienient" way to use local repo instead of the remote one
 
 ```
-# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v2=/home/silverxia/workspace/milvus-proto/go-api 
+# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v3=/home/silverxia/workspace/milvus-proto/go-api 
 # cd pkg
 // set pkg module as well
-# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v2=/home/silverxia/workspace/milvus-proto/go-api
+# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v3=/home/silverxia/workspace/milvus-proto/go-api
 # cd .. 
 ```
 

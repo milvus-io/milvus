@@ -33,12 +33,12 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/googleapi"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // ChunkObjectWalkFunc is the callback function for walking objects.
@@ -75,11 +75,12 @@ var _ ChunkManager = (*RemoteChunkManager)(nil)
 func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*RemoteChunkManager, error) {
 	var client ObjectStorage
 	var err error
-	if c.CloudProvider == objectstorage.CloudProviderAzure {
+	switch c.CloudProvider {
+	case objectstorage.CloudProviderAzure:
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
-	} else if c.CloudProvider == objectstorage.CloudProviderGCPNative {
+	case objectstorage.CloudProviderGCPNative:
 		client, err = newGcpNativeObjectStorageWithConfig(ctx, c)
-	} else {
+	default:
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
 	}
 	if err != nil {
@@ -109,6 +110,11 @@ func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath st
 // RootPath returns minio root path.
 func (mcm *RemoteChunkManager) RootPath() string {
 	return mcm.rootPath
+}
+
+// BucketName returns the bucket name this chunk manager is configured with.
+func (mcm *RemoteChunkManager) BucketName() string {
+	return mcm.bucketName
 }
 
 // UnderlyingObjectStorage returns the underlying object storage.

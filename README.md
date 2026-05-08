@@ -11,6 +11,10 @@
   <a href="https://x.com/milvusio"><img src="https://img.shields.io/twitter/follow/milvusio" alt="twitter"/></a>
 </div>
 
+<div align="center">
+<a href="https://trendshift.io/repositories/1026" target="_blank"><img src="https://trendshift.io/api/badge/repositories/1026" alt="milvus-io%2Fmilvus | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</div>
+
 ## What is Milvus?
 
 🐦 [Milvus](https://milvus.io/) is a high-performance vector database built for scale. It powers AI applications by efficiently organizing and searching vast amounts of unstructured data, such as text, images, and multi-modal information.

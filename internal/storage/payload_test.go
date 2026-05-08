@@ -25,9 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestPayload_ReaderAndWriter(t *testing.T) {
@@ -2742,7 +2742,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 					for j := 0; j < 16; j++ {
 						sparseVec[j] = byte((i*10 + j) % 256)
 					}
-					data.SparseFloatArray.Contents = append(data.SparseFloatArray.Contents, sparseVec)
+					data.Contents = append(data.Contents, sparseVec)
 				}
 			}
 

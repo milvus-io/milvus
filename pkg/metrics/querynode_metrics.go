@@ -22,7 +22,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -903,6 +903,17 @@ var (
 			reasonLabelName,
 		})
 
+	QueryNodeGlobalRefineCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "global_refine_total",
+			Help:      "total number of search requests for which global refine was applied",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
 	// Pool metric descriptors (used by PoolMetricsCollector)
 	QueryNodePoolCapacityDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_capacity"),
@@ -996,6 +1007,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeTwoStageFilterLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchFallbackCount)
+	registry.MustRegister(QueryNodeGlobalRefineCount)
 	// Pool metrics collector (pull model — collectFn set later via SetPoolCollectFn)
 	registry.MustRegister(&poolMetricsCollector{})
 	// Add cgo metrics
@@ -1029,6 +1041,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
+	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestVecIndexChecker_StaticCheck(t *testing.T) {
@@ -40,6 +40,35 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 			dataType: schemapb.DataType_FloatVector,
 			params:   map[string]string{},
 			wantErr:  true,
+		},
+		{
+			name:     "Sparse with invalid metric",
+			dataType: schemapb.DataType_SparseFloatVector,
+			params: map[string]string{
+				"index_type":  "SPARSE_INVERTED_INDEX",
+				"metric_type": "L2",
+			},
+			wantErr: true,
+		},
+		{
+			name:     "Sparse with valid metric and invalid inverted_index_algo",
+			dataType: schemapb.DataType_SparseFloatVector,
+			params: map[string]string{
+				"index_type":            "SPARSE_INVERTED_INDEX",
+				"metric_type":           "IP",
+				SparseInvertedIndexAlgo: "INVALID_ALGO",
+			},
+			wantErr: true,
+		},
+		{
+			name:     "Sparse WAND with invalid inverted_index_algo",
+			dataType: schemapb.DataType_SparseFloatVector,
+			params: map[string]string{
+				"index_type":            "SPARSE_WAND",
+				"metric_type":           "IP",
+				SparseInvertedIndexAlgo: "NOT_AN_ALGO",
+			},
+			wantErr: true,
 		},
 	}
 

@@ -19,19 +19,21 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // SegmentFiles organizes source files by type for copy operations.
@@ -41,14 +43,17 @@ type SegmentFiles struct {
 	// From manifest (when storage_version >= StorageV3) or pb (when < StorageV3)
 	InsertBinlogs []string
 
+	// LOB files at partition level (only for StorageV3+ with TEXT fields)
+	LobFiles []string
+
 	// Always from pb
 	DeltaBinlogs      []string
 	StatsBinlogs      []string
 	Bm25Binlogs       []string
 	VectorScalarIndex []string
 	TextIndex         []string
-	JsonKeyIndex      []string
-	JsonStats         []string
+	JSONKeyIndex      []string
+	JSONStats         []string
 }
 
 // Copy Mode Implementation for Snapshot/Backup Import
@@ -170,9 +175,9 @@ func extractTextIndexFiles(textIndexInfos map[int64]*datapb.TextIndexStats) []st
 	return paths
 }
 
-// extractJsonFiles extracts JSON index files, separated by data format version.
+// extractJSONFiles extracts JSON index files, separated by data format version.
 // Returns (jsonKeyFiles, jsonStatsFiles).
-func extractJsonFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, []string) {
+func extractJSONFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, []string) {
 	var jsonKeyFiles []string
 	var jsonStatsFiles []string
 
@@ -231,6 +236,26 @@ func collectSegmentFiles(
 			zap.String("basePath", basePath),
 			zap.Int("fileCount", len(allFiles)),
 			zap.Int64("storageVersion", source.GetStorageVersion()))
+
+		// Collect LOB files owned by THIS segment from the manifest.
+		// LOB files live at partition level ({root}/insert_log/{coll}/{part}/lobs/),
+		// but multiple segments share that directory. We must only copy the files
+		// referenced by this segment's manifest to preserve the invariant that
+		// each LOB file belongs to exactly one segment.
+		storageConfig := compaction.CreateStorageConfig()
+		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
+		if lobErr != nil {
+			log.Debug("no LOB files found in manifest (may not have TEXT fields)",
+				zap.String("manifestPath", manifestPath),
+				zap.Error(lobErr))
+		} else if len(lobFileInfos) > 0 {
+			// GetManifestLobFiles returns absolute paths (the manifest
+			// deserializer calls ToAbsolute internally), so use them directly.
+			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
+			log.Info("collected LOB files from segment manifest",
+				zap.String("manifestPath", manifestPath),
+				zap.Int("lobFileCount", len(files.LobFiles)))
+		}
 	} else {
 		// StorageV1/V2: use pb paths (traditional non-packed format)
 		files.InsertBinlogs = extractFromPb(source.GetInsertBinlogs())
@@ -250,7 +275,7 @@ func collectSegmentFiles(
 	// using potentially stale or wrong-format paths from etcd metadata.
 	if source.GetStorageVersion() < storage.StorageV3 {
 		files.TextIndex = extractTextIndexFiles(source.GetTextIndexFiles())
-		files.JsonKeyIndex, files.JsonStats = extractJsonFiles(source.GetJsonKeyIndexFiles())
+		files.JSONKeyIndex, files.JSONStats = extractJSONFiles(source.GetJsonKeyIndexFiles())
 	}
 
 	return files, nil
@@ -275,6 +300,8 @@ func generateMappingsFromFiles(
 			switch fileType {
 			case IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
 				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType)
+			case FileTypeLOB:
+				dstPath, err = generateTargetLOBPath(srcPath, source, target)
 			default:
 				dstPath, err = generateTargetPath(srcPath, source, target)
 			}
@@ -306,10 +333,13 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.TextIndex, IndexTypeText); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.JsonKeyIndex, IndexTypeJSONKey); err != nil {
+	if err := addMappings(files.JSONKeyIndex, IndexTypeJSONKey); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.JsonStats, IndexTypeJSONStats); err != nil {
+	if err := addMappings(files.JSONStats, IndexTypeJSONStats); err != nil {
+		return nil, err
+	}
+	if err := addMappings(files.LobFiles, FileTypeLOB); err != nil {
 		return nil, err
 	}
 
@@ -405,7 +435,7 @@ func CopySegmentAndIndexFiles(
 		indexInfo.IndexFilePaths = shortenIndexFilePaths(indexInfo.IndexFilePaths)
 	}
 
-	jsonKeyIndexInfos = shortenJsonStatsPath(jsonKeyIndexInfos)
+	jsonKeyIndexInfos = shortenJSONStatsPath(jsonKeyIndexInfos)
 
 	log.Info("path compression completed",
 		zap.Int("binlogFields", len(segmentInfo.GetBinlogs())),
@@ -594,7 +624,33 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	parts[logTypeIndex+2] = targetPartitionIDStr
 	parts[logTypeIndex+3] = targetSegmentIDStr
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
+}
+
+// generateTargetLOBPath replaces collection and partition IDs in a LOB file path.
+// LOB path structure: {root}/insert_log/{coll}/{part}/lobs/{field}/_data/{file}.vx
+// Unlike segment paths, LOB paths have no segment ID component.
+func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	parts := strings.Split(sourcePath, "/")
+
+	logTypeIndex := -1
+	for i, part := range parts {
+		if part == BinlogTypeInsert {
+			logTypeIndex = i
+			break
+		}
+	}
+
+	// Path: .../{insert_log}/{coll}/{part}/lobs/...
+	// Need at least logTypeIndex + 2 (coll and part) after insert_log
+	if logTypeIndex == -1 || logTypeIndex+2 >= len(parts) {
+		return "", fmt.Errorf("invalid LOB path structure: %s", sourcePath)
+	}
+
+	parts[logTypeIndex+1] = strconv.FormatInt(target.GetCollectionId(), 10)
+	parts[logTypeIndex+2] = strconv.FormatInt(target.GetPartitionId(), 10)
+
+	return path.Join(parts...), nil
 }
 
 // buildIndexInfoFromSource builds complete index metadata from source information.
@@ -692,17 +748,17 @@ func buildIndexInfoFromSource(
 	// pass metadata as placeholders. For V2, transform file paths using mappings.
 	jsonKeyIndexInfos := make(map[int64]*datapb.JsonKeyStats)
 	if source.GetStorageVersion() >= storage.StorageV3 {
-		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
-			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
-			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
-				dstJson.BuildID = newID
+		for fieldID, srcJSON := range source.GetJsonKeyIndexFiles() {
+			dstJSON := proto.Clone(srcJSON).(*datapb.JsonKeyStats)
+			if newID, ok := target.GetNewBuildIds()[dstJSON.GetBuildID()]; ok {
+				dstJSON.BuildID = newID
 			}
-			jsonKeyIndexInfos[fieldID] = dstJson
+			jsonKeyIndexInfos[fieldID] = dstJSON
 		}
 	} else {
-		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
-			targetFiles := make([]string, 0, len(srcJson.GetFiles()))
-			for _, srcFile := range srcJson.GetFiles() {
+		for fieldID, srcJSON := range source.GetJsonKeyIndexFiles() {
+			targetFiles := make([]string, 0, len(srcJSON.GetFiles()))
+			for _, srcFile := range srcJSON.GetFiles() {
 				targetFile, ok := mappings[srcFile]
 				if !ok {
 					return nil, nil, nil, fmt.Errorf("no mapping found for JSON index file: %s", srcFile)
@@ -710,12 +766,12 @@ func buildIndexInfoFromSource(
 				targetFiles = append(targetFiles, targetFile)
 			}
 
-			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
-			dstJson.Files = targetFiles
-			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
-				dstJson.BuildID = newID
+			dstJSON := proto.Clone(srcJSON).(*datapb.JsonKeyStats)
+			dstJSON.Files = targetFiles
+			if newID, ok := target.GetNewBuildIds()[dstJSON.GetBuildID()]; ok {
+				dstJSON.BuildID = newID
 			}
-			jsonKeyIndexInfos[fieldID] = dstJson
+			jsonKeyIndexInfos[fieldID] = dstJSON
 		}
 	}
 
@@ -725,6 +781,18 @@ func buildIndexInfoFromSource(
 // ============================================================================
 // File Type Constants
 // ============================================================================
+
+// lobFileInfosToPaths extracts absolute file paths from LobFileInfo structs.
+// GetManifestLobFiles returns paths that have already been resolved to absolute
+// form by the C++ manifest deserializer (Manifest::ToAbsolutePaths), so we use
+// them directly without any path concatenation.
+func lobFileInfosToPaths(infos []packed.LobFileInfo) []string {
+	paths := make([]string, 0, len(infos))
+	for _, info := range infos {
+		paths = append(paths, info.Path)
+	}
+	return paths
+}
 
 // File type constants used for path identification and generation.
 // These constants match the directory names in Milvus storage paths.
@@ -737,6 +805,7 @@ const (
 	IndexTypeText         = "text_log"
 	IndexTypeJSONKey      = "json_key_index_log" // Legacy: JSON Key Inverted Index
 	IndexTypeJSONStats    = "json_stats"         // New: JSON Stats with Shredding Design
+	FileTypeLOB           = "lob"                // LOB files at partition level for TEXT fields
 )
 
 // generateTargetIndexPath is the unified function for generating target paths for all index types
@@ -849,7 +918,7 @@ func generateTargetIndexPath(
 	parts[keywordIdx+partitionOffset] = strconv.FormatInt(target.GetPartitionId(), 10)
 	parts[keywordIdx+segmentOffset] = strconv.FormatInt(target.GetSegmentId(), 10)
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
 }
 
 // ============================================================================
@@ -897,7 +966,7 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 	return result
 }
 
-// shortenJsonStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
+// shortenJSONStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
 //
 // In normal import flow, the C++ core returns already-shortened paths (e.g., "shared_key_index/file").
 // In copy segment flow, DataNode returns full paths after file copying.
@@ -912,12 +981,12 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 //
 // Returns:
 //   - Map of field ID to JsonKeyStats with shortened paths
-func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
+func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
 	result := make(map[int64]*datapb.JsonKeyStats)
 	for fieldID, stats := range jsonStats {
 		shortenedFiles := make([]string, 0, len(stats.GetFiles()))
 		for _, file := range stats.GetFiles() {
-			shortenedFiles = append(shortenedFiles, shortenSingleJsonStatsPath(file))
+			shortenedFiles = append(shortenedFiles, shortenSingleJSONStatsPath(file))
 		}
 
 		result[fieldID] = &datapb.JsonKeyStats{
@@ -933,7 +1002,7 @@ func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 	return result
 }
 
-// shortenSingleJsonStatsPath shortens a single JSON stats file path.
+// shortenSingleJSONStatsPath shortens a single JSON stats file path.
 //
 // This function extracts the relative path from a full JSON stats file path by:
 //  1. Finding "shared_key_index" or "shredding_data" keywords and extracting from that position
@@ -959,7 +1028,7 @@ func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 //
 // Returns:
 //   - Shortened path relative to fieldID directory
-func shortenSingleJsonStatsPath(fullPath string) string {
+func shortenSingleJSONStatsPath(fullPath string) string {
 	// Find "shared_key_index" in path
 	if idx := strings.Index(fullPath, jsonStatsSharedIndexPath); idx != -1 {
 		return fullPath[idx:]
@@ -975,7 +1044,7 @@ func shortenSingleJsonStatsPath(fullPath string) string {
 	parts := strings.Split(fullPath, "/")
 	for i, part := range parts {
 		if part == common.JSONStatsPath && i+8 < len(parts) {
-			return strings.Join(parts[i+8:], "/")
+			return path.Join(parts[i+8:]...)
 		}
 	}
 

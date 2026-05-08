@@ -217,8 +217,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
     if (IsStringDataType(data_type)) {
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
-        AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
-        auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+        int64_t max_len = 0;
+        if (type_map.count(MAX_LENGTH)) {
+            max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+        } else {
+            AssertInfo(data_type == DataType::TEXT,
+                       "max_length not found for non-Text string field");
+        }
 
         auto get_bool_value = [&](const std::string& key) -> bool {
             if (!type_map.count(key)) {

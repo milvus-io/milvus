@@ -20,7 +20,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // milvus server label rules:

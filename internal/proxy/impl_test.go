@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/bytedance/mockey"
@@ -33,9 +34,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -45,18 +46,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -2392,6 +2394,97 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
 }
 
+func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
+	t.Run("consistency check fails", func(t *testing.T) {
+		mockey.PatchConvey("consistency check blocks AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
+				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
+			).Build()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+
+			resp, err := node.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.ErrorIs(t, merr.Error(resp), merr.ErrCollectionSchemaVersionNotReady)
+			assert.True(t, resp.GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+		})
+	})
+
+	t.Run("consistency check retries until success", func(t *testing.T) {
+		mockey.PatchConvey("consistency check retries AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			attempt := 0
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).To(func(*Proxy, context.Context, string, string) error {
+				attempt++
+				if attempt == 1 {
+					return merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3)
+				}
+				return nil
+			}).Build()
+
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+			assert.Equal(t, 2, attempt)
+		})
+	})
+
+	t.Run("concurrent request rejected", func(t *testing.T) {
+		mockey.PatchConvey("in-flight gate blocks concurrent AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			// Simulate an in-flight schema change on the same collection
+			collKey := "default/test_coll"
+			node.alterSchemaInFlight.Store(collKey, struct{}{})
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "another schema-change request is already in progress")
+
+			node.alterSchemaInFlight.Delete(collKey)
+		})
+	})
+}
+
 func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
@@ -2668,14 +2761,19 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			}, nil).Build()
 
 			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
-				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
 			).Build()
 
-			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+
+			resp, err := node.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+			assert.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrCollectionSchemaVersionNotReady)
+			assert.True(t, resp.GetAlterStatus().GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetAlterStatus().GetErrorCode())
 		})
 	})
 
@@ -2869,9 +2967,12 @@ func TestCheckSchemaVersionConsistency(t *testing.T) {
 				}).Build()
 
 			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 			assert.Contains(t, err.Error(), "5")
 			assert.Contains(t, err.Error(), "10")
+			status := merr.Status(err)
+			assert.True(t, status.GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 		})
 	})
 
@@ -2937,4 +3038,211 @@ func TestCheckSchemaVersionConsistency(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+}
+
+func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cases := []struct {
+		name       string
+		src, spec  string
+		wantSubstr string
+	}{
+		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
+		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "any_collection",
+				ExternalSource: tc.src,
+				ExternalSpec:   tc.spec,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+			if tc.wantSubstr != "" {
+				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	mkInfo := func(src, spec string) *collectionInfo {
+		schema := &schemapb.CollectionSchema{
+			Name:           "demo",
+			ExternalSource: src,
+			ExternalSpec:   spec,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		return &collectionInfo{
+			collID: 1,
+			schema: &schemaInfo{CollectionSchema: schema},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		persisted *collectionInfo
+		wantErr   bool
+	}{
+		{"persisted both empty rejected", mkInfo("", ""), true},
+		{"persisted source empty rejected", mkInfo("", `{"format":"parquet"}`), true},
+		{"persisted spec empty rejected", mkInfo("s3://bucket/p", ""), true},
+	}
+	cacheBak := globalMetaCache
+	defer func() { globalMetaCache = cacheBak }()
+	globalMetaCache = &MetaCache{}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockey.Mock((*MetaCache).GetCollectionInfo).Return(tc.persisted, nil).Build()
+			defer m.UnPatch()
+
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "demo",
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				assert.Contains(t, resp.GetStatus().GetReason(), "no persisted external_source")
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+		})
+	}
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	cacheCalled := false
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).To(
+		func(_ *MetaCache, _ context.Context, _ string, _ string, _ int64) (*collectionInfo, error) {
+			cacheCalled = true
+			return nil, errors.New("collection cache should not be used for list all")
+		}).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "allowed",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+					{
+						JobId:          2,
+						CollectionName: "blocked",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName: "default",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(0), capturedCollectionID)
+	assert.False(t, cacheCalled)
+	require.Len(t, resp.GetJobs(), 2)
+	assert.Equal(t, int64(1), resp.GetJobs()[0].GetJobId())
+	assert.Equal(t, "allowed", resp.GetJobs()[0].GetCollectionName())
+	assert.Equal(t, int64(2), resp.GetJobs()[1].GetJobId())
+	assert.Equal(t, "blocked", resp.GetJobs()[1].GetCollectionName())
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "external_collection",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+		},
+	}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		collID: 101,
+		schema: &schemaInfo{
+			CollectionSchema: schema,
+		},
+	}, nil).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "external_collection",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+						ExternalSpec:   `{"format":"parquet","extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-east-1"}}`,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName:         "default",
+		CollectionName: "external_collection",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(101), capturedCollectionID)
+	require.Len(t, resp.GetJobs(), 1)
+	redactedSpec := resp.GetJobs()[0].GetExternalSpec()
+	assert.Contains(t, redactedSpec, `"access_key_id":"***"`)
+	assert.Contains(t, redactedSpec, `"access_key_value":"***"`)
+	assert.Contains(t, redactedSpec, `"region":"us-east-1"`)
+	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
+	assert.NotContains(t, redactedSpec, "SUPERSECRET")
 }

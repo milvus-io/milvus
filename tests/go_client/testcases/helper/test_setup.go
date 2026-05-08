@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
@@ -97,6 +97,7 @@ func teardown() {
 	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
 	if err != nil {
 		log.Error("teardown failed to connect milvus with error", zap.Error(err))
+		return
 	}
 	defer mc.Close(ctx)
 

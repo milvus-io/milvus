@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
@@ -27,22 +26,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Handler handles some channel method for ChannelManager
@@ -170,8 +169,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && s.GetManifestPath() == "" {
-			// External collection segments may not have start/DML positions but have ManifestPath
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 		if s.GetIsImporting() {
@@ -273,8 +271,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		}, ids...)
 	}
 
-	var compactionFromExistWithCache func(segID UniqueID) bool
-	compactionFromExistWithCache = func(segID UniqueID) bool {
+	compactionFromExistWithCache := func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
 
@@ -774,9 +771,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()
 		indexesFiles := uncompressIndexFiles(h, collectionID, segID)
-		uncompressedJsonStats := make(map[int64]*datapb.JsonKeyStats)
+		uncompressedJSONStats := make(map[int64]*datapb.JsonKeyStats)
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
-			uncompressedJsonStats[id] = uncompressJsonStats(h, segInfo, jsonStats)
+			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
 		return &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
@@ -793,7 +790,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			Statslogs:         segInfo.GetStatslogs(),
 			Bm25Statslogs:     segInfo.GetBm25Statslogs(),
 			IndexFiles:        indexesFiles,
-			JsonKeyIndexFiles: uncompressedJsonStats,
+			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 		}
@@ -816,7 +813,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
-			NumPartitions:       int64(resp.GetNumPartitions()),
+			NumPartitions:       resp.GetNumPartitions(),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},
@@ -825,16 +822,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}, nil
 }
 
-func uncompressJsonStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
-	prefix := metautil.BuildJSONKeyStatsPrefix(h.s.meta.chunkManager.RootPath(), jsonStats.GetJsonKeyStatsDataFormat(),
-		jsonStats.GetBuildID(), jsonStats.GetVersion(), segInfo.GetCollectionID(), segInfo.GetPartitionID(), segInfo.GetID(), jsonStats.GetFieldID())
-	uncompressedFiles := make([]string, 0, len(jsonStats.GetFiles()))
-	for _, file := range jsonStats.GetFiles() {
-		uncompressedFiles = append(uncompressedFiles, path.Join(prefix, file))
-	}
-	uncompressedJsonStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
-	uncompressedJsonStats.Files = uncompressedFiles
-	return uncompressedJsonStats
+func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
+	uncompressedJSONStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
+	statsMap := map[int64]*datapb.JsonKeyStats{jsonStats.GetFieldID(): uncompressedJSONStats}
+	metautil.BuildJSONKeyStatsPaths(h.s.meta.chunkManager.RootPath(), segInfo, statsMap)
+	return uncompressedJSONStats
 }
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {

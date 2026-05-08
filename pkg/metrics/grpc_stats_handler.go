@@ -22,7 +22,7 @@ import (
 
 	"google.golang.org/grpc/stats"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // milvusStatsKey is context key type.

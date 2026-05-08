@@ -31,27 +31,61 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
+	info := &SearchInfo{
+		planInfo: &planpb.QueryInfo{
+			GroupByFieldIds: []int64{101},
+		},
+	}
+
+	assert.Equal(t, internalpb.SearchType_DEFAULT, info.DetermineSearchType(false))
+}
+
+func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "category", DataType: schemapb.DataType_VarChar},
+	}}
+
+	info, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldKey, Value: "brand"},
+		{Key: GroupByFieldsKey, Value: "category"},
+	}, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{101}, info.groupByFieldIds)
+	assert.Equal(t, []string{"brand"}, info.groupByFieldNames)
+
+	info, err = parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldKey, Value: " "},
+		{Key: GroupByFieldsKey, Value: "brand, category"},
+	}, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
+	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
+}
 
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, validateCollectionName("abc"))
@@ -186,6 +220,52 @@ func TestValidateFieldName(t *testing.T) {
 	for _, name := range invalidNames {
 		assert.NotNil(t, validateFieldName(name))
 	}
+}
+
+// Regression for #49314: user-supplied field named __virtual_pk__ (or
+// RowID / Timestamp) must be rejected at CreateCollection to keep the
+// system namespace clean. Covers regular fields and struct-array
+// fields (both the struct name and its inner fields).
+func TestValidateReservedFieldNames(t *testing.T) {
+	// Accepts non-reserved names.
+	ok := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id"},
+			{Name: "embedding"},
+		},
+	}
+	assert.NoError(t, validateReservedFieldNames(ok))
+
+	for _, reserved := range []string{
+		common.VirtualPKFieldName,
+		common.RowIDFieldName,
+		common.TimeStampFieldName,
+	} {
+		s := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: reserved, DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := validateReservedFieldNames(s)
+		assert.Error(t, err, "reserved name %q must be rejected", reserved)
+		assert.Contains(t, err.Error(), "reserved")
+	}
+
+	// Struct-array field name collision.
+	s := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{Name: common.VirtualPKFieldName, Fields: []*schemapb.FieldSchema{{Name: "a"}}},
+		},
+	}
+	assert.Error(t, validateReservedFieldNames(s))
+
+	// Struct-array inner field name collision.
+	s2 := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{Name: "ok_struct", Fields: []*schemapb.FieldSchema{{Name: common.RowIDFieldName}}},
+		},
+	}
+	assert.Error(t, validateReservedFieldNames(s2))
 }
 
 func TestValidateDimension(t *testing.T) {
@@ -4088,7 +4168,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
 	})
 
 	t.Run("JSON not supported in struct", func(t *testing.T) {
@@ -4119,7 +4199,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "Nested array is not supported")
+			assert.Contains(t, err.Error(), "nested array is not supported")
 		}
 	})
 
@@ -5258,7 +5338,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid hash_function empty value", func(t *testing.T) {
@@ -5283,7 +5363,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid token_level value", func(t *testing.T) {
@@ -5308,7 +5388,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid token_level empty value", func(t *testing.T) {
@@ -5333,7 +5413,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid seed string value", func(t *testing.T) {

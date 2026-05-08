@@ -29,7 +29,7 @@ type SiliconflowClient struct {
 
 func NewSiliconflowClient(apiKey string) (*SiliconflowClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials conifg or configure the %s environment variable in the Milvus service.", models.SiliconflowAKEnvStr)
+		return nil, fmt.Errorf("missing credentials conifg or configure the %s environment variable in the Milvus service", models.SiliconflowAKEnvStr)
 	}
 
 	return &SiliconflowClient{

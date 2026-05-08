@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 var _ Checker = (*LeaderChecker)(nil)
@@ -77,20 +77,20 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		return nil
 	}
 
-	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
+	collectionIDs := c.meta.GetAll(ctx)
 	tasks := make([]task.Task, 0)
 
 	for _, collectionID := range collectionIDs {
 		if !c.readyToCheck(ctx, collectionID) {
 			continue
 		}
-		collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
+		collection := c.meta.GetCollection(ctx, collectionID)
 		if collection == nil {
 			log.Warn("collection released during check leader", zap.Int64("collection", collectionID))
 			continue
 		}
 
-		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			nodes := replica.GetRWNodes()
 			if streamingutil.IsStreamingServiceEnabled() {

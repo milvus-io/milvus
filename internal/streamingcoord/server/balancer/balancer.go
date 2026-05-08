@@ -6,11 +6,11 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 var (
@@ -37,6 +37,13 @@ type Balancer interface {
 
 	// GetAvailableStreamingNodes fetches streaming node info with resource group excluding frozen nodes.
 	GetAvailableStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)
+
+	// ConfirmPrimaryResourceGroupReady returns nil iff every RW pchannel is currently
+	// assigned to a streaming node that belongs to the configured primary resource group.
+	// Used by compliance checks to verify that a primary-RG change has finished
+	// propagating through the WAL layout before signaling Ready.
+	// If streaming.primaryResourceGroup is not configured, returns nil.
+	ConfirmPrimaryResourceGroupReady(ctx context.Context) error
 
 	// AllocVirtualChannels allocates virtual channels for a collection.
 	AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error)

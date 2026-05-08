@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -43,14 +43,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type OpsServiceSuite struct {
@@ -448,8 +448,8 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	nodes, err := suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.meta.HandleNodeUp(ctx, 1)
+	nodes, err := suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Contains(nodes, int64(1))
 	// test success
@@ -459,7 +459,7 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	nodes, err = suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.NotContains(nodes, int64(1))
 
@@ -468,7 +468,7 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	nodes, err = suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Contains(nodes, int64(1))
 }
@@ -500,7 +500,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	replicaID := int64(1)
 	nodes := []int64{1, 2, 3, 4}
 	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 	collection := utils.CreateTestCollection(collectionID, 1)
 	partition := utils.CreateTestPartition(partitionID, collectionID)
 	suite.meta.PutCollection(ctx, collection, partition)
@@ -615,7 +615,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.HandleNodeUp(ctx, node)
+		suite.meta.HandleNodeUp(ctx, node)
 	}
 
 	// test transfer segment success, expect generate 1 balance segment task
@@ -751,7 +751,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	replicaID := int64(1)
 	nodes := []int64{1, 2, 3, 4}
 	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 	collection := utils.CreateTestCollection(collectionID, 1)
 	partition := utils.CreateTestPartition(partitionID, collectionID)
 	suite.meta.PutCollection(ctx, collection, partition)
@@ -868,7 +868,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.HandleNodeUp(ctx, node)
+		suite.meta.HandleNodeUp(ctx, node)
 	}
 
 	// test transfer channel success, expect generate 1 balance channel task

@@ -21,15 +21,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) error {
@@ -48,7 +48,7 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		// Use default config if not set, compatible with old client.
 		cfg = meta.NewResourceGroupConfig(0, 0)
 	}
-	if err := s.meta.ResourceManager.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil {
+	if err := s.meta.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil {
 		return err
 	}
 
@@ -81,7 +81,7 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 		defer broadcaster.Close()
 	}
 
-	if err := s.meta.ResourceManager.CheckIfResourceGroupsUpdatable(ctx, req.GetResourceGroups()); err != nil {
+	if err := s.meta.CheckIfResourceGroupsUpdatable(ctx, req.GetResourceGroups()); err != nil {
 		return err
 	}
 
@@ -111,7 +111,7 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 	}
 
 	// Move node from source resource group to target resource group.
-	rgs, err := s.meta.ResourceManager.CheckIfTransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
+	rgs, err := s.meta.CheckIfTransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
 		return err
@@ -132,5 +132,5 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 }
 
 func (c *DDLCallbacks) alterResourceGroupV2AckCallback(ctx context.Context, result message.BroadcastResultAlterResourceGroupMessageV2) error {
-	return c.meta.ResourceManager.AlterResourceGroups(ctx, result.Message.Header().ResourceGroupConfigs)
+	return c.meta.AlterResourceGroups(ctx, result.Message.Header().ResourceGroupConfigs)
 }

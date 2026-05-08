@@ -21,11 +21,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema) error {
@@ -72,7 +72,7 @@ func SafeStringForError(s string) string {
 	for i, r := range s {
 		if r == utf8.RuneError {
 			// Invalid UTF-8 sequence, encode as hex
-			result.WriteString(fmt.Sprintf("\\x%02x", s[i]))
+			fmt.Fprintf(&result, "\\x%02x", s[i])
 		} else {
 			result.WriteRune(r)
 		}

@@ -32,20 +32,20 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type spyCompactionInspector struct {
@@ -524,7 +524,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -2003,6 +2003,41 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 }
 
+func TestFilterSegmentsWithMatchingSchemaVersion(t *testing.T) {
+	coll := &collectionInfo{
+		ID:     1,
+		Schema: &schemapb.CollectionSchema{Version: 5},
+	}
+
+	// empty input → empty output
+	result := filterSegmentsWithMatchingSchemaVersion(nil, coll)
+	assert.Empty(t, result)
+
+	// all segments match → all returned
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+	}, coll)
+	assert.Equal(t, 2, len(result))
+
+	// mixed versions → only matching segments returned
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{ID: 1, SchemaVersion: 5}},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 2, SchemaVersion: 4}},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3, SchemaVersion: 5}},
+	}, coll)
+	assert.Equal(t, 2, len(result))
+	assert.Equal(t, int64(1), result[0].GetID())
+	assert.Equal(t, int64(3), result[1].GetID())
+
+	// all segments outdated → empty output
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 0}},
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 4}},
+	}, coll)
+	assert.Empty(t, result)
+}
+
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	coll := &collectionInfo{
 		ID:         1,
@@ -2080,9 +2115,10 @@ func Test_TirggerCompaction_WaitResult(t *testing.T) {
 			case signal := <-got.signals:
 				x := j.Load().(int)
 				j.Store(x + 1)
-				if x == 0 {
+				switch x {
+				case 0:
 					assert.EqualValues(t, 3, signal.collectionID)
-				} else if x == 1 {
+				case 1:
 					assert.EqualValues(t, 4, signal.collectionID)
 				}
 				signal.Notify(nil)

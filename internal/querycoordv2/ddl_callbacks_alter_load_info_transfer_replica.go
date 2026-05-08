@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForTransferReplica broadcasts the alter load config message for transfer replica.
@@ -34,10 +34,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 	}
 	defer broadcaster.Close()
 
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetSourceResourceGroup()); !ok {
+	if ok := s.meta.ContainResourceGroup(ctx, req.GetSourceResourceGroup()); !ok {
 		return merr.WrapErrResourceGroupNotFound(req.GetSourceResourceGroup())
 	}
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetTargetResourceGroup()); !ok {
+	if ok := s.meta.ContainResourceGroup(ctx, req.GetTargetResourceGroup()); !ok {
 		return merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup())
 	}
 	if req.GetSourceResourceGroup() == req.GetTargetResourceGroup() {

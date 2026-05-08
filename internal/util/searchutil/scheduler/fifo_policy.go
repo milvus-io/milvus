@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ schedulePolicy = &fifoPolicy{}

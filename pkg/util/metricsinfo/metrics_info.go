@@ -14,7 +14,7 @@ package metricsinfo
 import (
 	"encoding/json"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 )
 
 // ComponentInfos defines the interface of all component infos

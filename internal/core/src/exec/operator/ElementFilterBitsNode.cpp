@@ -182,6 +182,15 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         tracer::AddEvent(fmt::format("offset_mode, input_elements: {}",
                                      element_offsets.size()));
 
+        // No doc passed the upstream predicate on this segment: skip Eval
+        // (expressions return nullptr on empty input) and mark all elements
+        // as filtered out.
+        if (element_offsets.empty()) {
+            TargetBitmap bitset(total_elements, true);
+            TargetBitmap valid_bitset(total_elements, true);
+            return std::make_pair(std::move(bitset), std::move(valid_bitset));
+        }
+
         EvalCtx eval_ctx(operator_context_->get_exec_context(),
                          &element_offsets);
 

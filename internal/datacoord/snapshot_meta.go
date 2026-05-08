@@ -4,22 +4,22 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Snapshot Metadata Management
@@ -411,7 +411,7 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 //   - first tick: runs immediately, loads RefIndexes from S3, narrows the blocks
 //   - subsequent ticks: periodically retry any RefIndex still in Failed state
 //
-// It runs until loaderCtx is cancelled.
+// It runs until loaderCtx is canceled.
 func (sm *snapshotMeta) refIndexLoaderLoop() {
 	defer sm.loaderWg.Done()
 
@@ -810,7 +810,7 @@ func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectio
 
 	if len(errs) > 0 {
 		return dropped, fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
-			len(errs), len(snapshotNames), collectionID, errors.Join(errs...))
+			len(errs), len(snapshotNames), collectionID, merr.Combine(errs...))
 	}
 
 	return dropped, nil

@@ -57,6 +57,7 @@
 #include "nlohmann/json_fwd.hpp"
 #include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -284,7 +285,7 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
             auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
@@ -623,7 +624,7 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (uint32_t i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 BuildKeyStatsForNullRow();
             } else {
                 auto json_str =
@@ -635,10 +636,9 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 // should be handled as null row
                 if (strlen(json_str) == 0) {
                     BuildKeyStatsForNullRow();
-                    continue;
+                } else {
+                    BuildKeyStatsForRow(json_str, row_id);
                 }
-
-                BuildKeyStatsForRow(json_str, row_id);
             }
             row_id++;
         }
@@ -1066,13 +1066,17 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
 
+    auto group_chunk_metadata = milvus::segcore::LoadGroupChunkMetadata(
+        files, {}, fmt::format("seg_{}_jks_{}", segment_id_, field_id_));
+
     auto translator = std::make_unique<
         milvus::segcore::storagev2translator::GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::JSON_KEY_STATS,
         field_meta_map,
         column_group_info,
-        files,
+        std::move(files),
+        std::move(group_chunk_metadata.row_group_meta_list),
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),

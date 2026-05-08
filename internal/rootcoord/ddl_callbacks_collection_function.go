@@ -23,31 +23,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: coll.EnableDynamicField,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)
 	if err != nil {
@@ -84,7 +75,7 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 
 func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.FunctionSchema, collection *model.Collection) error {
 	if fSchema == nil {
-		return fmt.Errorf("Function schema is empty")
+		return fmt.Errorf("function schema is empty")
 	}
 	var oldFuncSchema *model.Function
 	newFuncs := []*model.Function{}
@@ -96,7 +87,7 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 		}
 	}
 	if oldFuncSchema == nil {
-		err := fmt.Errorf("Function %s not exists", fSchema.Name)
+		err := fmt.Errorf("function %s not exists", fSchema.Name)
 		log.Ctx(ctx).Error("Alter function failed:", zap.Error(err))
 		return err
 	}
@@ -112,7 +103,7 @@ func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.Functi
 	for _, name := range oldFuncSchema.OutputFieldNames {
 		field, exists := fieldMapping[name]
 		if !exists {
-			return fmt.Errorf("Old version function's output field %s not exists", name)
+			return fmt.Errorf("old version function's output field %s not exists", name)
 		}
 		field.IsFunctionOutput = false
 	}

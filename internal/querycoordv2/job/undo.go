@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 type UndoList struct {
@@ -67,7 +67,7 @@ func (u *UndoList) RollBack() {
 	if u.IsNewCollection || u.IsReplicaCreated {
 		err = u.meta.CollectionManager.RemoveCollection(u.ctx, u.CollectionID)
 	} else {
-		err = u.meta.CollectionManager.RemovePartition(u.ctx, u.CollectionID, u.LackPartitions...)
+		err = u.meta.RemovePartition(u.ctx, u.CollectionID, u.LackPartitions...)
 	}
 	if err != nil {
 		log.Warn("failed to rollback collection from meta", zap.Error(err))

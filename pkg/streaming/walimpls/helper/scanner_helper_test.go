@@ -45,9 +45,10 @@ func TestScanner(t *testing.T) {
 			if cancel && done {
 				return
 			}
-			if i == 0 {
+			switch i {
+			case 0:
 				assert.True(t, cancel && !done)
-			} else if i == 1 {
+			case 1:
 				assert.True(t, cancel && done)
 			}
 		}

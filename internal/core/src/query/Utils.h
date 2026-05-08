@@ -14,12 +14,44 @@
 #include <limits>
 #include <string>
 
+#include <utility>
+#include <vector>
+
+#include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
+#include "common/Consts.h"
 #include "common/OffsetMapping.h"
+#include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
+// Map logical element IDs returned by knowhere to (doc_id, elem_idx) pairs
+// via ArrayOffsets. Caller must ensure the input `element_ids` are already
+// in logical space (i.e. apply TransformOffset first when offset_mapping is
+// enabled), since ArrayOffsets::ElementIDToRowID is keyed on logical
+// element IDs.
+inline std::pair<std::vector<int64_t>, std::vector<int32_t>>
+ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
+                      const milvus::IArrayOffsets& array_offsets) {
+    std::vector<int64_t> doc_offsets;
+    std::vector<int32_t> element_indices;
+    doc_offsets.reserve(element_ids.size());
+    element_indices.reserve(element_ids.size());
+    for (size_t i = 0; i < element_ids.size(); i++) {
+        if (element_ids[i] == INVALID_SEG_OFFSET) {
+            doc_offsets.push_back(INVALID_SEG_OFFSET);
+            element_indices.push_back(-1);
+        } else {
+            auto [doc_id, elem_index] =
+                array_offsets.ElementIDToRowID(element_ids[i]);
+            doc_offsets.push_back(doc_id);
+            element_indices.push_back(elem_index);
+        }
+    }
+    return std::make_pair(std::move(doc_offsets), std::move(element_indices));
+}
+
 inline TargetBitmap
 TransformBitset(const BitsetView& bitset,
                 const milvus::OffsetMapping& mapping) {
@@ -43,6 +75,35 @@ TransformOffset(std::vector<int64_t>& seg_offsets,
         if (seg_offset >= 0) {
             seg_offset = mapping.GetLogicalOffset(seg_offset);
         }
+    }
+}
+
+// Map knowhere's raw offsets back to logical space. The two inputs are
+// mutually exclusive:
+//
+// - array_offsets != nullptr (VECTOR_ARRAY element-level search):
+//   knowhere returns physical element IDs. ArrayOffsets is built by
+//   walking every row in the segment and advancing the row counter on
+//   every row (including empty/null rows, which occupy a zero-length
+//   element range), so ElementIDToRowID produces (logical_row_id,
+//   elem_idx) directly. No OffsetMapping pass is needed.
+//
+// - array_offsets == nullptr (plain vector field): when OffsetMapping is
+//   enabled, the index/chunk was built over valid rows only, so
+//   knowhere's physical row IDs must be remapped to logical via
+//   OffsetMapping. When OffsetMapping is disabled, TransformOffset is a
+//   no-op.
+inline void
+FinalizeVectorSearchOffsets(SearchResult& result,
+                            const milvus::OffsetMapping& offset_mapping,
+                            const milvus::IArrayOffsets* array_offsets) {
+    if (array_offsets != nullptr) {
+        auto [doc_offsets, elem_indices] =
+            ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
+        result.seg_offsets_ = std::move(doc_offsets);
+        result.element_indices_ = std::move(elem_indices);
+    } else {
+        TransformOffset(result.seg_offsets_, offset_mapping);
     }
 }
 

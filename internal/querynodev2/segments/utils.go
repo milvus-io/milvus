@@ -10,20 +10,20 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
@@ -333,6 +333,23 @@ func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 		return policy
 	}
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// isExternalCollectionLazyLoad checks if all external fields in the schema
+// have warmup=disable (lazy load). Returns true only when every external
+// field's resolved warmup policy is "disable", meaning no field data will be
+// downloaded during segment load.
+func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() == "" {
+			continue
+		}
+		policy := getFieldWarmupPolicy(field)
+		if policy != common.WarmupDisable {
+			return false
+		}
+	}
+	return true
 }
 
 // GetVirtualPK generates a virtual primary key from segmentID and offset.

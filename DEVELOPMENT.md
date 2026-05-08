@@ -89,7 +89,7 @@ The following specification (either physical or virtual machine resources) is re
 | Go | 1.21 | Required. Install from https://go.dev/dl/ |
 | CMake | 3.26 | Auto-installed by install_deps.sh |
 | Conan | 2.25.1 | Auto-installed by install_deps.sh |
-| Rust | 1.89 | Auto-installed by install_deps.sh |
+| Rust | 1.92 | Auto-installed by install_deps.sh |
 
 ### Compiler Setup
 
@@ -174,6 +174,38 @@ Install Conan:
 ```shell
 pip install conan==2.25.1
 ```
+
+##### Working on master and release-2.5 / release-2.6 on the same machine
+
+The release-2.5 and release-2.6 branches still use Conan 1.x, while master
+requires Conan 2.x. If you switch between branches on the same machine, keep
+Conan 2.x as your default `conan` and install Conan 1.x alongside with a
+`-1` suffix via `pipx`:
+
+```shell
+# Default conan stays 2.x (as above)
+pipx install conan==2.25.1
+
+# Add Conan 1.x for release-2.5 / release-2.6 work
+pipx install conan==1.66.0 --suffix=-1
+```
+
+Then build as usual:
+
+```shell
+# master: uses the default conan (2.x), no override needed
+make
+
+# release-2.5 / release-2.6: point at the 1.x binary
+CONAN_CMD=conan-1 make
+
+# Or export once per shell session:
+#   export CONAN_CMD=conan-1
+#   make
+```
+
+If `CONAN_CMD` is unset, the build scripts fall back to the default `conan`
+binary on your `PATH`, preserving the existing behavior.
 
 #### Go
 

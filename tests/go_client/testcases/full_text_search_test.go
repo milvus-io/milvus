@@ -15,6 +15,8 @@ import (
 )
 
 func TestFullTextSearchDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -45,6 +47,8 @@ func TestFullTextSearchDefault(t *testing.T) {
 
 // TestSearchFullTextBase tests basic full text search functionality with different languages
 func TestSearchFullTextWithDiffLang(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -105,6 +109,8 @@ func TestSearchFullTextWithDiffLang(t *testing.T) {
 
 // TestSearchFullTextWithDynamicField tests full text search with dynamic field enabled
 func TestSearchFullTextWithDynamicField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// Test cases for different languages and analyzers
@@ -164,6 +170,8 @@ func TestSearchFullTextWithDynamicField(t *testing.T) {
 
 // TestSearchFullTextWithPartitionKey tests full text search with partition key
 func TestSearchFullTextWithPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -235,6 +243,8 @@ func TestSearchFullTextWithPartitionKey(t *testing.T) {
 
 // TestSearchFullTextWithEmptyData tests full text search with empty data
 func TestSearchFullTextWithEmptyData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -298,6 +308,8 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 
 // test full-text-search with default text, output text
 func TestFullTextSearchDefaultValue(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -343,6 +355,8 @@ func TestFullTextSearchDefaultValue(t *testing.T) {
 
 // TestTextMatchMinimumShouldMatch verifies text_match(..., minimum_should_match=N)
 func TestTextMatchMinimumShouldMatch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

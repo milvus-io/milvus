@@ -12,9 +12,9 @@
 package client
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Check rmqMessage implements ConsumerMessage

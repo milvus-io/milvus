@@ -3,7 +3,7 @@
 package mock_ratelimit
 
 import (
-	ratelimit "github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
+	ratelimit "github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	mock "github.com/stretchr/testify/mock"
 )
 

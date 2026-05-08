@@ -21,8 +21,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
@@ -120,6 +120,15 @@ func (opt *createCollectionOption) WithVectorFieldName(name string) *createColle
 func (opt *createCollectionOption) WithNumPartitions(numPartitions int64) *createCollectionOption {
 	opt.numPartitions = numPartitions
 	return opt
+}
+
+// Validate runs client-side sanity checks against the user-provided schema. Invoked automatically
+// from Client.CreateCollection via interface assertion.
+func (opt *createCollectionOption) Validate() error {
+	if opt.schema == nil {
+		return nil
+	}
+	return opt.schema.Validate()
 }
 
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {

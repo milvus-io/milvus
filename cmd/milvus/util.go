@@ -21,10 +21,10 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func makeRuntimeDir(dir string) error {
@@ -86,7 +86,7 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Floc
 	defer fd.Close()
 
 	fd.Truncate(0)
-	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	_, err = fmt.Fprintf(fd, "%d", os.Getpid())
 	if err != nil {
 		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
 	}

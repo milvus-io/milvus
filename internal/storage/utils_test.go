@@ -28,14 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -704,7 +704,7 @@ func genRowBasedInsertMsg(numRows, dim int) (msg *msgstream.InsertMsg, pks []int
 	raws := make([][]interface{}, 0)
 	for i := 0; i < numRows; i++ {
 		row, pk, raw := genRowWithAllFields(dim)
-		msg.InsertRequest.RowData = append(msg.InsertRequest.RowData, row)
+		msg.RowData = append(msg.RowData, row)
 		pks = append(pks, pk)
 		raws = append(raws, raw)
 	}

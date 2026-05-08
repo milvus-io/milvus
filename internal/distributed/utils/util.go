@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func GracefulStopGRPCServer(s *grpc.Server) {
@@ -52,7 +52,7 @@ func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.T
 
 func EnableInternalTLS(NodeType string) grpc.ServerOption {
 	log := log.Ctx(context.TODO())
-	var Params *paramtable.ComponentParam = paramtable.Get()
+	Params := paramtable.Get()
 	certFile := Params.InternalTLSCfg.InternalTLSServerPemPath.GetValue()
 	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
 	internaltlsEnabled := Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool()

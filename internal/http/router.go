@@ -56,6 +56,8 @@ const (
 	RouteGcPause  = "/management/datacoord/garbage_collection/pause"
 	RouteGcResume = "/management/datacoord/garbage_collection/resume"
 
+	RouteCommitBackfill = "/management/datacoord/backfill/commit"
+
 	RouteSuspendQueryCoordBalance = "/management/querycoord/balance/suspend"
 	RouteResumeQueryCoordBalance  = "/management/querycoord/balance/resume"
 	RouteQueryCoordBalanceStatus  = "/management/querycoord/balance/status"

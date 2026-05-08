@@ -13,7 +13,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType, MilvusException, AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, DataType, MilvusException, RRFRanker
 
 prefix = "large_topk"
 default_nb = 3000          # > 1024 to trigger IVF index build
@@ -23,6 +23,7 @@ default_limit = ct.default_limit  # 10
 vec_field = ct.default_float_vec_field_name  # "float_vector"
 large_topk_first = 16385   # first topk above the normal 16384 limit
 large_topk_total = 21000   # total rows in col_large_topk (> large_topk_first + default_nb for headroom)
+large_topk_max = 1_000_000  # maximum supported topk in large_topk mode
 
 
 @pytest.mark.xdist_group("TestLargeTopkShared")
@@ -449,6 +450,56 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
                                  "metric": "L2"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_after_insert_with_large_topk(self):
+        """
+        target: verify create_index on a populated collection with query_mode=large_topk,
+                and that large topk search (>16384) works correctly after index build
+        method:
+            1. create collection with query_mode=large_topk (no index yet)
+            2. insert large_topk_first + default_nb rows, flush
+            3. create_index on the populated collection
+            4. load
+            5. search with limit=large_topk_first (>16384) to verify large topk is functional
+            6. search with limit > nb rows (capped to actual nb) to verify normal search works
+        expected: create_index succeeds on populated collection;
+                  large topk search returns large_topk_first results;
+                  normal search returns min(limit, nb) results
+        note: this catches the timeout seen when rebuilding index after alter/drop property,
+              isolating whether the issue is data-at-index-build-time or the alter step itself
+        """
+        client = self._client()
+        nb = large_topk_first + default_nb
+        col = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, col, schema=schema,
+                               properties={"query_mode": "large_topk"}, force_teardown=True)
+
+        rows = [{vec_field: cf.gen_vectors(1, default_dim)[0]} for _ in range(nb)]
+        self.insert(client, col, rows)
+        self.flush(client, col)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
+        self.create_index(client, col, index_params)
+        self.load_collection(client, col)
+
+        # verify large topk (>16384) is functional
+        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
+                    anns_field=vec_field, limit=large_topk_first,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq, "limit": large_topk_first, "metric": "L2"})
+
+        # verify normal search also works
+        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
+                    anns_field=vec_field, limit=100,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq, "limit": 100, "metric": "L2"})
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_large_topk_growing_segment(self):
         """
         target: verify large_topk works on growing segments (before flush)
@@ -582,6 +633,68 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
     # The SDK enforces batch_size <= 16384 client-side (ParamError code=1, regardless of property).
     # Iterator `limit` (total results) uses internal pagination with batch_size <= 16384 per request,
     # so per-request topk never exceeds 16384. No large_topk-specific iterator tests are needed.
+
+    # -------------------------------------------------------------------------
+    # Large topk boundary tests (L3, large data volume)
+    # -------------------------------------------------------------------------
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_large_topk_boundary_2m_rows(self):
+        """
+        target: verify large_topk topk boundary values with 2M rows
+        method:
+            1. create collection with query_mode=large_topk
+            2. insert 2,000,000 rows (128-dim) in batches, flush
+            3. create_index, load
+            4. search with limit=large_topk_max-1 (999,999) → should succeed
+            5. search with limit=large_topk_max (1,000,000) → should succeed, return 1M results
+            6. search with limit=large_topk_max+1 (1,000,001) → should fail with error
+        expected: boundary limits enforced correctly; max valid topk returns 1M results
+        """
+        client = self._client()
+        total_nb = 2_000_000
+        batch_size = 50_000
+        col = cf.gen_collection_name_by_testcase_name()
+        dim = 64
+        schema = self.create_schema(client)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, col, schema=schema,
+                               properties={"query_mode": "large_topk"}, force_teardown=True)
+
+        for _ in range(total_nb // batch_size):
+            vecs = cf.gen_vectors(batch_size, dim)
+            rows = [{vec_field: v} for v in vecs]
+            self.insert(client, col, rows)
+        self.flush(client, col)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
+        self.create_index(client, col, index_params)
+        self.load_collection(client, col)
+
+        # just below max → should succeed
+        self.search(client, col, data=cf.gen_vectors(1, dim),
+                    anns_field=vec_field, limit=large_topk_max - 1,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": large_topk_max - 1, "metric": "L2"})
+
+        # max valid large topk → should succeed, return 1M results
+        self.search(client, col, data=cf.gen_vectors(1, dim),
+                    anns_field=vec_field, limit=large_topk_max,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": large_topk_max, "metric": "L2"})
+
+        # over max → should fail
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"topk [{large_topk_max + 1}] is invalid, "
+                             f"it should be in range [1, {large_topk_max}]"}
+        self.search(client, col, data=cf.gen_vectors(1, dim),
+                    anns_field=vec_field, limit=large_topk_max + 1,
+                    check_task=CheckTasks.err_res,
+                    check_items=error)
 
     # -------------------------------------------------------------------------
     # Hybrid search interface tests

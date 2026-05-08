@@ -31,8 +31,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
@@ -44,19 +44,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	_ "github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ Task = (*statsTask)(nil)
@@ -82,9 +82,9 @@ type statsTask struct {
 
 type BuildIndexOptions struct {
 	TantivyMemory                int64
-	JsonStatsMaxShreddingColumns int64
-	JsonStatsShreddingRatio      float64
-	JsonStatsWriteBatchSize      int64
+	JSONStatsMaxShreddingColumns int64
+	JSONStatsShreddingRatio      float64
+	JSONStatsWriteBatchSize      int64
 }
 
 func NewStatsTask(ctx context.Context,
@@ -738,11 +738,11 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			req.InsertLogs = insertBinlogs
 			req.ManifestPath = st.manifestPath
 			options := &BuildIndexOptions{
-				JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
-				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
-				JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
+				JSONStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
+				JSONStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
+				JSONStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
-			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_key_index", field.GetFieldID())
+			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_stats", field.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -794,7 +794,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
 			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
-			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_key_index", stats.GetFieldID())
+			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_stats", stats.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -851,7 +851,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 		return metautil.BuildTextIndexPrefix(rootPath,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
-	case "json_key_index":
+	case "json_stats":
 		return metautil.BuildJSONKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
@@ -882,9 +882,9 @@ func buildIndexParams(
 		StorageConfig:                    storageConfig,
 		CurrentScalarIndexVersion:        common.ClampScalarIndexVersion(req.GetCurrentScalarIndexVersion()),
 		StorageVersion:                   req.GetStorageVersion(),
-		JsonStatsMaxShreddingColumns:     options.JsonStatsMaxShreddingColumns,
-		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,
-		JsonStatsWriteBatchSize:          options.JsonStatsWriteBatchSize,
+		JsonStatsMaxShreddingColumns:     options.JSONStatsMaxShreddingColumns,
+		JsonStatsShreddingRatioThreshold: options.JSONStatsShreddingRatio,
+		JsonStatsWriteBatchSize:          options.JSONStatsWriteBatchSize,
 		Manifest:                         req.GetManifestPath(),
 		StatsBasePath:                    statsBasePath,
 	}

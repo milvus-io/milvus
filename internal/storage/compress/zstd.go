@@ -26,8 +26,8 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type zstdCodec struct{}

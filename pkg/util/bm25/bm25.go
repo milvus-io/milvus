@@ -1,6 +1,6 @@
 package bm25
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 
 func BuildSparseFieldData(field *schemapb.FieldSchema, sparseArray *schemapb.SparseFloatArray) *schemapb.FieldData {
 	return &schemapb.FieldData{

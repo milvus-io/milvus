@@ -34,9 +34,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
@@ -141,16 +141,12 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 }
 
 // ReadNext reads the next record batch from the reader
-func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
+func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 	if r.recordReader == nil {
 		return nil, io.EOF
 	}
 
-	// no need to manual release
-	// stream reader will release previous one
-
-	// Read next record from the stream
-	rec, err := r.recordReader.Read()
+	rec, err = r.recordReader.Read()
 	if err != nil {
 		if err == io.EOF {
 			return nil, io.EOF

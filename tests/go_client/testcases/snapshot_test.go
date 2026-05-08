@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -127,6 +127,8 @@ func waitForAllIndexesBuilt(ctx context.Context, mc *base.MilvusClient, collName
 
 // TestCreateSnapshot tests creating a snapshot for a collection
 func TestCreateSnapshot(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -175,6 +177,8 @@ func TestCreateSnapshot(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiSegment tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -312,6 +316,8 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -460,6 +466,8 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiFields tests snapshot restore with all supported field types
 func TestSnapshotRestoreWithMultiFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -665,6 +673,8 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 // TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection
 // Verifies that schema and indexes are preserved correctly without any data
 func TestSnapshotRestoreEmptyCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -931,6 +941,8 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 // This test verifies that JSON stats (both legacy json_key_index_log and new json_stats formats)
 // are correctly preserved and restored during snapshot operations
 func TestSnapshotRestoreWithJSONStats(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1142,6 +1154,8 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 // TestSnapshotRestoreAfterDropPartitionAndCollection tests snapshot restore functionality
 // after dropping partitions and the entire collection
 func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1332,6 +1346,8 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 // Verifies that ListSnapshots with db-level filtering returns only snapshots
 // belonging to collections in the specified database.
 func TestSnapshotCrossDatabase(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1404,6 +1420,8 @@ func TestSnapshotCrossDatabase(t *testing.T) {
 // 3. Drop collection B, restore A1 again to collection C
 // 4. Verify both A and C can load and query/search
 func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1559,6 +1577,8 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 // This covers the bug where CopySegmentResult.index_infos used fieldID as map key,
 // causing only the last index per field to survive (overwriting earlier ones).
 func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

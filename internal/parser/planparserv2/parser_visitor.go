@@ -9,12 +9,12 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ParserVisitorArgs struct {
@@ -294,11 +294,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := true
-
-	if leftValueExpr == nil {
-		reverse = false
-	}
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
@@ -387,11 +383,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := true
-
-	if leftValueExpr == nil {
-		reverse = false
-	}
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
@@ -564,7 +556,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 	}
 
 	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
-		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
+		(!typeutil.IsArrayType(leftExpr.dataType) || !typeutil.IsStringType(column.GetElementType())) {
 		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
@@ -1037,7 +1029,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserLE
 	upperInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserLE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !(lowerInclusive && upperInclusive) {
+		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
@@ -1124,7 +1116,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserGE
 	upperInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserGE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !(lowerInclusive && upperInclusive) {
+		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
@@ -1226,6 +1218,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 						Child: childExpr.expr,
 					},
 				},
+				IsTemplate: childExpr.expr.GetIsTemplate(),
 			},
 			dataType: schemapb.DataType_Bool,
 		}
@@ -1254,8 +1247,30 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return n
 	}
 
+	// One side is a boolean literal, the other is an expression: short-circuit fold.
+	// true or expr → AlwaysTrueExpr; false or expr → expr (and symmetric cases).
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'or' can only be used between boolean expressions")
+		boolLiteral := leftValue
+		otherExpr := getExpr(right)
+		if boolLiteral == nil {
+			boolLiteral = rightValue
+			otherExpr = getExpr(left)
+		}
+		if !IsBool(boolLiteral) {
+			return errors.New("'or' can only be used between boolean expressions")
+		}
+		if boolLiteral.GetBoolVal() {
+			// true or expr → always true
+			return &ExprWithType{
+				expr:     alwaysTrueExpr(),
+				dataType: schemapb.DataType_Bool,
+			}
+		}
+		// false or expr → expr
+		if otherExpr == nil || !canBeExecuted(otherExpr) {
+			return errors.New("'or' can only be used between boolean expressions")
+		}
+		return otherExpr
 	}
 
 	var leftExpr *ExprWithType
@@ -1310,8 +1325,30 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return n
 	}
 
+	// One side is a boolean literal, the other is an expression: short-circuit fold.
+	// false and expr → AlwaysFalseExpr; true and expr → expr (and symmetric cases).
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'and' can only be used between boolean expressions")
+		boolLiteral := leftValue
+		otherExpr := getExpr(right)
+		if boolLiteral == nil {
+			boolLiteral = rightValue
+			otherExpr = getExpr(left)
+		}
+		if !IsBool(boolLiteral) {
+			return errors.New("'and' can only be used between boolean expressions")
+		}
+		if !boolLiteral.GetBoolVal() {
+			// false and expr → always false
+			return &ExprWithType{
+				expr:     alwaysFalseExpr(),
+				dataType: schemapb.DataType_Bool,
+			}
+		}
+		// true and expr → expr
+		if otherExpr == nil || !canBeExecuted(otherExpr) {
+			return errors.New("'and' can only be used between boolean expressions")
+		}
+		return otherExpr
 	}
 
 	var leftExpr *ExprWithType

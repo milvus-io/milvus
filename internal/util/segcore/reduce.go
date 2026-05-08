@@ -27,8 +27,12 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/util/cgo"
 )
 
 type SliceInfo struct {
@@ -68,9 +72,18 @@ func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *S
 	return sInfo
 }
 
-func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searchResults []*SearchResult,
+func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, placeholderGroup unsafe.Pointer, searchResults []*SearchResult,
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
 ) (SearchResultDataBlobs, error) {
+	// cgo.Async starts the C call synchronously and only then registers the
+	// future for ctx-driven cancellation. For a small reduce the C side can
+	// finish in microseconds, well before the future manager propagates
+	// cancellation, so a pre-canceled ctx otherwise leaks through as a
+	// successful reduce. Honor ctx early -- the standard Go idiom.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if plan.cSearchPlan == nil {
 		return nil, errors.New("nil search plan")
 	}
@@ -95,14 +108,35 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	cSliceNQSPtr := (*C.int64_t)(&sliceNQs[0])
 	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
 	cNumSlices := C.int64_t(len(sliceNQs))
-	var cSearchResultDataBlobs SearchResultDataBlobs
 	traceCtx := ParseCTraceContext(ctx)
-	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
-		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(plan)
+	defer runtime.KeepAlive(searchResults)
+	defer runtime.KeepAlive(cSearchResults)
+	defer runtime.KeepAlive(sliceNQs)
+	defer runtime.KeepAlive(sliceTopKs)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncReduceSearchResultsAndFillData(
+				traceCtx.ctx,
+				plan.cSearchPlan,
+				C.CPlaceholderGroup(placeholderGroup),
+				cSearchResultPtr,
+				cNumSegments,
+				cSliceNQSPtr,
+				cSliceTopKSPtr,
+				cNumSlices,
+			))
+		},
+		cgo.WithName("reduce-search-results"),
+	)
+	defer future.Release()
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
 		return nil, errors.Wrap(err, "ReduceSearchResultsAndFillData failed")
 	}
-	return cSearchResultDataBlobs, nil
+	return SearchResultDataBlobs(result), nil
 }
 
 func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchResultDataBlobs, blobIndex int) ([]byte, StorageCost, error) {

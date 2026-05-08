@@ -1,13 +1,31 @@
-import pytest
-import time
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
+
+import pytest
 from pymilvus import MilvusClient
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS = 600
+
+
+def apply_replicate_configuration(tasks, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS):
+    # Fan out in parallel: the server blocks non-primary clusters in
+    # waitUntilPrimaryChangeOrConfigurationSame until the primary's broadcast
+    # propagates via CDC, so a sequential call where the first client happens
+    # to be a replica deadlocks on the client's RPC timeout.
+    with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = [
+            executor.submit(client.update_replicate_configuration, timeout=timeout, **config)
+            for client, config in tasks
+        ]
+        wait(futures)
+    for f in futures:
+        f.result()
+
 
 def pytest_addoption(parser):
     """Add command line options for pytest."""
@@ -35,9 +53,7 @@ def pytest_addoption(parser):
         default="root:Milvus",
         help="Downstream Milvus token",
     )
-    parser.addoption(
-        "--sync-timeout", action="store", default="30", help="Sync timeout in seconds"
-    )
+    parser.addoption("--sync-timeout", action="store", default="30", help="Sync timeout in seconds")
     parser.addoption(
         "--source-cluster-id",
         action="store",
@@ -61,6 +77,18 @@ def pytest_addoption(parser):
         action="store",
         default="30m",
         help="Duration for test operations (e.g., 30m, 1h, 60s)",
+    )
+    parser.addoption(
+        "--is-check",
+        action="store",
+        default="true",
+        help="Whether to assert on checker statistics",
+    )
+    parser.addoption(
+        "--milvus-ns",
+        action="store",
+        default="chaos-testing",
+        help="Kubernetes namespace for Milvus deployment",
     )
 
 
@@ -138,6 +166,75 @@ def request_duration(request):
     return request.config.getoption("--request-duration")
 
 
+@pytest.fixture(scope="session")
+def is_check(request):
+    # The root tests/python_client/conftest.py registers --is_check (underscore)
+    # with type=bool, which argparse maps to the same dest (is_check) as our
+    # --is-check (hyphen). The root's bool wins in chaos runs, so accept either.
+    val = request.config.getoption("--is-check")
+    return val if isinstance(val, bool) else str(val).lower() == "true"
+
+
+@pytest.fixture(scope="session")
+def milvus_ns(request):
+    return request.config.getoption("--milvus-ns")
+
+
+@pytest.fixture(scope="session")
+def switchover_helper(request, upstream_client, downstream_client):
+    """Returns a callable that performs CDC topology switchover."""
+    upstream_uri = request.config.getoption("--upstream-uri")
+    upstream_token = request.config.getoption("--upstream-token")
+    downstream_uri = request.config.getoption("--downstream-uri")
+    downstream_token = request.config.getoption("--downstream-token")
+    pchannel_num = int(request.config.getoption("--pchannel-num"))
+    original_source = request.config.getoption("--source-cluster-id")
+    original_target = request.config.getoption("--target-cluster-id")
+
+    # Map cluster IDs to their URIs/tokens
+    cluster_map = {
+        original_source: {"uri": upstream_uri, "token": upstream_token},
+        original_target: {"uri": downstream_uri, "token": downstream_token},
+    }
+
+    def do_switchover(new_source_id, new_target_id):
+        logger.info(f"Performing switchover: {new_source_id} -> {new_target_id}")
+        config = {
+            "clusters": [
+                {
+                    "cluster_id": new_source_id,
+                    "connection_param": cluster_map[new_source_id],
+                    "pchannels": [f"{new_source_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
+                },
+                {
+                    "cluster_id": new_target_id,
+                    "connection_param": cluster_map[new_target_id],
+                    "pchannels": [f"{new_target_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
+                },
+            ],
+            "cross_cluster_topology": [{"source_cluster_id": new_source_id, "target_cluster_id": new_target_id}],
+        }
+        # Dedicated short-lived clients so switchover RPCs don't share a
+        # gRPC channel with concurrent DML on the session-scoped clients.
+        # pymilvus's connection manager closes a channel on UNAVAILABLE /
+        # STREAMING_CODE_REPLICATE_VIOLATION to trigger recovery; if a DML
+        # on the session client triggers that close while our sibling
+        # update_replicate_configuration RPC is in flight on the same
+        # channel, the latter surfaces "Cannot invoke RPC on closed
+        # channel!". Separate clients = separate channels = no race.
+        up_tmp = MilvusClient(uri=upstream_uri, token=upstream_token)
+        dn_tmp = MilvusClient(uri=downstream_uri, token=downstream_token)
+        try:
+            apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
+        finally:
+            up_tmp.close()
+            dn_tmp.close()
+        logger.info("Switchover completed, waiting 10s for stabilization...")
+        time.sleep(10)
+
+    return do_switchover
+
+
 @pytest.fixture(scope="session", autouse=True)
 def cdc_topology_setup(request, upstream_client, downstream_client):
     """Setup CDC topology at the beginning of test session."""
@@ -147,9 +244,7 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
     target_cluster_id = request.config.getoption("--target-cluster-id")
     pchannel_num = int(request.config.getoption("--pchannel-num"))
 
-    logger.info(
-        f"Setting up CDC topology: {source_cluster_id} -> {target_cluster_id} (channels: {pchannel_num})..."
-    )
+    logger.info(f"Setting up CDC topology: {source_cluster_id} -> {target_cluster_id} (channels: {pchannel_num})...")
 
     # Create CDC replication configuration
     config = {
@@ -160,10 +255,7 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
                     "uri": upstream_uri,
                     "token": request.config.getoption("--upstream-token"),
                 },
-                "pchannels": [
-                    f"{source_cluster_id}-rootcoord-dml_{i}"
-                    for i in range(pchannel_num)
-                ],
+                "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
             },
             {
                 "cluster_id": target_cluster_id,
@@ -171,10 +263,7 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
                     "uri": downstream_uri,
                     "token": request.config.getoption("--downstream-token"),
                 },
-                "pchannels": [
-                    f"{target_cluster_id}-rootcoord-dml_{i}"
-                    for i in range(pchannel_num)
-                ],
+                "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
             },
         ],
         "cross_cluster_topology": [
@@ -186,9 +275,16 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
     }
 
     try:
-        # Update replication configuration on both clusters
-        upstream_client.update_replicate_configuration(**config)
-        downstream_client.update_replicate_configuration(**config)
+        # Dedicated clients for the control-plane update_replicate_configuration
+        # RPC, mirroring switchover_helper. Keeps the session-scoped clients'
+        # channels clean of any recovery side effects from the initial setup.
+        up_tmp = MilvusClient(uri=upstream_uri, token=request.config.getoption("--upstream-token"))
+        dn_tmp = MilvusClient(uri=downstream_uri, token=request.config.getoption("--downstream-token"))
+        try:
+            apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
+        finally:
+            up_tmp.close()
+            dn_tmp.close()
         logger.info("CDC topology setup completed successfully")
 
         # Allow some time for CDC to initialize

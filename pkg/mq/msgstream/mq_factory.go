@@ -28,16 +28,16 @@ import (
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	kafkawrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
-	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
+	kafkawrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
+	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar/pulsarlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
@@ -78,7 +78,7 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 
 // NewMsgStream is used to generate a new Msgstream object
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
+	timeout := f.RequestTimeout
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
@@ -108,7 +108,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
+	timeout := f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
 			return nil, errors.New("context timeout when NewTtMsgStream")

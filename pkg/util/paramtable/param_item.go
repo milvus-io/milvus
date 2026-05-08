@@ -27,9 +27,9 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
@@ -327,7 +327,12 @@ func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]st
 }
 
 func (pi *ParamItem) GetAsDurationByParse() time.Duration {
-	val, _ := pi.get()
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if durationVal, ok := val.(time.Duration); ok {
+			return durationVal
+		}
+	}
+	val, raw, _ := pi.getWithRaw()
 	durationVal, err := time.ParseDuration(val)
 	if err != nil {
 		durationVal, err = time.ParseDuration(pi.DefaultValue)
@@ -335,6 +340,7 @@ func (pi *ParamItem) GetAsDurationByParse() time.Duration {
 			panic(fmt.Sprintf("unreachable: parse duration from default value failed, %s, err: %s", pi.DefaultValue, err.Error()))
 		}
 	}
+	pi.manager.CASCachedValue(pi.Key, raw, durationVal)
 	return durationVal
 }
 

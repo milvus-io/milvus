@@ -36,25 +36,25 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type HandlersV2 struct {
@@ -69,7 +69,7 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 	}
 }
 
-var routeToMethod = map[string]string{
+var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a route-to-method mapping
 	"/v2/vectordb/collections/list":                 "ShowCollections",
 	"/v2/vectordb/collections/has":                  "HasCollection",
 	"/v2/vectordb/collections/describe":             "DescribeCollection",
@@ -155,10 +155,13 @@ var routeToMethod = map[string]string{
 	"/v2/vectordb/aliases/drop":     "DropAlias",
 	"/v2/vectordb/aliases/alter":    "AlterAlias",
 
-	"/v2/vectordb/jobs/import/list":         "ListImports",
-	"/v2/vectordb/jobs/import/create":       "Import",
-	"/v2/vectordb/jobs/import/get_progress": "GetImportProgress",
-	"/v2/vectordb/jobs/import/describe":     "GetImportProgress",
+	"/v2/vectordb/jobs/import/list":                  "ListImports",
+	"/v2/vectordb/jobs/import/create":                "Import",
+	"/v2/vectordb/jobs/import/get_progress":          "GetImportProgress",
+	"/v2/vectordb/jobs/import/describe":              "GetImportProgress",
+	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
+	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
+	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
 
 	"/v2/vectordb/resource_groups/create":           "CreateResourceGroup",
 	"/v2/vectordb/resource_groups/drop":             "DropResourceGroup",
@@ -307,6 +310,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
 	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
+	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
+	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
 
 	// resource group
 	router.POST(ResourceGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ResourceGroupReq{} }, wrapperTraceLog(h.createResourceGroup))))
@@ -453,7 +459,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
-		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath())
+		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
 	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
@@ -461,7 +467,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
-		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath())
+		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
 	}
 
@@ -499,7 +505,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
-			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath())
+			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
@@ -522,7 +528,10 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 			return handler(ctx, req)
 		})
 	}
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, forwardHandler)
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	if response != nil {
+		ginCtx.Set(ContextResponse, response)
+	}
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -667,6 +676,8 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		"partitionsNum":       coll.NumPartitions,
 		"consistencyLevel":    commonpb.ConsistencyLevel_name[int32(coll.ConsistencyLevel)],
 		"enableDynamicField":  coll.Schema.EnableDynamicField,
+		"externalSource":      coll.Schema.GetExternalSource(),
+		"externalSpec":        coll.Schema.GetExternalSpec(),
 		"properties":          coll.Properties,
 	}, HTTPReturnMessage: errMessage})
 	return resp, nil
@@ -701,11 +712,12 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return resp, err
 	}
-	if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotExist {
+	switch resp.(*milvuspb.GetLoadStateResponse).State {
+	case commonpb.LoadState_LoadStateNotExist:
 		err = merr.WrapErrCollectionNotFound(req.CollectionName)
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
-	} else if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotLoad {
+	case commonpb.LoadState_LoadStateNotLoad:
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPReturnLoadState: resp.(*milvuspb.GetLoadStateResponse).State.String(),
 		}})
@@ -1250,7 +1262,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, false)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1325,7 +1337,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1788,11 +1800,32 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	c.Set(ContextRequest, req)
 
+	if httpReq.HasTopLevelExternalConfig() {
+		err := merr.WrapErrParameterInvalid("schema.externalSource/schema.externalSpec", "top-level externalSource/externalSpec",
+			"externalSource and externalSpec must be set under schema when creating an external collection")
+		log.Ctx(ctx).Warn("high level restful api, create external collection with top-level external config fail", zap.Error(err), zap.Any("request", anyReq))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+
 	var schema []byte
 	var err error
 	fieldNames := map[string]bool{}
 	partitionsNum := int64(-1)
 	if len(httpReq.Schema.Fields) == 0 {
+		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
+			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
+				"external collection is not supported by quick create; provide schema.fields with externalField")
+			log.Ctx(ctx).Warn("high level restful api, quickly create external collection fail", zap.Error(err), zap.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
 		if len(httpReq.Schema.Functions) > 0 {
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
@@ -1881,6 +1914,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			},
 			EnableDynamicField: enableDynamic,
 			Description:        httpReq.Description,
+			ExternalSource:     httpReq.GetExternalSource(),
+			ExternalSpec:       httpReq.GetExternalSpec(),
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1890,6 +1925,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 			Description:        httpReq.Description,
+			ExternalSource:     httpReq.GetExternalSource(),
+			ExternalSpec:       httpReq.GetExternalSpec(),
 		}
 
 		allOutputFields := []string{}
@@ -1927,6 +1964,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				DataType:        dataType,
 				TypeParams:      []*commonpb.KeyValuePair{},
 				Nullable:        field.Nullable,
+				ExternalField:   field.ExternalField,
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
@@ -3109,6 +3147,86 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RefreshExternalCollectionReq)
+	req := &milvuspb.RefreshExternalCollectionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		ExternalSource: httpReq.ExternalSource,
+		ExternalSpec:   httpReq.ExternalSpec,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RefreshExternalCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.RefreshExternalCollection(reqCtx, req.(*milvuspb.RefreshExternalCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.RefreshExternalCollectionResponse).GetJobId()},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RefreshExternalCollectionProgressReq)
+	req := &milvuspb.GetRefreshExternalCollectionProgressRequest{
+		JobId: httpReq.JobID,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetRefreshExternalCollectionProgress", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetRefreshExternalCollectionProgress(reqCtx, req.(*milvuspb.GetRefreshExternalCollectionProgressRequest))
+	})
+	if err == nil {
+		jobInfo := resp.(*milvuspb.GetRefreshExternalCollectionProgressResponse).GetJobInfo()
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: refreshExternalCollectionJobInfoToMap(jobInfo)})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listRefreshExternalCollectionJobs(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*OptionalCollectionNameReq)
+	req := &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListRefreshExternalCollectionJobs", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListRefreshExternalCollectionJobs(reqCtx, req.(*milvuspb.ListRefreshExternalCollectionJobsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.ListRefreshExternalCollectionJobsResponse)
+		records := make([]map[string]interface{}, 0, len(response.GetJobs()))
+		for _, jobInfo := range response.GetJobs() {
+			records = append(records, refreshExternalCollectionJobInfoToMap(jobInfo))
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"records": records}})
+	}
+	return resp, err
+}
+
+func refreshExternalCollectionJobInfoToMap(jobInfo *milvuspb.RefreshExternalCollectionJobInfo) map[string]interface{} {
+	detail := make(map[string]interface{})
+	if jobInfo == nil {
+		return detail
+	}
+	detail["jobId"] = jobInfo.GetJobId()
+	detail["collectionName"] = jobInfo.GetCollectionName()
+	detail["state"] = jobInfo.GetState().String()
+	detail["progress"] = jobInfo.GetProgress()
+	detail["externalSource"] = jobInfo.GetExternalSource()
+	detail["externalSpec"] = jobInfo.GetExternalSpec()
+	detail["startTime"] = jobInfo.GetStartTime()
+	detail["endTime"] = jobInfo.GetEndTime()
+	if jobInfo.GetReason() != "" {
+		detail["reason"] = jobInfo.GetReason()
+	}
+	return detail
 }
 
 func (h *HandlersV2) GetCollectionSchema(ctx context.Context, c *gin.Context, dbName, collectionName string) (*schemapb.CollectionSchema, error) {

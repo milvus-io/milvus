@@ -3,8 +3,8 @@ package proxy
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // validator is a generic interface for validating tasks
@@ -53,8 +53,8 @@ func (v *searchTaskValidator) validateSearch(search *searchTask) error {
 
 func (v *searchTaskValidator) validate(search *searchTask) error {
 	// if it is a hybrid search, check all sub-searches
-	if search.SearchRequest.GetIsAdvanced() {
-		for _, subReq := range search.SearchRequest.GetSubReqs() {
+	if search.GetIsAdvanced() {
+		for _, subReq := range search.GetSubReqs() {
 			if err := v.validateSubSearch(subReq); err != nil {
 				return err
 			}

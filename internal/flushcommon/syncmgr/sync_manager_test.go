@@ -12,20 +12,20 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type SyncManagerSuite struct {
@@ -168,7 +168,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 	syncMgr, ok := manager.(*syncManager)
 	s.Require().True(ok)
 
-	cap := syncMgr.keyLockDispatcher.workerPool.Cap()
+	cap := syncMgr.workerPool.Cap()
 	s.NotZero(cap)
 
 	params := paramtable.Get()
@@ -181,21 +181,21 @@ func (s *SyncManagerSuite) TestResizePool() {
 		HasUpdated: true,
 	})
 
-	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap, syncMgr.workerPool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      "-1",
 		HasUpdated: true,
 	})
-	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap, syncMgr.workerPool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      strconv.FormatInt(int64(oldValue*2), 10),
 		HasUpdated: true,
 	})
-	s.Equal(cap*2, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap*2, syncMgr.workerPool.Cap())
 }
 
 func (s *SyncManagerSuite) TestUnexpectedError() {

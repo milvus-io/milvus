@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vllm"
@@ -60,7 +60,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		}
 	}
 	if endpoint == "" {
-		return nil, fmt.Errorf("Rerank function lost params endpoint")
+		return nil, fmt.Errorf("rerank function lost params endpoint")
 	}
 
 	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})

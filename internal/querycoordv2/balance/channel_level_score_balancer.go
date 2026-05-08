@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ChannelLevelScoreBalancer extends ScoreBasedBalancer to provide channel-level balance awareness.
@@ -85,7 +85,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	if streamingutil.IsStreamingServiceEnabled() {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
-		channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica)
+		channelPlan := b.balanceChannels(ctx, br, replica)
 		// If the channelPlan is not empty, do it directly, don't do the segment balance.
 		if len(channelPlan) > 0 {
 			return nil, channelPlan

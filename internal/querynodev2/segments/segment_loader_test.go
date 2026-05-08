@@ -31,20 +31,21 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type SegmentLoaderSuite struct {
@@ -328,6 +329,133 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRawData() {
+	ctx := context.Background()
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	msgLength := 100
+	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("true")
+	initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	defer func() {
+		paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+		initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	}()
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			msgLength,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		vecFields := funcutil.GetVecFieldIDs(suite.schema)
+		indexInfo, err := mock_segcore.GenAndSaveIndex(
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			vecFields[0],
+			msgLength,
+			mock_segcore.IndexFaissIVFFlat,
+			metric.L2,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	suite.NoError(err)
+
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
+	for _, segment := range segments {
+		suite.True(segment.ExistIndex(vecFields[0]))
+		suite.True(segment.HasRawData(vecFields[0]))
+
+		localSegment, ok := segment.(*LocalSegment)
+		suite.True(ok)
+		suite.True(localSegment.HasFieldData(vecFields[0]))
+	}
+}
+
+// Negative counterpart: with the flag off (default) and the index already
+// holding raw data, the loader must skip loading the field data — otherwise
+// the memory-saving behavior relied on by existing deployments is broken.
+func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
+	ctx := context.Background()
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	msgLength := 100
+	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("false")
+	initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	defer func() {
+		paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+		initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	}()
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			msgLength,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		vecFields := funcutil.GetVecFieldIDs(suite.schema)
+		indexInfo, err := mock_segcore.GenAndSaveIndex(
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			vecFields[0],
+			msgLength,
+			mock_segcore.IndexFaissIVFFlat,
+			metric.L2,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	suite.NoError(err)
+
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
+	for _, segment := range segments {
+		suite.True(segment.ExistIndex(vecFields[0]))
+		suite.True(segment.HasRawData(vecFields[0]))
+
+		localSegment, ok := segment.(*LocalSegment)
+		suite.True(ok)
+		suite.False(localSegment.HasFieldData(vecFields[0]))
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
@@ -557,30 +685,26 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	suite.Require().Len(segs, 1)
 	segment := segs[0]
 
-	// Patch readers to observe which branch is exercised.
-	legacyReaderCalled := atomic.NewInt32(0)
-	manifestReaderCalled := atomic.NewInt32(0)
+	readerCalled := atomic.NewInt32(0)
+	manifestCalled := atomic.NewInt32(0)
 
-	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
-			legacyReaderCalled.Inc()
-			return nil, errors.Newf("V1 path-based delta reader should not be called for V3 segments; paths=%v", paths)
-		},
-	).Build()
-	defer patchLegacy.UnPatch()
-
-	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
-		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
-			manifestReaderCalled.Inc()
-			// io.EOF indicates "no deltalogs in manifest" and is handled gracefully by loadDeltalogs.
-			return nil, io.EOF
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			manifestCalled.Inc()
+			// Return empty paths — no delta data in manifest.
+			return nil, nil
 		},
 	).Build()
 	defer patchManifest.UnPatch()
 
-	// Build V3 loadInfo: ManifestPath set, Deltalogs contains a pathless placeholder
-	// (LogID/EntriesNum/MemorySize only — no LogPath). Without the fix, the V1
-	// loop would try to MultiRead an empty path and fail.
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			readerCalled.Inc()
+			return nil, errors.New("should not be called when manifest has no delta paths")
+		},
+	).Build()
+	defer patchReader.UnPatch()
+
 	v3LoadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
@@ -600,10 +724,10 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	loader := suite.loader.(*segmentLoader)
 	err = loader.loadDeltalogs(ctx, segment, v3LoadInfo)
 	suite.NoError(err)
-	suite.EqualValues(0, legacyReaderCalled.Load(),
-		"V1 path-based delta reader must be skipped for V3 segments")
-	suite.EqualValues(1, manifestReaderCalled.Load(),
-		"manifest-based delta reader must be invoked once for V3 segments")
+	suite.EqualValues(1, manifestCalled.Load(),
+		"GetDeltaLogPathsFromManifest must be called for V3 segments")
+	suite.EqualValues(0, readerCalled.Load(),
+		"NewDeltalogReader must not be called when manifest returns no paths")
 }
 
 // TestLoadDeltaLogsV1StillUsesPathRead ensures the skip logic does not break
@@ -643,25 +767,24 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	suite.Require().Len(segs, 1)
 	segment := segs[0]
 
-	legacyReaderCalled := atomic.NewInt32(0)
-	manifestReaderCalled := atomic.NewInt32(0)
+	readerCalled := atomic.NewInt32(0)
+	manifestCalled := atomic.NewInt32(0)
 
-	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
-			legacyReaderCalled.Inc()
-			// Return an empty reader via EOF so the test finishes quickly; we only care that this was invoked.
-			return nil, io.EOF
-		},
-	).Build()
-	defer patchLegacy.UnPatch()
-
-	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
-		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
-			manifestReaderCalled.Inc()
-			return nil, io.EOF
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			manifestCalled.Inc()
+			return nil, nil
 		},
 	).Build()
 	defer patchManifest.UnPatch()
+
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			readerCalled.Inc()
+			return nil, io.EOF
+		},
+	).Build()
+	defer patchReader.UnPatch()
 
 	v1LoadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:     suite.segmentID,
@@ -674,13 +797,11 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	}
 
 	loader := suite.loader.(*segmentLoader)
-	// NewDeltalogReader returns io.EOF which bubbles up as an error in the V1 branch;
-	// we only need to assert the branch was taken, not that the reader succeeded.
 	_ = loader.loadDeltalogs(ctx, segment, v1LoadInfo)
-	suite.Greater(legacyReaderCalled.Load(), int32(0),
-		"V1 path-based delta reader must be invoked for non-V3 segments")
-	suite.EqualValues(0, manifestReaderCalled.Load(),
-		"manifest-based delta reader must not be invoked when ManifestPath is empty")
+	suite.Greater(readerCalled.Load(), int32(0),
+		"NewDeltalogReader must be invoked for V1 segments")
+	suite.EqualValues(0, manifestCalled.Load(),
+		"GetDeltaLogPathsFromManifest must not be called when ManifestPath is empty")
 }
 
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
@@ -1560,217 +1681,129 @@ func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
 	assert.Len(t, loadInfo.IndexInfos, 2)
 }
 
-func TestSeparateLoadInfoV2_ExternalFieldInShortColumnGroupV3(t *testing.T) {
-	// Verify that external fields within a short column group (FieldID=0) are skipped
-	// when matching indexes, but the short column group binlog entry itself is kept.
-	schema := &schemapb.CollectionSchema{
+// ExternalSegmentEstimateSuite tests resource estimation for external table segments
+// with fake binlogs (pre-computed MemorySize from DataNode Take sampling).
+type ExternalSegmentEstimateSuite struct {
+	suite.Suite
+	schema *schemapb.CollectionSchema
+}
+
+func (suite *ExternalSegmentEstimateSuite) SetupSuite() {
+	paramtable.Init()
+	suite.schema = &schemapb.CollectionSchema{
+		Name:           "test_external_estimate",
+		ExternalSource: "s3://bucket/data/",
+		ExternalSpec:   `{"format":"parquet"}`,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "ext_id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
-			{Name: "normal_ts", FieldID: 103, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "__virtual_pk__", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+			{
+				FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			},
 		},
 	}
+}
 
-	loadInfo := &querypb.SegmentLoadInfo{
+func (suite *ExternalSegmentEstimateSuite) externalLoadInfo(numRows int64, memorySize int64) *querypb.SegmentLoadInfo {
+	return &querypb.SegmentLoadInfo{
+		SegmentID:      1,
+		CollectionID:   100,
+		NumOfRows:      numRows,
 		StorageVersion: storage.StorageV3,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			// Index on external field 101 — should NOT be matched via short column group
-			{FieldID: 101, IndexID: 1001, IndexFilePaths: []string{"index/101/file1"}},
-			// Index on normal field 103 — should be matched
-			{FieldID: 103, IndexID: 1003, IndexFilePaths: []string{"index/103/file1"}},
-		},
+		ManifestPath:   `{"ver":1,"base_path":"external/100/segments/1"}`,
 		BinlogPaths: []*datapb.FieldBinlog{
-			// Short column group (FieldID=0) contains all fields
-			{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: "binlog/short_group"}}},
+			{
+				FieldID:     0, // DefaultShortColumnGroupID
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 1, EntriesNum: numRows, MemorySize: memorySize, LogSize: memorySize},
+				},
+			},
 		},
 	}
-
-	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
-
-	// Normal field 103 should be matched via short column group iteration
-	assert.Contains(t, indexedFieldInfos, int64(1003))
-	// External field 101 should NOT be matched (skipped by externalFieldIDs check)
-	assert.NotContains(t, indexedFieldInfos, int64(1001))
-	// Short column group binlog should still be in fieldBinlogs
-	assert.Len(t, fieldBinlogs, 1)
-	assert.Equal(t, int64(0), fieldBinlogs[0].FieldID)
 }
 
-func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedV3(t *testing.T) {
-	// Verify that BinlogPaths entries for external fields are skipped in the V3 path.
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "ext_id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
-			{Name: "ext_vec", FieldID: 102, DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
-			{Name: "normal_ts", FieldID: 103, DataType: schemapb.DataType_Int64},
-		},
-	}
+func (suite *ExternalSegmentEstimateSuite) TestEstimatedBytesPerRow() {
+	loadInfo := suite.externalLoadInfo(1000, 576000) // 576 bytes/row
+	factor := resourceEstimateFactor{externalRawDataFactor: 1.0}
 
-	loadInfo := &querypb.SegmentLoadInfo{
-		StorageVersion: storage.StorageV3,
-		BinlogPaths: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
-			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}}, // external, should skip
-			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}}, // external, should skip
-			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "binlog/103"}}},
-		},
-	}
-
-	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
-
-	// Only non-external fields (100 and 103) should remain in fieldBinlogs
-	assert.Len(t, fieldBinlogs, 2)
-	fieldIDs := make([]int64, len(fieldBinlogs))
-	for i, fb := range fieldBinlogs {
-		fieldIDs[i] = fb.FieldID
-	}
-	assert.Contains(t, fieldIDs, int64(100))
-	assert.Contains(t, fieldIDs, int64(103))
-	assert.NotContains(t, fieldIDs, int64(101))
-	assert.NotContains(t, fieldIDs, int64(102))
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.NotNil(usage)
+	suite.Equal(int64(576), loadInfo.EstimatedBytesPerRow)
 }
 
-func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedLegacy(t *testing.T) {
-	// Verify that BinlogPaths entries for external fields are skipped in the legacy (non-V2/V3) path.
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "ext_field", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "col1"},
-			{Name: "normal_field", FieldID: 102, DataType: schemapb.DataType_Int64},
-		},
-	}
+func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
+	loadInfo := suite.externalLoadInfo(1000, 100000)
+	factor := resourceEstimateFactor{externalRawDataFactor: 1.5}
 
-	loadInfo := &querypb.SegmentLoadInfo{
-		StorageVersion: 0, // legacy, not V2 or V3
-		BinlogPaths: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
-			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}}, // external, should skip
-			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}},
-		},
-	}
-
-	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
-
-	// Only non-external fields (100 and 102) should remain
-	assert.Len(t, fieldBinlogs, 2)
-	fieldIDs := make([]int64, len(fieldBinlogs))
-	for i, fb := range fieldBinlogs {
-		fieldIDs[i] = fb.FieldID
-	}
-	assert.Contains(t, fieldIDs, int64(100))
-	assert.Contains(t, fieldIDs, int64(102))
-	assert.NotContains(t, fieldIDs, int64(101))
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	// PART 2 adds binlogSize (100000) to memory
+	// PART 2.5 adds extra = 100000 * (1.5 - 1.0) = 50000
+	suite.True(usage.MemorySize >= 150000, "should include raw data factor: got %d", usage.MemorySize)
 }
 
-func TestSeparateLoadInfoV2_NonExternalCollectionUnaffected(t *testing.T) {
-	// Verify that non-external collections are unaffected by external field filtering.
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "field1", FieldID: 101, DataType: schemapb.DataType_Int64},
-			{Name: "field2", FieldID: 102, DataType: schemapb.DataType_FloatVector},
-		},
-	}
+func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor_NoExtraWhenFactorLe1() {
+	loadInfo := suite.externalLoadInfo(1000, 100000)
+	factor := resourceEstimateFactor{externalRawDataFactor: 0.8}
 
-	loadInfo := &querypb.SegmentLoadInfo{
-		StorageVersion: storage.StorageV3,
-		BinlogPaths: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
-			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}},
-			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}},
-		},
-	}
-
-	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
-
-	// All fields should be included (no external fields to skip)
-	assert.Len(t, fieldBinlogs, 3)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	// factor <= 1.0, no extra memory added by PART 2.5
+	suite.True(usage.MemorySize >= 100000, "should include base binlog size")
 }
 
-func TestDetectVirtualPKCollisions(t *testing.T) {
-	t.Run("NoCollision", func(t *testing.T) {
-		infos := []*querypb.SegmentLoadInfo{
-			{SegmentID: 1},
-			{SegmentID: 2},
-			{SegmentID: 3},
-		}
-		collisions := detectVirtualPKCollisions(1, infos)
-		assert.Empty(t, collisions)
-	})
-
-	t.Run("CollisionWithTruncatedID", func(t *testing.T) {
-		// Two segment IDs with same lower 32 bits but different upper bits
-		segID1 := int64(0x100000001) // lower 32 = 1
-		segID2 := int64(0x200000001) // lower 32 = 1
-		infos := []*querypb.SegmentLoadInfo{
-			{SegmentID: segID1},
-			{SegmentID: segID2},
-			{SegmentID: 3},
-		}
-		collisions := detectVirtualPKCollisions(segID1, infos)
-		assert.Equal(t, []int64{segID2}, collisions)
-	})
-
-	t.Run("SelfNotIncluded", func(t *testing.T) {
-		infos := []*querypb.SegmentLoadInfo{
-			{SegmentID: 100},
-		}
-		collisions := detectVirtualPKCollisions(100, infos)
-		assert.Empty(t, collisions)
-	})
-
-	t.Run("MultipleCollisions", func(t *testing.T) {
-		segID1 := int64(0x100000005)
-		segID2 := int64(0x200000005)
-		segID3 := int64(0x300000005)
-		infos := []*querypb.SegmentLoadInfo{
-			{SegmentID: segID1},
-			{SegmentID: segID2},
-			{SegmentID: segID3},
-		}
-		collisions := detectVirtualPKCollisions(segID1, infos)
-		assert.Len(t, collisions, 2)
-		assert.Contains(t, collisions, segID2)
-		assert.Contains(t, collisions, segID3)
-	})
-
-	t.Run("EmptyInfos", func(t *testing.T) {
-		collisions := detectVirtualPKCollisions(100, nil)
-		assert.Empty(t, collisions)
-	})
-}
-
-func TestExternalCollectionSkipsDeltaLogs(t *testing.T) {
-	// Verify that IsExternalCollection correctly identifies external schemas,
-	// which is the condition used to skip delta log loading in the segment loader.
-	externalSchema := &schemapb.CollectionSchema{
-		ExternalSource: "s3://bucket/data",
+func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
+	// Build a separate schema with warmup=disable on all external fields
+	lazySchema := &schemapb.CollectionSchema{
+		Name:           "test_external_lazy",
+		ExternalSource: "s3://bucket/data/",
+		ExternalSpec:   `{"format":"parquet"}`,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "embedding"},
+			{FieldID: 100, Name: "__virtual_pk__", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+			},
+			{
+				FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+					{Key: common.WarmupKey, Value: common.WarmupDisable},
+				},
+			},
 		},
 	}
-	assert.True(t, typeutil.IsExternalCollection(externalSchema))
 
-	normalSchema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "vec", DataType: schemapb.DataType_FloatVector},
-		},
-	}
-	assert.False(t, typeutil.IsExternalCollection(normalSchema))
+	// Override global warmup defaults to disable
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupDisable)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key, common.WarmupDisable)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key)
 
-	// Empty ExternalSource is not external
-	emptySourceSchema := &schemapb.CollectionSchema{
-		ExternalSource: "",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "vec", DataType: schemapb.DataType_FloatVector},
-		},
-	}
-	assert.False(t, typeutil.IsExternalCollection(emptySourceSchema))
+	suite.True(isExternalCollectionLazyLoad(lazySchema), "schema should be detected as lazy load")
+
+	loadInfo := suite.externalLoadInfo(1000, 100000)
+	factor := resourceEstimateFactor{externalRawDataFactor: 1.0}
+
+	// With lazy load, memory estimate should be less than or equal to
+	// the non-lazy-load case (which is at least binlogSize=100000).
+	// The exact value depends on PART 2's mmap/tiered logic.
+	nonLazyUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+
+	lazyUsage, err := estimateLoadingResourceUsageOfSegment(lazySchema, loadInfo, factor)
+	suite.NoError(err)
+
+	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
+		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
 }
 
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
 	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
+	suite.Run(t, &ExternalSegmentEstimateSuite{})
 }

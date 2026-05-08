@@ -26,15 +26,15 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	rocksdb "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	rocksdb "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // UniqueID is the type of message ID
@@ -101,7 +101,7 @@ func constructKey(metaName, topic string) string {
 func parsePageID(key string) (int64, error) {
 	stringSlice := strings.Split(key, "/")
 	if len(stringSlice) != 3 {
-		return 0, fmt.Errorf("Invalid page id %s ", key)
+		return 0, fmt.Errorf("invalid page id %s ", key)
 	}
 	return strconv.ParseInt(stringSlice[2], 10, 64)
 }
@@ -1179,7 +1179,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 		}
 
 		// find min id of all consumer
-		var minBeginID UniqueID = lastID
+		minBeginID := lastID
 		var err error
 		consumers.Range(func(c *Consumer) bool {
 			if c.GroupName != groupName {

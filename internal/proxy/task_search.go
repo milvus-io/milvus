@@ -10,16 +10,18 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -27,21 +29,22 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -113,6 +116,11 @@ type searchTask struct {
 
 	storageCost  segcore.StorageCost
 	traceEnabled bool
+
+	aggCtx *search_agg.SearchAggregationContext
+
+	// Old SDK sent only singular group_by_field; output must downgrade plural→singular.
+	legacyGroupByWire bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -147,7 +155,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
 
-	t.SearchRequest.IsAdvanced = len(t.request.GetSubReqs()) > 0
+	t.IsAdvanced = len(t.request.GetSubReqs()) > 0
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -158,8 +166,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 
-	t.SearchRequest.DbID = 0 // todo
-	t.SearchRequest.CollectionID = collID
+	t.DbID = 0 // todo
+	t.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -190,7 +198,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
-		t.SearchRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
 		if err != nil {
 			log.Warn("failed to get partition ids", zap.Error(err))
 			return err
@@ -214,7 +222,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	log.Debug("translate output fields",
 		zap.Strings("output fields", t.translatedOutputFields))
 
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
 			return errors.New(fmt.Sprintf("maximum of ann search requests is %d", defaultMaxSearchRequest))
 		}
@@ -225,9 +233,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Info("failed to check nq", zap.Error(err))
 		return err
 	}
-	t.SearchRequest.Nq = nq
+	t.Nq = nq
 
-	if t.SearchRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.SearchParams); err != nil {
+	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.SearchParams); err != nil {
 		return err
 	}
 
@@ -236,13 +244,23 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Info("fail to get output field ids", zap.Error(err))
 		return err
 	}
-	t.SearchRequest.OutputFieldsId = outputFieldIDs
+	t.OutputFieldsId = outputFieldIDs
 
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
-	if t.SearchRequest.GetIsAdvanced() {
+	// initSearchAggregation must run before init{,Advanced}SearchRequest so
+	// that t.SearchRequest.GroupByFieldIds and t.aggCtx are populated before
+	// queryInfo is built and captured — otherwise queryInfo.GroupByFieldIds
+	// stays empty at reduce stage and DerivedTopK/DerivedGroupSize overrides
+	// are skipped.
+	if err = t.initSearchAggregation(); err != nil {
+		log.Debug("init search aggregation failed", zap.Error(err))
+		return err
+	}
+
+	if t.GetIsAdvanced() {
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
 		err = t.initSearchRequest(ctx)
@@ -279,24 +297,24 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		guaranteeTs = collectionInfo.updateTimestamp
 	}
 
-	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
+	t.GuaranteeTimestamp = guaranteeTs
 	// Extract physical time for entity-level TTL (issue #47413)
 	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
-	t.SearchRequest.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
-	t.SearchRequest.ConsistencyLevel = consistencyLevel
+	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
+	t.ConsistencyLevel = consistencyLevel
 	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
-	t.SearchRequest.IsIterator = t.isIterator
+	t.IsIterator = t.isIterator
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
-		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
 	// Set username of this search request for feature like task scheduling.
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
-		t.SearchRequest.Username = username
+		t.Username = username
 	}
 
 	if collectionInfo.collectionTTL != 0 {
@@ -332,14 +350,14 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
-		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()),
+		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
 		zap.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
 	return nil
 }
 
 func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 	var nq int64
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		// In the context of Advanced Search, it is essential to verify that the number of vectors
 		// for each individual search, denoted as nq, remains consistent.
 		nq = t.request.GetNq()
@@ -374,6 +392,54 @@ func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
 	}
 	return nq, nil
+}
+
+func (t *searchTask) initSearchAggregation() error {
+	spec := t.request.GetSearchAggregation()
+	if spec == nil {
+		t.aggCtx = nil
+		t.GroupByFieldIds = nil
+		return nil
+	}
+
+	if t.GetIsAdvanced() {
+		return merr.WrapErrParameterInvalidMsg("search aggregation is not supported for hybrid search")
+	}
+
+	if t.request.GetHighlighter() != nil {
+		return merr.WrapErrParameterInvalidMsg("highlighter and search_aggregation cannot be used simultaneously")
+	}
+
+	groupByField, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
+	if err == nil && strings.TrimSpace(groupByField) != "" {
+		return merr.WrapErrParameterInvalidMsg("group_by_field and search_aggregation cannot be used simultaneously")
+	}
+	groupByFields, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, t.request.GetSearchParams())
+	if err == nil && strings.TrimSpace(groupByFields) != "" {
+		return merr.WrapErrParameterInvalidMsg("group_by_fields and search_aggregation cannot be used simultaneously")
+	}
+
+	aggCtx, err := search_agg.BuildSearchAggregationContext(spec, t.schema.CollectionSchema, t.GetNq())
+	if err != nil {
+		return err
+	}
+
+	t.GroupByFieldIds = aggCtx.AllGroupByFieldIDs()
+	for _, fieldID := range t.GetOutputFieldsId() {
+		aggCtx.UserOutputFieldIDs[fieldID] = struct{}{}
+	}
+
+	// Append metric source / top_hits sort fields to OutputFieldsId so segcore
+	// writes them into fields_data. Group-by fields are delivered separately
+	// via SearchResultData.group_by_field_values and must NOT be appended here.
+	if extra := aggCtx.ExtraOutputFieldIDs(); len(extra) > 0 {
+		outputSet := typeutil.NewSet[int64](t.GetOutputFieldsId()...)
+		outputSet.Insert(extra...)
+		t.OutputFieldsId = outputSet.Collect()
+	}
+
+	t.aggCtx = aggCtx
+	return nil
 }
 
 func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *planpb.PlanNode) error {
@@ -416,6 +482,13 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	defer sp.End()
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
+
+	// Old SDK hybrid callers pass only singular group_by_field; output must
+	// downgrade plural→singular the same way the non-advanced path does.
+	_, errGroupByField := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
+	_, errGroupByFields := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, t.request.GetSearchParams())
+	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
+
 	var err error
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
@@ -426,6 +499,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+	})
+	// TEXT type output fields need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
 	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
@@ -449,7 +526,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = true
 	case "outputvector":
 		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
-		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
+		// TEXT fields also need requery since data is stored as LOB references
+		t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
 	case "outputfields":
 		fallthrough
 	default:
@@ -457,17 +535,38 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 	t.needRequery = t.needRequery || (t.rerankMeta != nil && len(t.rerankMeta.GetInputFieldNames()) > 0)
 
-	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
+	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, _, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
 		}
 
-		ignoreGrowing := t.SearchRequest.IgnoreGrowing
+		// Hybrid search does not yet support vector array (embedding list) fields:
+		// placeholder type is per sub-request and element-level vs embedding-list-level
+		// differentiation is not wired up on this path. Reject range search / iterator /
+		// group by on such fields here; plain top-K stays allowed for now (unchanged
+		// behavior).
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if t.rankParams.GetGroupByFieldId() > 0 {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if subIsIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+		}
+
+		ignoreGrowing := t.IgnoreGrowing
 		if !ignoreGrowing {
 			// fetch ignore_growing from sub search param if not set in search request
 			if ignoreGrowing, err = isIgnoreGrowing(subReq.GetSearchParams()); err != nil {
@@ -516,7 +615,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 				t.partitionIDsSet.Upsert(partitionIDs...)
 			}
 		} else {
-			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
+			internalSubReq.PartitionIDs = t.GetPartitionIDs()
 		}
 
 		var rerankInputFieldIDs []int64
@@ -530,7 +629,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
+			allFieldIDs := typeutil.NewSet(t.OutputFieldsId...)
 			allFieldIDs.Insert(rerankInputFieldIDs...)
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
 			plan.OutputFieldIds = allFieldIDs.Collect()
@@ -550,14 +649,14 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		t.SearchRequest.SubReqs[index] = internalSubReq
+		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
+	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
@@ -571,23 +670,25 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
-	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
-	t.SearchRequest.GroupSize = t.rankParams.GetGroupSize()
+	t.GroupByFieldId = t.rankParams.GetGroupByFieldId()
+	t.GroupSize = t.rankParams.GetGroupSize()
 
 	if t.partitionKeyMode {
-		t.SearchRequest.PartitionIDs = t.partitionIDsSet.Collect()
+		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
 	return nil
 }
 
 func (t *searchTask) fillResult() {
-	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
+	limit := t.GetTopk() - t.GetOffset()
 	resultSizeInsufficient := false
-	for _, topk := range t.result.Results.Topks {
-		if topk < limit {
-			resultSizeInsufficient = true
-			break
+	if t.aggCtx == nil {
+		for _, topk := range t.result.Results.Topks {
+			if topk < limit {
+				resultSizeInsufficient = true
+				break
+			}
 		}
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient
@@ -621,7 +722,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 	t.highlighter = h
 	if h.highlightSearch {
 		if metricType != metric.BM25 {
-			return merr.WrapErrParameterInvalidMsg(`Search highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
+			return merr.WrapErrParameterInvalidMsg(`Search highlight only support with metric type "BM25" but was: %s`, t.GetMetricType())
 		}
 		function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
 		if !ok {
@@ -668,13 +769,18 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 
+	// Old SDK: group_by_field only, no group_by_fields, no agg → output as singular.
+	_, errGroupByField := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
+	_, errGroupByFields := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, t.request.GetSearchParams())
+	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
+
 	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
 	if err != nil {
 		return err
 	}
 	t.orderByFields = orderByFields
 
-	t.SearchRequest.SearchType = searchType
+	t.SearchType = searchType
 
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
@@ -687,20 +793,23 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
 	if err == nil {
-		t.SearchRequest.AnalyzerName = analyzer
+		t.AnalyzerName = analyzer
 	}
 
 	t.isIterator = isIterator
-	t.SearchRequest.Offset = offset
-	t.SearchRequest.FieldId = queryInfo.GetQueryFieldId()
+	t.Offset = offset
+	if t.aggCtx != nil && t.Offset > 0 {
+		return merr.WrapErrParameterInvalidMsg("offset is not supported with search_aggregation")
+	}
+	t.FieldId = queryInfo.GetQueryFieldId()
 
-	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.GetAnalyzerName()); err != nil {
 		return err
 	}
 
 	// add highlight field ids to output fields id
 	if t.highlighter != nil {
-		t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, t.highlighter.RequiredFieldIDs()...)
+		t.OutputFieldsId = append(t.OutputFieldsId, t.highlighter.RequiredFieldIDs()...)
 	}
 
 	if t.partitionKeyMode {
@@ -714,23 +823,31 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			return err2
 		}
 		if len(partitionIDs) > 0 {
-			t.SearchRequest.PartitionIDs = partitionIDs
+			t.PartitionIDs = partitionIDs
 		}
 	}
 
-	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
-	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
-		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
-	})
-	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
-	case "always":
-		t.needRequery = true
-	case "outputfields":
-		t.needRequery = len(t.request.GetOutputFields()) > 0
-	case "outputvector":
-		fallthrough
-	default:
-		t.needRequery = len(vectorOutputFields) > 0
+	if t.aggCtx != nil {
+		t.needRequery = false
+	} else {
+		allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+		vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+			return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+		})
+		// TEXT type output fields need requery since TEXT data is stored as LOB references
+		textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+			return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+		})
+		switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
+		case "always":
+			t.needRequery = true
+		case "outputfields":
+			t.needRequery = len(t.request.GetOutputFields()) > 0
+		case "outputvector":
+			fallthrough
+		default:
+			t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
+		}
 	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
@@ -743,7 +860,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		allFieldIDs := typeutil.NewSet[int64](t.SearchRequest.OutputFieldsId...)
+		allFieldIDs := typeutil.NewSet[int64](t.OutputFieldsId...)
 		allFieldIDs.Insert(rerankInputFieldIDs...)
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
@@ -760,47 +877,87 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	plan.Namespace = t.request.Namespace
 
-	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
+	// segcore sees the derived topK / groupSize and plural GroupByFieldIds.
+	// strict_group_size is forced true: aggregation metrics need each top-K
+	// group filled to groupSize for meaningful sample sizes.
+	// Non-destructive: only overwrite queryInfo.GroupByFieldIds when aggCtx
+	// populated t.SearchRequest.GroupByFieldIds. Non-agg plural group_by path
+	// relies on parseSearchInfo having stamped it from the search_params
+	// keyword; blind copy of an empty slice would clobber that.
+	if ids := t.GetGroupByFieldIds(); len(ids) > 0 {
+		queryInfo.GroupByFieldIds = ids
+	}
+	if t.aggCtx != nil {
+		t.Topk = t.aggCtx.DerivedTopK
+		t.GroupSize = t.aggCtx.DerivedGroupSize
+		queryInfo.Topk = t.aggCtx.DerivedTopK
+		queryInfo.GroupSize = t.aggCtx.DerivedGroupSize
+		queryInfo.StrictGroupSize = true
+	}
+
+	t.SerializedExprPlan, err = proto.Marshal(plan)
 	if err != nil {
 		return err
 	}
-	t.SearchRequest.PkFilter = checkSegmentFilter(plan)
-	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
-		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
+	t.PkFilter = checkSegmentFilter(plan)
+	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.FieldId) {
+		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
 	var placeholderType commonpb.PlaceholderType
-	t.SearchRequest.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.SearchRequest.FieldId)
+	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
 	if err != nil {
 		return err
 	}
 
-	// For ArrayOfVector fields with group by:
-	// 1. Embedding list search does not support group by
-	// 2. Element-level search only supports group by PK (doc-level dedup)
-	if queryInfo.GetGroupByFieldId() > 0 {
-		annsField := typeutil.GetField(t.schema.CollectionSchema, t.SearchRequest.FieldId)
-		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if isEmbeddingListPlaceholderType(placeholderType) {
+	// For ArrayOfVector fields, the placeholder type decides the search semantics:
+	// - Element-level (plain vector placeholder): behaves like a normal single-vector
+	//   search; supports range search, iterator, and group by primary key.
+	// - Embedding-list-level (multi-search-multi): does not support range search,
+	//   iterator, or group by (other than the PK case above).
+	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
+	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
+
+		if isEmbList {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for multi-search-multi on embedding list fields")
+			}
+			if t.isIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for multi-search-multi on embedding list fields")
+			}
+		}
+
+		groupByFieldIDs := queryInfo.GetGroupByFieldIds()
+		if len(groupByFieldIDs) == 0 && queryInfo.GetGroupByFieldId() > 0 {
+			groupByFieldIDs = []int64{queryInfo.GetGroupByFieldId()}
+		}
+		if len(groupByFieldIDs) > 0 {
+			if isEmbList {
 				return merr.WrapErrParameterInvalid("", "",
 					"group by is not supported for multi-search-multi on embedding list fields")
 			}
-			pkField, _ := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
-			if pkField == nil || queryInfo.GetGroupByFieldId() != pkField.GetFieldID() {
-				return merr.WrapErrParameterInvalid("", "",
-					"only group by primary key is supported for element-level search on embedding list fields")
+			pkField, _ := t.schema.GetPkField()
+			for _, groupByFieldID := range groupByFieldIDs {
+				if pkField == nil || groupByFieldID != pkField.GetFieldID() {
+					return merr.WrapErrParameterInvalid("", "",
+						"only group by primary key is supported for element-level search on embedding list fields")
+				}
 			}
 		}
 	}
 
-	t.SearchRequest.Topk = queryInfo.GetTopk()
-	t.SearchRequest.MetricType = queryInfo.GetMetricType()
-	t.queryInfos = append(t.queryInfos, queryInfo)
-	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
-	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
-	t.SearchRequest.GroupSize = queryInfo.GroupSize
+	t.Topk = queryInfo.GetTopk()
+	t.MetricType = queryInfo.GetMetricType()
 
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+	t.queryInfos = append(t.queryInfos, queryInfo)
+	t.DslType = commonpb.DslType_BoolExprV1
+	t.GroupByFieldId = queryInfo.GroupByFieldId
+	t.GroupSize = queryInfo.GroupSize
+	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
@@ -861,7 +1018,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
-	searchType := searchInfo.DetermineSearchType(hasFilter)
+	searchType := internalpb.SearchType_DEFAULT
+	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
+	if t.request.GetFunctionScore() == nil {
+		searchType = searchInfo.DetermineSearchType(hasFilter)
+	}
 
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
@@ -907,14 +1068,14 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 func (t *searchTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx).WithLazy(zap.Int64("nq", t.SearchRequest.GetNq()))
+	log := log.Ctx(ctx).WithLazy(zap.Int64("nq", t.GetNq()))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
-		CollectionID:   t.SearchRequest.CollectionID,
+		CollectionID:   t.CollectionID,
 		CollectionName: t.collectionName,
 		Nq:             t.Nq,
 		Exec:           t.searchShard,
@@ -969,7 +1130,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
-	log := log.Ctx(ctx).With(zap.Int64("nq", t.SearchRequest.GetNq()))
+	log := log.Ctx(ctx).With(zap.Int64("nq", t.GetNq()))
 
 	toReduceResults, err := t.collectSearchResults(ctx)
 	if err != nil {
@@ -1061,11 +1222,14 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
-	if t.result.GetResults().GetGroupByFieldValue() != nil &&
-		t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Geometry {
-		if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
-			log.Warn("fail to validate geometry field search result", zap.Error(err))
-			return err
+	// Validate Geometry on all group-by columns. All internal pipeline
+	// stages emit plural; runs before the legacy-wire downgrade below.
+	for i, gbv := range t.result.GetResults().GetGroupByFieldValues() {
+		if gbv != nil && gbv.GetType() == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValues[i]); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
 		}
 	}
 
@@ -1092,6 +1256,18 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 
+	// Legacy-wire downgrade: the old SDK only reads the singular channel
+	// (GroupByFieldValue). All internal pipeline stages emit to the plural
+	// channel; this is the single boundary that moves the 1-element plural
+	// column back into the singular channel so old clients see the group-by
+	// result. New-SDK requests leave the plural channel as-is.
+	if t.legacyGroupByWire {
+		if rd := t.result.GetResults(); rd != nil && len(rd.GetGroupByFieldValues()) == 1 {
+			rd.GroupByFieldValue = rd.GroupByFieldValues[0]
+			rd.GroupByFieldValues = nil
+		}
+	}
+
 	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
@@ -1099,6 +1275,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	searchReq := shallowcopy.ShallowCopySearchRequest(t.SearchRequest, nodeID)
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
@@ -1151,12 +1328,16 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 			}
 		}
 	}
-	// Currently, we get vectors by requery. Once we support getting vectors from search,
+	// TEXT type output fields also need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
+	// Currently, we get vectors and TEXT by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
-	if len(vectorOutputFields) > 0 {
+	if len(vectorOutputFields) > 0 || len(textOutputFields) > 0 {
 		return math.MaxInt64, nil
 	}
-	// If no vector field as output, no need to requery.
+	// If no vector or TEXT field as output, no need to requery.
 	return 0, nil
 
 	//outputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {

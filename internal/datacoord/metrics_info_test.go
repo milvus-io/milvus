@@ -26,20 +26,20 @@ import (
 	"github.com/tidwall/gjson"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGetDataNodeMetrics(t *testing.T) {
@@ -117,7 +117,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	info, err := svr.getDataNodeMetrics(ctx, req, 100)
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.Name)
 
 	info, err = svr.getDataNodeMetrics(ctx, req, 101)
 	assert.NoError(t, err)
@@ -160,7 +160,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 
 	// return unexpected
 	dn = mocks.NewMockDataNodeClient(t)
@@ -172,7 +172,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 
 	// success
 	dn = mocks.NewMockDataNodeClient(t)
@@ -203,7 +203,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 }
 
 func TestGetSyncTaskMetrics(t *testing.T) {

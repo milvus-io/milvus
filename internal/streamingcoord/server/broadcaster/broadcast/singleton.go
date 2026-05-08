@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 var (
@@ -60,6 +60,15 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)
+}
+
+// GetPendingCreateCollectionResources returns pending CreateCollection file resource
+// IDs from the broadcaster. Must be called after Register.
+func GetPendingCreateCollectionResources() map[int64][]int64 {
+	if !singleton.Ready() {
+		return nil
+	}
+	return singleton.Get().GetPendingCreateCollectionResources()
 }
 
 // Release releases the broadcaster.

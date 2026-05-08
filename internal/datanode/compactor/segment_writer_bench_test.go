@@ -27,12 +27,12 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func testSegmentWriterBatchSize(b *testing.B, batchSize int) {
@@ -93,7 +93,6 @@ func testSegmentWriterBatchSize(b *testing.B, batchSize int) {
 	writer, err := NewSegmentWriter(schema, numRows, batchSize, 1, 2, 3, nil)
 	assert.NoError(b, err)
 
-	b.N = 10
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start = time.Now()

@@ -23,12 +23,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
@@ -275,7 +275,8 @@ func TestBM25Stats_MemSize(t *testing.T) {
 	for i := uint32(0); i < 100; i++ {
 		stats.Append(map[uint32]float32{i: 1})
 	}
-	assert.Equal(t, int64(120+100*bm25StatsPerEntryBytes), stats.MemSize())
+	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
 }
 
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {

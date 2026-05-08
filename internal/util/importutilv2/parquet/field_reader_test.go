@@ -16,14 +16,14 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func init() {
@@ -87,6 +87,80 @@ func TestInvalidUTF8(t *testing.T) {
 	_, err = reader.Read()
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "contains invalid UTF-8 data"))
+}
+
+func TestConvertToArrowDataType_Text(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "text_field",
+		DataType: schemapb.DataType_Text,
+		// TEXT has no TypeParams (no max_length)
+	}
+	arrowType, err := convertToArrowDataType(field, false)
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.STRING, arrowType.ID())
+}
+
+func TestReadTextFieldData(t *testing.T) {
+	const (
+		fieldID = int64(100)
+		numRows = 10
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "text",
+				DataType: schemapb.DataType_Text,
+				// no TypeParams — TEXT has no max_length
+			},
+		},
+	}
+
+	data := make([]string, numRows)
+	for i := 0; i < numRows; i++ {
+		data[i] = fmt.Sprintf("text_content_%d_with_longer_payload_for_testing", i)
+	}
+
+	filePath := fmt.Sprintf("/tmp/test_%d_text_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+
+	pqSchema, err := ConvertToArrowSchemaForUT(schema, false)
+	assert.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
+	assert.NoError(t, err)
+
+	builder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer builder.Release()
+	for _, v := range data {
+		builder.Append(v)
+	}
+	arr := builder.NewArray()
+	defer arr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{arr}, int64(numRows))
+	defer recordBatch.Release()
+	err = fw.Write(recordBatch)
+	assert.NoError(t, err)
+	fw.Close()
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	assert.NoError(t, err)
+	assert.NotNil(t, reader)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	assert.NoError(t, err)
+	assert.NotNil(t, insertData)
+	assert.Equal(t, numRows, insertData.Data[fieldID].RowNum())
 }
 
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function

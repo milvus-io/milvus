@@ -28,8 +28,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
@@ -379,10 +379,10 @@ func (s *VertexAITextEmbeddingProviderSuite) TestParseCredentail() {
 	{
 		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "NotBase64"})
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
-		s.ErrorContains(err, "Parse gcp credential")
+		s.ErrorContains(err, "parse gcp credential")
 	}
 	{
-		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "bW9jaw=="})
+		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "bW9jaw=="}) //nolint:gosec // not a real credential, test data
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
 		s.NoError(err)
 	}

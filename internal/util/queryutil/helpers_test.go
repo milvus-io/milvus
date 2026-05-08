@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 // makeNullableSchema builds a minimal CollectionSchema marking the given
@@ -2279,11 +2279,12 @@ func TestCalcFieldElementSize_RemainingBranches(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := calcFieldElementSize(tt.fd, tt.rowIdx)
-			if tt.name == "vector_array" {
+			switch tt.name {
+			case "vector_array":
 				assert.True(t, result > 0, "vector_array size should be > 0")
-			} else if tt.name == "array_data" {
+			case "array_data":
 				assert.True(t, result > 0, "array_data size should be > 0")
-			} else {
+			default:
 				assert.Equal(t, tt.expected, result)
 			}
 		})

@@ -23,11 +23,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RowParserSuite struct {
@@ -832,4 +832,49 @@ func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
 
 func TestJsonRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
+}
+
+func TestParseTextFieldValue(t *testing.T) {
+	// TEXT fields should be parsed as strings without maxLength validation.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				// no TypeParams — TEXT has no max_length
+			},
+		},
+	}
+
+	parser, err := NewRowParser(schema)
+	assert.NoError(t, err)
+
+	// Parse a row with a TEXT value (including very long text)
+	longText := strings.Repeat("hello world ", 1000) // ~12000 chars, no maxLength check
+	row := map[string]any{
+		"text_field": longText,
+	}
+	rowData, err := json.Marshal(row)
+	assert.NoError(t, err)
+
+	var rawRow any
+	err = json.Unmarshal(rowData, &rawRow)
+	assert.NoError(t, err)
+
+	result, err := parser.Parse(rawRow)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify TEXT field value is correctly parsed
+	val, ok := result[int64(101)]
+	assert.True(t, ok)
+	assert.Equal(t, longText, val)
 }

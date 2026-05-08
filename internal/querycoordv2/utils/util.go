@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
@@ -135,14 +135,20 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 	return nil
 }
 
-func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
-	percentage := m.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, withUnserviceableShards bool) error {
+	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
 		return err
 	}
-	collection := m.CollectionManager.GetCollection(ctx, collectionID)
+	// When the caller accepts unserviceable shards (e.g. proxy refreshing its
+	// shard-leader cache during replica reconfig), skip the full-load gate so
+	// the caller can route by the per-leader Serviceable flag instead.
+	if withUnserviceableShards {
+		return nil
+	}
+	collection := m.GetCollection(ctx, collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
 		// when collection is loaded, regard collection as readable, set percentage == 100
 		percentage = 100
@@ -168,7 +174,7 @@ func GetShardLeadersWithChannels(
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
-	replicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 
@@ -216,8 +222,7 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	// skip check load status if withUnserviceableShards is true
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	if err := checkLoadStatus(ctx, m, collectionID, withUnserviceableShards); err != nil {
 		return nil, err
 	}
 
@@ -255,7 +260,7 @@ func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta
 // checkCollectionQueryable check all channels are watched and all segments are loaded for this collection
 func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, coll *meta.Collection) error {
 	collectionID := coll.GetCollectionID()
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	if err := checkLoadStatus(ctx, m, collectionID, false); err != nil {
 		return err
 	}
 

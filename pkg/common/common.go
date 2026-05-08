@@ -30,8 +30,8 @@ import (
 	"github.com/twpayne/go-geom/encoding/wkbcommon"
 	"github.com/twpayne/go-geom/encoding/wkt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // system field id:
@@ -189,6 +189,10 @@ const (
 	CollectionKey   = "collection"
 	RecallEvalKey   = "recall_eval"
 
+	GlobalRefineKey    = "global_refine"
+	SearchTopkRatioKey = "search_topk_ratio"
+	RefineTopkRatioKey = "refine_topk_ratio"
+
 	ParamsKey      = "params"
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"
@@ -235,6 +239,8 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	CollectionExternalSource    = "collection.external_source"
+	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
 

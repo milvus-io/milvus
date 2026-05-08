@@ -10,17 +10,17 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -600,31 +600,9 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	// Both nil — already dropped, idempotent.
-	if config == nil && cm.replicateConfig == nil {
-		return nil
-	}
-
-	// Drop path: nil config means clear all replication state.
-	if config == nil {
-		if err := resource.Resource().StreamingCatalog().DropReplicateConfiguration(ctx); err != nil {
-			cm.Logger().Error("failed to drop replicate configuration", zap.Error(err))
-			return err
-		}
-		cm.Logger().Info("Dropped replicate configuration")
-		cm.replicateConfig = nil
-		for _, ch := range cm.channels {
-			ch.availableInReplication = isChannelAvailableInReplication(ch.Name(), nil)
-		}
-		cm.cond.UnsafeBroadcast()
-		cm.version.Local++
-		cm.metrics.UpdateAssignmentVersion(cm.version.Local)
-		return nil
-	}
-
-	// check if the replicate configuration is changed.
-	// if not changed, return it directly.
 	if cm.replicateConfig != nil && proto.Equal(config.GetReplicateConfiguration(), cm.replicateConfig.GetReplicateConfiguration()) {
+		// check if the replicate configuration is changed.
+		// if not changed, return it directly.
 		return nil
 	}
 

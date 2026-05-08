@@ -17,18 +17,18 @@
 package importv2
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 func TestNewCopySegmentTask(t *testing.T) {
@@ -98,12 +98,12 @@ func TestNewCopySegmentTask(t *testing.T) {
 
 		// Test Cancel
 		copyTask.Cancel()
-		// Verify context is cancelled
+		// Verify context is canceled
 		select {
 		case <-copyTask.ctx.Done():
 			// Expected behavior
 		default:
-			t.Fatal("context should be cancelled")
+			t.Fatal("context should be canceled")
 		}
 	})
 

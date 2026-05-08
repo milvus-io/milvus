@@ -232,13 +232,41 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             AssertInfo(array->type()->id() == arrow::Type::type::STRING,
                        "inconsistent data type");
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);
+        }
+        case DataType::TEXT: {
+            // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
+            // Insert path: TEXT arrives as STRING
+            AssertInfo(array->type()->id() == arrow::Type::type::STRING ||
+                           array->type()->id() == arrow::Type::type::BINARY,
+                       "inconsistent data type");
+            std::vector<std::string> values(element_count);
+            if (array->type()->id() == arrow::Type::type::STRING) {
+                auto string_array =
+                    std::dynamic_pointer_cast<arrow::StringArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = string_array->GetString(index);
+                }
+            } else {
+                auto binary_array =
+                    std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sv = binary_array->GetView(index);
+                    values[index].assign(sv.data(), sv.size());
+                }
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(values.data(), element_count);
         }
         case DataType::JSON: {
             // The code here is not referenced.

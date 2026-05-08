@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Comprehensive benchmark expressions covering all parser features

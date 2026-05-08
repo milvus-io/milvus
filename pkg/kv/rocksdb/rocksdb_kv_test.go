@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	rocksdbkv "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestRocksdbKV(t *testing.T) {

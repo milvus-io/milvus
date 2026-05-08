@@ -376,50 +376,6 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return meta->num_rows_until_chunk_;
     }
 
-    const std::vector<int64_t>&
-    GetNumValidRowsUntilChunk() const override {
-        if (!num_valid_rows_until_chunk_.empty()) {
-            return num_valid_rows_until_chunk_;
-        }
-        return GetNumRowsUntilChunk();
-    }
-
-    void
-    BuildValidRowIds(milvus::OpContext* op_ctx) override {
-        if (!nullable_) {
-            return;
-        }
-        auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
-        int64_t logical_offset = 0;
-        valid_data_.resize(num_rows_);
-        valid_count_per_chunk_.resize(num_chunks_);
-        for (size_t i = 0; i < num_chunks_; i++) {
-            auto chunk = ca->get_cell_of(i);
-            auto rows = chunk_row_nums(i);
-            int64_t valid_count = 0;
-            for (int64_t j = 0; j < rows; j++) {
-                if (chunk->isValid(j)) {
-                    valid_data_[logical_offset + j] = true;
-                    valid_count++;
-                } else {
-                    valid_data_[logical_offset + j] = false;
-                }
-            }
-            valid_count_per_chunk_[i] = valid_count;
-            logical_offset += rows;
-        }
-
-        num_valid_rows_until_chunk_.clear();
-        num_valid_rows_until_chunk_.reserve(num_chunks_ + 1);
-        num_valid_rows_until_chunk_.push_back(0);
-        for (size_t i = 0; i < num_chunks_; i++) {
-            num_valid_rows_until_chunk_.push_back(
-                num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
-        }
-
-        BuildOffsetMapping();
-    }
-
  protected:
     bool nullable_{false};
     DataType data_type_{DataType::NONE};

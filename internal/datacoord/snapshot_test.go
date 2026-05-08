@@ -19,24 +19,24 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // =========================== Test Helper Functions ===========================
@@ -386,7 +386,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 		StatslogFiles:     []AvroFieldBinlog{},
 		Bm25StatslogFiles: []AvroFieldBinlog{},
 		TextIndexFiles:    []AvroTextIndexEntry{},
-		JsonKeyIndexFiles: []AvroJsonKeyIndexEntry{},
+		JSONKeyIndexFiles: []AvroJSONKeyIndexEntry{},
 		IndexFiles:        []AvroIndexFilePathInfo{},
 		StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
 		DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
@@ -668,6 +668,54 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSnapshot_JSONStatsPaths_RoundTripPreservesSnapshotRestorePaths(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	writer := NewSnapshotWriter(cm)
+	reader := NewSnapshotReader(cm)
+
+	snapshotData := createTestSnapshotData()
+	snapshotData.Segments[0].ManifestPath = `{"ver":7,"base_path":"files/insert_log/1/2/1001"}`
+	snapshotData.Segments[0].JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
+		200: {
+			FieldID:                200,
+			Version:                2,
+			Files:                  []string{"files/json_stats/3/6000/2/100/1/1001/200/shared_key_index/.managed.json_0"},
+			LogSize:                1024,
+			MemorySize:             2048,
+			BuildID:                6000,
+			JsonKeyStatsDataFormat: 3,
+		},
+		201: {
+			FieldID: 201,
+			Version: 3,
+			Files: []string{
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shared_key_index/.managed.json_1",
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shredding_data/data.parquet",
+			},
+			LogSize:                2048,
+			MemorySize:             4096,
+			BuildID:                6001,
+			JsonKeyStatsDataFormat: 3,
+		},
+	}
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+
+	readSnapshot, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
+	assert.NoError(t, err)
+	assert.Len(t, readSnapshot.Segments, 1)
+
+	got := readSnapshot.Segments[0].GetJsonKeyIndexFiles()
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[200].GetFiles(), got[200].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[201].GetFiles(), got[201].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetManifestPath(), readSnapshot.Segments[0].GetManifestPath())
+}
+
 // =========================== New Fields Tests ===========================
 
 func TestSnapshot_NewFields_Serialization(t *testing.T) {
@@ -822,8 +870,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			BuildID:                6000,
 			JsonKeyStatsDataFormat: 1,
 		}
-		avro := convertJsonKeyStatsToAvro(original)
-		restored := convertAvroToJsonKeyStats(avro)
+		avro := convertJSONKeyStatsToAvro(original)
+		restored := convertAvroToJSONKeyStats(avro)
 
 		assert.Equal(t, original.FieldID, restored.FieldID)
 		assert.Equal(t, original.Version, restored.Version)
@@ -859,8 +907,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			100: {FieldID: 100, Version: 1, Files: []string{"/json1"}, JsonKeyStatsDataFormat: 1},
 			200: {FieldID: 200, Version: 2, Files: []string{"/json2"}, JsonKeyStatsDataFormat: 2},
 		}
-		avroArray := convertJsonKeyIndexMapToAvro(originalMap)
-		restoredMap := convertAvroToJsonKeyIndexMap(avroArray)
+		avroArray := convertJSONKeyIndexMapToAvro(originalMap)
+		restoredMap := convertAvroToJSONKeyIndexMap(avroArray)
 
 		assert.Equal(t, len(originalMap), len(restoredMap))
 		for fieldID, origStats := range originalMap {

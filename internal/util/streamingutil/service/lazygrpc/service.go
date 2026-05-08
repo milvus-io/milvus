@@ -28,7 +28,7 @@ type serviceImpl[T any] struct {
 }
 
 func (s *serviceImpl[T]) GetService(ctx context.Context) (T, error) {
-	conn, err := s.Conn.GetConn(ctx)
+	conn, err := s.GetConn(ctx)
 	if err != nil {
 		var result T
 		return result, err

@@ -26,14 +26,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestTextEmbeddingFunction(t *testing.T) {
@@ -129,7 +129,7 @@ func (s *TextEmbeddingFunctionSuite) TestUnsupportedProvider() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.ErrorContains(err, "Unsupported text embedding service provider")
+	s.ErrorContains(err, "unsupported text embedding service provider")
 }
 
 func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
@@ -1039,7 +1039,7 @@ func (s *TextEmbeddingFunctionSuite) TestDisable() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
+	s.ErrorContains(err, "text embedding model provider [openai] is disabled")
 }
 
 func (s *TextEmbeddingFunctionSuite) TestYCEmbedding() {
@@ -1095,7 +1095,7 @@ func (s *TextEmbeddingFunctionSuite) TestDisableYC() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.ErrorContains(err, "Text embedding model provider [yc] is disabled")
+	s.ErrorContains(err, "text embedding model provider [yc] is disabled")
 }
 
 func (s *TextEmbeddingFunctionSuite) TestCheck() {
@@ -1136,5 +1136,5 @@ func (s *TextEmbeddingFunctionSuite) TestCheck() {
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 	err = runner.Check(context.Background())
-	s.ErrorContains(err, "Embedding model output and field type mismatch, model output is FloatVector, field type is Int8Vector")
+	s.ErrorContains(err, "embedding model output and field type mismatch, model output is FloatVector, field type is Int8Vector")
 }

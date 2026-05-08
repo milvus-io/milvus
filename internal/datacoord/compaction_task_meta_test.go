@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 func TestCompactionTaskMetaSuite(t *testing.T) {
@@ -164,4 +164,29 @@ func (suite *CompactionTaskMetaSuite) TestReloadFromKV_PreAllocatedSegmentIDsCom
 	clusteringTasks := meta.GetCompactionTasksByTriggerID(2)
 	suite.Equal(1, len(clusteringTasks))
 	suite.Equal(datapb.CompactionTaskState_failed, clusteringTasks[0].State)
+}
+
+// TestReloadFromKV_BackfillTaskSurvives verifies that an in-progress backfill compaction
+// task is NOT marked failed on reload, even though it has no PreAllocatedSegmentIDs —
+// backfill is in-place and never allocates new segment IDs. Without this guard, every
+// datacoord restart would kill any running backfill task.
+func (suite *CompactionTaskMetaSuite) TestReloadFromKV_BackfillTaskSurvives() {
+	backfillTask := &datapb.CompactionTask{
+		PlanID:    10,
+		TriggerID: 10,
+		Type:      datapb.CompactionType_BackfillCompaction,
+		State:     datapb.CompactionTaskState_executing,
+		// PreAllocatedSegmentIDs intentionally nil — backfill never allocates new segment IDs
+	}
+
+	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{backfillTask}, nil).Once()
+
+	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	suite.NoError(err)
+
+	tasks := meta.GetCompactionTasksByTriggerID(10)
+	suite.Equal(1, len(tasks))
+	suite.Equal(datapb.CompactionTaskState_executing, tasks[0].State,
+		"backfill task must survive reload even with nil PreAllocatedSegmentIDs")
 }

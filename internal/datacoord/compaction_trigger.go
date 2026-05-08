@@ -26,19 +26,19 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type compactTime struct {
@@ -230,6 +230,20 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	return coll, nil
 }
 
+// filterSegmentsWithMatchingSchemaVersion removes segments whose schema version does not match the
+// collection's current schema version. This allows mix compaction to proceed on the matching subset
+// rather than blocking the entire group (collection + partition + channel) during backfill.
+func filterSegmentsWithMatchingSchemaVersion(segments []*SegmentInfo, coll *collectionInfo) []*SegmentInfo {
+	collectionSchemaVersion := coll.Schema.GetVersion()
+	result := make([]*SegmentInfo, 0, len(segments))
+	for _, segment := range segments {
+		if segment.GetSchemaVersion() == collectionSchemaVersion {
+			result = append(result, segment)
+		}
+	}
+	return result
+}
+
 func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	if coll == nil {
 		return false
@@ -371,6 +385,15 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			if signal.collectionID != 0 {
 				return err
 			}
+			continue
+		}
+
+		group.segments = filterSegmentsWithMatchingSchemaVersion(group.segments, coll)
+		if len(group.segments) == 0 {
+			log.Debug("no segments with matching schema version in group, skip mix compaction",
+				zap.Int64("collectionID", group.collectionID),
+				zap.Int64("partitionID", group.partitionID),
+				zap.String("channel", group.channelName))
 			continue
 		}
 

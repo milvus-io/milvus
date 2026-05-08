@@ -33,11 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSortCompactionTaskSuite(t *testing.T) {
@@ -64,7 +64,7 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMeta()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	s.NoError(err)
 
 	plan := &datapb.CompactionPlan{
@@ -238,7 +238,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockChunkManager = mocks.NewChunkManager(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}

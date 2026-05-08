@@ -25,9 +25,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 )
 
 type ctxTenantKey struct{}
@@ -60,7 +60,7 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Append(s, kv[i+1])
+			md.Append(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -77,7 +77,7 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Set(s, kv[i+1])
+			md.Set(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)

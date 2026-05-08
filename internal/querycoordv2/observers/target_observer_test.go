@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -36,14 +36,14 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TargetObserverSuite struct {
@@ -108,14 +108,14 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 	testCollection := utils.CreateTestCollection(suite.collectionID, 1)
 	testCollection.Status = querypb.LoadStatus_Loaded
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, testCollection)
+	err = suite.meta.PutCollection(suite.ctx, testCollection)
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 
 	suite.nextTargetChannels = []*datapb.VchannelInfo{
@@ -265,17 +265,18 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	// Wait for observer to automatically discover the new segment
-	// The background goroutine should detect segment 13 and update NextTarget
+	// Manually trigger update so the observer discovers the new segment immediately
+	// instead of waiting for the background ticker (default interval 10s, which would
+	// make Eventually flaky when timeout < ticker interval).
+	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
+
+	// Verify the observer picked up segment 13 in NextTarget
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
-
-	// Manually trigger update to ensure NextTarget is ready
-	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
-	suite.NoError(err)
 
 	// Simulate nodes loading the new segment 13
 	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -368,7 +369,7 @@ func (suite *TargetObserverSuite) TestTriggerRelease() {
 	suite.NoError(err)
 
 	// manually release partition
-	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(ctx, suite.collectionID)
+	partitions := suite.meta.GetPartitionsByCollection(ctx, suite.collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
 	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
 
@@ -439,14 +440,14 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
+	err = suite.meta.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 }
 

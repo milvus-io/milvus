@@ -30,13 +30,13 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var (
@@ -282,7 +282,7 @@ func getCollEzPropsByDBProps(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 }
 
 func IsDBEncrypted(dbProperties []*commonpb.KeyValuePair) bool {
-	var hasEzID, hasKey bool = false, false
+	hasEzID, hasKey := false, false
 	for _, property := range dbProperties {
 		if property.Key == common.EncryptionEzIDKey && property.Value != "" {
 			hasEzID = true
@@ -456,7 +456,7 @@ func InitOnceCipher() {
 func buildCipherInitConfig() map[string]string {
 	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
 	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
-	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
+	initConfigs[paramtable.Get().LocalStorageCfg.Path.Key] = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	return initConfigs
 }
 

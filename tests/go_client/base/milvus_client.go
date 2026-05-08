@@ -9,11 +9,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
@@ -80,6 +80,9 @@ func NewMilvusClient(ctx context.Context, cfg *client.ClientConfig) (*MilvusClie
 }
 
 func (mc *MilvusClient) Close(ctx context.Context) error {
+	if mc.Client == nil {
+		return nil
+	}
 	err := mc.Client.Close(ctx)
 	return err
 }
