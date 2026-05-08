@@ -813,7 +813,6 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	s.tryPromoteReadyLoadConfigReplicas(ctx)
 	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
 		s.meta,
 		s.targetMgr,
