@@ -21,7 +21,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -37,7 +36,7 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 		return
 	}
 	for _, replica := range replicas {
-		if !s.isLoadConfigReplicaReady(ctx, replica) {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
 			return
 		}
 	}
@@ -64,18 +63,4 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 			zap.Int64s("collections", collections),
 			zap.Error(err))
 	}
-}
-
-func (s *Server) isLoadConfigReplicaReady(ctx context.Context, replica *meta.Replica) bool {
-	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
-	if len(channels) == 0 {
-		return false
-	}
-	for channelName := range channels {
-		leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
-		if leader == nil || !leader.IsServiceable() || s.nodeMgr.Get(leader.Node) == nil {
-			return false
-		}
-	}
-	return true
 }
