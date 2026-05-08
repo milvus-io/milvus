@@ -2,7 +2,6 @@ package metautil
 
 import (
 	"path"
-	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -56,22 +55,12 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 
 // BuildPrefix returns the directory prefix containing all files for this index build.
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
-// v1: {root}/index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+// v1: {root}/index_files_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
 func (b *IndexPathBuilder) BuildPrefix() string {
 	if IsCollectionRooted(b.pathVersion) {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)
-		return path.Join(b.rootPath, common.SegmentIndexPath, k)
+		return path.Join(b.rootPath, common.SegmentIndexV1Path, k)
 	}
 	k := JoinIDPath(b.buildID, b.indexVersion, b.partID, b.segID)
-	return path.Join(b.rootPath, common.SegmentIndexPath, k)
-}
-
-// BuildCollectionPrefix returns the prefix for all index files of a collection.
-// v0: no collection prefix exists, returns index_files root.
-// v1: {root}/index_files/{collID}
-func (b *IndexPathBuilder) BuildCollectionPrefix() string {
-	if IsCollectionRooted(b.pathVersion) {
-		return path.Join(b.rootPath, common.SegmentIndexPath, strconv.FormatInt(b.collID, 10))
-	}
-	return path.Join(b.rootPath, common.SegmentIndexPath)
+	return path.Join(b.rootPath, common.SegmentIndexV0Path, k)
 }

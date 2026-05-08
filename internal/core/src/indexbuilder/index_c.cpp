@@ -270,7 +270,7 @@ CreateIndex(CIndex* res_index,
             field_type,
             build_index_info->dim(),
             index_non_encoding,
-            build_index_info->index_store_path_version()};
+            build_index_info->index_store_path()};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
         LOG_INFO("create chunk manager success, build_id: {}",

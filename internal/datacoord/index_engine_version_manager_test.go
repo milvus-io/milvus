@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
@@ -62,45 +62,37 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
 }
 
-func Test_IndexEngineVersionManager_IndexStorePathVersionCapability(t *testing.T) {
+func Test_IndexEngineVersionManager_IndexStorePathVersionCapabilityFromSessionVersion(t *testing.T) {
 	m := newIndexEngineVersionManager()
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
-	m.StartupByRole(typeutil.QueryNodeRole, map[string]*sessionutil.Session{
-		"qn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 1, MaxIndexStorePathVersion: 1}},
-	})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m.StartupByRole(typeutil.DataNodeRole, map[string]*sessionutil.Session{
-		"dn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 2}},
-	})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m = newIndexEngineVersionManager()
-	m.StartupByRole(typeutil.DataNodeRole, map[string]*sessionutil.Session{
-		"dn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 2, MaxIndexStorePathVersion: 1}},
-	})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m.UpdateByRole(typeutil.DataNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 2, MaxIndexStorePathVersion: 1}})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m.AddByRole(typeutil.QueryNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m.RemoveByRole(typeutil.QueryNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
-
-	m = newIndexEngineVersionManager()
 	m.Startup(map[string]*sessionutil.Session{
-		"qn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 1, MaxIndexStorePathVersion: 1}},
+		"qn1": {
+			Version: common.Version,
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
 	})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
-	m.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 2}})
+	m.AddNode(&sessionutil.Session{
+		Version: common.Version,
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.6.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 3,
+		},
+	})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
-	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 2}})
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
 }
 

@@ -2482,65 +2482,14 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	})
 }
 
-func TestIndexMeta_HasCollectionWithPathVersion(t *testing.T) {
+func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
 	m := &indexMeta{
 		segmentBuildInfo: newSegmentIndexBuildInfo(),
 	}
 
-	// Add a v0 index for collection 100
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1000,
-		CollectionID:          100,
-		IndexStorePathVersion: 0,
-	})
-
-	// Add a v1 index for collection 200
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2000,
-		CollectionID:          200,
-		IndexStorePathVersion: 1,
-	})
-
-	// Collection 100 has no v1 indexes
-	assert.False(t, m.HasCollectionWithPathVersion(100, 1))
-	// Collection 200 has v1 indexes
-	assert.True(t, m.HasCollectionWithPathVersion(200, 1))
-	// Collection 300 doesn't exist
-	assert.False(t, m.HasCollectionWithPathVersion(300, 1))
-	// Collection 100 has v0 indexes (version >= 0)
-	assert.True(t, m.HasCollectionWithPathVersion(100, 0))
-}
-
-func TestIndexMeta_ListCollectionRootedIndexCollections(t *testing.T) {
-	m := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1,
-		CollectionID:          100,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2,
-		CollectionID:          200,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               3,
-		CollectionID:          300,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion(2),
-	})
-
-	collections := m.ListCollectionRootedIndexCollections()
-	assert.NotContains(t, collections, int64(100))
-	assert.Contains(t, collections, int64(200))
-	assert.Contains(t, collections, int64(300))
-}
-
-func TestIndexMeta_GetDeletedIndexesWithPathVersion(t *testing.T) {
-	m := &indexMeta{
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-	}
-
-	// Add: deleted v0, deleted v1, not-deleted v1
+	// Add: deleted v0, deleted v1, not-deleted v1.
+	// Only deleted v1 indexes need metadata-driven cleanup under index_files_v1;
+	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
 	m.segmentBuildInfo.Add(&model.SegmentIndex{
 		BuildID:               1000,
 		CollectionID:          100,
@@ -2560,12 +2509,7 @@ func TestIndexMeta_GetDeletedIndexesWithPathVersion(t *testing.T) {
 		IsDeleted:             false,
 	})
 
-	// Get deleted with pathVersion >= 1
-	result := m.GetDeletedIndexesWithPathVersion(1)
+	result := m.GetDeletedIndexesWithV1Path()
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(2000), result[0].BuildID)
-
-	// Get deleted with pathVersion >= 0 (all deleted)
-	result = m.GetDeletedIndexesWithPathVersion(0)
-	assert.Len(t, result, 2)
 }

@@ -748,7 +748,9 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 	return indexInfos
 }
 
-// MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
+// MarkIndexAsDeleted marks indexes as deleted. File cleanup is split by path layout:
+// recycleUnusedIndexFilesV0 handles legacy v0 index_files objects, and
+// recycleUnusedIndexFilesV1 handles v1 index_files_v1 objects.
 func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
@@ -1226,45 +1228,10 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 	return true, nil
 }
 
-// HasCollectionWithPathVersion checks if any SegmentIndex with this collectionID uses pathVersion >= ver.
-// Used by GC to distinguish collectionID dirs from orphan buildID dirs.
-func (m *indexMeta) HasCollectionWithPathVersion(collectionID int64, pathVersion indexpb.IndexStorePathVersion) bool {
-	if m.segmentBuildInfo == nil {
-		return false
-	}
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.CollectionID != collectionID {
-			continue
-		}
-		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
-			if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
-				return true
-			}
-			continue
-		}
-		if segIdx.IndexStorePathVersion >= pathVersion {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *indexMeta) ListCollectionRootedIndexCollections() map[int64]struct{} {
-	collections := make(map[int64]struct{})
-	if m.segmentBuildInfo == nil {
-		return collections
-	}
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
-			collections[segIdx.CollectionID] = struct{}{}
-		}
-	}
-	return collections
-}
-
-// GetDeletedIndexesWithPathVersion returns SegmentIndex entries that are deleted and have pathVersion >= ver.
-// Used by GC to find v1-format indexes that need file cleanup.
-func (m *indexMeta) GetDeletedIndexesWithPathVersion(pathVersion indexpb.IndexStorePathVersion) []*model.SegmentIndex {
+// GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
+// the v1 index_files_v1 layout. v0 cleanup still walks the buildID-rooted
+// index_files prefix and does not use this metadata-driven query.
+func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
 	if m.segmentBuildInfo == nil {
 		return nil
 	}
@@ -1273,13 +1240,7 @@ func (m *indexMeta) GetDeletedIndexesWithPathVersion(pathVersion indexpb.IndexSt
 		if !segIdx.IsDeleted {
 			continue
 		}
-		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
-			if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
-				result = append(result, model.CloneSegmentIndex(segIdx))
-			}
-			continue
-		}
-		if segIdx.IndexStorePathVersion >= pathVersion {
+		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
 			result = append(result, model.CloneSegmentIndex(segIdx))
 		}
 	}

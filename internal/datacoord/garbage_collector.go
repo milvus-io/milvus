@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -349,7 +348,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context, signal <-chan gcCmd) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
-			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleUnusedIndexFilesV0(ctx)
 			gc.recycleUnusedIndexFilesV1(ctx)
 		})
 	}()
@@ -1129,18 +1128,19 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	}
 }
 
-// recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
-func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
+// recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.
+// v0 paths are rooted by buildID, so the first-level directory can be parsed and
+// checked against index meta directly.
+func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 	start := time.Now()
-	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFiles"), zap.Time("startAt", start))
-	log.Info("start recycleUnusedIndexFiles...")
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV0"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedIndexFilesV0...")
 
-	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
+	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexV0Path) + "/"
 
 	// Resolve snapshotMeta once. Both IsBuildIDGCBlocked paths below are O(1) so
 	// no caching of intermediate state is needed.
 	snapshotMeta := gc.meta.GetSnapshotMeta()
-	collectionRootedCollections := gc.meta.indexMeta.ListCollectionRootedIndexCollections()
 
 	// list dir first
 	keyCount := 0
@@ -1149,9 +1149,11 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 		keyCount++
 		logger := log.With(zap.String("prefix", prefix), zap.String("key", key))
 
+		// This recycler only walks index_files/ (v0). Its first path level is buildID;
+		// v1 collectionID directories live under index_files_v1/ and are handled below.
 		buildID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
-			logger.Warn("garbageCollector recycleUnusedIndexFiles parseIndexFileKey", zap.Error(err))
+			logger.Warn("garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", zap.Error(err))
 			return true
 		}
 		logger = logger.With(zap.Int64("buildID", buildID))
@@ -1164,27 +1166,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
-			// parsedID not found as a buildID — could be:
-			// 1. Orphan legacy buildID dir (should be removed)
-			// 2. CollectionID dir from v1 path format (should NOT be removed)
-			if _, ok := collectionRootedCollections[buildID]; ok {
-				// This is a collectionID dir for v1 format — skip here,
-				// v1 cleanup is handled by recycleUnusedIndexFilesV1.
-				// TODO: v1 files written before SegmentIndex metadata commit are not
-				// discovered by this collection-dir skip. Full cleanup needs a follow-up
-				// bounded scan under known collection/partition/segment prefixes.
-				logger.Info("skip collectionID dir, handled by v1 recycler",
-					zap.Int64("collectionID", buildID))
-				return true
-			}
-			if gc.meta.indexMeta.HasCollectionWithPathVersion(buildID, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
-				collectionRootedCollections[buildID] = struct{}{}
-				logger.Info("skip collectionID dir after live metadata recheck",
-					zap.Int64("collectionID", buildID))
-				return true
-			}
-
-			// Orphan buildID walk: no collection context,
+			// buildID no longer exists in meta. Orphan buildID walk has no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
 				logger.Info("skip GC index files since buildID is protected by snapshot",
@@ -1193,13 +1175,13 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			}
 
 			// buildID no longer exists in meta, remove all index files
-			logger.Info("garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files")
+			logger.Info("garbageCollector recycleUnusedIndexFilesV0 find meta has not exist, remove index files")
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
 			if err != nil {
-				logger.Warn("garbageCollector recycleUnusedIndexFiles remove index files failed", zap.Error(err))
+				logger.Warn("garbageCollector recycleUnusedIndexFilesV0 remove index files failed", zap.Error(err))
 				return true
 			}
-			logger.Info("garbageCollector recycleUnusedIndexFiles remove index files success")
+			logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove index files success")
 			return true
 		}
 
@@ -1227,14 +1209,14 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			if _, ok := filesMap[file]; !ok {
 				future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 					logger := logger.With(zap.String("file", file))
-					logger.Info("garbageCollector recycleUnusedIndexFiles remove file...")
+					logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove file...")
 
 					if err := gc.option.cli.Remove(ctx, file); err != nil {
-						logger.Warn("garbageCollector recycleUnusedIndexFiles remove file failed", zap.Error(err))
+						logger.Warn("garbageCollector recycleUnusedIndexFilesV0 remove file failed", zap.Error(err))
 						return struct{}{}, err
 					}
 					deletedFilesNum.Inc()
-					logger.Info("garbageCollector recycleUnusedIndexFiles remove file success")
+					logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove file success")
 					return struct{}{}, nil
 				})
 				futures = append(futures, future)
@@ -1257,13 +1239,14 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 	})
 	log = log.With(zap.Duration("timeCost", time.Since(start)), zap.Int("keyCount", keyCount), zap.Error(err))
 	if err != nil {
-		log.Warn("garbageCollector recycleUnusedIndexFiles failed", zap.Error(err))
+		log.Warn("garbageCollector recycleUnusedIndexFilesV0 failed", zap.Error(err))
 		return
 	}
-	log.Info("recycleUnusedIndexFiles done")
+	log.Info("recycleUnusedIndexFilesV0 done")
 }
 
-// getAllIndexFilesOfIndex returns the all index files of index.
+// getAllIndexFilesOfIndex returns all expected index files using the path version
+// recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_files_v1 paths.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
 	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
@@ -1277,13 +1260,13 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 }
 
 // recycleUnusedIndexFilesV1 cleans index files for v1 format entries (collection-partitioned paths).
-// V1 first-level dirs are collectionIDs, so the walk-based approach in recycleUnusedIndexFiles can't
-// discover individual builds. Instead, iterate over deleted metadata entries and remove by full path.
+// v1 uses the separate index_files_v1 prefix and puts collectionID before buildID,
+// so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
 func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV1"))
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
-	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithPathVersion(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)
+	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithV1Path()
 	if len(deletedIndexes) == 0 {
 		return
 	}

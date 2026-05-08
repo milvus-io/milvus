@@ -535,14 +535,6 @@ func (s *Server) initServiceDiscovery() error {
 // Note: may apply same node multiple times, so rewatchQueryNodes must be idempotent
 func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) error {
 	s.indexEngineVersionManager.Startup(sessions)
-	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-		s.indexEngineVersionManager.AddByRole(typeutil.QueryNodeRole, &sessionutil.Session{
-			SessionRaw: sessionutil.SessionRaw{
-				ServerID: Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
-				Address:  Params.DataCoordCfg.IndexNodeAddress.GetValue(),
-			},
-		})
-	}
 	return nil
 }
 

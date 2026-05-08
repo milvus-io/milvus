@@ -2029,11 +2029,10 @@ func TestHandleSessionEvent(t *testing.T) {
 			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:                 101,
-					ServerName:               "DN101",
-					Address:                  "DN127.0.0.101",
-					Exclusive:                false,
-					MaxIndexStorePathVersion: 1,
+					ServerID:   101,
+					ServerName: "DN101",
+					Address:    "DN127.0.0.101",
+					Exclusive:  false,
 				},
 			},
 		}
@@ -2062,11 +2061,10 @@ func TestHandleSessionEvent(t *testing.T) {
 			EventType: sessionutil.SessionUpdateEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:                 102,
-					ServerName:               "DN102",
-					Address:                  "DN127.0.0.102",
-					Exclusive:                false,
-					MaxIndexStorePathVersion: 1,
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
+					Exclusive:  false,
 				},
 			},
 		}
@@ -2456,18 +2454,16 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 	sessions := map[string]*sessionutil.Session{
 		"session1": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID:                 1,
-				Address:                  "localhost:9001",
-				Version:                  "2.3.0",
-				MaxIndexStorePathVersion: 1,
+				ServerID: 1,
+				Address:  "localhost:9001",
+				Version:  "2.3.0",
 			},
 		},
 		"session2": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID:                 2,
-				Address:                  "localhost:9002",
-				Version:                  "2.2.0", // legacy version
-				MaxIndexStorePathVersion: 1,
+				ServerID: 2,
+				Address:  "localhost:9002",
+				Version:  "2.2.0", // legacy version
 			},
 		},
 	}
@@ -2537,7 +2533,7 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "cluster startup failed")
 }
 
-func TestServer_initServiceDiscovery_BindIndexNodeSeedsConservativePathVersion(t *testing.T) {
+func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVersionGate(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.BindIndexNodeMode.Key, "true")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeID.Key, "10001")
 	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeAddress.Key, "localhost:10001")
@@ -2552,7 +2548,12 @@ func TestServer_initServiceDiscovery_BindIndexNodeSeedsConservativePathVersion(t
 	mockSession.EXPECT().
 		GetSessions(mock.Anything, typeutil.QueryNodeRole).
 		Return(map[string]*sessionutil.Session{
-			"qn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 1, MaxIndexStorePathVersion: 1}},
+			"qn1": {
+				Version: common.Version,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID: 1,
+				},
+			},
 		}, int64(20), nil)
 	mockSession.EXPECT().
 		WatchServicesWithVersionRange(typeutil.QueryNodeRole, mock.Anything, int64(21), mock.Anything).
@@ -2569,7 +2570,7 @@ func TestServer_initServiceDiscovery_BindIndexNodeSeedsConservativePathVersion(t
 
 	err := server.initServiceDiscovery()
 	assert.NoError(t, err)
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
 func Test_CheckHealth(t *testing.T) {

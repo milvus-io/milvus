@@ -191,10 +191,18 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<InputStream>
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
-        auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
-                                              : GetRemoteTextLogPrefix();
-        remote_file_path += "/" + local_file_name;
+        std::string remote_file_path;
+        // IndexFilePaths may contain either:
+        // - v0 legacy basename: "file1"; use IndexMeta to build the v0 prefix.
+        // - v0/v1 full object path: "root/index_files.../file1"; open it directly.
+        if (is_index_file && filename.find('/') != std::string::npos) {
+            remote_file_path = NormalizePath(filename);
+        } else {
+            auto local_file_name = GetFileName(filename);
+            remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                             : GetRemoteTextLogPrefix();
+            remote_file_path += "/" + local_file_name;
+        }
         auto remote_file = fs_->OpenInputFile(remote_file_path);
         AssertInfo(remote_file.ok(),
                    "failed to open remote file, reason: {}",
@@ -277,26 +285,20 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
+        // Prefer the DataCoord-built prefix when present. The fallback is only
+        // for v0 basename-only index file inputs.
+        if (!index_meta_.index_store_path.empty()) {
+            return NormalizePath(index_meta_.index_store_path);
+        }
         boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1;
-        if (index_meta_.index_store_path_version >=
-            milvus::proto::index::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
-            // v1: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
-            path1 = std::to_string(field_meta_.collection_id) + "/" +
-                    std::to_string(field_meta_.partition_id) + "/" +
-                    std::to_string(field_meta_.segment_id) + "/" +
-                    std::to_string(index_meta_.build_id) + "/" +
-                    std::to_string(index_meta_.index_version);
-        } else {
-            // v0 (legacy): index_files/{buildID}/{indexVersion}/{partID}/{segID}
-            path1 = std::to_string(index_meta_.build_id) + "/" +
-                    std::to_string(index_meta_.index_version) + "/" +
-                    std::to_string(field_meta_.partition_id) + "/" +
-                    std::to_string(field_meta_.segment_id);
-        }
+        boost::filesystem::path path1 =
+            std::to_string(index_meta_.build_id) + "/" +
+            std::to_string(index_meta_.index_version) + "/" +
+            std::to_string(field_meta_.partition_id) + "/" +
+            std::to_string(field_meta_.segment_id);
         return NormalizePath(prefix / path / path1);
     }
 

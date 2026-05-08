@@ -310,7 +310,7 @@ func generateMappingsFromFiles(
 
 			// Determine path generation logic based on file type
 			switch fileType {
-			case IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
+			case IndexTypeVectorScalarV0, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
 				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType, indexPathVersions[srcPath])
 			case FileTypeLOB:
 				dstPath, err = generateTargetLOBPath(srcPath, source, target)
@@ -339,7 +339,9 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.Bm25Binlogs, BinlogTypeBM25); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalar); err != nil {
+	// Vector/scalar index copy uses the v0 type as the logical input; the
+	// per-file IndexStorePathVersion switches storage matching to index_files_v1 when needed.
+	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalarV0); err != nil {
 		return nil, err
 	}
 	if err := addMappings(files.TextIndex, IndexTypeText); err != nil {
@@ -810,26 +812,27 @@ func lobFileInfosToPaths(infos []packed.LobFileInfo) []string {
 // File type constants used for path identification and generation.
 // These constants match the directory names in Milvus storage paths.
 const (
-	BinlogTypeInsert      = "insert_log"
-	BinlogTypeStats       = "stats_log"
-	BinlogTypeDelta       = "delta_log"
-	BinlogTypeBM25        = "bm25_stats"
-	IndexTypeVectorScalar = "index_files"
-	IndexTypeText         = "text_log"
-	IndexTypeJSONKey      = "json_key_index_log" // Legacy: JSON Key Inverted Index
-	IndexTypeJSONStats    = "json_stats"         // New: JSON Stats with Shredding Design
-	FileTypeLOB           = "lob"                // LOB files at partition level for TEXT fields
+	BinlogTypeInsert        = "insert_log"
+	BinlogTypeStats         = "stats_log"
+	BinlogTypeDelta         = "delta_log"
+	BinlogTypeBM25          = "bm25_stats"
+	IndexTypeVectorScalarV0 = "index_files"
+	IndexTypeVectorScalarV1 = "index_files_v1"
+	IndexTypeText           = "text_log"
+	IndexTypeJSONKey        = "json_key_index_log" // Legacy: JSON Key Inverted Index
+	IndexTypeJSONStats      = "json_stats"         // New: JSON Stats with Shredding Design
+	FileTypeLOB             = "lob"                // LOB files at partition level for TEXT fields
 )
 
 // generateTargetIndexPath is the unified function for generating target paths for all index types
 // The indexType parameter specifies which type of index path to generate
 //
 // Supported index types (use constants):
-//   - IndexTypeVectorScalar: Vector/Scalar Index path format (from BuildSegmentIndexFilePaths)
+//   - IndexTypeVectorScalarV0: Vector/Scalar v0 path format (legacy index_files prefix)
 //     {rootPath}/index_files/{build_id}/{index_version}/{partition_id}/{segment_id}/file
 //     Note: collectionID is NOT in the path, only partitionID and segmentID are replaced
-//   - IndexTypeVectorScalar (v1): New path format with collectionID
-//     {rootPath}/index_files/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
+//   - IndexTypeVectorScalarV1: Vector/Scalar v1 path format (index_files_v1 prefix)
+//     {rootPath}/index_files_v1/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
 //   - IndexTypeText: Text Index path format
 //     {rootPath}/text_log/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/file
 //   - IndexTypeJSONKey: JSON Key Index path format (legacy)
@@ -838,7 +841,7 @@ const (
 //     {rootPath}/json_stats/{data_format_version}/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/(shared_key_index|shredding_data)/...
 //
 // Examples:
-// generateTargetIndexPath(..., IndexTypeVectorScalar):
+// generateTargetIndexPath(..., IndexTypeVectorScalarV0):
 //
 //	files/index_files/1001/1/222/333/scalar_index -> files/index_files/1001/1/bbb/ccc/scalar_index
 //
@@ -867,24 +870,31 @@ func generateTargetIndexPath(
 	var keywordIdx int
 	var collectionOffset, partitionOffset, segmentOffset int
 
+	keyword := indexType
+	if indexType == IndexTypeVectorScalarV0 && metautil.IsCollectionRooted(pathVersion) {
+		// The caller still passes the vector/scalar logical type, but v1 files
+		// live under a different object-storage prefix.
+		keyword = IndexTypeVectorScalarV1
+	}
+
 	// Find the keyword position in the path
 	keywordIdx = -1
 	for i, part := range parts {
-		if part == indexType {
+		if part == keyword {
 			keywordIdx = i
 			break
 		}
 	}
 
 	if keywordIdx == -1 {
-		return "", fmt.Errorf("keyword '%s' not found in path: %s", indexType, sourcePath)
+		return "", fmt.Errorf("keyword '%s' not found in path: %s", keyword, sourcePath)
 	}
 
 	// Set offsets based on index type
 	// collectionOffset = -1 means collectionID is not present in the path
 	var buildIDOffset int
 	switch indexType {
-	case IndexTypeVectorScalar:
+	case IndexTypeVectorScalarV0:
 		if metautil.IsCollectionRooted(pathVersion) {
 			collectionOffset = 1
 			partitionOffset = 2
@@ -910,7 +920,7 @@ func generateTargetIndexPath(
 		buildIDOffset = 2
 	default:
 		return "", fmt.Errorf("unsupported index type: %s (expected '%s', '%s', '%s', or '%s')",
-			indexType, IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
+			indexType, IndexTypeVectorScalarV0, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
 	}
 
 	// Validate path structure has enough components
