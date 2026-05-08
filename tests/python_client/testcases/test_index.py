@@ -1428,9 +1428,9 @@ class TestIndexInvalid(TestcaseBase):
         data = cf.gen_default_list_sparse_data()
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
-        error = {ct.err_code: 999,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
-                             f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]"}
+                             f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE BLOCK_MAX_MAXSCORE BLOCK_MAX_WAND SINDI]"}
         index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
                                               check_task=CheckTasks.err_res,
                                               check_items=error)
