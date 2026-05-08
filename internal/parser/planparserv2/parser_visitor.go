@@ -544,9 +544,19 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
 
-	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
-	if err != nil {
+	queryExpr := ctx.GetQuery().Accept(v)
+	if err := getError(queryExpr); err != nil {
 		return err
+	}
+	queryValueExpr := getValueExpr(queryExpr)
+	if queryValueExpr == nil {
+		return merr.WrapErrParameterInvalidMsg("\"query\" should be a string literal or template variable expression. \"query\" expression passed: %s", ctx.GetQuery().GetText())
+	}
+	queryText := queryValueExpr.GetValue()
+	templateVariableName := queryValueExpr.GetTemplateVariableName()
+	isTemplate := templateVariableName != ""
+	if !isTemplate && (queryText == nil || !IsString(queryText)) {
+		return merr.WrapErrParameterInvalidMsg("\"query\" should be a string literal or template variable expression. \"query\" expression passed: %s", ctx.GetQuery().GetText())
 	}
 
 	// Handle optional min_should_match parameter
@@ -567,12 +577,14 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:  columnInfo,
-					Op:          planpb.OpType_TextMatch,
-					Value:       NewString(queryText),
-					ExtraValues: extraValues,
+					ColumnInfo:           columnInfo,
+					Op:                   planpb.OpType_TextMatch,
+					Value:                queryText,
+					TemplateVariableName: templateVariableName,
+					ExtraValues:          extraValues,
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -613,24 +625,35 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
 
-	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
-	if err != nil {
+	queryExpr := ctx.GetQuery().Accept(v)
+	if err := getError(queryExpr); err != nil {
 		return err
 	}
+	queryValueExpr := getValueExpr(queryExpr)
+	if queryValueExpr == nil {
+		return merr.WrapErrParameterInvalidMsg("\"query\" should be a string literal or template variable expression. \"query\" expression passed: %s", ctx.GetQuery().GetText())
+	}
+	queryText := queryValueExpr.GetValue()
+	templateVariableName := queryValueExpr.GetTemplateVariableName()
+	isTemplate := templateVariableName != ""
+	if !isTemplate && (queryText == nil || !IsString(queryText)) {
+		return merr.WrapErrParameterInvalidMsg("\"query\" should be a string literal or template variable expression. \"query\" expression passed: %s", ctx.GetQuery().GetText())
+	}
+
 	var slop int64 = 0
-	if ctx.Expr() != nil {
-		slopExpr := ctx.Expr().Accept(v)
+	if ctx.GetSlop() != nil {
+		slopExpr := ctx.GetSlop().Accept(v)
 		slopValueExpr := getValueExpr(slopExpr)
 		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
-			return merr.WrapErrParameterInvalidMsg("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr().GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.GetSlop().GetText())
 		}
 		slop = slopValueExpr.GetValue().GetInt64Val()
 		if slop < 0 {
-			return merr.WrapErrParameterInvalidMsg("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr().GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.GetSlop().GetText())
 		}
 
 		if slop > math.MaxUint32 {
-			return merr.WrapErrParameterInvalidMsg("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr().GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.GetSlop().GetText())
 		}
 	}
 
@@ -638,12 +661,14 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:  toColumnInfo(column),
-					Op:          planpb.OpType_PhraseMatch,
-					Value:       NewString(queryText),
-					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
+					ColumnInfo:           toColumnInfo(column),
+					Op:                   planpb.OpType_PhraseMatch,
+					Value:                queryText,
+					TemplateVariableName: templateVariableName,
+					ExtraValues:          []*planpb.GenericValue{NewInt(slop)},
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}

@@ -18,8 +18,8 @@ expr:
 	| EmptyArray                                                                                            # EmptyArray
 	| EXISTS expr                                                                                           # Exists
 	| expr LIKE StringLiteral                                                                               # Like
-	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'                                    # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
+	| TEXTMATCH'('Identifier',' query=expr (',' textMatchOption)? ')'                                       # TextMatch
+	| PHRASEMATCH'('Identifier',' query=expr (',' slop=expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple

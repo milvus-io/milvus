@@ -186,6 +186,112 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 	})
 }
 
+func (s *FillExpressionValueSuite) TestTextMatch() {
+	s.Run("normal case", func() {
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		schemaH, err := typeutil.CreateSchemaHelper(schema)
+		s.NoError(err)
+
+		testcases := []testcase{
+			{`text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`text_match(VarCharField, {query}, minimum_should_match=1)`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`text_match(VarCharField, {query}) and Int64Field <= {judgment_date}`, map[string]*schemapb.TemplateValue{
+				"query":         generateTemplateValue(schemapb.DataType_String, "query phrase"),
+				"judgment_date": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+			}},
+		}
+		for _, c := range testcases {
+			s.assertValidExpr(schemaH, c.expr, c.values)
+		}
+
+		expr, err := ParseExpr(schemaH, `text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+		})
+		s.NoError(err)
+		s.Equal("query phrase", expr.GetUnaryRangeExpr().GetValue().GetStringVal())
+		s.Equal("query", expr.GetUnaryRangeExpr().GetTemplateVariableName())
+	})
+
+	s.Run("failed case", func() {
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		schemaH, err := typeutil.CreateSchemaHelper(schema)
+		s.NoError(err)
+
+		testcases := []testcase{
+			{`text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+			}},
+			{`text_match(VarCharField, {missing})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`text_match(VarCharField, Int64Field)`, nil},
+			{`text_match(VarCharField, 123)`, nil},
+		}
+		for _, c := range testcases {
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
+		}
+	})
+}
+
+func (s *FillExpressionValueSuite) TestPhraseMatch() {
+	s.Run("normal case", func() {
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		schemaH, err := typeutil.CreateSchemaHelper(schema)
+		s.NoError(err)
+
+		testcases := []testcase{
+			{`phrase_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`phrase_match(VarCharField, {query}, 1)`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`phrase_match(VarCharField, {query}) and Int64Field <= {judgment_date}`, map[string]*schemapb.TemplateValue{
+				"query":         generateTemplateValue(schemapb.DataType_String, "query phrase"),
+				"judgment_date": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+			}},
+		}
+		for _, c := range testcases {
+			s.assertValidExpr(schemaH, c.expr, c.values)
+		}
+
+		expr, err := ParseExpr(schemaH, `phrase_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+		})
+		s.NoError(err)
+		s.Equal("query phrase", expr.GetUnaryRangeExpr().GetValue().GetStringVal())
+		s.Equal("query", expr.GetUnaryRangeExpr().GetTemplateVariableName())
+	})
+
+	s.Run("failed case", func() {
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		schemaH, err := typeutil.CreateSchemaHelper(schema)
+		s.NoError(err)
+
+		testcases := []testcase{
+			{`phrase_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+			}},
+			{`phrase_match(VarCharField, {missing})`, map[string]*schemapb.TemplateValue{
+				"query": generateTemplateValue(schemapb.DataType_String, "query phrase"),
+			}},
+			{`phrase_match(VarCharField, Int64Field)`, nil},
+			{`phrase_match(VarCharField, 123)`, nil},
+		}
+		for _, c := range testcases {
+			s.assertInvalidExpr(schemaH, c.expr, c.values)
+		}
+	})
+}
+
 func (s *FillExpressionValueSuite) TestBinaryRange() {
 	s.Run("normal case", func() {
 		testcases := []testcase{

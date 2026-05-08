@@ -301,6 +301,8 @@ func TestExpr_TextMatch(t *testing.T) {
 	unsupported := []string{
 		`text_match(not_exist, "query")`,
 		`text_match(BoolField, "query")`,
+		`text_match(VarCharField, Int64Field)`,
+		`text_match(VarCharField, 123)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -593,6 +595,8 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	unsupported := []string{
 		`phrase_match(not_exist, "phrase")`,
 		`phrase_match(BoolField, "phrase")`,
+		`phrase_match(StringField, Int64Field)`,
+		`phrase_match(StringField, 123)`,
 		`phrase_match(StringField, "phrase", -1)`,
 	}
 	for _, exprStr := range unsupported {
