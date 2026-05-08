@@ -813,7 +813,17 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	leaders, err := utils.GetShardLeaders(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, req.GetCollectionID(), req.GetWithUnserviceableShards())
+	s.tryPromoteReadyReplicaVisibility(ctx)
+	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
+		s.meta,
+		s.targetMgr,
+		s.dist,
+		s.nodeMgr,
+		req.GetCollectionID(),
+		req.GetWithUnserviceableShards(),
+		func(replica *meta.Replica) bool {
+			return s.replicaVisibilityManager == nil || s.replicaVisibilityManager.IsVisible(replica)
+		})
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,
@@ -1129,6 +1139,10 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 		}
 
 		waitRG := len(needWaitRGReady) > 0 && needWaitRGReady[0]
+		var replicaVisibilityManagers []job.ReplicaVisibilityManager
+		if waitRG && s.replicaVisibilityManager != nil {
+			replicaVisibilityManagers = append(replicaVisibilityManagers, s.replicaVisibilityManager)
+		}
 		updateJob := job.NewUpdateLoadConfigJob(
 			ctx,
 			subReq,
@@ -1139,6 +1153,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			s.proxyClientManager,
 			false,
 			waitRG,
+			replicaVisibilityManagers...,
 		)
 
 		jobs = append(jobs, updateJob)
