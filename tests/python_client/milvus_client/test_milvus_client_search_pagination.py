@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
@@ -54,9 +56,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         # Create collection
         collection_schema = self.create_schema(client)[0]
         collection_schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
+        collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128, nullable=True)
         collection_schema.add_field(self.bfloat16_vector_field_name, DataType.BFLOAT16_VECTOR, dim=200)
-        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
         collection_schema.add_field(self.binary_vector_field_name, DataType.BINARY_VECTOR, dim=256)
         collection_schema.add_field(default_float_field_name, DataType.FLOAT)
         collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
@@ -88,9 +90,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 pk = i + j * default_nb
                 row = {
                     default_primary_key_field_name: pk,
-                    self.float_vector_field_name: list(float_vectors[pk]),
+                    self.float_vector_field_name: None if pk % 10 == 9 else list(float_vectors[pk]),
                     self.bfloat16_vector_field_name: bfloat16_vectors[pk],
-                    self.sparse_vector_field_name: sparse_vectors[pk], 
+                    self.sparse_vector_field_name: None if pk % 10 == 9 else sparse_vectors[pk],
                     self.binary_vector_field_name: binary_vectors[pk],
                     default_float_field_name: pk * 1.0,
                     default_string_field_name: str(pk),
@@ -465,7 +467,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             for i, _id in enumerate(self.primary_keys):
                 int64 = total_datas[i][ct.default_int64_field_name]
                 float = total_datas[i][ct.default_float_field_name]
-                if not expr or eval(expr):
+                if (not expr or eval(expr)) and total_datas[i][self.float_vector_field_name] is not None:
                     filter_ids.append(_id)
             # 2. search
             limit = min(default_limit, len(filter_ids))

@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import json
 import numpy as np
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
@@ -74,14 +76,15 @@ class TestGroupSearch(TestMilvusClientV2Base):
         fields = []
         fields.append(FieldSchema(name=self.primary_field, dtype=DataType.INT64, is_primary=True, auto_id=True))
         fields.append(
-            FieldSchema(name=self.float_vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=self.float_vector_dim))
+            FieldSchema(name=self.float_vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=self.float_vector_dim,
+                        nullable=True))
 
         for data_type in ct.all_scalar_data_types:
             fields.append(cf.gen_scalar_field(data_type, name=data_type.name, nullable=True))
 
         collection_schema = CollectionSchema(fields, enable_dynamic_field=self.enable_dynamic_field)
         collection_schema.add_field(self.bfloat16_vector_field_name, DataType.BFLOAT16_VECTOR, dim=self.bf16_vector_dim)
-        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
         collection_schema.add_field(self.binary_vector_field_name, DataType.BINARY_VECTOR, dim=self.binary_vector_dim)
 
         collection_schema.add_field(self.inverted_string_field, DataType.VARCHAR, max_length=256, nullable=True)
@@ -112,9 +115,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
             binary_vectors = cf.gen_vectors(nb, dim=self.binary_vector_dim, vector_data_type=DataType.BINARY_VECTOR)
             for i in range(nb):
                 row = {
-                    self.float_vector_field_name: float_vectors[i],
+                    self.float_vector_field_name: None if i % 10 == 9 else float_vectors[i],
                     self.bfloat16_vector_field_name: bf16_vectors[i],
-                    self.sparse_vector_field_name: sparse_vectors[i],
+                    self.sparse_vector_field_name: None if i % 10 == 9 else sparse_vectors[i],
                     self.binary_vector_field_name: binary_vectors[i],
                     DataType.BOOL.name: bool(i % 2) if random.random() < 0.8 else None,
                     DataType.INT8.name: int8_value if random.random() < 0.8 else None,
