@@ -52,6 +52,9 @@ class PhyMatchFilterExpr : public Expr {
     void
     MoveCursor() override {
         if (!has_offset_input_) {
+            for (auto& input : inputs_) {
+                input->MoveCursor();
+            }
             int64_t real_batch_size =
                 current_pos_ + batch_size_ >= active_count_
                     ? active_count_ - current_pos_

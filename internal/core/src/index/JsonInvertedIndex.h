@@ -188,7 +188,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         return res_set;
     }
 
-    // Returns a row-level bitmap indicating which rows contain the JSON path.
+    // Returns a row-level bitmap using Json::exist() semantics.
     TargetBitmap
     Exists();
 

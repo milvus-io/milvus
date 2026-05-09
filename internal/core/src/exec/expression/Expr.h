@@ -206,7 +206,7 @@ class SegmentExpr : public Expr {
                 int64_t batch_size,
                 int32_t consistency_level,
                 bool allow_any_json_cast_type = false,
-                bool is_json_contains = false,
+                bool require_json_array_index = false,
                 const query::PlanOptions& plan_options = {})
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
@@ -217,7 +217,7 @@ class SegmentExpr : public Expr {
           active_count_(active_count),
           batch_size_(batch_size),
           consistency_level_(consistency_level),
-          is_json_contains_(is_json_contains),
+          require_json_array_index_(require_json_array_index),
           plan_options_(plan_options) {
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
@@ -282,7 +282,7 @@ class SegmentExpr : public Expr {
                                  nested_path_,
                                  value_type_,
                                  allow_any_json_cast_type_,
-                                 is_json_contains_);
+                                 require_json_array_index_);
         num_index_chunk_ = pinned_index_.size();
     }
 
@@ -428,8 +428,9 @@ class SegmentExpr : public Expr {
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
         // JSON: ArrayOffsets lives on the path index itself (per
-        // (field_id, nested_path)). Non-JSON (struct / plain array): ArrayOffsets
-        // is segment-owned and shared across callers.
+        // (field_id, nested_path)).
+        // Non-JSON (struct / plain array): ArrayOffsets is segment-owned and
+        // shared across callers.
         std::shared_ptr<const IArrayOffsets> array_offsets;
         if (field_type_ == DataType::JSON) {
             AssertInfo(!pinned_index_.empty(),
@@ -886,10 +887,17 @@ class SegmentExpr : public Expr {
                             valid_res + result_idx,
                             values...);
                     } else {
-                        // Chunk is skipped - handle exactly like ProcessDataByOffsets
-                        if (valid_data.size() > j && !valid_data[j]) {
-                            res[result_idx] = valid_res[result_idx] = false;
-                        }
+                        bool is_valid = !valid_data.data() || valid_data[j];
+                        res[result_idx] = false;
+                        valid_res[result_idx] = is_valid;
+                        func.template operator()<FilterType::random>(
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            1,
+                            res + result_idx,
+                            valid_res + result_idx,
+                            values...);
                     }
 
                     processed_size++;
@@ -941,10 +949,17 @@ class SegmentExpr : public Expr {
                         valid_res + processed_size,
                         values...);
                 } else {
-                    // Chunk is skipped
-                    if (valid_data && !valid_data[0]) {
-                        res[processed_size] = valid_res[processed_size] = false;
-                    }
+                    bool is_valid = !valid_data || valid_data[0];
+                    res[processed_size] = false;
+                    valid_res[processed_size] = is_valid;
+                    func.template operator()<FilterType::random>(
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
                 }
 
                 processed_size++;
@@ -1085,61 +1100,6 @@ class SegmentExpr : public Expr {
             valid_values.push_back(valid);
         }
         return values.size();
-    }
-
-    template <typename ElementType>
-    int64_t
-    CountJsonElementLevelByOffsets(OffsetVector* row_offsets,
-                                   const std::string& pointer) {
-        int64_t element_count = 0;
-        VisitJsonRowsByOffsets(row_offsets,
-                               [&](const Json& json, bool row_valid) {
-                                   if (!row_valid) {
-                                       return;
-                                   }
-                                   auto array_res = json.array_at(pointer);
-                                   if (array_res.error()) {
-                                       return;
-                                   }
-                                   auto array = array_res.value();
-                                   for (auto element : array) {
-                                       (void)element;
-                                       ++element_count;
-                                   }
-                               });
-        return element_count;
-    }
-
-    template <typename ElementType, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessJsonElementLevelByOffsets(FUNC func,
-                                     OffsetVector* row_offsets,
-                                     const std::string& pointer,
-                                     TargetBitmapView res,
-                                     TargetBitmapView valid_res,
-                                     const ValTypes&... values) {
-        int64_t processed_elements = 0;
-        VisitJsonRowsByOffsets(
-            row_offsets, [&](const Json& json, bool row_valid) {
-                FixedVector<ElementType> element_values;
-                FixedVector<bool> element_valid;
-                auto elem_count = ExtractJsonElementValues<ElementType>(
-                    json, row_valid, pointer, element_values, element_valid);
-                if (elem_count == 0) {
-                    return;
-                }
-
-                func.template operator()<FilterType::sequential>(
-                    element_values.data(),
-                    element_valid.data(),
-                    nullptr,
-                    elem_count,
-                    res + processed_elements,
-                    valid_res + processed_elements,
-                    values...);
-                processed_elements += elem_count;
-            });
-        return processed_elements;
     }
 
     // Process element-level data without offset input
@@ -1354,10 +1314,18 @@ class SegmentExpr : public Expr {
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
                         auto elem_count = data_vec[j].length();
+                        bool is_row_valid = !valid_data.data() || valid_data[j];
                         for (size_t k = 0; k < elem_count; k++) {
-                            res[processed_elems + k] =
-                                valid_res[processed_elems + k] = false;
+                            res[processed_elems + k] = false;
+                            valid_res[processed_elems + k] = is_row_valid;
                         }
+                        func(nullptr,
+                             nullptr,
+                             nullptr,
+                             elem_count,
+                             res + processed_elems,
+                             valid_res + processed_elems,
+                             values...);
                         processed_elems += elem_count;
                     }
                 } else {
@@ -1365,13 +1333,25 @@ class SegmentExpr : public Expr {
                         segment_->chunk_data<Array>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const Array* data = chunk.data() + data_pos;
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
                         auto elem_count = data[j].length();
+                        bool is_row_valid = !valid_data || valid_data[j];
                         for (size_t k = 0; k < elem_count; k++) {
-                            res[processed_elems + k] =
-                                valid_res[processed_elems + k] = false;
+                            res[processed_elems + k] = false;
+                            valid_res[processed_elems + k] = is_row_valid;
                         }
+                        func(nullptr,
+                             nullptr,
+                             nullptr,
+                             elem_count,
+                             res + processed_elems,
+                             valid_res + processed_elems,
+                             values...);
                         processed_elems += elem_count;
                     }
                 }
@@ -2085,14 +2065,13 @@ class SegmentExpr : public Expr {
                 auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                 auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
-                if (valid_data == nullptr) {
-                    return valid_result;
+                if (valid_data != nullptr) {
+                    valid_data += data_pos;
+                    ApplyValidData(valid_data,
+                                   valid_result + processed_size,
+                                   valid_result + processed_size,
+                                   size);
                 }
-                valid_data += data_pos;
-                ApplyValidData(valid_data,
-                               valid_result + processed_size,
-                               valid_result + processed_size,
-                               size);
             }
 
             processed_size += size;
@@ -2494,7 +2473,9 @@ class SegmentExpr : public Expr {
     DataType field_type_;
     DataType value_type_;
     bool allow_any_json_cast_type_{false};
-    bool is_json_contains_{false};
+    // When pinning a JSON index, require an ARRAY cast index instead of a
+    // scalar cast index. Used by JSON_CONTAINS and JSON MATCH element access.
+    bool require_json_array_index_{false};
     bool is_data_mode_{false};
     query::PlanOptions plan_options_;
     // Execution path determined by DetermineExecPath() during initialization.

@@ -1731,50 +1731,55 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size;
-            if (input != nullptr) {
-                batch_size = input->size();
-            } else {
-                batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                                 ? active_count_ - overflow_check_pos_
-                                 : batch_size_;
-                overflow_check_pos_ += batch_size;
-            }
-            auto valid = (input != nullptr)
-                             ? ProcessChunksForValidByOffsets<T>(
-                                   UseIndexCursor(), *input)
-                             : ProcessChunksForValid<T>(UseIndexCursor());
-            auto res_vec = std::make_shared<ColumnVector>(
-                TargetBitmap(batch_size), std::move(valid));
-            TargetBitmapView res(res_vec->GetRawData(), batch_size);
-            TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
+            auto get_next_overflow_batch =
+                [this](OffsetVector* input, bool matched) -> ColumnVectorPtr {
+                auto batch_size =
+                    GetNextRealBatchSize(input, expr_->column_.element_level_);
+                if (expr_->column_.element_level_) {
+                    if (input == nullptr) {
+                        MoveCursor();
+                    }
+                    return std::make_shared<ColumnVector>(
+                        TargetBitmap(batch_size, matched),
+                        TargetBitmap(batch_size, true));
+                }
+
+                auto valid = (input != nullptr)
+                                 ? ProcessChunksForValidByOffsets<T>(
+                                       UseIndexCursor(), *input)
+                                 : ProcessChunksForValid<T>(UseIndexCursor());
+                auto res_vec = std::make_shared<ColumnVector>(
+                    TargetBitmap(batch_size), std::move(valid));
+                if (matched) {
+                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
+                    TargetBitmapView valid_res(res_vec->GetValidRawData(),
+                                               batch_size);
+                    res.set();
+                    res &= valid_res;
+                }
+                return res_vec;
+            };
+
             switch (expr_->op_type_) {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
                     if (milvus::query::lt_lb<T>(val)) {
-                        res.set();
-                        res &= valid_res;
-                        return res_vec;
+                        return get_next_overflow_batch(input, true);
                     }
-                    return res_vec;
+                    return get_next_overflow_batch(input, false);
                 }
                 case proto::plan::LessThan:
                 case proto::plan::LessEqual: {
                     if (milvus::query::gt_ub<T>(val)) {
-                        res.set();
-                        res &= valid_res;
-                        return res_vec;
+                        return get_next_overflow_batch(input, true);
                     }
-                    return res_vec;
+                    return get_next_overflow_batch(input, false);
                 }
                 case proto::plan::Equal: {
-                    res.reset();
-                    return res_vec;
+                    return get_next_overflow_batch(input, false);
                 }
                 case proto::plan::NotEqual: {
-                    res.set();
-                    res &= valid_res;
-                    return res_vec;
+                    return get_next_overflow_batch(input, true);
                 }
                 default: {
                     ThrowInfo(OpTypeInvalid,

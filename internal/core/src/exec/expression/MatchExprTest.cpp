@@ -758,6 +758,26 @@ class SealedMatchExprTest : public ::testing::Test {
             nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
     }
 
+    ColumnVectorPtr
+    EvalFilterWithOffsets(const std::string& filter_expr,
+                          const exec::OffsetVector& offsets) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.ParseSearch(
+            filter_expr, "vec", 10, "L2", R"({"nprobe": 10})", 3);
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        if (plan == nullptr) {
+            return nullptr;
+        }
+
+        auto offset_copy = offsets;
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get();
+        return milvus::test::gen_filter_res(
+            filter_node, seg_.get(), N_, MAX_TIMESTAMP, &offset_copy);
+    }
+
     // Compute expected matching rows
     std::set<int64_t>
     ComputeExpectedRows(const std::string& target_str,
@@ -1441,6 +1461,38 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchExactNoIndex) {
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count == threshold;
         });
+}
+
+TEST_F(SealedMatchExprTestNoIndex,
+       MatchAllSkipIndexNoOffsetDoesNotVacuouslyMatch) {
+    const int32_t impossible_upper = 10000;
+    ASSERT_TRUE(seg_->GetSkipIndex().CanSkipUnaryRange<int32_t>(
+        sub_int_fid_, 0, proto::plan::OpType::GreaterThan, impossible_upper));
+
+    auto result = ExecuteRetrieve("match_all(struct_array, $[sub_int] > " +
+                                  std::to_string(impossible_upper) + ")");
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->offset_size(), 0);
+}
+
+TEST_F(SealedMatchExprTestNoIndex,
+       MatchAllSkipIndexWithOffsetsDoesNotVacuouslyMatch) {
+    const int32_t impossible_upper = 10000;
+    ASSERT_TRUE(seg_->GetSkipIndex().CanSkipUnaryRange<int32_t>(
+        sub_int_fid_, 0, proto::plan::OpType::GreaterThan, impossible_upper));
+
+    exec::OffsetVector offsets{0, 1, 2, 37, 128, 255, 999};
+    auto result =
+        EvalFilterWithOffsets("match_all(struct_array, $[sub_int] > " +
+                                  std::to_string(impossible_upper) + ")",
+                              offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->size(), static_cast<int64_t>(offsets.size()));
+
+    TargetBitmapView view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(view.any());
+    EXPECT_TRUE(valid_view.all());
 }
 
 TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAnyPartialIndex) {

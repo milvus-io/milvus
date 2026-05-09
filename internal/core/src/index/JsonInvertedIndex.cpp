@@ -12,6 +12,7 @@
 #include "index/JsonInvertedIndex.h"
 
 #include <algorithm>
+#include <cstring>
 #include <exception>
 #include <fcntl.h>
 #include <list>
@@ -149,20 +150,70 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
+    auto load_array_offsets = [this](const uint8_t* data, size_t size) {
+        array_offsets_ = ArrayOffsetsSealed::Deserialize(data, size);
+        this->is_nested_index_ = true;
+    };
+
+    std::optional<std::string> array_offsets_file;
+    std::vector<std::string> array_offsets_files;
+    std::optional<std::string> non_exist_offset_file;
+    std::vector<std::string> non_exist_offset_files;
+    std::optional<std::string> slice_meta_file;
+    for (const auto& file : index_files) {
+        auto file_name = boost::filesystem::path(file).filename().string();
+        if (file_name == INDEX_ARRAY_OFFSETS_FILE_NAME) {
+            array_offsets_file = file;
+        } else if (file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME) !=
+                   std::string::npos) {
+            array_offsets_files.push_back(file);
+        }
+
+        if (file_name == INDEX_NON_EXIST_OFFSET_FILE_NAME) {
+            non_exist_offset_file = file;
+        } else if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                   std::string::npos) {
+            non_exist_offset_files.push_back(file);
+        }
+
+        if (file_name == INDEX_FILE_SLICE_META) {
+            slice_meta_file = file;
+        }
+    }
+
     // Load ArrayOffsets sidecar (only present for ARRAY cast_type).
-    auto array_offsets_file_itr = std::find_if(
-        index_files.begin(), index_files.end(), [&](const std::string& file) {
-            return boost::filesystem::path(file).filename().string() ==
-                   INDEX_ARRAY_OFFSETS_FILE_NAME;
-        });
-    if (array_offsets_file_itr != index_files.end()) {
+    if (array_offsets_file.has_value()) {
         auto index_datas = this->file_manager_->LoadIndexToMemory(
-            {*array_offsets_file_itr}, load_priority);
+            {array_offsets_file.value()}, load_priority);
         auto data = std::move(index_datas.at(INDEX_ARRAY_OFFSETS_FILE_NAME));
-        array_offsets_ = ArrayOffsetsSealed::Deserialize(
+        load_array_offsets(
             reinterpret_cast<const uint8_t*>(data->PayloadData()),
             static_cast<size_t>(data->PayloadSize()));
-        this->is_nested_index_ = true;
+    } else if (!array_offsets_files.empty()) {
+        AssertInfo(slice_meta_file.has_value(),
+                   "array_offsets slices found but _meta_slice is missing");
+        array_offsets_files.push_back(slice_meta_file.value());
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
+            array_offsets_files, load_priority);
+
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto array_offsets_data = CompactIndexDatasByKey(
+            INDEX_ARRAY_OFFSETS_FILE_NAME, std::move(slice_meta), index_datas);
+        AssertInfo(array_offsets_data.codecs_.size() > 0,
+                   "array offsets file is empty");
+
+        std::vector<uint8_t> assembled(
+            static_cast<size_t>(array_offsets_data.size_));
+        size_t offset = 0;
+        for (auto&& codec : array_offsets_data.codecs_) {
+            std::memcpy(assembled.data() + offset,
+                        codec->PayloadData(),
+                        codec->PayloadSize());
+            offset += codec->PayloadSize();
+        }
+        AssertInfo(offset == assembled.size(),
+                   "array offsets size mismatch after slice compaction");
+        load_array_offsets(assembled.data(), assembled.size());
     } else if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
         // Legacy JSON ARRAY indexes were row-level and have no ArrayOffsets
         // sidecar. Keep them row-level so existing json_contains/exists
@@ -174,33 +225,16 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         non_exist_offsets_.resize((size_t)size / sizeof(size_t));
         memcpy(non_exist_offsets_.data(), data, (size_t)size);
     };
-    auto non_exist_offset_file_itr = std::find_if(
-        index_files.begin(), index_files.end(), [&](const std::string& file) {
-            return boost::filesystem::path(file).filename().string() ==
-                   INDEX_NON_EXIST_OFFSET_FILE_NAME;
-        });
 
-    if (non_exist_offset_file_itr != index_files.end()) {
-        // null offset file is not sliced
+    if (non_exist_offset_file.has_value()) {
+        // non_exist offset file is not sliced
         auto index_datas = this->file_manager_->LoadIndexToMemory(
-            {*non_exist_offset_file_itr}, load_priority);
+            {non_exist_offset_file.value()}, load_priority);
         auto non_exist_offset_data =
             std::move(index_datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
         fill_non_exist_offset(non_exist_offset_data->PayloadData(),
                               non_exist_offset_data->PayloadSize());
         return;
-    }
-    std::vector<std::string> non_exist_offset_files;
-    std::optional<std::string> slice_meta_file;
-    for (auto& file : index_files) {
-        auto file_name = boost::filesystem::path(file).filename().string();
-        if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
-            std::string::npos) {
-            non_exist_offset_files.push_back(file);
-        }
-        if (file_name == INDEX_FILE_SLICE_META) {
-            slice_meta_file = file;
-        }
     }
     if (non_exist_offset_files.size() > 0) {
         AssertInfo(slice_meta_file.has_value(),
@@ -246,7 +280,8 @@ JsonInvertedIndex<T>::RetainTantivyIndexFiles(
                     boost::filesystem::path(file).filename().string();
                 return file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
                            std::string::npos ||
-                       file_name == INDEX_ARRAY_OFFSETS_FILE_NAME;
+                       file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME) !=
+                           std::string::npos;
             }),
         index_files.end());
     InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);

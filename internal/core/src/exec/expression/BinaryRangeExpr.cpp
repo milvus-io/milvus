@@ -331,15 +331,16 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
         [this](OffsetVector* input) -> ColumnVectorPtr {
-        int64_t batch_size;
-        if (input != nullptr) {
-            batch_size = input->size();
-        } else {
-            batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                             ? active_count_ - overflow_check_pos_
-                             : batch_size_;
-            overflow_check_pos_ += batch_size;
+        auto batch_size =
+            GetNextRealBatchSize(input, expr_->column_.element_level_);
+        if (expr_->column_.element_level_) {
+            if (input == nullptr) {
+                MoveCursor();
+            }
+            return std::make_shared<ColumnVector>(
+                TargetBitmap(batch_size), TargetBitmap(batch_size, true));
         }
+
         auto valid_res =
             (input != nullptr)
                 ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)

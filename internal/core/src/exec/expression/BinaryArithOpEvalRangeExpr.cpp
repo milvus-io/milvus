@@ -1198,6 +1198,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
+    if (!has_offset_input_ && expr_->column_.element_level_) {
+        auto array_offsets =
+            segment_->GetArrayOffsets(expr_->column_.field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for element-level arithmetic index "
+                   "on field {}",
+                   expr_->column_.field_id_.get());
+        sub_batch_size = array_offsets->GetTotalElementCount();
+    }
 
     auto execute_sub_batch =
         [ op_type, arith_type,
