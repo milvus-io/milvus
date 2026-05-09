@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,6 +84,24 @@ func TestSendFirstTimeTickFastFailsOnAppendError(t *testing.T) {
 	assert.Nil(t, msg)
 	assert.Contains(t, err.Error(), "send first timestamp message failed")
 	assert.Equal(t, int32(1), walImpls.appendCount.Load())
+}
+
+func TestSendFirstTimeTickFastFailsOnTSOAllocateError(t *testing.T) {
+	resource.InitForTest(t)
+	walImpls := newFirstTimeTickWALImpls(func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	mockAllocate := mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "Allocate")).
+		Return(uint64(0), errors.New("allocate tso failed")).
+		Build()
+	defer mockAllocate.UnPatch()
+
+	msg, err := sendFirstTimeTick(context.Background(), walImpls, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, msg)
+	assert.Contains(t, err.Error(), "allocate timestamp failed")
+	assert.Equal(t, int32(0), walImpls.appendCount.Load())
 }
 
 func TestSendFirstTimeTickReturnsMessageOnSuccess(t *testing.T) {
