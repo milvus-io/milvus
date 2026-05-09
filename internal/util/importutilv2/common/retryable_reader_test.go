@@ -20,12 +20,14 @@ import (
 	"context"
 	"io"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -119,6 +121,101 @@ func (m *customMockReader) Seek(offset int64, whence int) (int64, error) {
 
 func (m *customMockReader) ReadAt(p []byte, off int64) (int, error) {
 	return 0, nil
+}
+
+type prematureEOFReader struct {
+	*strings.Reader
+	limit int
+	read  int
+}
+
+func newPrematureEOFReader(content string, limit int) storage.FileReader {
+	return &prematureEOFReader{
+		Reader: strings.NewReader(content),
+		limit:  limit,
+	}
+}
+
+func (r *prematureEOFReader) Read(p []byte) (int, error) {
+	if r.read >= r.limit {
+		return 0, io.EOF
+	}
+	if remaining := r.limit - r.read; len(p) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.Reader.Read(p)
+	r.read += n
+	return n, err
+}
+
+func (r *prematureEOFReader) Close() error {
+	return nil
+}
+
+func (r *prematureEOFReader) Size() (int64, error) {
+	return int64(r.Reader.Len()) + int64(r.read), nil
+}
+
+func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	content := "hello world"
+	openCount := 0
+	reopen := func(context.Context, string) (storage.FileReader, error) {
+		openCount++
+		return NewMockReader(content), nil
+	}
+
+	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReader(content, 5), reopen)
+	buf := make([]byte, len(content))
+	n, err := io.ReadFull(reader, buf)
+
+	assert.NoError(t, err)
+	assert.Equal(t, len(content), n)
+	assert.Equal(t, content, string(buf))
+	assert.Equal(t, 1, openCount)
+}
+
+func TestRetryableReader_FinalEOFIsNotRetried(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	content := "done"
+	openCount := 0
+	reopen := func(context.Context, string) (storage.FileReader, error) {
+		openCount++
+		return NewMockReader(content), nil
+	}
+
+	reader := NewRetryableReaderWithReopen(ctx, path, NewMockReader(content), reopen)
+	buf := make([]byte, len(content))
+	n, err := io.ReadFull(reader, buf)
+	assert.NoError(t, err)
+	assert.Equal(t, len(content), n)
+
+	n, err = reader.Read(buf)
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, 0, openCount)
+}
+
+func TestRetryableReader_ReopenOnRetryableError(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	content := "data after retry"
+	openCount := 0
+	reopen := func(context.Context, string) (storage.FileReader, error) {
+		openCount++
+		return NewMockReader(content), nil
+	}
+
+	reader := NewRetryableReaderWithReopen(ctx, path, newErrorMockReader(content, errors.New("network timeout"), 1), reopen)
+	buf := make([]byte, len(content))
+	n, err := reader.Read(buf)
+
+	assert.NoError(t, err)
+	assert.Equal(t, len(content), n)
+	assert.Equal(t, content, string(buf))
+	assert.Equal(t, 1, openCount)
 }
 
 func TestRetryableReader_DenylistRetry_NonRetryableErrors(t *testing.T) {

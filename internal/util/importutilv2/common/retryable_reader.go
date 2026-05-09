@@ -37,22 +37,66 @@ type RetryableReader interface {
 	Read(p []byte) (n int, err error)
 }
 
+type ReopenReaderFunc func(context.Context, string) (storage.FileReader, error)
+
 // retryableReader is the implementation of RetryableReader.
 type retryableReader struct {
 	storage.FileReader
 	ctx           context.Context
 	path          string
 	retryAttempts uint
+	reopen        ReopenReaderFunc
+	offset        int64
+	size          int64
 }
 
 // NewRetryableReader creates a new RetryableReader.
 func NewRetryableReader(ctx context.Context, path string, reader storage.FileReader) RetryableReader {
+	return newRetryableReader(ctx, path, reader, nil)
+}
+
+func NewRetryableReaderWithReopen(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc) RetryableReader {
+	return newRetryableReader(ctx, path, reader, reopen)
+}
+
+func newRetryableReader(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc) RetryableReader {
+	size := int64(-1)
+	if reader != nil {
+		var err error
+		size, err = reader.Size()
+		if err != nil {
+			size = -1
+		}
+	}
 	return &retryableReader{
 		FileReader:    reader,
 		ctx:           ctx,
 		path:          path,
 		retryAttempts: paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
+		reopen:        reopen,
+		size:          size,
 	}
+}
+
+func (r *retryableReader) reopenAtOffset() error {
+	if r.reopen == nil {
+		return nil
+	}
+	if r.FileReader != nil {
+		_ = r.FileReader.Close()
+	}
+	reader, err := r.reopen(r.ctx, r.path)
+	if err != nil {
+		return storage.ToMilvusIoError(r.path, err)
+	}
+	if r.offset > 0 {
+		if _, err = reader.Seek(r.offset, io.SeekStart); err != nil {
+			_ = reader.Close()
+			return storage.ToMilvusIoError(r.path, err)
+		}
+	}
+	r.FileReader = reader
+	return nil
 }
 
 // Read reads from the underlying FileReader and retries on errors.
@@ -61,11 +105,25 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 	var err error
 	err = retry.Handle(r.ctx, func() (bool, error) {
 		n, err = r.FileReader.Read(p)
+		if n > 0 {
+			r.offset += int64(n)
+			return false, nil
+		}
 		if err == nil {
 			return false, nil
 		}
-		// EOF is not an error - don't retry
 		if errors.Is(err, io.EOF) {
+			if r.size >= 0 && r.offset < r.size && r.reopen != nil {
+				log.Ctx(r.ctx).Warn("retryable reader got premature EOF",
+					zap.String("path", r.path),
+					zap.Int64("offset", r.offset),
+					zap.Int64("size", r.size),
+				)
+				if reopenErr := r.reopenAtOffset(); reopenErr != nil {
+					return !merr.IsNonRetryableErr(reopenErr), reopenErr
+				}
+				return true, err
+			}
 			return false, err
 		}
 		// Context canceled or deadline exceeded - don't retry
@@ -80,6 +138,9 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		// Denylist check - don't retry permanent/validation errors
 		if merr.IsNonRetryableErr(err) {
 			return false, err
+		}
+		if reopenErr := r.reopenAtOffset(); reopenErr != nil {
+			return !merr.IsNonRetryableErr(reopenErr), reopenErr
 		}
 		// Retry everything else (network errors, timeouts, 500s, etc.)
 		return true, err

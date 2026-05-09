@@ -19,7 +19,9 @@ package json
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -54,6 +56,39 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.numRows = 100
 	suite.pkDataType = schemapb.DataType_Int64
 	suite.vecDataType = schemapb.DataType_FloatVector
+}
+
+type prematureEOFFileReader struct {
+	*strings.Reader
+	limit int
+	read  int
+}
+
+func newPrematureEOFFileReader(content string, limit int) storage.FileReader {
+	return &prematureEOFFileReader{
+		Reader: strings.NewReader(content),
+		limit:  limit,
+	}
+}
+
+func (r *prematureEOFFileReader) Read(p []byte) (int, error) {
+	if r.read >= r.limit {
+		return 0, io.EOF
+	}
+	if remaining := r.limit - r.read; len(p) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.Reader.Read(p)
+	r.read += n
+	return n, err
+}
+
+func (r *prematureEOFFileReader) Close() error {
+	return nil
+}
+
+func (r *prematureEOFFileReader) Size() (int64, error) {
+	return int64(r.Reader.Len()) + int64(r.read), nil
 }
 
 func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
@@ -452,6 +487,39 @@ func (suite *ReaderSuite) TestReadCount() {
 	data, err = reader.Read()
 	suite.NoError(err)
 	suite.Equal(20, data.GetRowNum())
+}
+
+func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+	jsonContent := `[{"pk":1},{"pk":2},{"pk":3}]`
+	openCount := 0
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, "mockPath").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return newPrematureEOFFileReader(jsonContent, 10), nil
+		}
+		return importcommon.NewMockReader(jsonContent), nil
+	})
+
+	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+	suite.NoError(err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(3, data.GetRowNum())
+	suite.GreaterOrEqual(openCount, 2)
 }
 
 func TestJsonReader(t *testing.T) {
