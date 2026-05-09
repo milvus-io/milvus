@@ -797,7 +797,6 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 	}
 
 	if coll == nil {
-		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
@@ -806,8 +805,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 	}
 
 	if !coll.Available() {
-		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, merr.WrapErrCollectionNotFound(dbName, coll.Name)
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	return filterUnavailablePartition(coll), nil

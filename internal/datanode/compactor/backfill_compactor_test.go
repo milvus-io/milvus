@@ -130,7 +130,7 @@ func (s *BackfillCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 	paramtable.Get().Reset("common.storage.enablev2")
-	initcore.CleanArrowFileSystemSingleton()
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *BackfillCompactionTaskSuite) prepareBackfillCompaction() {

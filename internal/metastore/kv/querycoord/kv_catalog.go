@@ -65,16 +65,24 @@ func (s Catalog) SaveCollection(ctx context.Context, collection *querypb.Collect
 }
 
 func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {
+	kvs := make(map[string]string)
 	for _, partition := range info {
 		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
 		v, err := proto.Marshal(partition)
 		if err != nil {
 			return err
 		}
-		err = s.cli.Save(ctx, k, string(v))
-		if err != nil {
-			return err
+		kvs[k] = string(v)
+		if len(kvs) >= MetaOpsBatchSize {
+			err := s.cli.MultiSave(ctx, kvs)
+			if err != nil {
+				return err
+			}
+			kvs = make(map[string]string)
 		}
+	}
+	if len(kvs) > 0 {
+		return s.cli.MultiSave(ctx, kvs)
 	}
 	return nil
 }

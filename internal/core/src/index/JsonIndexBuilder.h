@@ -25,6 +25,14 @@
 
 namespace milvus::index {
 
+namespace json {
+// Returns true if the JSON cast_type is compatible with the raw JSON value's
+// data_type (e.g., DOUBLE cast can accept INT64 JSON values). Array cast
+// types require is_array=true.
+bool
+IsDataTypeSupported(JsonCastType cast_type, DataType data_type, bool is_array);
+}  // namespace json
+
 template <typename T>
 using JsonDataAdder =
     std::function<void(const T* data, int64_t size, int64_t offset)>;
@@ -36,14 +44,71 @@ using JsonErrorRecorder = std::function<void(const Json& json,
 using JsonNullAdder = std::function<void(int64_t offset)>;
 using JsonNonExistAdder = std::function<void(int64_t offset)>;
 
-// Scalar JSON cast (cast_type != ARRAY). One doc per row: data_adder is
-// invoked once per row with size in {0, 1}, offset = row_id.
+// Result of converting JSON field data to typed FieldData.
+struct JsonToTypedResult {
+    // Typed field data with nullable semantics. Rows where the path doesn't
+    // exist or the cast fails are marked as invalid.
+    FieldDataPtr field_data;
+
+    // Offsets of rows where the JSON path does not exist (row is null, path
+    // missing, or path value is null). This is a SUBSET of the invalid rows
+    // in field_data — rows that exist but fail to cast are NOT included.
+    // Used for EXISTS queries: Exists() should return true for rows where
+    // the path exists, even if the value can't be cast to the index type.
+    std::vector<size_t> non_exist_offsets;
+};
+
+// Convert JSON field data into typed FieldData by extracting values at
+// the given nested_path.
+template <typename T>
+JsonToTypedResult
+ConvertJsonToTypedFieldData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<int64_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+extern template JsonToTypedResult
+ConvertJsonToTypedFieldData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+// A helper function for processing json data for building inverted index
 template <typename T>
 void
 ProcessJsonFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
+    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
@@ -70,6 +135,7 @@ ProcessJsonFieldData<bool>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
+    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
@@ -81,6 +147,7 @@ ProcessJsonFieldData<int64_t>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
+    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
@@ -92,6 +159,7 @@ ProcessJsonFieldData<double>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
+    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
@@ -103,6 +171,7 @@ ProcessJsonFieldData<std::string>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
     const proto::schema::FieldSchema& schema,
     const std::string& nested_path,
+    const JsonCastType& cast_type,
     JsonCastFunction cast_function,
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,

@@ -452,7 +452,6 @@ queryCoord:
   stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
-  checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   channelTaskCapFraction: 0.3 # fraction of total task execution capacity reserved for channel tasks per node (0.0-1.0)
   # Duration (in seconds) that a query node remains marked as resource exhausted after reaching resource limits.
@@ -1397,6 +1396,9 @@ streaming:
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
+  replication:
+    pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
+    pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

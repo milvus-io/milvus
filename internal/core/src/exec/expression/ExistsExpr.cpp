@@ -33,7 +33,7 @@
 #include "monitor/Monitor.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
 #include "opentelemetry/trace/span.h"
@@ -93,49 +93,20 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
         auto* index = pinned_index_[cached_index_chunk_id_].get();
         AssertInfo(
             index != nullptr, "Cannot find json index with path: {}", pointer);
-        switch (index->GetCastType().data_type()) {
-            case JsonCastType::DataType::DOUBLE: {
-                auto* json_index =
-                    const_cast<index::JsonInvertedIndex<double>*>(
-                        dynamic_cast<const index::JsonInvertedIndex<double>*>(
-                            index));
-                cached_index_chunk_res_ =
-                    std::make_shared<TargetBitmap>(json_index->Exists());
-                break;
-            }
 
-            case JsonCastType::DataType::VARCHAR: {
-                auto* json_index = const_cast<
-                    index::JsonInvertedIndex<std::string>*>(
-                    dynamic_cast<const index::JsonInvertedIndex<std::string>*>(
-                        index));
-                cached_index_chunk_res_ =
-                    std::make_shared<TargetBitmap>(json_index->Exists());
-                break;
-            }
-
-            case JsonCastType::DataType::BOOL: {
-                auto* json_index = const_cast<index::JsonInvertedIndex<bool>*>(
-                    dynamic_cast<const index::JsonInvertedIndex<bool>*>(index));
-                cached_index_chunk_res_ =
-                    std::make_shared<TargetBitmap>(json_index->Exists());
-                break;
-            }
-
-            case JsonCastType::DataType::JSON: {
-                auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
-                    dynamic_cast<const index::JsonFlatIndex*>(index));
-                auto executor =
-                    json_flat_index->create_executor<double>(pointer);
-                cached_index_chunk_res_ =
-                    std::make_shared<TargetBitmap>(executor->Exists());
-                break;
-            }
-
-            default:
-                ThrowInfo(DataTypeInvalid,
-                          "unsupported data type: {}",
-                          index->GetCastType());
+        if (index->GetCastType().data_type() == JsonCastType::DataType::JSON) {
+            // JsonFlatIndex needs special handling via executor.
+            auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
+                dynamic_cast<const index::JsonFlatIndex*>(index));
+            auto executor = json_flat_index->create_executor<double>(pointer);
+            cached_index_chunk_res_ =
+                std::make_shared<TargetBitmap>(executor->Exists());
+        } else {
+            // All other JSON path indexes (Inverted, Sort, Bitmap, Hybrid)
+            // return a fresh clone from Exists().
+            auto* mutable_index = const_cast<index::IndexBase*>(index);
+            cached_index_chunk_res_ =
+                std::make_shared<TargetBitmap>(mutable_index->Exists());
         }
     }
     auto res = MoveOrSliceBitmap(

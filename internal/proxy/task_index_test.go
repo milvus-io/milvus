@@ -1344,6 +1344,35 @@ func Test_parseIndexParams(t *testing.T) {
 		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "DynamicField")
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "json",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+				},
+				IndexName: "",
+				FieldName: "FieldJSON",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, indexparamcheck.IndexINVERTED, indexType)
 	})
 }
 

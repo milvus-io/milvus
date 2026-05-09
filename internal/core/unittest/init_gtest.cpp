@@ -23,6 +23,7 @@
 #include "exec/expression/function/init_c.h"
 #include "folly/init/Init.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "segcore/arrow_fs_c.h"
 #include "pb/cgo_msg.pb.h"
 #include "pb/clustering.pb.h"
 #include "pb/common.pb.h"
@@ -102,10 +103,13 @@ main(int argc, char** argv) {
         get_default_local_storage_config());
     milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
 
-    milvus_storage::ArrowFileSystemConfig arrow_conf;
-    arrow_conf.storage_type = "local";
-    arrow_conf.root_path = TestLocalPath;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_conf);
+    CStorageConfig arrow_fs_config = {};
+    arrow_fs_config.root_path = TestLocalPath.c_str();
+    arrow_fs_config.storage_type = "local";
+    auto c_status = InitArrowFileSystem(arrow_fs_config);
+    if (c_status.error_code != 0) {
+        throw std::runtime_error("Failed to init arrow filesystem");
+    }
 
     static const int64_t mb = 1024 * 1024;
 

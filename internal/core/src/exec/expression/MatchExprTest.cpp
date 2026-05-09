@@ -45,7 +45,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/InvertedIndexTantivy.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "simdjson/padded_string.h"
 #include "common/Tracer.h"

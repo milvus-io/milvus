@@ -2547,8 +2547,13 @@ class TestBitmapIndex(TestcaseBase):
                 check_items={ct.err_code: 1100, ct.err_msg: msg},
             )
 
-        # build `BITMAP` index on not supported scalar fields
+        # build `BITMAP` index on not supported scalar fields.
+        # JSON is supported with an explicit json_cast_type (BOOL or VARCHAR);
+        # it is excluded here because it fails with a different error message
+        # ("json index must specify cast type") rather than CheckBitmapIndex.
         for _field_name in self.bitmap_not_support_dtype_names:
+            if _field_name == DataType.JSON.name:
+                continue
             self.collection_wrap.create_index(
                 field_name=_field_name,
                 index_params=IndexPrams(index_type=IndexName.BITMAP).to_dict,

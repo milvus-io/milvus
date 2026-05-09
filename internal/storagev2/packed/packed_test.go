@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -242,11 +243,14 @@ func (suite *PackedTestSuite) TestCloseAndTellMultiGroups() {
 }
 
 func (suite *PackedTestSuite) TestFilesystemMetrics() {
-	// Get baseline metrics
-	beforeMetrics, err := storagev2.GetCachedFilesystemMetrics("")
+	localConfig := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    "/tmp",
+	}
+
+	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
 
-	// Write data
 	paths := []string{"/tmp/metrics_test"}
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
 	pw, err := NewPackedWriter(paths, suite.schema, 10*1024*1024, 0, columnGroups, nil, nil)
@@ -258,20 +262,17 @@ func (suite *PackedTestSuite) TestFilesystemMetrics() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	// Verify write metrics increased
-	afterWrite, err := storagev2.GetCachedFilesystemMetrics("")
+	afterWrite, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
 	suite.Greater(afterWrite.WriteBytes, beforeMetrics.WriteBytes, "write bytes should increase")
 
-	// Read data back
 	reader, err := NewPackedReader(paths, suite.schema, 10*1024*1024, nil, nil)
 	suite.NoError(err)
 	rr, err := reader.ReadNext()
 	suite.NoError(err)
 	rr.Release()
 
-	// Verify read metrics increased
-	afterRead, err := storagev2.GetCachedFilesystemMetrics("")
+	afterRead, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
 	suite.Greater(afterRead.ReadBytes, afterWrite.ReadBytes, "read bytes should increase")
 }

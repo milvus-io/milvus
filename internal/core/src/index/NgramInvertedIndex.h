@@ -13,7 +13,6 @@
 #include <string>
 #include <boost/filesystem.hpp>
 #include <optional>
-#include "index/JsonInvertedIndex.h"
 #include "index/InvertedIndexTantivy.h"
 
 namespace milvus::exec {
@@ -128,6 +127,5 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     // for json type
     std::string nested_path_;
-    JsonInvertedIndexParseErrorRecorder error_recorder_;
 };
 }  // namespace milvus::index

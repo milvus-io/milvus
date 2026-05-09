@@ -497,7 +497,14 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 			if field.DataType == entity.FieldTypeBool ||
 				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+				// STL_SORT on JSON is supported with a json_cast_type; without
+				// it the server rejects with a missing-cast-type error instead
+				// of the old "not supported on field" error.
+				if field.DataType == entity.FieldTypeJSON {
+					require.ErrorContains(t, err, "json index must specify cast type")
+				} else {
+					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				common.CheckErr(t, err, true)
@@ -657,7 +664,10 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
+		// STL_SORT on JSON is supported with a json_cast_type; without it the
+		// server now rejects with a missing-cast-type error instead of the
+		// old "not supported on field" error.
+		{index.NewSortedIndex(), "json index must specify cast type"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 	for _, idxErr := range inxError {

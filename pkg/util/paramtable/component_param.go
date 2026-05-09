@@ -2674,7 +2674,6 @@ type queryCoordConfig struct {
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
@@ -3248,15 +3247,6 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
-
-	p.CheckExecutedFlagInterval = ParamItem{
-		Key:          "queryCoord.checkExecutedFlagInterval",
-		Version:      "2.4.4",
-		DefaultValue: "100",
-		Doc:          "the interval of check executed flag to force to pull dist",
-		Export:       true,
-	}
-	p.CheckExecutedFlagInterval.Init(base.mgr)
 
 	p.CollectionBalanceSegmentBatchSize = ParamItem{
 		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
@@ -7206,6 +7196,10 @@ type streamingConfig struct {
 
 	// Replication filtering configuration
 	ReplicationSkipMessageTypes ParamItem `refreshable:"false"`
+
+	// Replication pending message queue configuration
+	ReplicationPendingMessagesQueueLength  ParamItem `refreshable:"true"`
+	ReplicationPendingMessagesQueueMaxSize ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -7654,6 +7648,24 @@ so we set 1 second here as a threshold.`,
 		Export:       false,
 	}
 	p.ReplicationSkipMessageTypes.Init(base.mgr)
+
+	p.ReplicationPendingMessagesQueueLength = ParamItem{
+		Key:          "streaming.replication.pendingMessagesQueueLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Doc:          "The capacity of pending message queue for each replication stream client.",
+		Export:       true,
+	}
+	p.ReplicationPendingMessagesQueueLength.Init(base.mgr)
+
+	p.ReplicationPendingMessagesQueueMaxSize = ParamItem{
+		Key:          "streaming.replication.pendingMessagesQueueMaxSize",
+		Version:      "3.0.0",
+		DefaultValue: "134217728",
+		Doc:          "The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.",
+		Export:       true,
+	}
+	p.ReplicationPendingMessagesQueueMaxSize.Init(base.mgr)
 
 	p.WALRateLimitDefaultBurst = ParamItem{
 		Key:          "streaming.walRateLimit.defaultBurst",

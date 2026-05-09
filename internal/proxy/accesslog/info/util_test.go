@@ -207,3 +207,17 @@ func TestGetCurUserFromContext(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestListToString(t *testing.T) {
+	t.Run("empty list", func(t *testing.T) {
+		assert.Equal(t, "[]", listToString([]string{}))
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		assert.Equal(t, "[\"foo\"]", listToString([]string{"foo"}))
+	})
+
+	t.Run("multiple elements", func(t *testing.T) {
+		assert.Equal(t, "[\"foo\", \"bar\"]", listToString([]string{"foo", "bar"}))
+	})
+}

@@ -43,8 +43,9 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 	}
 
 	var checkpoint message.MessageID
+	walName := impl.wal.Get().WALName()
 	for _, info := range recoveryInfos {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), info.GetInfo().GetSeekPosition().GetMsgID())
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(walName, info.GetInfo().GetSeekPosition().GetMsgID())
 		if checkpoint == nil || messageID.LT(checkpoint) {
 			checkpoint = messageID
 		}

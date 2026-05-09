@@ -38,7 +38,8 @@
 #include "index/InvertedIndexTantivy.h"
 #include "index/TextMatchIndex.h"
 #include "index/JsonFlatIndex.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonHybridScalarIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/RTreeIndex.h"
@@ -513,44 +514,122 @@ IndexFactory::CreateComplexScalarIndex(
     ThrowInfo(Unsupported, "Complex index not supported now");
 }
 
+namespace {
+
+template <typename T, typename BaseIndex, typename... Args>
+IndexBasePtr
+MakeJsonWrapped(const CreateIndexInfo& info,
+                const storage::FileManagerContext& ctx,
+                Args&&... args) {
+    return std::make_unique<JsonScalarIndexWrapper<T, BaseIndex>>(
+        info.json_cast_type,
+        info.json_path,
+        JsonCastFunction::FromString(info.json_cast_function),
+        ctx.fieldDataMeta.field_schema,
+        ctx,
+        std::forward<Args>(args)...);
+}
+
+template <typename T>
+IndexBasePtr
+MakeJsonHybrid(const CreateIndexInfo& info,
+               const storage::FileManagerContext& ctx) {
+    return std::make_unique<JsonHybridScalarIndex<T>>(
+        info.json_cast_type,
+        info.json_path,
+        JsonCastFunction::FromString(info.json_cast_function),
+        ctx.fieldDataMeta.field_schema,
+        info.tantivy_index_version,
+        ctx);
+}
+
+}  // namespace
+
 IndexBasePtr
 IndexFactory::CreateJsonIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
-    AssertInfo(create_index_info.index_type == INVERTED_INDEX_TYPE ||
-                   create_index_info.index_type == NGRAM_INDEX_TYPE,
-               "Invalid index type for json index");
-
+    const auto& index_type = create_index_info.index_type;
     const auto& cast_dtype = create_index_info.json_cast_type;
     const auto& nested_path = create_index_info.json_path;
     const auto& json_cast_function = create_index_info.json_cast_function;
+
+    // Sort index
+    if (index_type == ASCENDING_SORT) {
+        switch (cast_dtype.element_type()) {
+            case JsonCastType::DataType::DOUBLE:
+                return MakeJsonWrapped<double, ScalarIndexSort<double>>(
+                    create_index_info, file_manager_context);
+            case JsonCastType::DataType::VARCHAR:
+                return MakeJsonWrapped<std::string, StringIndexSort>(
+                    create_index_info, file_manager_context);
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid cast type for JSON sort index: {}",
+                          cast_dtype);
+        }
+    }
+
+    // Bitmap index
+    if (index_type == BITMAP_INDEX_TYPE) {
+        switch (cast_dtype.element_type()) {
+            case JsonCastType::DataType::BOOL:
+                return MakeJsonWrapped<bool, BitmapIndex<bool>>(
+                    create_index_info, file_manager_context);
+            case JsonCastType::DataType::VARCHAR:
+                return MakeJsonWrapped<std::string, BitmapIndex<std::string>>(
+                    create_index_info, file_manager_context);
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid cast type for JSON bitmap index: {}",
+                          cast_dtype);
+        }
+    }
+
+    // Hybrid index
+    if (index_type == HYBRID_INDEX_TYPE) {
+        switch (cast_dtype.element_type()) {
+            case JsonCastType::DataType::BOOL:
+                return MakeJsonHybrid<bool>(create_index_info,
+                                            file_manager_context);
+            case JsonCastType::DataType::DOUBLE:
+                return MakeJsonHybrid<double>(create_index_info,
+                                              file_manager_context);
+            case JsonCastType::DataType::VARCHAR:
+                return MakeJsonHybrid<std::string>(create_index_info,
+                                                   file_manager_context);
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid cast type for JSON hybrid index: {}",
+                          cast_dtype);
+        }
+    }
+
+    // Inverted / NGram (existing paths)
+    AssertInfo(
+        index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE,
+        "Invalid index type for json index: {}",
+        index_type);
+
+    auto tantivy_ver =
+        static_cast<uint32_t>(create_index_info.tantivy_index_version);
+
     switch (cast_dtype.element_type()) {
         case JsonCastType::DataType::BOOL:
-            return std::make_unique<index::JsonInvertedIndex<bool>>(
-                cast_dtype,
-                nested_path,
-                file_manager_context,
-                create_index_info.tantivy_index_version,
-                JsonCastFunction::FromString(json_cast_function));
+            return MakeJsonWrapped<bool, InvertedIndexTantivy<bool>>(
+                create_index_info, file_manager_context, tantivy_ver);
         case JsonCastType::DataType::DOUBLE:
-            return std::make_unique<index::JsonInvertedIndex<double>>(
-                cast_dtype,
-                nested_path,
-                file_manager_context,
-                create_index_info.tantivy_index_version,
-                JsonCastFunction::FromString(json_cast_function));
+            return MakeJsonWrapped<double, InvertedIndexTantivy<double>>(
+                create_index_info, file_manager_context, tantivy_ver);
         case JsonCastType::DataType::VARCHAR: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
                 return std::make_unique<NgramInvertedIndex>(
                     file_manager_context, ngram_params.value(), nested_path);
             }
-            return std::make_unique<index::JsonInvertedIndex<std::string>>(
-                cast_dtype,
-                nested_path,
-                file_manager_context,
-                create_index_info.tantivy_index_version,
-                JsonCastFunction::FromString(json_cast_function));
+            return MakeJsonWrapped<std::string,
+                                   InvertedIndexTantivy<std::string>>(
+                create_index_info, file_manager_context, tantivy_ver);
         }
         case JsonCastType::DataType::JSON:
             return std::make_unique<JsonFlatIndex>(

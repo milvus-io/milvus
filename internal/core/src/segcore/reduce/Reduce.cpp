@@ -785,6 +785,27 @@ ReduceHelper::FillEntryData() {
     }
 }
 
+bool
+ReduceHelper::TryAcceptSearchResult(const SearchResultPair& result) {
+    auto search_result = result.search_result_;
+    if (!search_result->element_level_) {
+        return pk_set_.insert(result.primary_key_).second;
+    }
+
+    AssertInfo(
+        result.offset_ >= 0 && static_cast<size_t>(result.offset_) <
+                                   search_result->element_indices_.size(),
+        "invalid element-level search result offset {}, "
+        "element_indices size {}",
+        result.offset_,
+        search_result->element_indices_.size());
+
+    return element_result_set_
+        .insert({result.primary_key_,
+                 search_result->element_indices_[result.offset_]})
+        .second;
+}
+
 int64_t
 ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                                          int64_t topk,
@@ -794,6 +815,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         SearchResultPairComparator>
         heap;
     pk_set_.clear();
+    element_result_set_.clear();
     pairs_.clear();
 
     pairs_.reserve(num_segments_);
@@ -828,13 +850,12 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (pk == INVALID_PK) {
             break;
         }
-        // remove duplicates
-        if (pk_set_.count(pk) == 0) {
+        // Row-level search is deduplicated by PK. Element-level search has
+        // multiple result identities per row, so use (PK, element_index).
+        if (TryAcceptSearchResult(*pilot)) {
             pilot->search_result_->result_offsets_.push_back(offset++);
             final_search_records_[index][qi].push_back(pilot->offset_);
-            pk_set_.insert(pk);
         } else {
-            // skip entity with same primary key
             dup_cnt++;
         }
         pilot->advance();

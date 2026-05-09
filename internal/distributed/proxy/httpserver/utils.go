@@ -17,7 +17,6 @@
 package httpserver
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -110,18 +109,38 @@ func getPrimaryField(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, 
 }
 
 func joinArray(data interface{}) string {
-	var buffer bytes.Buffer
-	arr := reflect.ValueOf(data)
-
-	for i := 0; i < arr.Len(); i++ {
-		if i > 0 {
-			buffer.WriteString(",")
-		}
-
-		fmt.Fprintf(&buffer, "%v", arr.Index(i))
+	if data == nil {
+		return ""
 	}
-
-	return buffer.String()
+	var builder strings.Builder
+	switch arr := data.(type) {
+	case []int64:
+		for i, v := range arr {
+			if i > 0 {
+				builder.WriteString(",")
+			}
+			builder.WriteString(strconv.FormatInt(v, 10))
+		}
+	case []string:
+		for i, v := range arr {
+			if i > 0 {
+				builder.WriteString(",")
+			}
+			builder.WriteString(v)
+		}
+	default:
+		rv := reflect.ValueOf(data)
+		if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+			return ""
+		}
+		for i := 0; i < rv.Len(); i++ {
+			if i > 0 {
+				builder.WriteString(",")
+			}
+			fmt.Fprintf(&builder, "%v", rv.Index(i))
+		}
+	}
+	return builder.String()
 }
 
 func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, error) {
@@ -389,10 +408,10 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				}
 				fieldType := field.DataType
 				fieldName := field.Name
+				fieldValue := data.Get(fieldName)
 
 				if field.Nullable || field.DefaultValue != nil {
-					value := gjson.Get(data.Raw, fieldName)
-					if value.Type == gjson.Null {
+					if fieldValue.Type == gjson.Null {
 						validDataMap[fieldName] = append(validDataMap[fieldName], false)
 						continue
 					} else {
@@ -401,7 +420,6 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				}
 
 				// For partial update, check if field exists in the data
-				fieldValue := gjson.Get(data.Raw, fieldName)
 				if partialUpdate && !fieldValue.Exists() {
 					// Skip fields that are not provided in partial update
 					continue
@@ -434,7 +452,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					if dataString == "" {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
-					vectorStr := gjson.Get(data.Raw, fieldName).Raw
+					vectorStr := fieldValue.Raw
 					var vectorArray []byte
 					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
 					if err != nil {
@@ -456,7 +474,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					if dataString == "" {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
-					vectorJSON := gjson.Get(data.Raw, fieldName)
+					vectorJSON := fieldValue
 					// Clients may send float32 vector because they are inconvenient of processing float16 or bfloat16.
 					// Float32 vector is an array in JSON format, like `[1.0, 2.0, 3.0]`, `[1, 2, 3]`, etc,
 					// while float16 or bfloat16 vector is a string in JSON format, like `"4z1jPgAAgL8="`, `"gD+AP4A/gD8="`, etc.
@@ -472,7 +490,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					} else if vectorJSON.Type == gjson.String {
 						// `data` is a float16 or bfloat16 vector
 						// same as `case schemapb.DataType_BinaryVector`
-						vectorStr := gjson.Get(data.Raw, fieldName).Raw
+						vectorStr := fieldValue.Raw
 						var vectorArray []byte
 						err := json.Unmarshal([]byte(vectorStr), &vectorArray)
 						if err != nil {

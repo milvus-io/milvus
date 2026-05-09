@@ -380,6 +380,7 @@ func (s *Server) initDataCoord() error {
 		s.handler,
 		s.broker,
 		s.getChannelsByCollectionID,
+		s.indexEngineVersionManager,
 	)
 	log.Info("init snapshot manager done")
 
