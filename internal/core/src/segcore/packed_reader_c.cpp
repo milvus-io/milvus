@@ -92,7 +92,8 @@ NewPackedReaderWithStorageConfig(char** paths,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties());
+            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -132,7 +133,8 @@ NewPackedReader(char** paths,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties());
+            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
