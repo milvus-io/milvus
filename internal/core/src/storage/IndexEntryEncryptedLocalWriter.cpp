@@ -28,6 +28,7 @@
 #include <boost/uuid/uuid_io.hpp>
 
 #include "common/EasyAssert.h"
+#include "folly/ScopeGuard.h"
 #include "nlohmann/json.hpp"
 #include "storage/Crc32cUtil.h"
 #include "storage/RemoteOutputStream.h"
@@ -253,9 +254,10 @@ IndexEntryEncryptedLocalWriter::Finish() {
     total_bytes_written_ = MILVUS_V3_MAGIC_SIZE + current_offset_ +
                            dir_str.size() + MILVUS_V3_FOOTER_SIZE;
 
+    auto cleanup_local_file =
+        folly::makeGuard([this]() { ::unlink(local_path_.c_str()); });
     UploadLocalFile();
 
-    ::unlink(local_path_.c_str());
     finished_ = true;
 }
 
@@ -271,6 +273,7 @@ IndexEntryEncryptedLocalWriter::UploadLocalFile() {
     int read_fd = ::open(local_path_.c_str(), O_RDONLY);
     AssertInfo(
         read_fd != -1, "Failed to open local file for upload: {}", local_path_);
+    auto close_read_fd = folly::makeGuard([read_fd]() { ::close(read_fd); });
 
     constexpr size_t kBufSize = 16 * 1024 * 1024;
     std::vector<char> buf(kBufSize);
@@ -284,14 +287,12 @@ IndexEntryEncryptedLocalWriter::UploadLocalFile() {
             if (errno == EINTR) {
                 continue;
             }
-            ::close(read_fd);
             ThrowInfo(ErrorCode::UnexpectedError,
                       fmt::format("Failed to read local file {}: {}",
                                   local_path_,
                                   strerror(errno)));
         }
     }
-    ::close(read_fd);
     remote_stream->Close();
 }
 
