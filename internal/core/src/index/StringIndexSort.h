@@ -159,7 +159,6 @@ class StringIndexSort : public StringIndex {
 
     int64_t total_size_{0};
     std::unique_ptr<StringIndexSortImpl> impl_;
-
 };
 
 // Abstract interface for implementations

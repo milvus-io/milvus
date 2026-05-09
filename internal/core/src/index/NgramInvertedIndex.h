@@ -21,7 +21,6 @@ class SegmentExpr;
 }  // namespace milvus::exec
 
 namespace milvus::index {
-
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for string/varchar type

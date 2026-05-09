@@ -361,8 +361,7 @@ class ArrayBitmapIndexTest : public testing::Test {
             start += lack_binlog_row_;
         }
         for (size_t i = start; i < bitset.size(); i++) {
-            ASSERT_EQ(bitset[i],
-                      nullable_ && !valid_data_[i - start])
+            ASSERT_EQ(bitset[i], nullable_ && !valid_data_[i - start])
                 << "row " << i;
         }
     }
@@ -379,8 +378,7 @@ class ArrayBitmapIndexTest : public testing::Test {
             start += lack_binlog_row_;
         }
         for (size_t i = start; i < bitset.size(); i++) {
-            ASSERT_EQ(bitset[i],
-                      !nullable_ || valid_data_[i - start])
+            ASSERT_EQ(bitset[i], !nullable_ || valid_data_[i - start])
                 << "row " << i;
         }
     }

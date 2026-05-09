@@ -534,7 +534,6 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 					partitionID,
 					segmentID)
 			}
-
 			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err

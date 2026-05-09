@@ -7,7 +7,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
 #include "bitset/bitset.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
@@ -25,7 +24,6 @@
 #include "test_utils/Constants.h"
 #include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
-
 using namespace milvus;
 using namespace milvus::index;
 
@@ -52,7 +50,6 @@ test_stlsort_for_range(
         const std::shared_ptr<ScalarIndexSort<int64_t>>&)> exec_expr,
     const std::vector<bool>& expected_result) {
     size_t nb = data.size();
-
     BinarySet binary_set;
     {
         Config config;

@@ -169,10 +169,8 @@ NgramInvertedIndex::BuildWithJsonFieldData(
                simdjson::error_code error) {
             this->error_recorder_.Record(json, nested_path, error);
         });
-
     avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
     LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);
-
     error_recorder_.PrintErrStats();
 }
 
@@ -289,7 +287,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
-
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(

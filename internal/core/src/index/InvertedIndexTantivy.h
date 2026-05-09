@@ -361,6 +361,5 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // for now, only TextMatchIndex  can be built for growing segment,
     // and can read and insert concurrently.
     bool is_growing_{false};
-
 };
 }  // namespace milvus::index

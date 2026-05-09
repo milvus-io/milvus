@@ -606,6 +606,7 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
     }
 
     TargetBitmap bitset(str_ids_.size());
+
     auto match_value = [&pattern, op](const std::string& value) {
         switch (op) {
             case proto::plan::OpType::PostfixMatch:
@@ -640,7 +641,6 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
             }
         }
     }
-
     return bitset;
 }
 
