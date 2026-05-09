@@ -754,7 +754,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.ArrowReaderHoleSizeLimitBytes = ParamItem{
 		Key:          "common.arrow.reader.holeSizeLimitBytes",
-		Version:      "2.6.14",
+		Version:      "2.6.16",
 		DefaultValue: "0",
 		Doc: `Maximum byte gap between adjacent Arrow read ranges that can be coalesced. ` +
 			`0 keeps Arrow's default. Increasing this can reduce remote object-store GET ` +
@@ -765,7 +765,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.ArrowReaderRangeSizeLimitBytes = ParamItem{
 		Key:          "common.arrow.reader.rangeSizeLimitBytes",
-		Version:      "2.6.14",
+		Version:      "2.6.16",
 		DefaultValue: "0",
 		Doc: `Maximum size in bytes of a coalesced Arrow read range. 0 keeps Arrow's ` +
 			`default. Increase this with holeSizeLimitBytes when larger remote reads ` +
