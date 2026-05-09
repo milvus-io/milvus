@@ -127,8 +127,15 @@ func (m *StatsManager) unregisterAllStatsOnPChannel(pchannel string) int {
 	if !ok {
 		return 0
 	}
+	vchannels := make(map[string]struct{})
 	for segmentID := range segmentIDs {
+		if belongs, ok := m.segmentIndex[segmentID]; ok {
+			vchannels[belongs.VChannel] = struct{}{}
+		}
 		m.unregisterSealedSegment(segmentID)
+	}
+	for vchannel := range vchannels {
+		m.advanceDeleteWindowLocked(vchannel)
 	}
 	return len(segmentIDs)
 }

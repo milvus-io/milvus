@@ -422,6 +422,27 @@ func TestStatsManagerClearDeleteWindowWhenNoGrowingL1(t *testing.T) {
 	assert.NotContains(t, m.deleteWindows, "vchannel")
 }
 
+func TestStatsManagerClearDeleteWindowOnUnregisterSealOperatorWithoutL1(t *testing.T) {
+	paramtable.Init()
+
+	m := NewStatsManager()
+
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
+	sealOperator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator, nil, nil)
+
+	segment10 := createSegmentStats(100, 100, 300)
+	segment10.Level = datapb.SegmentLevel_L0
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
+
+	m.RecordDelete("vchannel", 120, 1, 10)
+
+	m.UnregisterSealOperator(sealOperator)
+
+	assert.NotContains(t, m.deleteWindows, "vchannel")
+}
+
 func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *SegmentStats {
 	return &SegmentStats{
 		Modified: ModifiedMetrics{

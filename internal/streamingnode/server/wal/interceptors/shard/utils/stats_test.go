@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestStatsConvention(t *testing.T) {
