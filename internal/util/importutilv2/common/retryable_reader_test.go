@@ -125,14 +125,20 @@ func (m *customMockReader) ReadAt(p []byte, off int64) (int, error) {
 
 type prematureEOFReader struct {
 	*strings.Reader
-	limit int
-	read  int
+	limit        int
+	read         int
+	reportedSize int64
 }
 
 func newPrematureEOFReader(content string, limit int) storage.FileReader {
+	return newPrematureEOFReaderWithSize(content, limit, int64(len(content)))
+}
+
+func newPrematureEOFReaderWithSize(content string, limit int, reportedSize int64) storage.FileReader {
 	return &prematureEOFReader{
-		Reader: strings.NewReader(content),
-		limit:  limit,
+		Reader:       strings.NewReader(content),
+		limit:        limit,
+		reportedSize: reportedSize,
 	}
 }
 
@@ -153,7 +159,13 @@ func (r *prematureEOFReader) Close() error {
 }
 
 func (r *prematureEOFReader) Size() (int64, error) {
-	return int64(r.Reader.Len()) + int64(r.read), nil
+	return r.reportedSize, nil
+}
+
+func newSizeFunc(size int64) ReaderSizeFunc {
+	return func(context.Context, string) (int64, error) {
+		return size, nil
+	}
 }
 
 func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
@@ -166,7 +178,7 @@ func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
 		return NewMockReader(content), nil
 	}
 
-	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReader(content, 5), reopen)
+	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReader(content, 5), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := io.ReadFull(reader, buf)
 
@@ -186,7 +198,7 @@ func TestRetryableReader_FinalEOFIsNotRetried(t *testing.T) {
 		return NewMockReader(content), nil
 	}
 
-	reader := NewRetryableReaderWithReopen(ctx, path, NewMockReader(content), reopen)
+	reader := NewRetryableReaderWithReopen(ctx, path, NewMockReader(content), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := io.ReadFull(reader, buf)
 	assert.NoError(t, err)
@@ -208,9 +220,54 @@ func TestRetryableReader_ReopenOnRetryableError(t *testing.T) {
 		return NewMockReader(content), nil
 	}
 
-	reader := NewRetryableReaderWithReopen(ctx, path, newErrorMockReader(content, errors.New("network timeout"), 1), reopen)
+	reader := NewRetryableReaderWithReopen(ctx, path, newErrorMockReader(content, errors.New("network timeout"), 1), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := reader.Read(buf)
+
+	assert.NoError(t, err)
+	assert.Equal(t, len(content), n)
+	assert.Equal(t, content, string(buf))
+	assert.Equal(t, 1, openCount)
+}
+
+func TestRetryableReader_ExhaustedPrematureEOFReturnsUnexpectedEOF(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	content := "hello world"
+	reopen := func(context.Context, string) (storage.FileReader, error) {
+		return newPrematureEOFReader(content, 0), nil
+	}
+
+	reader := &retryableReader{
+		FileReader:    newPrematureEOFReader(content, 5),
+		ctx:           ctx,
+		path:          path,
+		retryAttempts: 2,
+		reopen:        reopen,
+		sizeFunc:      newSizeFunc(int64(len(content))),
+		size:          -1,
+	}
+	buf := make([]byte, len(content))
+	n, err := io.ReadFull(reader, buf)
+
+	assert.ErrorIs(t, err, merr.ErrIoUnexpectEOF)
+	assert.False(t, errors.Is(err, io.EOF))
+	assert.Equal(t, 5, n)
+}
+
+func TestRetryableReader_UsesSizeFuncForPrematureEOF(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	content := "hello world"
+	openCount := 0
+	reopen := func(context.Context, string) (storage.FileReader, error) {
+		openCount++
+		return NewMockReader(content), nil
+	}
+
+	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReaderWithSize(content, 5, 0), reopen, newSizeFunc(int64(len(content))))
+	buf := make([]byte, len(content))
+	n, err := io.ReadFull(reader, buf)
 
 	assert.NoError(t, err)
 	assert.Equal(t, len(content), n)

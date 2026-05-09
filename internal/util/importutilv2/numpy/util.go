@@ -97,7 +97,7 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
 		}
-		retryableReader := common.NewRetryableReaderWithReopen(ctx, path, reader, cm.Reader)
+		retryableReader := common.NewRetryableReaderWithReopen(ctx, path, reader, cm.Reader, cm.Size)
 		readers[field.GetFieldID()] = retryableReader
 		readFields[field.GetName()] = field.GetFieldID()
 	}

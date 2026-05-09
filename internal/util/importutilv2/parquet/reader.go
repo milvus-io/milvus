@@ -59,7 +59,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
-	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, cmReader, cm.Reader)
+	retryableReader := common.NewRetryableReader(ctx, path, cmReader)
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	// Each ColumnReader consumes ReaderProperties.BufferSize memory independently.

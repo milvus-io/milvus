@@ -38,6 +38,7 @@ type RetryableReader interface {
 }
 
 type ReopenReaderFunc func(context.Context, string) (storage.FileReader, error)
+type ReaderSizeFunc func(context.Context, string) (int64, error)
 
 // retryableReader is the implementation of RetryableReader.
 type retryableReader struct {
@@ -46,20 +47,21 @@ type retryableReader struct {
 	path          string
 	retryAttempts uint
 	reopen        ReopenReaderFunc
+	sizeFunc      ReaderSizeFunc
 	offset        int64
 	size          int64
 }
 
 // NewRetryableReader creates a new RetryableReader.
 func NewRetryableReader(ctx context.Context, path string, reader storage.FileReader) RetryableReader {
-	return newRetryableReader(ctx, path, reader, nil)
+	return newRetryableReader(ctx, path, reader, nil, nil)
 }
 
-func NewRetryableReaderWithReopen(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc) RetryableReader {
-	return newRetryableReader(ctx, path, reader, reopen)
+func NewRetryableReaderWithReopen(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc, sizeFunc ReaderSizeFunc) RetryableReader {
+	return newRetryableReader(ctx, path, reader, reopen, sizeFunc)
 }
 
-func newRetryableReader(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc) RetryableReader {
+func newRetryableReader(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc, sizeFunc ReaderSizeFunc) RetryableReader {
 	size := int64(-1)
 	if reader != nil {
 		var err error
@@ -74,8 +76,28 @@ func newRetryableReader(ctx context.Context, path string, reader storage.FileRea
 		path:          path,
 		retryAttempts: paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 		reopen:        reopen,
+		sizeFunc:      sizeFunc,
 		size:          size,
 	}
+}
+
+func (r *retryableReader) objectSize() (int64, bool) {
+	if r.size > 0 || (r.size == 0 && r.offset == 0) {
+		return r.size, true
+	}
+	if r.sizeFunc == nil {
+		return r.size, r.size >= 0
+	}
+	size, err := r.sizeFunc(r.ctx, r.path)
+	if err != nil {
+		log.Ctx(r.ctx).Warn("retryable reader failed to get object size",
+			zap.String("path", r.path),
+			zap.Error(err),
+		)
+		return 0, false
+	}
+	r.size = size
+	return size, true
 }
 
 func (r *retryableReader) reopenAtOffset() error {
@@ -113,11 +135,12 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 			return false, nil
 		}
 		if errors.Is(err, io.EOF) {
-			if r.size >= 0 && r.offset < r.size && r.reopen != nil {
+			if size, ok := r.objectSize(); ok && r.offset < size && r.reopen != nil {
+				err = storage.ToMilvusIoError(r.path, io.ErrUnexpectedEOF)
 				log.Ctx(r.ctx).Warn("retryable reader got premature EOF",
 					zap.String("path", r.path),
 					zap.Int64("offset", r.offset),
-					zap.Int64("size", r.size),
+					zap.Int64("size", size),
 				)
 				if reopenErr := r.reopenAtOffset(); reopenErr != nil {
 					return !merr.IsNonRetryableErr(reopenErr), reopenErr
