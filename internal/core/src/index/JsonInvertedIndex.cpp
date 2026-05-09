@@ -29,7 +29,6 @@
 #include "index/JsonIndexBuilder.h"
 #include "index/Utils.h"
 #include "log/Log.h"
-#include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "simdjson/error.h"
 #include "storage/FileWriter.h"
@@ -196,16 +195,6 @@ JsonInvertedIndex<T>::RetainTantivyIndexFiles(
             }),
         index_files.end());
     InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
-}
-
-template <typename T>
-nlohmann::json
-JsonInvertedIndex<T>::BuildTantivyMeta(
-    const std::vector<std::string>& file_names, bool has_null) {
-    auto meta = InvertedIndexTantivy<T>::BuildTantivyMeta(file_names, has_null);
-    std::shared_lock<folly::SharedMutex> lock(this->mutex_);
-    meta["has_non_exist"] = !this->non_exist_offsets_.empty();
-    return meta;
 }
 
 template <typename T>

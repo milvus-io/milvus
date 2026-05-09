@@ -82,11 +82,6 @@ class IndexBase {
     virtual bool
     IsMmapSupported() const = 0;
 
-    virtual bool
-    IsNestedIndex() const {
-        return false;
-    }
-
     const IndexType&
     Type() const {
         return index_type_;

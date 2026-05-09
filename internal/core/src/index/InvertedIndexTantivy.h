@@ -21,8 +21,6 @@
 #include <string_view>
 #include <vector>
 
-#include "nlohmann/json_fwd.hpp"
-
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
@@ -99,8 +97,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     explicit InvertedIndexTantivy(uint32_t tantivy_index_version,
                                   const storage::FileManagerContext& ctx,
                                   bool inverted_index_single_segment = false,
-                                  bool user_specified_doc_id = true,
-                                  bool is_nested_index = false);
+                                  bool user_specified_doc_id = true);
 
     ~InvertedIndexTantivy();
 
@@ -225,11 +222,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         this->cached_byte_size_ = total;
     }
 
-    bool
-    IsNestedIndex() const override {
-        return is_nested_index_;
-    }
-
     virtual const TargetBitmap
     PrefixMatch(const std::string_view prefix);
 
@@ -307,10 +299,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
-    void
-    build_index_for_array_nested(
-        const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
-
     virtual void
     build_index_for_json(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
@@ -329,11 +317,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // Modifying the index_files in place.
     virtual void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files);
-
-    // Builds the TANTIVY_META JSON object. Override in subclasses to add
-    // additional fields (e.g., has_non_exist in JsonInvertedIndex).
-    virtual nlohmann::json
-    BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
 
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
@@ -379,8 +362,5 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // and can read and insert concurrently.
     bool is_growing_{false};
 
-    // `is_nested_index_` can only be true for array data type. When it's true,
-    // every element in the array is treated as a separate document in the index.
-    bool is_nested_index_{false};
 };
 }  // namespace milvus::index

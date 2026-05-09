@@ -19,13 +19,11 @@
 #include <string>
 
 #include "folly/init/Init.h"
-#include "common/type_c.h"
 #include "exec/expression/function/init_c.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "index/Meta.h"
 #include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -71,7 +69,7 @@ main(int argc, char** argv) {
     std::filesystem::create_directories(TestRemotePath);
     std::filesystem::create_directories(TestMmapPath);
 
-    // Initialize expression function factory (registers aggregate functions like count, sum, min, max)
+    // Initialize expression function factory for expression-related C++ UTs.
     InitExecExpressionFunctionFactory();
 
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
@@ -99,6 +97,5 @@ main(int argc, char** argv) {
         std::chrono::milliseconds(0),
         std::chrono::milliseconds(-1));
 
-    milvus::index::kOverrideRootPathForUT = "files";
     return RUN_ALL_TESTS();
 }

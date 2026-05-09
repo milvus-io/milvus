@@ -22,8 +22,6 @@
 
 #include "common/Consts.h"
 #include "boost/filesystem/path.hpp"
-#include "common/type_c.h"
-#include "index/Meta.h"
 #include "filemanager/FileManager.h"
 #include "log/Log.h"
 #include "milvus-storage/properties.h"
@@ -38,7 +36,6 @@
 #include "storage/RemoteOutputStream.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "filemanager/FileManager.h"
 
 namespace milvus::storage {
 
@@ -269,9 +266,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -311,9 +306,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteTextLogPrefix() const {
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -339,9 +332,7 @@ class FileManagerImpl : public milvus::FileManager {
     virtual std::string
     GetRemoteTextLogFilePrefixV2() const {
         boost::filesystem::path bucket = rcm_->GetBucketName();
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +

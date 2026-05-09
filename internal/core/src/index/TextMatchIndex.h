@@ -26,18 +26,18 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     // for growing segment.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
-                            const char* analyzer_name,
+                            const char* tokenizer_name,
                             const char* analyzer_params);
     // for sealed segment to create index from raw data during loading.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,
                             uint32_t tantivy_index_version,
-                            const char* analyzer_name,
+                            const char* tokenizer_name,
                             const char* analyzer_params);
     // for building index.
     explicit TextMatchIndex(const storage::FileManagerContext& ctx,
                             uint32_t tantivy_index_version,
-                            const char* analyzer_name,
+                            const char* tokenizer_name,
                             const char* analyzer_params);
     // for loading built index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);

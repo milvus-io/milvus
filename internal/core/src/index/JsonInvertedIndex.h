@@ -12,8 +12,6 @@
 #pragma once
 #include <cstdint>
 #include <shared_mutex>
-#include "nlohmann/json_fwd.hpp"
-
 #include "common/Slice.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastFunction.h"
@@ -181,10 +179,6 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
                 const Config& config) override;
 
  protected:
-    nlohmann::json
-    BuildTantivyMeta(const std::vector<std::string>& file_names,
-                     bool has_null) override;
-
     void
     LoadIndexMetas(const std::vector<std::string>& index_files,
                    const Config& config) override final;

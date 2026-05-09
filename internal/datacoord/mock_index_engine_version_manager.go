@@ -3,7 +3,6 @@
 package datacoord
 
 import (
-	semver "github.com/blang/semver/v4"
 	mock "github.com/stretchr/testify/mock"
 
 	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -456,51 +455,6 @@ func (_c *MockVersionManager_ResolveScalarIndexVersion_Call) Return(_a0 int32) *
 }
 
 func (_c *MockVersionManager_ResolveScalarIndexVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_ResolveScalarIndexVersion_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetMinimalSessionVer provides a mock function with no fields
-func (_m *MockVersionManager) GetMinimalSessionVer() semver.Version {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetMinimalSessionVer")
-	}
-
-	var r0 semver.Version
-	if rf, ok := ret.Get(0).(func() semver.Version); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(semver.Version)
-	}
-
-	return r0
-}
-
-// MockVersionManager_GetMinimalSessionVer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMinimalSessionVer'
-type MockVersionManager_GetMinimalSessionVer_Call struct {
-	*mock.Call
-}
-
-// GetMinimalSessionVer is a helper method to define mock.On call
-func (_e *MockVersionManager_Expecter) GetMinimalSessionVer() *MockVersionManager_GetMinimalSessionVer_Call {
-	return &MockVersionManager_GetMinimalSessionVer_Call{Call: _e.mock.On("GetMinimalSessionVer")}
-}
-
-func (_c *MockVersionManager_GetMinimalSessionVer_Call) Run(run func()) *MockVersionManager_GetMinimalSessionVer_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockVersionManager_GetMinimalSessionVer_Call) Return(_a0 semver.Version) *MockVersionManager_GetMinimalSessionVer_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockVersionManager_GetMinimalSessionVer_Call) RunAndReturn(run func() semver.Version) *MockVersionManager_GetMinimalSessionVer_Call {
 	_c.Call.Return(run)
 	return _c
 }

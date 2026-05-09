@@ -43,6 +43,7 @@ type IndexTaskInfo struct {
 	MemSize                   uint64
 	FailReason                string
 	CurrentIndexVersion       int32
+	IndexStoreVersion         int64
 	CurrentScalarIndexVersion int32
 
 	// task statistics
@@ -58,6 +59,7 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		MemSize:                   i.MemSize,
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
+		IndexStoreVersion:         i.IndexStoreVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
@@ -72,6 +74,7 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 		MemSize:                   i.MemSize,
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
+		IndexStoreVersion:         i.IndexStoreVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 	}
 }

@@ -304,55 +304,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
 }
 
-std::vector<std::string>
-split_by_wildcard(const std::string& literal) {
-    std::vector<std::string> result;
-    std::string r;
-    r.reserve(literal.size());
-    bool escape_mode = false;
-    for (char c : literal) {
-        if (escape_mode) {
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                // consider case "\\%", we should reserve %
-                escape_mode = true;
-            } else if (c == '%' || c == '_') {
-                if (r.length() > 0) {
-                    result.push_back(r);
-                    r.clear();
-                }
-            } else {
-                r += c;
-            }
-        }
-    }
-    if (r.length() > 0) {
-        result.push_back(r);
-    }
-    return result;
-}
-
-template <typename T, typename Predicate>
-inline void
-handle_batch(const T* data,
-             const int64_t size,
-             TargetBitmapView res,
-             Predicate&& predicate) {
-    auto next_off_option = res.find_first();
-    while (next_off_option.has_value()) {
-        auto next_off = next_off_option.value();
-        if (next_off >= static_cast<size_t>(size)) {
-            return;
-        }
-        if (!predicate(data[next_off])) {
-            res[next_off] = false;
-        }
-        next_off_option = res.find_next(next_off);
-    }
-}
-
 std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  proto::plan::OpType op_type,
@@ -469,6 +420,25 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
 }
 
 template <typename T, typename Predicate>
+inline void
+handle_batch(const T* data,
+             const int64_t size,
+             TargetBitmapView res,
+             Predicate&& predicate) {
+    auto next_off_option = res.find_first();
+    while (next_off_option.has_value()) {
+        auto next_off = next_off_option.value();
+        if (next_off >= static_cast<size_t>(size)) {
+            return;
+        }
+        if (!predicate(data[next_off])) {
+            res[next_off] = false;
+        }
+        next_off_option = res.find_next(next_off);
+    }
+}
+
+template <typename T, typename Predicate>
 std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
                                               exec::SegmentExpr* segment,
@@ -504,6 +474,36 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));
+}
+
+std::vector<std::string>
+split_by_wildcard(const std::string& literal) {
+    std::vector<std::string> result;
+    std::string r;
+    r.reserve(literal.size());
+    bool escape_mode = false;
+    for (char c : literal) {
+        if (escape_mode) {
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                // consider case "\\%", we should reserve %
+                escape_mode = true;
+            } else if (c == '%' || c == '_') {
+                if (r.length() > 0) {
+                    result.push_back(std::move(r));
+                    r.clear();
+                }
+            } else {
+                r += c;
+            }
+        }
+    }
+    if (r.length() > 0) {
+        result.push_back(std::move(r));
+    }
+    return result;
 }
 
 std::optional<TargetBitmap>

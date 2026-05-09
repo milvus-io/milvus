@@ -91,7 +91,6 @@ constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
 constexpr const char* EMB_LIST_META_PATH = "emb_list_meta_file_path";
 constexpr const char* EMB_LIST_META_FILE_NAME = "emb_list_meta";
 constexpr const char* EMB_LIST_OFFSETS_PATH = "emb_list_offset_file_path";
-constexpr const char* VALID_DATA_PATH_KEY = "valid_data_file_path";
 
 // VecIndex node filtering
 constexpr const char* VEC_OPT_FIELDS_PATH = "opt_fields_path";
@@ -115,8 +114,4 @@ constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
 constexpr const char* DISK_ANN_QUERY_LIST = "search_list";
 constexpr const char* DISK_ANN_QUERY_BEAMWIDTH = "beamwidth";
 
-// UT-only: when non-empty, overrides rcm_->GetRootPath() in
-// GetRemoteIndexObjectPrefix/GetRemoteTextLogPrefix to avoid
-// absolute path duplication with SubTreeFileSystem in tests.
-extern std::string kOverrideRootPathForUT;
 }  // namespace milvus::index

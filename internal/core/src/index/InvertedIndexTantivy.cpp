@@ -43,8 +43,6 @@
 #include "index/Utils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
-#include "nlohmann/detail/iterators/iter_impl.hpp"
-#include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -96,14 +94,12 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     uint32_t tantivy_index_version,
     const storage::FileManagerContext& ctx,
     bool inverted_index_single_segment,
-    bool user_specified_doc_id,
-    bool is_nested_index)
+    bool user_specified_doc_id)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
       tantivy_index_version_(tantivy_index_version),
       inverted_index_single_segment_(inverted_index_single_segment),
-      user_specified_doc_id_(user_specified_doc_id),
-      is_nested_index_(is_nested_index) {
+      user_specified_doc_id_(user_specified_doc_id) {
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
@@ -162,15 +158,6 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     boost::filesystem::path p(path_);
     boost::filesystem::directory_iterator end_iter;
 
-    // TODO: remove this log when #45590 is solved
-    auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;
-    auto field_id = disk_file_manager_->GetFieldDataMeta().field_id;
-    LOG_INFO(
-        "InvertedIndexTantivy::Upload: segment_id={}, field_id={}, path={}",
-        segment_id,
-        field_id,
-        path_);
-
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
         if (boost::filesystem::is_directory(*iter)) {
@@ -222,13 +209,6 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
     auto inverted_index_files = index_files.value();
-
-    // TODO: remove this log when #45590 is solved
-    auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;
-    auto field_id = disk_file_manager_->GetFieldDataMeta().field_id;
-    LOG_INFO("InvertedIndexTantivy::Load: segment_id={}, field_id={}",
-             segment_id,
-             field_id);
 
     LoadIndexMetas(inverted_index_files, config);
     RetainTantivyIndexFiles(inverted_index_files);
@@ -352,13 +332,6 @@ InvertedIndexTantivy<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
 
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid (none are null).
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All false - no element is null
-    }
-
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
@@ -384,13 +357,6 @@ InvertedIndexTantivy<T>::IsNotNull() {
                           tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count, true);
-
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid.
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All true - all elements are valid
-    }
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
@@ -598,25 +564,13 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             tantivy_index_version_,
             inverted_index_single_segment_);
     }
-    bool is_nested_index = config.find("is_nested_index") != config.end();
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
-            if (is_nested_index) {
-                is_nested_index_ = true;
-                // For nested index, each array element is a separate document
-                int64_t offset = 0;
-                for (size_t i = 0; i < n; i++) {
-                    wrapper_->template add_data<T>(
-                        arr[i].data(), arr[i].size(), offset);
-                    offset += arr[i].size();
-                }
-            } else {
-                for (size_t i = 0; i < n; i++) {
-                    wrapper_->template add_array_data(
-                        arr[i].data(), arr[i].size(), i);
-                }
+            for (size_t i = 0; i < n; i++) {
+                wrapper_->template add_array_data(
+                    arr[i].data(), arr[i].size(), i);
             }
         } else {
             wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
@@ -711,11 +665,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         }
 
         case proto::schema::DataType::Array: {
-            if (is_nested_index_) {
-                build_index_for_array_nested(field_datas);
-            } else {
-                build_index_for_array(field_datas);
-            }
+            build_index_for_array(field_datas);
             break;
         }
 
@@ -796,75 +746,6 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             }
         }
     }
-}
-
-template <typename T>
-void
-InvertedIndexTantivy<T>::build_index_for_array_nested(
-    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
-                                               std::is_same<T, int16_t>::value,
-                                           int32_t,
-                                           T>;
-
-    int64_t offset = 0;
-    int64_t row_offset = 0;
-    for (const auto& data : field_datas) {
-        auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
-        for (int64_t i = 0; i < n; i++, row_offset++) {
-            if (schema_.nullable() && !data->is_valid(i)) {
-                // Record null row offset, no elements to add
-                null_offset_.push_back(row_offset);
-                continue;
-            }
-            auto length = array_column[i].length();
-            wrapper_->template add_data<ElementType>(
-                reinterpret_cast<const ElementType*>(array_column[i].data()),
-                length,
-                offset);
-            offset += length;
-        }
-    }
-}
-
-template <>
-void
-InvertedIndexTantivy<std::string>::build_index_for_array_nested(
-    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    int64_t offset = 0;
-    int64_t row_offset = 0;
-    for (const auto& data : field_datas) {
-        auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
-        for (int64_t i = 0; i < n; i++, row_offset++) {
-            if (schema_.nullable() && !data->is_valid(i)) {
-                // Record null row offset, no elements to add
-                null_offset_.push_back(row_offset);
-                continue;
-            }
-            Assert(IsStringDataType(array_column[i].get_element_type()));
-            Assert(IsStringDataType(
-                static_cast<DataType>(schema_.element_type())));
-
-            std::vector<std::string> output;
-            auto length = array_column[i].length();
-            output.reserve(length);
-            for (int64_t j = 0; j < length; j++) {
-                output.push_back(
-                    array_column[i].template get_data<std::string>(j));
-            }
-            wrapper_->add_data(output.data(), length, offset);
-            offset += length;
-        }
-    }
-}
-
-template <typename T>
-nlohmann::json
-InvertedIndexTantivy<T>::BuildTantivyMeta(
-    const std::vector<std::string>& file_names, bool has_null) {
-    return {{"file_names", file_names}, {"has_null", has_null}};
 }
 
 template <typename T>
