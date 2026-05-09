@@ -627,7 +627,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         error = {"err_code": 999, "err_msg": "failed to create query plan: cannot parse expression"}
         if invalid_search_expr == 1:
-            error = {"err_code": 1, "err_msg": "'int' object has no attribute 'lower'"}
+            error = {"err_code": 1, "err_msg": "bad argument type for built-in operation"}
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
