@@ -18,10 +18,10 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -120,7 +120,7 @@ func hasTaskResultPayload(resp *workerpb.QueryTaskResponse) bool {
 }
 
 func errTerminalEmptyPayload(taskType taskcommon.Type, taskID int64, state taskcommon.State, reason string) error {
-	return fmt.Errorf("%s task %d is terminal with empty result payload, state=%s, reason=%s",
+	return errors.Wrapf(merr.ErrTaskResultEmpty, "%s task %d is terminal with empty result payload, state=%s, reason=%s",
 		taskType, taskID, state.String(), reason)
 }
 

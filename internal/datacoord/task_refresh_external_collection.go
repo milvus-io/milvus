@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -502,6 +504,10 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 	// Query task status from worker
 	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
+		if errors.Is(err, merr.ErrTaskResultEmpty) {
+			log.Warn("refresh task result payload is empty, will retry query", zap.Error(err))
+			return
+		}
 		log.Warn("query refresh task result failed", zap.Error(err))
 		// If query fails, mark task as failed
 		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {

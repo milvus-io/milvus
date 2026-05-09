@@ -119,6 +119,7 @@ var (
 	ErrIndexNotSupported = newMilvusError("index type not supported", 701, false)
 	ErrIndexDuplicate    = newMilvusError("index duplicates", 702, false)
 	ErrTaskDuplicate     = newMilvusError("task duplicates", 703, false)
+	ErrTaskResultEmpty   = newMilvusError("task result empty", 704, true)
 
 	// Database related
 	ErrDatabaseNotFound         = newMilvusError("database not found", 800, false)

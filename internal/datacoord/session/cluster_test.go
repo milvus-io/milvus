@@ -357,6 +357,7 @@ func TestCluster_Import(t *testing.T) {
 		result, err := cluster.QueryImport(1, &datapb.QueryImportRequest{TaskID: 1})
 		assert.Error(t, err)
 		assert.Nil(t, result)
+		assert.ErrorIs(t, err, merr.ErrTaskResultEmpty)
 		assert.Contains(t, err.Error(), "result payload is empty")
 	})
 
@@ -477,6 +478,7 @@ func TestCluster_QueryTerminalEmptyPayloadReturnsError(t *testing.T) {
 						err = tc.queryFunc(cluster)
 					})
 					assert.Error(t, err)
+					assert.ErrorIs(t, err, merr.ErrTaskResultEmpty)
 					assert.Contains(t, err.Error(), tc.taskType)
 					assert.Contains(t, err.Error(), state.String())
 					assert.Contains(t, err.Error(), "result payload is empty")

@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -677,6 +679,41 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta)
 	s.Error(syncErr)
 	s.Contains(syncErr.Error(), "catalog error")
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TaskResultEmptyKeepsTaskInProgress() {
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
+	s.NoError(err)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: 100,
+			State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(copyMeta.AddJob(context.TODO(), job))
+
+	task := createTestCopyTask(1, 100).(*copySegmentTask)
+	task.copyMeta = copyMeta
+	s.NoError(copyMeta.AddTask(context.TODO(), task))
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(task.GetNodeId(), mock.Anything).
+		Return(nil, errors.Wrap(merr.ErrTaskResultEmpty, "copy segment task 1001 is terminal with empty result payload")).
+		Once()
+
+	task.QueryTaskOnWorker(cluster)
+
+	metaTask := copyMeta.GetTask(context.TODO(), task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, metaTask.GetState())
+	metaJob := copyMeta.GetJob(context.TODO(), task.GetJobId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, metaJob.GetState())
 }
 
 func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {

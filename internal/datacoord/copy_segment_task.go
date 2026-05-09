@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -402,6 +403,11 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	resp, err := cluster.QueryCopySegment(nodeID, req)
 	// Handle RPC error separately to avoid nil resp dereference
 	if err != nil {
+		if errors.Is(err, merr.ErrTaskResultEmpty) {
+			log.Warn("copy segment task result payload is empty, will retry query",
+				WrapCopySegmentTaskLog(t, zap.Error(err))...)
+			return
+		}
 		t.markTaskAndJobFailed(fmt.Sprintf("query copy segment RPC failed: %v", err))
 		return
 	}
