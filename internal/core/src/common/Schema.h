@@ -426,6 +426,9 @@ class Schema {
 
     bool
     ShouldLoadField(FieldId field_id) {
+        if (bm25_function_output_fields_.count(field_id) > 0) {
+            return false;
+        }
         auto it = fields_.find(field_id);
         if (it != fields_.end() && !it->second.NeedLoad()) {
             return false;
@@ -560,6 +563,7 @@ class Schema {
     // field partial load list
     // work as hint now
     std::unordered_set<FieldId> load_fields_;
+    std::unordered_set<FieldId> bm25_function_output_fields_;
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
