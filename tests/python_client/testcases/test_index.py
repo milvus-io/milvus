@@ -1,27 +1,28 @@
-import random
-from time import sleep
-
-import numpy as np
-import pytest
 import copy
+import random
 
+import pytest
 from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
-from base.collection_wrapper import ApiCollectionWrapper
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import IndexErrorMessage as iem
 from common.common_params import (
-    IndexName, FieldParams, IndexPrams, DefaultVectorIndexParams, DefaultScalarIndexParams, MetricType, AlterIndexParams
+    AlterIndexParams,
+    DefaultScalarIndexParams,
+    DefaultVectorIndexParams,
+    FieldParams,
+    IndexName,
+    IndexPrams,
+    MetricType,
 )
-
-from utils.util_pymilvus import *
+from common.common_type import CaseLabel, CheckTasks
 from common.constants import *
-from pymilvus.exceptions import MilvusException
 from pymilvus import DataType
+from pymilvus.exceptions import MilvusException
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -178,7 +179,6 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
                                    index_name=get_invalid_index_name,
@@ -1198,7 +1198,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=scalar_index_params,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1100,
-                                               ct.err_msg: f"invalid index params"})
+                                               ct.err_msg: "invalid index params"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_binary_vector_field(self, scalar_index):
@@ -1294,7 +1294,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index("random_index_345", {'mmap.enabled': True},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 65535,
-                                              ct.err_msg: f"index not found"})
+                                              ct.err_msg: "index not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_mmap_index(self):
@@ -1314,7 +1314,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(binary_field_name, {'mmap.enabled': True},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 104,
-                                              ct.err_msg: f"can't alter index on loaded collection"})
+                                              ct.err_msg: "can't alter index on loaded collection"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_turning_on_mmap_for_scalar_index(self):
@@ -1353,7 +1353,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': "error_value"},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 65535,
-                                              ct.err_msg: f"invalid mmap.enabled value"})
+                                              ct.err_msg: "invalid mmap.enabled value"})
         collection_w.alter_index(ct.default_index_name, {"error_param_key": 123},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1100,
@@ -1361,7 +1361,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, ["error_param_type"],
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
-                                              ct.err_msg: f"Unexpected error"})
+                                              ct.err_msg: "Unexpected error"})
         collection_w.alter_index(ct.default_index_name, None,
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
@@ -1369,7 +1369,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, 1000,
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
-                                              ct.err_msg: f"<'int' object has no attribute 'items'"})
+                                              ct.err_msg: "<'int' object has no attribute 'items'"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
@@ -1650,9 +1650,9 @@ class TestIndexString(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         collection_w.create_index(default_float_vec_field_name, default_index_params, index_name=index_name1)
-        assert collection_w.has_index(index_name=index_name1)[0] == True
+        assert collection_w.has_index(index_name=index_name1)[0]
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         assert len(collection_w.indexes) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1669,9 +1669,9 @@ class TestIndexString(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data()
         collection_w.insert(data=df)
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         collection_w.create_index(default_binary_vec_field_name, default_binary_index_params, index_name=index_name3)
-        assert collection_w.has_index(index_name=index_name3)[0] == True
+        assert collection_w.has_index(index_name=index_name3)[0]
         assert len(collection_w.indexes) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1725,7 +1725,7 @@ class TestIndexString(TestcaseBase):
         collection_w.insert(data=data)
 
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         collection_w.drop_index(index_name=index_name2)
         assert len(collection_w.indexes) == 0
 
@@ -1918,12 +1918,12 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.insert(data=data)
         assert collection_w.num_entities == default_nb
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name="a")
-        assert collection_w.has_index(index_name="a")[0] == True
+        assert collection_w.has_index(index_name="a")[0]
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name="b")
-        assert collection_w.has_index(index_name="b")[0] == True
+        assert collection_w.has_index(index_name="b")[0]
         default_params = {}
         collection_w.create_index("float", default_params, index_name="c")
-        assert collection_w.has_index(index_name="c")[0] == True
+        assert collection_w.has_index(index_name="c")[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_with_partition(self):
@@ -2010,7 +2010,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 104,
-                                              ct.err_msg: f"index type DISKANN does not support mmap"})
+                                              ct.err_msg: "index type DISKANN does not support mmap"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -2181,7 +2181,7 @@ class TestInvertedIndexValid(TestcaseBase):
         index_list = self.utility_wrap.list_indexes(collection_w.name)[0]
         assert index_name in index_list
         collection_w.flush()
-        result = self.utility_wrap.index_building_progress(collection_w.name, index_name)[0]
+        self.utility_wrap.index_building_progress(collection_w.name, index_name)[0]
         # assert False
         start = time.time()
         while True:
@@ -2190,7 +2190,7 @@ class TestInvertedIndexValid(TestcaseBase):
             if 0 < res['indexed_rows'] <= default_nb:
                 break
             if time.time() - start > 5:
-                raise MilvusException(1, f"Index build completed in more than 5s")
+                raise MilvusException(1, "Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_multiple_inverted_index(self):
@@ -2246,7 +2246,6 @@ class TestInvertedIndexValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_binary_arith_expr_on_inverted_index(self):
         prefix = "test_binary_arith_expr_on_inverted_index"
-        nb = 5000
         collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_index=True,
                                                                          is_all_data_type=True)
         index_name = "test_binary_arith_expr_on_inverted_index"
@@ -2367,7 +2366,7 @@ class TestBitmapIndex(TestcaseBase):
             3. can drop index on loaded collection
         """
         # init params
-        collection_name, nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
+        collection_name, _nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(
@@ -2865,7 +2864,7 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index failed with param `bitmap_cardinality_limit`
         """
         # init params
-        collection_name, primary_field, nb = f"{request.function.__name__}", "int64_pk", 3000
+        collection_name, primary_field, _nb = f"{request.function.__name__}", "int64_pk", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(
@@ -2905,7 +2904,7 @@ class TestBitmapIndex(TestcaseBase):
         """
         # init params
         collection_name = f"{request.function.__name__}_{str(bitmap_cardinality_limit).replace('-', '_')}"
-        primary_field, nb = "int64_pk", 3000
+        primary_field, _nb = "int64_pk", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(

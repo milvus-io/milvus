@@ -36,7 +36,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
 "conftest.py" = ["F401", "F811"]
-"**/testcases/**/*.py" = ["E402"]
+"**/testcases/**/*.py" = ["E402", "F403", "F405"]
 "**/chaos/**/*.py" = ["E402"]
 
 [tool.ruff.format]
