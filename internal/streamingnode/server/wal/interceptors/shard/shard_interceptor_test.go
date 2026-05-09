@@ -105,6 +105,33 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 	assert.Nil(t, msgID)
 }
 
+func TestShardInterceptorDeleteDoesNotApplyOnAppendFailure(t *testing.T) {
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("vchannel").
+		WithHeader(&messagespb.DeleteMessageHeader{
+			CollectionId: 1,
+			Rows:         10,
+		}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(nil)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, errors.New("append failed")
+	})
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+}
+
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)

@@ -38,7 +38,7 @@ type ShardManager interface {
 
 	AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error)
 
-	ApplyDelete(msg message.MutableDeleteMessageV1) error
+	ApplyDelete(msg message.ImmutableDeleteMessageV1) error
 
 	WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error)
 

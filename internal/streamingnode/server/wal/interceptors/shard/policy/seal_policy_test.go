@@ -138,3 +138,26 @@ func TestPolicyNodeMemory(t *testing.T) {
 		t.Errorf("expected used ratio %f, got %f", usedRatio, extra.UsedRatio)
 	}
 }
+
+func TestPolicyBlockingL0(t *testing.T) {
+	p := PolicyBlockingL0(10, 20, 100, 200)
+	if p.Policy != PolicyNameBlockingL0 {
+		t.Errorf("expected policy name %s, got %s", PolicyNameBlockingL0, p.Policy)
+	}
+	extra, ok := p.Extra.(sealByBlockingL0ExtraInfo)
+	if !ok {
+		t.Fatalf("expected extra to be of type sealByBlockingL0ExtraInfo, got %T", p.Extra)
+	}
+	if extra.BlockingRows != 10 {
+		t.Errorf("expected blocking rows %d, got %d", uint64(10), extra.BlockingRows)
+	}
+	if extra.BlockingBytes != 20 {
+		t.Errorf("expected blocking bytes %d, got %d", uint64(20), extra.BlockingBytes)
+	}
+	if extra.RowLimit != 100 {
+		t.Errorf("expected row limit %d, got %d", int64(100), extra.RowLimit)
+	}
+	if extra.SizeLimit != 200 {
+		t.Errorf("expected size limit %d, got %d", int64(200), extra.SizeLimit)
+	}
+}

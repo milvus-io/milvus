@@ -231,8 +231,12 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
-	impl.shardManager.ApplyDelete(deleteMessage)
-	return appendOp(ctx, msg)
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+	impl.shardManager.ApplyDelete(message.MustAsImmutableDeleteMessageV1(msg.IntoImmutableMessage(msgID)))
+	return msgID, nil
 }
 
 // handleManualFlushMessage handles the manual flush message.

@@ -39,11 +39,18 @@ type StatsManager struct {
 	totalStats    *aggregatedMetrics
 	pchannelStats map[string]*aggregatedMetrics
 	vchannelStats map[string]*aggregatedMetrics
-	segmentStats  map[int64]*SegmentStats       // map[SegmentID]SegmentStats
-	segmentIndex  map[int64]SegmentBelongs      // map[SegmentID]channels
-	pchannelIndex map[string]map[int64]struct{} // map[PChannel]SegmentID
+	segmentStats  map[int64]*SegmentStats        // map[SegmentID]SegmentStats
+	segmentIndex  map[int64]SegmentBelongs       // map[SegmentID]channels
+	pchannelIndex map[string]map[int64]struct{}  // map[PChannel]SegmentID
+	deleteWindows map[string][]deleteWindowEntry // map[VChannel]delete windows
 	sealOperators map[string]SealOperator
 	metricHelper  *metricsHelper
+}
+
+type deleteWindowEntry struct {
+	timeTick uint64
+	rows     uint64
+	bytes    uint64
 }
 
 // sealSegmentIDWithPolicy is the struct that contains the segment ID and the seal policy.
@@ -67,6 +74,7 @@ func NewStatsManager() *StatsManager {
 		segmentStats:  make(map[int64]*SegmentStats),
 		segmentIndex:  make(map[int64]SegmentBelongs),
 		pchannelIndex: make(map[string]map[int64]struct{}),
+		deleteWindows: make(map[string][]deleteWindowEntry),
 		sealOperators: make(map[string]SealOperator),
 		metricHelper:  newMetricsHelper(),
 	}
@@ -223,6 +231,22 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool,
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
 }
 
+// RecordDelete records local delete metrics on a vchannel.
+func (m *StatsManager) RecordDelete(vchannel string, timeTick uint64, rows uint64, bytes uint64) {
+	if vchannel == "" || timeTick == 0 || (rows == 0 && bytes == 0) {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deleteWindows[vchannel] = append(m.deleteWindows[vchannel], deleteWindowEntry{
+		timeTick: timeTick,
+		rows:     rows,
+		bytes:    bytes,
+	})
+}
+
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.
 func (m *StatsManager) notifyIfTotalGrowingBytesOverHWM() {
 	m.mu.Lock()
@@ -324,7 +348,42 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 			delete(m.vchannelStats, info.VChannel)
 		}
 	}
+	if stats.Level == datapb.SegmentLevel_L1 {
+		m.advanceDeleteWindowLocked(info.VChannel)
+	}
 	return stats
+}
+
+func (m *StatsManager) advanceDeleteWindowLocked(vchannel string) {
+	var nextTimeTick uint64
+	for segmentID, stat := range m.segmentStats {
+		if stat.Level != datapb.SegmentLevel_L1 || stat.CreateSegmentTimeTick == 0 {
+			continue
+		}
+		belongs := m.segmentIndex[segmentID]
+		if belongs.VChannel != vchannel {
+			continue
+		}
+		if nextTimeTick == 0 || stat.CreateSegmentTimeTick < nextTimeTick {
+			nextTimeTick = stat.CreateSegmentTimeTick
+		}
+	}
+	if nextTimeTick == 0 {
+		delete(m.deleteWindows, vchannel)
+		return
+	}
+
+	kept := m.deleteWindows[vchannel][:0]
+	for _, entry := range m.deleteWindows[vchannel] {
+		if entry.timeTick >= nextTimeTick {
+			kept = append(kept, entry)
+		}
+	}
+	if len(kept) == 0 {
+		delete(m.deleteWindows, vchannel)
+		return
+	}
+	m.deleteWindows[vchannel] = kept
 }
 
 // selectSegmensWithTimePolicy selects segments with time policy.
@@ -353,6 +412,67 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 		}
 	}
 	return sealSegmentIDs
+}
+
+// selectSegmentsWithBlockingL0Policy selects the earliest L1 growing segment per vchannel
+// when local deletes blocked by that segment reach the configured threshold.
+func (m *StatsManager) selectSegmentsWithBlockingL0Policy() map[int64]policy.SealPolicy {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cfg.blockingL0EntryNum < 0 && m.cfg.blockingL0SizeBytes < 0 {
+		return nil
+	}
+
+	type earliestSegment struct {
+		segmentID int64
+		timeTick  uint64
+	}
+
+	earliestByVChannel := make(map[string]earliestSegment)
+	for segmentID, stat := range m.segmentStats {
+		if stat.Level != datapb.SegmentLevel_L1 || stat.CreateSegmentTimeTick == 0 {
+			continue
+		}
+		belongs := m.segmentIndex[segmentID]
+		earliest, ok := earliestByVChannel[belongs.VChannel]
+		if !ok || stat.CreateSegmentTimeTick < earliest.timeTick {
+			earliestByVChannel[belongs.VChannel] = earliestSegment{
+				segmentID: segmentID,
+				timeTick:  stat.CreateSegmentTimeTick,
+			}
+		}
+	}
+
+	sealSegmentIDs := make(map[int64]policy.SealPolicy)
+	for vchannel, earliest := range earliestByVChannel {
+		var rows uint64
+		var bytes uint64
+		for _, entry := range m.deleteWindows[vchannel] {
+			if entry.timeTick < earliest.timeTick {
+				continue
+			}
+			rows += entry.rows
+			bytes += entry.bytes
+		}
+		if m.reachBlockingL0Threshold(rows, bytes) {
+			sealSegmentIDs[earliest.segmentID] = policy.PolicyBlockingL0(rows, bytes, m.cfg.blockingL0EntryNum, m.cfg.blockingL0SizeBytes)
+		}
+	}
+	if len(sealSegmentIDs) == 0 {
+		return nil
+	}
+	return sealSegmentIDs
+}
+
+func (m *StatsManager) reachBlockingL0Threshold(rows uint64, bytes uint64) bool {
+	if m.cfg.blockingL0EntryNum >= 0 && rows >= uint64(m.cfg.blockingL0EntryNum) {
+		return true
+	}
+	if m.cfg.blockingL0SizeBytes >= 0 && bytes >= uint64(m.cfg.blockingL0SizeBytes) {
+		return true
+	}
+	return false
 }
 
 // selectSegmentsUntilLessThanLWM selects segments until the total size is less than the threshold.
