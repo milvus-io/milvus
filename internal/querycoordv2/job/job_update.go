@@ -114,6 +114,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	var spawnOpts []meta.SpawnOption
 	if job.needWaitRGReady {
 		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+		spawnOpts = append(spawnOpts, meta.WithQueryInvisible())
 	}
 	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
