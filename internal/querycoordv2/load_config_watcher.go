@@ -28,6 +28,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	loadConfigWatcherInterval           = time.Minute
+	loadConfigReplicaPromotionInterval  = 5 * time.Second
+	loadConfigWatcherBackoffInitial     = 10 * time.Millisecond
+	loadConfigWatcherBackoffMaxInterval = 10 * time.Minute
+)
+
 // NewLoadConfigWatcher creates a new load config watcher.
 func NewLoadConfigWatcher(s *Server) *LoadConfigWatcher {
 	w := &LoadConfigWatcher{
@@ -68,13 +75,15 @@ func (w *LoadConfigWatcher) background() {
 	w.Logger().Info("load config watcher started")
 
 	balanceTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: time.Minute,
+		Default: loadConfigWatcherInterval,
 		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 10 * time.Millisecond,
+			InitialInterval: loadConfigWatcherBackoffInitial,
 			Multiplier:      2,
-			MaxInterval:     10 * time.Minute,
+			MaxInterval:     loadConfigWatcherBackoffMaxInterval,
 		},
 	})
+	promotionTicker := time.NewTicker(loadConfigReplicaPromotionInterval)
+	defer promotionTicker.Stop()
 
 	for {
 		nextTimer, _ := balanceTimer.NextTimer()
@@ -84,6 +93,9 @@ func (w *LoadConfigWatcher) background() {
 		case <-w.triggerCh:
 			w.Logger().Info("load config watcher triggered")
 		case <-nextTimer:
+		case <-promotionTicker.C:
+			w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
+			continue
 		}
 		if err := w.applyLoadConfigChanges(); err != nil {
 			balanceTimer.EnableBackoff()
