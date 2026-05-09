@@ -1828,7 +1828,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	mockVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(2)).Maybe()
 	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
 	mockVersionManager.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	mockVersionManager.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 	trigger.indexEngineVersionManager = mockVersionManager
 	info4 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
