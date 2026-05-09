@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -16,10 +17,65 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
+
+func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t *testing.T) {
+	paramtable.Init()
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Insert,
+				SourceID: 1,
+			},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "coll",
+			PartitionName:  "_default",
+			NumRows:        1,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "pk",
+					FieldId:   1,
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1}},
+							},
+						},
+					},
+				},
+			},
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{1},
+		},
+	}
+	result := &milvuspb.MutationResult{
+		IDs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+		},
+	}
+
+	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+
+	msg := message.MustAsMutableInsertMessageV1(msgs[0])
+	header := msg.Header()
+	assert.NotNil(t, header.SchemaVersion)
+	assert.Equal(t, int32(0), header.GetSchemaVersion())
+}
 
 func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error

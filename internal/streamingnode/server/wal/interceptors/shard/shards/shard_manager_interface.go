@@ -53,7 +53,8 @@ type ShardManager interface {
 	// Returns the IDs of flushed segments (non-empty only for schema changes).
 	AlterCollection(msg message.MutableAlterCollectionMessageV2) ([]int64, error)
 
-	CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error)
+	// CheckIfCollectionSchemaVersionMatch validates insert header schema version against in-memory collection state.
+	CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error)
 
 	Close()
 }
