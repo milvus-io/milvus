@@ -150,6 +150,48 @@ func TestWAL(t *testing.T) {
 	assert.Error(t, resp.UnwrapFirstError())
 }
 
+func TestReleaseTimeout(t *testing.T) {
+	oldTimeout := releaseTimeout
+	oldSingleton := singleton
+	releaseTimeout = 10 * time.Millisecond
+	defer func() {
+		releaseTimeout = oldTimeout
+		singleton = oldSingleton
+	}()
+
+	coordClient := mock_client.NewMockClient(t)
+	closeDone := make(chan struct{})
+	coordClient.EXPECT().Close().Run(func() {
+		close(closeDone)
+	}).Return()
+	handler := mock_handler.NewMockHandlerClient(t)
+	handler.EXPECT().Close().Return().Maybe()
+	w := &walAccesserImpl{
+		lifetime:             typeutil.NewLifetime(),
+		streamingCoordClient: coordClient,
+		handlerClient:        handler,
+		producerMutex:        sync.Mutex{},
+		producers:            make(map[string]*producer.ResumableProducer),
+	}
+	assert.True(t, w.lifetime.Add(typeutil.LifetimeStateWorking))
+	singleton = w
+
+	start := time.Now()
+	err := Release()
+	assert.ErrorIs(t, err, ErrWALReleaseTimeout)
+	assert.Less(t, time.Since(start), time.Second)
+
+	w.lifetime.Done()
+	assert.Eventually(t, func() bool {
+		select {
+		case <-closeDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
 func newInsertMessage(vChannel string) message.MutableMessage {
 	msg, err := message.NewInsertMessageBuilderV1().
 		WithVChannel(vChannel).
