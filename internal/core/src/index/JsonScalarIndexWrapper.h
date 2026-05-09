@@ -235,7 +235,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     reinterpret_cast<const uint8_t*>(e.data.data()),
                     e.data.size());
                 this->is_nested_index_ = true;
-            } else if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+            } else if (cast_type_.data_type() ==
+                       JsonCastType::DataType::ARRAY) {
                 this->is_nested_index_ = false;
             }
         }
@@ -302,8 +303,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     config, milvus::LOAD_PRIORITY)
                     .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-            auto load_array_offsets = [this](const uint8_t* data,
-                                             size_t size) {
+            auto load_array_offsets = [this](const uint8_t* data, size_t size) {
                 array_offsets_ = ArrayOffsetsSealed::Deserialize(data, size);
                 this->is_nested_index_ = true;
             };
@@ -434,7 +434,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     [](const std::string& f) {
                         auto file_name =
                             boost::filesystem::path(f).filename().string();
-                        return file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                        return file_name.find(
+                                   INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
                                    std::string::npos ||
                                file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME) !=
                                    std::string::npos;
@@ -473,8 +474,12 @@ class JsonScalarIndexWrapper : public BaseIndex {
                         row_to_element_start_.back() +
                         static_cast<int32_t>(size));
                 },
-                [this](int64_t offset) { this->null_offset_.push_back(offset); },
-                [this](int64_t offset) { non_exist_offsets_.push_back(offset); },
+                [this](int64_t offset) {
+                    this->null_offset_.push_back(offset);
+                },
+                [this](int64_t offset) {
+                    non_exist_offsets_.push_back(offset);
+                },
                 [](const Json&, const std::string&, simdjson::error_code) {});
 
             array_offsets_ =
