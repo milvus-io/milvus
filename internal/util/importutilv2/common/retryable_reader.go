@@ -37,8 +37,10 @@ type RetryableReader interface {
 	Read(p []byte) (n int, err error)
 }
 
-type ReopenReaderFunc func(context.Context, string) (storage.FileReader, error)
-type ReaderSizeFunc func(context.Context, string) (int64, error)
+type (
+	ReopenReaderFunc func(context.Context, string) (storage.FileReader, error)
+	ReaderSizeFunc   func(context.Context, string) (int64, error)
+)
 
 // retryableReader is the implementation of RetryableReader.
 type retryableReader struct {
@@ -82,7 +84,7 @@ func newRetryableReader(ctx context.Context, path string, reader storage.FileRea
 }
 
 func (r *retryableReader) objectSize() (int64, bool) {
-	if r.size > 0 || (r.size == 0 && r.offset == 0) {
+	if r.size > 0 {
 		return r.size, true
 	}
 	if r.sizeFunc == nil {
@@ -97,6 +99,7 @@ func (r *retryableReader) objectSize() (int64, bool) {
 		return 0, false
 	}
 	r.size = size
+	r.sizeFunc = nil
 	return size, true
 }
 
@@ -105,7 +108,8 @@ func (r *retryableReader) reopenAtOffset() error {
 		return nil
 	}
 	if r.FileReader != nil {
-		_ = r.FileReader.Close()
+		_ = r.Close()
+		r.FileReader = nil
 	}
 	reader, err := r.reopen(r.ctx, r.path)
 	if err != nil {
@@ -126,6 +130,15 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 	var n int
 	var err error
 	err = retry.Handle(r.ctx, func() (bool, error) {
+		if r.FileReader == nil {
+			if reopenErr := r.reopenAtOffset(); reopenErr != nil {
+				return !merr.IsNonRetryableErr(reopenErr), reopenErr
+			}
+			if r.FileReader == nil {
+				err = storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+				return false, err
+			}
+		}
 		n, err = r.FileReader.Read(p)
 		if n > 0 {
 			r.offset += int64(n)

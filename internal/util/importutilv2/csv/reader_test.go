@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -56,6 +57,39 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.numRows = 100
 	suite.pkDataType = schemapb.DataType_Int64
 	suite.vecDataType = schemapb.DataType_FloatVector
+}
+
+type prematureEOFFileReader struct {
+	*strings.Reader
+	limit int
+	read  int
+}
+
+func newPrematureEOFFileReader(content string, limit int) storage.FileReader {
+	return &prematureEOFFileReader{
+		Reader: strings.NewReader(content),
+		limit:  limit,
+	}
+}
+
+func (r *prematureEOFFileReader) Read(p []byte) (int, error) {
+	if r.read >= r.limit {
+		return 0, io.EOF
+	}
+	if remaining := r.limit - r.read; len(p) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.Reader.Read(p)
+	r.read += n
+	return n, err
+}
+
+func (r *prematureEOFFileReader) Close() error {
+	return nil
+}
+
+func (r *prematureEOFFileReader) Size() (int64, error) {
+	return int64(r.Len()) + int64(r.read), nil
 }
 
 func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
@@ -246,6 +280,7 @@ func (suite *ReaderSuite) TestError() {
 				return r, nil
 			}
 		})
+		cm.EXPECT().Size(mock.Anything, "dummy path").Return(int64(len(content)), nil).Maybe()
 
 		reader, err := NewReader(context.Background(), cm, schema, "dummy path", bufferSize, ',', "")
 		suite.Error(err)
@@ -344,6 +379,46 @@ func (suite *ReaderSuite) TestReadLoop() {
 	data, err = reader.Read()
 	suite.EqualError(io.EOF, err.Error())
 	suite.Nil(data)
+}
+
+func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "int32",
+				DataType: schemapb.DataType_Int32,
+			},
+		},
+	}
+	content := "pk,int32\n1,10\n2,20\n3,30\n"
+	openCount := 0
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, "dummy path").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return newPrematureEOFFileReader(content, len(content)-2), nil
+		}
+		return importcommon.NewMockReader(content), nil
+	})
+
+	reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+	suite.NoError(err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(3, data.GetRowNum())
+	suite.Equal(int64(1), data.Data[100].GetRow(0))
+	suite.Equal(int32(30), data.Data[101].GetRow(2))
+	suite.GreaterOrEqual(openCount, 2)
 }
 
 func TestCsvReader(t *testing.T) {

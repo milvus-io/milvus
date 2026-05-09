@@ -88,7 +88,7 @@ func (r *prematureEOFFileReader) Close() error {
 }
 
 func (r *prematureEOFFileReader) Size() (int64, error) {
-	return int64(r.Reader.Len()) + int64(r.read), nil
+	return int64(r.Len()) + int64(r.read), nil
 }
 
 func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
@@ -374,6 +374,7 @@ func (suite *ReaderSuite) TestDecodeError() {
 			r := importcommon.NewMockReader(jsonContent)
 			return r, nil
 		})
+		cm.EXPECT().Size(mock.Anything, "mockPath").Return(int64(len(jsonContent)), nil).Maybe()
 		var reader *reader
 		var err error
 		if isLinesFormat {
