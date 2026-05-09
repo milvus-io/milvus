@@ -563,6 +563,11 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
     idx_to_offsets_.resize(total_num_rows_);
 
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
+    auto expected_valid_bitset_size = (total_num_rows_ + 7) / 8;
+    AssertInfo(valid_bitset_entry.data.size() >= expected_valid_bitset_size,
+               "invalid valid_bitset size: expected at least {}, got {}",
+               expected_valid_bitset_size,
+               valid_bitset_entry.data.size());
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     for (size_t i = 0; i < total_num_rows_; ++i) {
         uint8_t byte = valid_bitset_entry.data[i / 8];

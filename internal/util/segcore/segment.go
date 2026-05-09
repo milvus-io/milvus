@@ -580,13 +580,14 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 		)
 
 		result[k] = &segcorepb.TextIndexStats{
-			FieldID:    v.GetFieldID(),
-			Version:    v.GetVersion(),
-			Files:      files,
-			LogSize:    v.GetLogSize(),
-			MemorySize: v.GetMemorySize(),
-			BuildID:    v.GetBuildID(),
-			BasePath:   basePath,
+			FieldID:                   v.GetFieldID(),
+			Version:                   v.GetVersion(),
+			Files:                     files,
+			LogSize:                   v.GetLogSize(),
+			MemorySize:                v.GetMemorySize(),
+			BuildID:                   v.GetBuildID(),
+			CurrentScalarIndexVersion: v.GetCurrentScalarIndexVersion(),
+			BasePath:                  basePath,
 		}
 	}
 	return result
