@@ -25,6 +25,7 @@
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "common/Consts.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "test_utils/Constants.h"
@@ -361,7 +362,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     }
 
     void
-    BuildAndUpload() {
+    BuildAndUpload(int64_t lack_binlog_rows = 0) {
         auto field_data =
             storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
         field_data->FillFieldData(data_.data(), data_.size());
@@ -389,6 +390,8 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
 
         Config config;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] =
+            static_cast<int64_t>(data_.size()) + lack_binlog_rows;
 
         build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
         build_index_->Build(config);
@@ -723,4 +726,39 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestMultipleBuildCycles) {
         VerifyPathInShredding("/y");
         VerifyPathInShredding("/z");
     }
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, TestEmptyJsonRowIdNotSkipped) {
+    const int64_t kLackRows = 2;
+    const int kValidRows = 10;
+    const int kTotalRows = kLackRows + kValidRows;
+    const int kRareRowIndex = kTotalRows - 1;
+
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < kValidRows; i++) {
+        if (i == kValidRows - 1) {
+            json_strings.push_back(
+                fmt::format(R"({{"a": {}, "rare": 42}})", i));
+        } else {
+            json_strings.push_back(fmt::format(R"({{"a": {}}})", i));
+        }
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+    EXPECT_FALSE(load_index_->GetShreddingFields("/a").empty());
+
+    TargetBitmap exists_bitset(kTotalRows);
+    load_index_->ExecuteForSharedData(
+        nullptr, "/rare", [&](BsonView, uint32_t row_id, uint32_t) {
+            exists_bitset[row_id] = true;
+        });
+
+    EXPECT_EQ(exists_bitset.count(), 1);
+    EXPECT_TRUE(exists_bitset[kRareRowIndex]);
+    EXPECT_FALSE(exists_bitset[kRareRowIndex - kLackRows]);
 }

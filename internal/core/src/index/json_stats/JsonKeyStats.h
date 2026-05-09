@@ -49,7 +49,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  public:
     void
-    BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
+    BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
@@ -410,7 +410,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     std::map<JsonKey, KeyStatsInfo>
-    CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+    CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas);
 
     void
     TraverseJsonForStats(const char* json,
@@ -443,7 +443,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     ClassifyJsonKeyLayoutType(const std::map<JsonKey, KeyStatsInfo>& infos);
 
     void
-    BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+    BuildKeyStats(const std::vector<FieldDataPtr>& field_datas);
 
     void
     BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
