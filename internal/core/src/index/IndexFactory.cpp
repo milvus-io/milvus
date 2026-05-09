@@ -554,6 +554,14 @@ IndexFactory::CreateJsonIndex(
     const auto& nested_path = create_index_info.json_path;
     const auto& json_cast_function = create_index_info.json_cast_function;
 
+    if (cast_dtype.data_type() == JsonCastType::DataType::ARRAY &&
+        index_type != INVERTED_INDEX_TYPE) {
+        ThrowInfo(DataTypeInvalid,
+                  "JSON ARRAY cast type is only supported for inverted index: "
+                  "{}",
+                  cast_dtype);
+    }
+
     // Sort index
     if (index_type == ASCENDING_SORT) {
         switch (cast_dtype.element_type()) {
