@@ -1,0 +1,32 @@
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "__pycache__",
+    "assets",
+    "*.ipynb_checkpoints",
+]
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line-too-long handled by formatter
+    "E741",  # ambiguous variable names (l, I, O) common in test code
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"conftest.py" = ["F401", "F811"]
+"**/testcases/**/*.py" = ["E402"]
+"**/chaos/**/*.py" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
