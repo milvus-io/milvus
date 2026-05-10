@@ -117,7 +117,7 @@ func (p *systemColumnPolicy) Split(currentSplit *currentSplit) *currentSplit {
 		if field.GetFieldID() < common.StartOfUserFieldID ||
 			(p.includePrimaryKey && field.GetIsPrimaryKey()) ||
 			(p.includePartitionKey && field.GetIsPartitionKey()) ||
-			(p.includeClusteringKey && field.GetIsClusteringKey()) {
+			(p.includeClusteringKey && field.GetIsClusteringKey() && !IsVectorDataType(field.GetDataType())) {
 			systemFields = append(systemFields, field.GetFieldID())
 			systemFieldIndices = append(systemFieldIndices, idx)
 		}

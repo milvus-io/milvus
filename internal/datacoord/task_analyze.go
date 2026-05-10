@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -116,7 +117,7 @@ func (at *analyzeTask) setJobInfo(result *workerpb.AnalyzeResult) error {
 }
 
 func (at *analyzeTask) resetTask(reason string) {
-	at.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+	at.UpdateStateWithMeta(indexpb.JobState_JobStateNone, reason)
 }
 
 func (at *analyzeTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason string) {
@@ -124,6 +125,103 @@ func (at *analyzeTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason 
 		return
 	}
 	at.resetTask(reason)
+}
+
+func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
+	// When data analyze occurs, segments must not be discarded. Such as compaction, GC, etc.
+	ctx := context.TODO()
+	filters := []SegmentFilter{
+		SegmentFilterFunc(func(segment *SegmentInfo) bool {
+			return isSegmentHealthy(segment) && slices.Contains(at.SegmentIDs, segment.ID)
+		}),
+	}
+	filters = append(filters, WithCollection(at.CollectionID))
+	segments := at.meta.SelectSegments(ctx, filters...)
+	segmentsMap := lo.SliceToMap(segments, func(t *SegmentInfo) (int64, *SegmentInfo) {
+		return t.ID, t
+	})
+
+	totalSegmentsRows := int64(0)
+	for _, segID := range at.SegmentIDs {
+		info := segmentsMap[segID]
+		if info == nil {
+			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
+				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
+			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
+			return fmt.Errorf("segmentInfo with ID: %d is nil", segID)
+		}
+
+		totalSegmentsRows += info.GetNumOfRows()
+		// get binlogIDs
+		binlogIDs := getBinLogIDs(info, at.FieldID)
+		req.SegmentStats[segID] = &indexpb.SegmentStats{
+			ID:      segID,
+			NumRows: info.GetNumOfRows(),
+			LogIDs:  binlogIDs,
+		}
+		req.InsertFiles[segID] = &workerpb.FieldBinLogs{
+			BinLogs: info.GetBinlogs(),
+		}
+	}
+
+	collInfo := at.meta.GetCollection(segments[0].GetCollectionID())
+	if collInfo == nil {
+		err := fmt.Errorf("analyze task get collection %d info failed", segments[0].GetCollectionID())
+		log.Ctx(ctx).Warn("analyze task get collection info failed", zap.Int64("collectionID",
+			segments[0].GetCollectionID()), zap.Error(err))
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return err
+	}
+
+	schema := collInfo.Schema
+	var field *schemapb.FieldSchema
+
+	for _, f := range schema.Fields {
+		if f.FieldID == at.FieldID {
+			field = f
+			break
+		}
+	}
+	dim, err := storage.GetDimFromParams(field.TypeParams)
+	if err != nil {
+		err := fmt.Errorf("analyze task get collection %d info failed", segments[0].GetCollectionID())
+		log.Ctx(ctx).Warn("analyze task get dim failed", zap.Int64("collectionID",
+			segments[0].GetCollectionID()), zap.Error(err))
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return err
+	}
+	req.Dim = int64(dim)
+
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(req.Dim) * typeutil.VectorTypeSize(at.FieldType) // Byte
+	requiredSegmentSize := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
+	maxSegmentSize := totalSegmentsRawDataSize / Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsFloat()
+	segmentSize := math.Min(requiredSegmentSize, maxSegmentSize)
+	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / segmentSize))
+	maxCentroids := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsPerSegment.GetAsInt64()
+	numClusters *= maxCentroids
+	if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+		err := fmt.Errorf("the number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
+		log.Ctx(ctx).Info("data size is too small, skip analyze task", zap.Float64("raw data size", totalSegmentsRawDataSize), zap.Int64("num clusters", numClusters), zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
+		at.SetState(indexpb.JobState_JobStateFinished, "")
+		return err
+	}
+	if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
+		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
+	}
+	req.NumClusters = numClusters
+	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat() // control clustering train data size
+	// config to detect data skewness
+	req.MinClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMinClusterSizeRatio.GetAsFloat()
+	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
+	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
+	req.TrainBufferSize = Params.DataCoordCfg.ClusteringCompactionMaxTrainBufferSize.GetAsSize()
+	req.AssignBufferSize = Params.DataCoordCfg.ClusteringCompactionMaxAssignBufferSize.GetAsSize()
+
+	taskSlot := Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	req.TaskSlot = taskSlot
+	req.StorageVersion = segments[0].StorageVersion
+
+	return nil
 }
 
 func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -155,74 +253,17 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
 		Version:       task.Version + 1,
 		StorageConfig: createStorageConfig(),
+		InsertFiles:   make(map[int64]*workerpb.FieldBinLogs),
 	}
-
-	// Populate SegmentStats with binlog IDs and row counts from segment metadata.
-	segments := at.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return isSegmentHealthy(info) && slices.Contains(task.SegmentIDs, info.ID)
-	}))
-	segmentsMap := lo.SliceToMap(segments, func(t *SegmentInfo) (int64, *SegmentInfo) {
-		return t.ID, t
-	})
-
-	totalSegmentsRows := int64(0)
-	for _, segID := range task.SegmentIDs {
-		info := segmentsMap[segID]
-		if info == nil {
-			log.Warn(context.TODO(), "analyze task is processing, but segment is nil, fail the task",
-				mlog.FieldSegmentID(segID))
-			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
-			return
-		}
-		totalSegmentsRows += info.GetNumOfRows()
-		binlogIDs := getBinLogIDs(info, task.FieldID)
-		req.SegmentStats[segID] = &indexpb.SegmentStats{
-			ID:      segID,
-			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
-		}
-	}
-
-	// Extract dim from schema field TypeParams for vector clustering key.
-	if at.schema != nil {
-		for _, f := range at.schema.Fields {
-			if f.FieldID == task.FieldID {
-				dim, err := storage.GetDimFromParams(f.TypeParams)
-				if err != nil {
-					at.SetState(indexpb.JobState_JobStateInit, err.Error())
-					return
-				}
-				req.Dim = int64(dim)
-
-				// Calculate the number of clusters based on total data size.
-				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
-				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-					log.Info(context.TODO(), "data size is too small, skip analyze task",
-						mlog.Float64("raw data size", totalSegmentsRawDataSize),
-						mlog.Int64("num clusters", numClusters),
-						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					at.SetState(indexpb.JobState_JobStateFinished, "")
-					return
-				}
-				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
-					numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
-				}
-				req.NumClusters = numClusters
-				break
-			}
-		}
-	}
-
-	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
-	req.MinClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMinClusterSizeRatio.GetAsFloat()
-	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
-	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
-	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 
 	var err error
+	err = at.updateAnalyzeInfo(req)
+	if err != nil {
+		at.dropAndResetTaskOnWorker(cluster, err.Error())
+		return
+	}
 	defer func() {
 		if err != nil {
 			log.Warn(context.TODO(), "assign analyze task to worker failed, try drop task on worker", mlog.Err(err))
@@ -294,8 +335,11 @@ func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	)
 
 	if err := cluster.DropAnalyze(at.NodeID, at.GetTaskID()); err != nil {
-		log.Warn(context.TODO(), "failed to drop analyze task on worker", mlog.Err(err))
-		return err
+		log.Warn("failed to drop analyze task", zap.Error(err))
+		if !strings.Contains(err.Error(), "node not found") && !strings.Contains(err.Error(), "task not found") {
+			log.Warn("failed to drop analyze task on worker", zap.Error(err))
+			return err
+		}
 	}
 
 	log.Info(context.TODO(), "dropped analyze task on worker successfully")

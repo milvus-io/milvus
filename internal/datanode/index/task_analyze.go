@@ -22,9 +22,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/util"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -119,6 +123,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 
 	numRowsMap := make(map[int64]int64)
 	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles)
+	segmentInsertFilesMapV2 := make(map[int64]*indexcgopb.SegmentInsertFiles)
 
 	for segID, stats := range at.req.GetSegmentStats() {
 		numRows := stats.GetNumRows()
@@ -131,6 +136,39 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 			insertFiles = append(insertFiles, path)
 		}
 		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
+		if at.req.StorageVersion == storage.StorageV2 || at.req.StorageVersion == storage.StorageV3 {
+			fieldBinLogs := make([]*datapb.FieldBinlog, 0)
+			for _, binlog := range at.req.InsertFiles[segID].BinLogs {
+				requestFieldID := at.req.GetFieldID()
+				if binlog.FieldID == requestFieldID {
+					fieldBinLogs = append(fieldBinLogs, binlog)
+				} else {
+					isFieldBinlogOfFieldID := IsFieldBinlogOfFieldID(binlog, requestFieldID)
+					log.Info("look for binlog", zap.Int64("requestFieldID", requestFieldID), zap.Int64("binlog.FieldID", binlog.FieldID))
+					if isFieldBinlogOfFieldID {
+						log.Info("binlog found ", zap.String("theBinLog", binlog.String()))
+						fieldBinLogs = append(fieldBinLogs, binlog)
+					}
+				}
+			}
+			if len(fieldBinLogs) > 0 {
+				log.Info("Found binlog via child ids")
+				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
+					fieldBinLogs,
+					at.req.GetStorageConfig(),
+					at.req.GetCollectionID(),
+					at.req.GetPartitionID(),
+					segID)
+			} else {
+				log.Info("Use single binlog")
+				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
+					at.req.GetInsertFiles()[segID].BinLogs,
+					at.req.GetStorageConfig(),
+					at.req.GetCollectionID(),
+					at.req.GetPartitionID(),
+					segID)
+			}
+		}
 	}
 
 	field := at.req.GetField()
@@ -143,23 +181,29 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 	}
 
 	analyzeInfo := &clusteringpb.AnalyzeInfo{
-		ClusterID:       at.req.GetClusterID(),
-		BuildID:         at.req.GetTaskID(),
-		CollectionID:    at.req.GetCollectionID(),
-		PartitionID:     at.req.GetPartitionID(),
-		Version:         at.req.GetVersion(),
-		Dim:             at.req.GetDim(),
-		StorageConfig:   storageConfig,
-		NumClusters:     at.req.GetNumClusters(),
-		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
-		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
-		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  at.req.GetMaxClusterSize(),
-		NumRows:         numRowsMap,
-		InsertFiles:     segmentInsertFilesMap,
-		FieldSchema:     field,
+		ClusterID:          at.req.GetClusterID(),
+		BuildID:            at.req.GetTaskID(),
+		CollectionID:       at.req.GetCollectionID(),
+		PartitionID:        at.req.GetPartitionID(),
+		Version:            at.req.GetVersion(),
+		Dim:                at.req.GetDim(),
+		StorageConfig:      storageConfig,
+		NumClusters:        at.req.GetNumClusters(),
+		TrainSize:          int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
+		MinClusterRatio:    at.req.GetMinClusterSizeRatio(),
+		MaxClusterRatio:    at.req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:     at.req.GetMaxClusterSize(),
+		NumRows:            numRowsMap,
+		InsertFiles:        segmentInsertFilesMap,
+		FieldSchema:        field,
+		StorageVersion:     at.req.GetStorageVersion(),
+		SegmentInsertFiles: segmentInsertFilesMapV2,
+		TrainBufferSize:    at.req.GetTrainBufferSize(),
+		AssignBufferSize:   at.req.GetAssignBufferSize(),
 	}
-
+	log.Info("analyze buffer sizes", zap.Int64("train_buffer_size", analyzeInfo.TrainBufferSize),
+		zap.Int64("assign_buffer_size", analyzeInfo.AssignBufferSize))
+	log.Info("starting analyze", zap.Any("analyzeInfo", analyzeInfo))
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
 		log.Error(ctx, "failed to analyze data", mlog.Err(err))
