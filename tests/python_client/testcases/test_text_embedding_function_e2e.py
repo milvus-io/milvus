@@ -2214,7 +2214,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
-            assert "Check function" in str(e) and "failed" in str(e)
+            assert "check function" in str(e).lower() and "failed" in str(e).lower()
 
     # ==================== drop_collection_function negative tests ====================
 

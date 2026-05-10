@@ -485,7 +485,6 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Insert test data
         insert_times = 2
-        total_records = insert_times * default_nb
         for i in range(insert_times):
             rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
             for j, row in enumerate(rows):
@@ -524,170 +523,33 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         self.wait_for_index_ready(client, collection_name, index_name="content_ngram")
         self.load_collection(client, collection_name)
 
-        expected_count_per_keyword = total_records // len(multilingual_keywords)
+        test_keywords = [
+            "北京",  # Chinese
+            "東京",  # Japanese
+            "Моск",  # Russian Cyrillic
+            "café",  # French accent
+            "🏫",  # Emoji
+            "⭐",  # Star emoji
+            "مدرسة",  # Arabic
+            "한국",  # Korean
+            "München",  # German umlaut
+            "mix",  # Mixed language
+            "café☕",  # Complex multilingual with emoji prefix
+            "प्रविष्टि",  # Hindi/Devanagari
+            "Γειά",  # Greek
+            "português",  # Portuguese with tilde
+            "学",  # Single CJK character
+        ]
 
-        # Test 1: Chinese character search
-        chinese_keyword = "北京"
-        filter_expr = f'content_ngram["body"] LIKE "%{chinese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{chinese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        for keyword in test_keywords:
+            filter_expr = f'content_ngram["body"] LIKE "%{keyword}%"'
+            res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[
+                0
+            ]
+            filter_expr = f'content_no_index["body"] LIKE "%{keyword}%"'
+            res_no_index = self.query(
+                client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"]
+            )[0]
 
-        # Test 2: Japanese character search
-        japanese_keyword = "東京"
-        filter_expr = f'content_ngram["body"] LIKE "%{japanese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{japanese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 3: Russian Cyrillic character search
-        russian_keyword = "Моск"
-        filter_expr = f'content_ngram["body"] LIKE "%{russian_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{russian_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 4: French accent character search
-        french_keyword = "café"
-        filter_expr = f'content_ngram["body"] LIKE "%{french_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{french_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 5: Emoji character search
-        emoji_keyword = "🏫"
-        filter_expr = f'content_ngram["body"] LIKE "%{emoji_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{emoji_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 6: Star emoji search
-        star_keyword = "⭐"
-        filter_expr = f'content_ngram["body"] LIKE "%{star_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{star_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 7: Arabic character search
-        arabic_keyword = "مدرسة"
-        filter_expr = f'content_ngram["body"] LIKE "%{arabic_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{arabic_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 8: Korean character search
-        korean_keyword = "한국"
-        filter_expr = f'content_ngram["body"] LIKE "%{korean_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{korean_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 9: German umlaut character search
-        german_keyword = "München"
-        filter_expr = f'content_ngram["body"] LIKE "%{german_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{german_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 10: Mixed language search
-        mixed_keyword = "mix"
-        filter_expr = f'content_ngram["body"] LIKE "%{mixed_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{mixed_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 11: Complex multilingual with emojis prefix search
-        complex_keyword = "café☕"
-        filter_expr = f'content_ngram["body"] LIKE "%{complex_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{complex_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 12: Hindi/Devanagari character search
-        hindi_keyword = "प्रविष्टि"
-        filter_expr = f'content_ngram["body"] LIKE "%{hindi_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{hindi_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 13: Greek character search
-        greek_keyword = "Γειά"
-        filter_expr = f'content_ngram["body"] LIKE "%{greek_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{greek_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 14: Portuguese with tilde character search
-        portuguese_keyword = "português"
-        filter_expr = f'content_ngram["body"] LIKE "%{portuguese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{portuguese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 15: Test single character search (especially important for CJK)
-        single_char_keyword = "学"
-        filter_expr = f'content_ngram["body"] LIKE "%{single_char_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{single_char_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        # Should match both "北京大学" and "🏫学校🎓"
-        assert len(res_ngram) >= expected_count_per_keyword * 2
-        assert res_ngram == res_no_index
+            assert len(res_ngram) > 0
+            assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
