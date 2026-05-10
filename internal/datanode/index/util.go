@@ -93,3 +93,16 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	}
 	return ""
 }
+
+func IsFieldBinlogOfFieldID(fieldBinlog *datapb.FieldBinlog, fieldID int64) bool {
+	for idx, childField := range fieldBinlog.ChildFields {
+		if childField == fieldID {
+			for idy := range fieldBinlog.Binlogs {
+				if idx == idy {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
