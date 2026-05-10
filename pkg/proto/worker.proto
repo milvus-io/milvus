@@ -150,6 +150,10 @@ message GetJobStatsResponse {
   int64 total_slots = 8;
 }
 
+message FieldBinLogs {
+  repeated data.FieldBinlog bin_logs=1;
+}
+
 message AnalyzeRequest {
   string clusterID = 1;
   int64 taskID = 2;
@@ -170,6 +174,11 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  int64 storage_version = 20;
+  map<int64, FieldBinLogs> insert_files = 21;
+  int64 train_buffer_size = 22;
+  int64 assign_buffer_size = 23;
+
 }
 
 message CreateStatsRequest {
