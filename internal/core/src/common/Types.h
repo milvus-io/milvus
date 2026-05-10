@@ -48,6 +48,7 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "BitUtil.h"
 #include "type_c.h"
 
@@ -981,6 +982,9 @@ vector_bytes_per_element(const DataType data_type, int64_t dim) {
 bool
 IsFixedSizeType(DataType type);
 
+SegmentInsertFiles
+get_segment_insert_files(
+    const milvus::proto::indexcgo::SegmentInsertFiles& segment_insert_files);
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {

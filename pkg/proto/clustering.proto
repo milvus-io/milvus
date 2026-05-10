@@ -3,6 +3,7 @@ package milvus.proto.clustering;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb";
 import "schema.proto";
+import "index_cgo_msg.proto";
 
 // Synchronously modify StorageConfig in index_coord.proto/index_cgo_msg.proto file
 message StorageConfig {
@@ -47,6 +48,10 @@ message AnalyzeInfo {
   map<int64, int64> num_rows = 14;
   schema.FieldSchema field_schema = 15;
   StorageConfig storage_config = 16;
+  int64 storage_version = 17;
+  map<int64, indexcgo.SegmentInsertFiles> segment_insert_files = 18;
+  int64 train_buffer_size = 19;
+  int64 assign_buffer_size = 20;
 }
 
 message ClusteringCentroidsStats {

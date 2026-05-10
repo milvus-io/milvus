@@ -153,6 +153,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	defer func() {
 		t.retryOnError(err)
 	}()
+	log.Info("QueryTaskOnWorker ", zap.String("state", t.GetTaskProto().GetState().String()))
+	if t.GetTaskProto().State != datapb.CompactionTaskState_executing {
+		t.Process()
+		return
+	}
 
 	var result *datapb.CompactionPlanResult
 	result, err = cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
@@ -312,7 +317,6 @@ func (t *clusteringCompactionTask) retryableProcess(ctx context.Context) error {
 		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
 		return nil
 	}
-
 	coll, err := t.handler.GetCollection(ctx, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		// retryable
@@ -616,7 +620,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		log.Warn("analyzeTask not found", zap.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 		return merr.WrapErrAnalyzeTaskNotFound(t.GetTaskProto().GetAnalyzeTaskID()) // retryable
 	}
-	log.Info("check analyze task state", zap.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()),
+	log.Info(" check analyze task state", zap.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()),
 		zap.Int64("version", analyzeTask.GetVersion()), zap.String("state", analyzeTask.State.String()))
 	switch analyzeTask.State {
 	case indexpb.JobState_JobStateFinished:
@@ -630,6 +634,9 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
 		return errors.New(analyzeTask.FailReason)
+	case indexpb.JobState_JobStateNone:
+		log.Warn("analyze task state none failure", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
+		return errors.New("State none")
 	default:
 	}
 	return nil
@@ -757,10 +764,12 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 		log.Warn("failed to create analyze task", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
 		return err
 	}
+	task := newAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta))
+	t.analyzeScheduler.Enqueue(task)
 
-	t.analyzeScheduler.Enqueue(newAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta)))
-
-	log.Info("submit analyze task", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()), zap.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
+	log.Info("submit analyze task", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Int64s("SegmentIDs:", task.SegmentIDs),
+		zap.Int64s("analyzeTask.SegmentIDs:", analyzeTask.SegmentIDs),
+		zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()), zap.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
 }
 

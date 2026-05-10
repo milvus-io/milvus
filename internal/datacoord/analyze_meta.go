@@ -172,7 +172,7 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) e
 	}
 
 	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),
-		zap.String("failReason", result.GetFailReason()))
+		zap.String("failReason", result.GetFailReason()), zap.String("centroidFile", result.GetCentroidsFile()))
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.State = result.GetState()
