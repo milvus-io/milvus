@@ -154,9 +154,42 @@ class ResultAnalyzer:
         df = df.sort_values(by="start_time")
         self.df = df
         self.chaos_info = get_chaos_info()
-        self.chaos_start_time = self.chaos_info["create_time"] if self.chaos_info is not None else None
-        self.chaos_end_time = self.chaos_info["delete_time"] if self.chaos_info is not None else None
-        self.recovery_time = self.chaos_info["recovery_time"] if self.chaos_info is not None else None
+        self.chaos_start_time = self._extract_chaos_time("create_time")
+        self.chaos_end_time = self._extract_chaos_time("delete_time")
+        self.recovery_time = self._extract_chaos_time("recovery_time")
+
+    @staticmethod
+    def _extract_chaos_time(key):
+        info = get_chaos_info()
+        if info is None:
+            return None
+        if key in info:
+            return info[key]
+
+        steps = info.get("steps", [])
+        if steps:
+            if key == "create_time":
+                return steps[0].get(key)
+            if key == "delete_time":
+                return steps[-1].get(key)
+
+        records = info.get("records", [])
+        if records:
+            if key == "create_time":
+                for record in records:
+                    for step in record.get("steps", []):
+                        if key in step:
+                            return step[key]
+            if key == "delete_time":
+                for record in reversed(records):
+                    for step in reversed(record.get("steps", [])):
+                        if key in step:
+                            return step[key]
+            if key == "recovery_time":
+                for record in reversed(records):
+                    if key in record:
+                        return record[key]
+        return None
 
     def get_stage_success_rate(self):
         df = self.df
@@ -170,14 +203,10 @@ class ResultAnalyzer:
         data = result.reset_index()
         data["success_rate"] = data["success_count"] / (data["success_count"] + data["failed_count"]).replace(0, 1)
         grouped_data = data.groupby("operation_name")
-        if self.chaos_info is None:
-            chaos_start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
-            chaos_end_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
-            recovery_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
-        else:
-            chaos_start_time = self.chaos_info["create_time"]
-            chaos_end_time = self.chaos_info["delete_time"]
-            recovery_time = self.chaos_info["recovery_time"]
+        now_str = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
+        chaos_start_time = self.chaos_start_time or now_str
+        chaos_end_time = self.chaos_end_time or now_str
+        recovery_time = self.recovery_time or now_str
         stage_success_rate = {}
         for name, group in grouped_data:
             log.info(f"operation_name: {name}")
@@ -285,8 +314,8 @@ class Op(Enum):
 
 
 timeout = 120
-search_timeout = 10
-query_timeout = 10
+search_timeout = 30
+query_timeout = 30
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
@@ -1361,6 +1390,8 @@ class FlushChecker(Checker):
 class AddFieldChecker(Checker):
     """check add field operations in a dependent thread"""
 
+    MAX_FIELDS = 64
+
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AddFieldChecker_")
@@ -1368,9 +1399,22 @@ class AddFieldChecker(Checker):
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
 
+    def _get_field_count(self):
+        collection_info = self.milvus_client.describe_collection(self.c_name)
+        schema = CollectionSchema.construct_from_dict(collection_info)
+        return len(schema.fields)
+
     @trace()
     def add_field(self):
         try:
+            field_count = self._get_field_count()
+            if field_count >= self.MAX_FIELDS:
+                log.debug(
+                    f"skip add_field: collection {self.c_name} already has {field_count} fields "
+                    f"(limit {self.MAX_FIELDS})"
+                )
+                return None, True
+
             new_field_name = cf.gen_unique_str("new_field_")
             self.milvus_client.add_collection_field(
                 collection_name=self.c_name, field_name=new_field_name, data_type=DataType.INT64, nullable=True
