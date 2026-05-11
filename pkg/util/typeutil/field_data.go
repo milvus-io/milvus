@@ -19,6 +19,7 @@ func NewFieldDataBuilder(dt schemapb.DataType, fillZero bool, capacity int) (*Fi
 	switch dt {
 	case schemapb.DataType_Bool,
 		schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		// DataType_String is deprecated; string scalar fields should arrive as VarChar.
 		schemapb.DataType_Timestamptz, schemapb.DataType_VarChar:
 		return &FieldDataBuilder{
 			dt:       dt,

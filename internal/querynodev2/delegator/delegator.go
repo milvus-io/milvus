@@ -505,6 +505,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				GroupByFieldId:          subReq.GetGroupByFieldId(),
 				GroupSize:               subReq.GetGroupSize(),
 				FieldId:                 subReq.GetFieldId(),
+				GroupByFieldIds:         req.GetReq().GetGroupByFieldIds(),
 				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
 				IsIterator:              req.GetReq().GetIsIterator(),
 				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
@@ -529,13 +530,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				if err != nil {
 					return nil, err
 				}
-
 				return segments.ReduceSearchOnQueryNode(ctx,
 					results,
 					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
 						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
-						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
-						WithGroupSize(searchReq.GetReq().GetGroupSize()))
+						WithGroupSize(searchReq.GetReq().GetGroupSize()).
+						WithGroupByFieldIdsFromProto(searchReq.GetReq().GetGroupByFieldId(), searchReq.GetReq().GetGroupByFieldIds()))
 			})
 			futures[index] = future
 		}

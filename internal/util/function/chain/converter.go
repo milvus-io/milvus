@@ -20,6 +20,7 @@ package chain
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -333,14 +334,22 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 			}
 		}
 
-		// Import GroupByFieldValue as a regular column
-		if gbv := resultData.GetGroupByFieldValue(); gbv != nil {
-			gbvID := gbv.GetFieldId()
-			gbvName := gbv.GetFieldName()
-			if (gbvID != 0 || gbvName != "") && !seenFieldIDs[gbvID] {
-				if err := importFieldData(builder, gbv, offsets, alloc); err != nil {
-					return nil, err
-				}
+		// Import plural GroupByFieldValues (unified reducer output).
+		for _, gbv := range resultData.GetGroupByFieldValues() {
+			if gbv == nil || !shouldImportGroupByField(gbv, seenFieldIDs, seenFieldNames) {
+				continue
+			}
+			if err := importGroupByFieldData(builder, gbv, offsets, alloc); err != nil {
+				return nil, err
+			}
+			markGroupByFieldSeen(gbv, seenFieldIDs, seenFieldNames)
+		}
+
+		// Singular fallback for legacy-wire inputs that still carry the
+		// group-by column on the deprecated GroupByFieldValue channel.
+		if gbv := resultData.GetGroupByFieldValue(); gbv != nil && shouldImportGroupByField(gbv, seenFieldIDs, seenFieldNames) {
+			if err := importGroupByFieldData(builder, gbv, offsets, alloc); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -391,9 +400,50 @@ func importScores(builder *DataFrameBuilder, scores []float32, offsets []int64, 
 	return builder.AddColumnFromChunks(types.ScoreFieldName, chunks)
 }
 
+func shouldImportGroupByField(fieldData *schemapb.FieldData, seenFieldIDs map[int64]bool, seenFieldNames map[string]bool) bool {
+	fieldID := fieldData.GetFieldId()
+	fieldName := groupByFieldColumnName(fieldData)
+	if fieldID <= 0 && fieldName == "" {
+		return false
+	}
+	if fieldID > 0 && seenFieldIDs[fieldID] {
+		return false
+	}
+	if fieldName != "" && seenFieldNames[fieldName] {
+		return false
+	}
+	return true
+}
+
+func markGroupByFieldSeen(fieldData *schemapb.FieldData, seenFieldIDs map[int64]bool, seenFieldNames map[string]bool) {
+	if fieldID := fieldData.GetFieldId(); fieldID > 0 {
+		seenFieldIDs[fieldID] = true
+	}
+	if fieldName := groupByFieldColumnName(fieldData); fieldName != "" {
+		seenFieldNames[fieldName] = true
+	}
+}
+
+func groupByFieldColumnName(fieldData *schemapb.FieldData) string {
+	if fieldName := fieldData.GetFieldName(); fieldName != "" {
+		return fieldName
+	}
+	if fieldID := fieldData.GetFieldId(); fieldID > 0 {
+		return "$group_by_" + strconv.FormatInt(fieldID, 10)
+	}
+	return ""
+}
+
+func importGroupByFieldData(builder *DataFrameBuilder, fieldData *schemapb.FieldData, offsets []int64, alloc memory.Allocator) error {
+	return importFieldDataWithName(builder, fieldData, groupByFieldColumnName(fieldData), offsets, alloc)
+}
+
 // importFieldData imports a FieldData into the DataFrame via builder.
 func importFieldData(builder *DataFrameBuilder, fieldData *schemapb.FieldData, offsets []int64, alloc memory.Allocator) error {
-	fieldName := fieldData.GetFieldName()
+	return importFieldDataWithName(builder, fieldData, fieldData.GetFieldName(), offsets, alloc)
+}
+
+func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.FieldData, fieldName string, offsets []int64, alloc memory.Allocator) error {
 	if fieldName == "" {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("importFieldData: field_name is empty for field_id %d", fieldData.GetFieldId()))
 	}
@@ -649,13 +699,15 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 			continue
 		}
 
-		// Export group-by column to GroupByFieldValue
+		// Export group-by column to the plural channel for internal uniformity
+		// with the unified reducer. The task-output boundary downgrades plural
+		// → singular when legacy-wire is in effect.
 		if groupByField != "" && name == groupByField {
 			fieldData, err := exportFieldData(df, name)
 			if err != nil {
 				return nil, err
 			}
-			result.GroupByFieldValue = fieldData
+			result.GroupByFieldValues = []*schemapb.FieldData{fieldData}
 			continue
 		}
 
