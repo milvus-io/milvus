@@ -6287,62 +6287,196 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         assert set(ids) == {r["id"] for r in oneshot}
 
 
+@pytest.mark.xdist_group("TestMilvusClientStructArrayElementContainsSearch")
 class TestMilvusClientStructArrayElementContainsSearch(TestMilvusClientV2Base):
-    """Test ARRAY_CONTAINS on struct sub-fields (6 cases, all skip - depends on PR #47172)"""
+    """Test ARRAY_CONTAINS on struct sub-fields in search filters."""
+
+    SEARCH_VEC_SEED = 616161
+    SEARCH_LIMIT = 50
+
+    def _query_vec(self):
+        return _seed_vector(self.SEARCH_VEC_SEED)
+
+    def _create_schema(self, client):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=default_capacity,
+        )
+        return schema
+
+    def _make_row(self, row_id, struct_elements):
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": self._query_vec(),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000 + offset),
+                    "int_val": elem["int_val"],
+                    "color": elem["color"],
+                }
+                for offset, elem in enumerate(struct_elements)
+            ],
+        }
+
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_shared_collection(self, request):
+        """Create a deterministic FLAT-indexed collection with sealed and growing rows."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_ac_search")
+
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, force_teardown=False)
+
+        controlled_rows = [
+            self._make_row(0, [{"int_val": 5, "color": "Red"}]),
+            self._make_row(1, [{"int_val": 5, "color": "Blue"}, {"int_val": 11, "color": "Green"}]),
+            self._make_row(2, [{"int_val": 7, "color": "Red"}, {"int_val": 13, "color": "Blue"}]),
+            self._make_row(3, [{"int_val": 5, "color": "Red"}, {"int_val": 13, "color": "Blue"}]),
+            self._make_row(
+                4,
+                [{"int_val": 11, "color": "Blue"}, {"int_val": 17, "color": "Green"}],
+            ),
+            self._make_row(
+                5,
+                [
+                    {"int_val": 5, "color": "Red"},
+                    {"int_val": 11, "color": "Green"},
+                    {"int_val": 17, "color": "Blue"},
+                ],
+            ),
+            self._make_row(6, []),
+            self._make_row(7, [{"int_val": 23, "color": "Yellow"}]),
+        ]
+
+        self.insert(client, collection_name, controlled_rows[:4])
+        self.flush(client, collection_name)
+        self.insert(client, collection_name, controlled_rows[4:])
+        self.load_collection(client, collection_name)
+
+        request.cls.shared_client = client
+        request.cls.shared_collection = collection_name
+
+        yield
+
+        client.drop_collection(collection_name)
+
+    def _search_ids(self, expr):
+        results, check = self.search(
+            self.shared_client,
+            self.shared_collection,
+            data=[self._query_vec()],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter=expr,
+            limit=self.SEARCH_LIMIT,
+            output_fields=["id"],
+            consistency_level="Strong",
+        )
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
+
+    def _element_search_ids(self, expr):
+        results, check = self.search(
+            self.shared_client,
+            self.shared_collection,
+            data=[_seed_vector(0)],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter=expr,
+            limit=self.SEARCH_LIMIT,
+            output_fields=["id"],
+            consistency_level="Strong",
+        )
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_array_contains_struct_int_subfield(self):
         """
         target: array_contains on struct array int sub-field
-        method: array_contains query on struct sub-field of array type
-        expected: matching rows returned
+        method: search with array_contains(structA[int_val], 5)
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains(structA[int_val], 5)")
+        assert ids == [0, 1, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_array_contains_all_struct_varchar_subfield(self):
         """
         target: array_contains_all on struct varchar sub-field
-        method: array_contains_all query
-        expected: matching rows returned
+        method: search with array_contains_all(structA[color], ["Red", "Blue"])
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids('id < 100 && array_contains_all(structA[color], ["Red", "Blue"])')
+        assert ids == [2, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_array_contains_any_struct_int_subfield(self):
         """
         target: array_contains_any on struct int sub-field
-        method: array_contains_any query
-        expected: matching rows returned
+        method: search with array_contains_any(structA[int_val], [13, 99])
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains_any(structA[int_val], [13, 99])")
+        assert ids == [2, 3]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_array_contains_combined_with_match(self):
         """
         target: array_contains combined with MATCH operator
-        method: MATCH_ANY(structA, array_contains($[tags], 5) && $[int_val] > 10)
-        expected: matching rows returned
+        method: array_contains(structA[int_val], 5) && MATCH_ANY(structA, $[int_val] > 10)
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains(structA[int_val], 5) && MATCH_ANY(structA, $[int_val] > 10)")
+        assert ids == [1, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_array_contains_combined_with_element_filter(self):
         """
         target: array_contains combined with element_filter
-        method: element_filter(structA, array_contains($[tags], 5))
-        expected: matching rows returned
+        method: element-level search with array_contains(structA[int_val], 5)
+                and element_filter(structA, $[color] == "Red")
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._element_search_ids(
+            'id < 100 && array_contains(structA[int_val], 5) && element_filter(structA, $[color] == "Red")'
+        )
+        assert ids == [0, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_array_contains_empty_array(self):
         """
         target: array_contains on empty array sub-field
-        method: query where sub-field array is empty
+        method: search with row whose structA is empty
         expected: no match
         """
-        pass
+        ids = self._search_ids("id == 6 && array_contains(structA[int_val], 5)")
+        assert ids == []
 
 
 class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
