@@ -24,6 +24,13 @@ var (
 	enableFenceError                   = atomic.NewBool(true)
 )
 
+// Reset clears global state of the in-memory WAL test implementation.
+func Reset() {
+	logs = typeutil.NewConcurrentMap[string, *messageLog]()
+	fenced = typeutil.NewConcurrentSet[string]()
+	enableFenceError.Store(true)
+}
+
 // EnableFenced enables fenced mode for the given channel.
 func EnableFenced(channel string) {
 	fenced.Insert(channel)
@@ -50,7 +57,7 @@ func (w *walImpls) Append(ctx context.Context, msg message.MutableMessage) (mess
 	if fenced.Contain(w.Channel().Name) {
 		return nil, errors.Mark(errors.New("err"), walimpls.ErrFenced)
 	}
-	if enableFenceError.Load() && rand.Int31n(30) == 0 {
+	if enableFenceError.Load() && msg.MessageType() != message.MessageTypeTimeTick && rand.Int31n(30) == 0 {
 		return nil, errors.New("random error")
 	}
 	return w.datas.Append(ctx, msg)
