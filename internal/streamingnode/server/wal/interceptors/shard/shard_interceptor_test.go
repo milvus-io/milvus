@@ -20,6 +20,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
+func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("vchannel").
+		WithHeader(&messagespb.DeleteMessageHeader{
+			CollectionId: 1,
+			Rows:         10,
+		}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(nil)
+	shardManager.EXPECT().ApplyDelete(mock.MatchedBy(func(deleteMsg message.MutableDeleteMessageV1) bool {
+		return deleteMsg.Header().GetCollectionId() == int64(1) && deleteMsg.Header().GetRows() == uint64(10)
+	})).Return(nil)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, errors.New("append failed")
+	})
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+}
+
 func TestShardInterceptor(t *testing.T) {
 	mockErr := errors.New("mock error")
 
