@@ -6087,12 +6087,35 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         iterator.close()
         return all_rows
 
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#49355: query_iterator over element_filter drops "
-        "trailing offsets of any row whose matched offsets span a page boundary "
-        "(server's element-level limit truncates mid-row; iterator advances pk > "
-        "last_pk, so the row's remaining offsets are never re-fetched)."
-    )
+    def _assert_match_query_and_iterator(self, client, collection_name, match_expr, predicate):
+        query_rows, _ = self.query(
+            client,
+            collection_name,
+            filter=match_expr,
+            output_fields=["id", "structA"],
+            limit=16384,
+            consistency_level="Strong",
+        )
+        query_ids = {r["id"] for r in query_rows}
+        assert len(query_ids) == len(query_rows), "one-shot query returned duplicated row ids"
+        for row in query_rows:
+            assert predicate(row["structA"]), f"row {row['id']} does not satisfy match predicate"
+
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=40,
+            filter=match_expr,
+            output_fields=["id", "structA"],
+            consistency_level="Strong",
+        )
+        iterator_rows = self._drain(iterator)
+        iterator_ids = {r["id"] for r in iterator_rows}
+        assert len(iterator_ids) == len(iterator_rows), "query_iterator returned duplicated row ids"
+        for row in iterator_rows:
+            assert predicate(row["structA"]), f"row {row['id']} does not satisfy match predicate"
+        assert iterator_ids == query_ids
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_iterator_with_element_filter(self):
         """
@@ -6159,34 +6182,32 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_qiter_match_{match_type.lower()}")
         self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
 
-        iterator, _ = self.query_iterator(
-            client,
-            collection_name,
-            batch_size=40,
-            filter=match_expr,
-            output_fields=["id", "structA"],
-        )
-        rows = self._drain(iterator)
-        ids = {r["id"] for r in rows}
-        assert len(ids) == len(rows), "duplicated row ids"
-        for row in rows:
-            assert predicate(row["structA"]), f"row {row['id']} does not satisfy {match_type}"
-
-        oneshot, _ = self.query(
-            client,
-            collection_name,
-            filter=match_expr,
-            output_fields=["id"],
-            limit=16384,
-        )
-        assert ids == {r["id"] for r in oneshot}
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
 
     @pytest.mark.xfail(
-        reason="milvus-io/milvus#49355: same root cause as "
-        "test_query_iterator_with_element_filter — server truncates within a row at "
-        "the element-level limit boundary; client cursor (pk > last_pk) cannot "
-        "recover the row's remaining offsets."
+        reason="milvus-io/milvus#49693: full StructArray output fails after release/load "
+        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
     )
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_full_struct_output_after_reload(self):
+        """
+        target: query/query_iterator return full struct array output after release/load
+        method: query with output_fields=["id", "structA"], then release_collection +
+                load_collection and query with the same output fields again
+        expected: reload does not change full struct array output behavior
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_reload")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        match_expr = "match_all(structA, $[int_val] >= 0)"
+        predicate = lambda sa: all(e["int_val"] >= 0 for e in sa)
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("batch_size", [10, 50, 100])
     def test_query_iterator_element_filter_batch_size(self, batch_size):

@@ -4745,7 +4745,6 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [1000])
     @pytest.mark.parametrize("array_capacity", [100])
-    @pytest.mark.xfail(reason="issue")
     def test_import_struct_array_with_parquet(self, dim, entities, array_capacity):
         """
         Test bulk import of struct array data from parquet file
