@@ -241,6 +241,61 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": 2, "limit": 100})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_with_text_and_phrase_match_filter_template(self):
+        """
+        target: verify text_match and phrase_match query strings support filter templating
+        method: create a small analyzer-enabled collection and compare literal filters with template filters
+        expected: template filters return the same IDs as equivalent literal filters
+        """
+        dim = 8
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params={"tokenizer": "standard"},
+            ),
+            FieldSchema(name="float32_emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test text template")
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+
+        data = [
+            {"id": 0, "text": "vector database search", "float32_emb": [0.1] * dim},
+            {"id": 1, "text": "database vector search", "float32_emb": [0.2] * dim},
+            {"id": 2, "text": "hybrid sparse retrieval", "float32_emb": [0.3] * dim},
+        ]
+        collection_w.insert(data)
+        collection_w.flush()
+        collection_w.create_index(
+            "float32_emb",
+            {"index_type": "FLAT", "metric_type": "L2", "params": {}},
+        )
+        collection_w.load()
+
+        cases = [
+            ('text_match(text, "vector")', "text_match(text, {query})", {"query": "vector"}),
+            (
+                'phrase_match(text, "vector database", 0)',
+                "phrase_match(text, {query}, 0)",
+                {"query": "vector database"},
+            ),
+        ]
+        for literal_expr, template_expr, template_params in cases:
+            literal_res = collection_w.query(expr=literal_expr, output_fields=["id"])[0]
+            template_res = collection_w.query(
+                expr=template_expr,
+                expr_params=template_params,
+                output_fields=["id"],
+            )[0]
+            literal_ids = {row["id"] for row in literal_res}
+            template_ids = {row["id"] for row in template_res}
+            assert template_ids == literal_ids
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
