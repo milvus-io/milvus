@@ -1,24 +1,25 @@
-import numpy as np
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import (
-    FieldSchema, CollectionSchema, DataType,
-    Collection, Function, FunctionType, FunctionScore
-)
+import math
+import random
 
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
+import numpy as np
+import pandas as pd
+import pytest
 from base.client_base import TestcaseBase
 from base.client_v2_base import TestMilvusClientV2Base
-
-import random
-import math
-import pytest
-import pandas as pd
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from faker import Faker
+from pymilvus import (
+    AnnSearchRequest,
+    DataType,
+    Function,
+    FunctionType,
+    RRFRanker,
+    WeightedRanker,
+)
+from utils.util_log import test_log as log
+from utils.util_pymilvus import default_dim, default_nb
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -359,7 +360,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                               "output_fields": [self.primary_key_field_name,
                                                                 self.string_field_name]})[0]
 
-        # verify the hybrid search results meet the filter                                          
+        # verify the hybrid search results meet the filter
         for i in range(nq):
             assert max(res[i].ids) <= filter_max_value
             assert min(res[i].ids) > filter_min_value
@@ -557,7 +558,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
     def test_hybrid_search_diff_limits_in_search_req(self, req_limit):
         """
         Test case: Hybrid search where individual search requests omit 'limit'
-        Scenario: 
+        Scenario:
             - Create connection, collection, and insert data.
             - Perform hybrid search with search requests with different 'limit' parameters.
         Expected:
@@ -884,13 +885,13 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         # sparse fields cannot be output, so specify the expected output fields
         expected_output_fields = [field_name for field_name in self.all_fields
                                   if field_name not in [self.sparse_vector_field_name1, self.sparse_vector_field_name2]]
-        res1 = self.hybrid_search(client, self.collection_name, reqs=req_list,
-                                  ranker=WeightedRanker(0.5, 0.5),
-                                  limit=limit, output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
-                                               "pk_name": self.primary_key_field_name,
-                                               "output_fields": expected_output_fields})[0]
+        self.hybrid_search(client, self.collection_name, reqs=req_list,
+                           ranker=WeightedRanker(0.5, 0.5),
+                           limit=limit, output_fields=output_fields,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
+                                        "pk_name": self.primary_key_field_name,
+                                        "output_fields": expected_output_fields})[0]
         output_fields = self.all_fields
         # verify the error message when output sparse vector field
         err_msg = {"err_code": 999,
@@ -1113,10 +1114,10 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 # print id and distance for debug
                 # answer and hybrid search result
                 for i1 in range(len(score_answer)):
-                    log.info("answer id: %d, distance: %f" % (ids_answer[i1], score_answer[i1]))
+                    log.info(f"answer id: {ids_answer[i1]:d}, distance: {score_answer[i1]:f}")
                 for i2 in range(len(hybrid_res[0].ids)):
                     log.info(
-                        "hybrid search res id: %d, distance: %f" % (hybrid_res[0].ids[i2], hybrid_res[0].distances[i2]))
+                        f"hybrid search res id: {hybrid_res[0].ids[i2]:d}, distance: {hybrid_res[0].distances[i2]:f}")
             assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1682,7 +1683,7 @@ class TestCollectionHybridSearch(TestcaseBase):
         method: Test hybrid search after loading sparse vectors
         expected: hybrid search successfully with limit(topK)
         """
-        nb, auto_id, dim, enable_dynamic_field = 20000, False, 768, False
+        nb, dim = 20000, 768
         # 1. init collection
         collection_w, insert_vectors, _, insert_ids = \
             self.init_collection_general("", True, nb=nb, multiple_dim_array=[dim, dim * 2],
@@ -1739,7 +1740,6 @@ class TestCollectionHybridSearch(TestcaseBase):
         Expected:
             - Hybrid search failed with error msg
         """
-        nq = 2
         req_limit = 10
         ids_to_search = [0, 1]
         # generate hybrid search request list
@@ -1751,4 +1751,4 @@ class TestCollectionHybridSearch(TestcaseBase):
         }
         with pytest.raises(TypeError,
                            match="AnnSearchRequest.__init__.*got an unexpected keyword argument 'ids'"):
-            req = AnnSearchRequest(**sub_params)
+            AnnSearchRequest(**sub_params)

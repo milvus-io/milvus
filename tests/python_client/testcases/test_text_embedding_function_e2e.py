@@ -1,22 +1,22 @@
 import random
-import uuid
+
+import numpy as np
+import pandas as pd
+import pytest
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    AnnSearchRequest,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    AnnSearchRequest,
     WeightedRanker,
 )
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
 from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-import numpy as np
-import pytest
-import pandas as pd
-from faker import Faker
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")

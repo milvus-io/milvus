@@ -1,12 +1,10 @@
-import logging
-import time
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from idx_ngram import NGRAM
+from pymilvus import DataType
 
 index_type = "NGRAM"
 success = "success"
@@ -438,11 +436,11 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         assert res_ngram == res_no_index
 
         # Test query with Mixed Wildcard Match
-        filter_expr = f'content_ngram LIKE "%st_d_um%"'
+        filter_expr = 'content_ngram LIKE "%st_d_um%"'
         res_ngram = self.query(client, collection_name, filter=filter_expr,
                                output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "%st_d_um%"'
+        filter_expr = 'content_no_index LIKE "%st_d_um%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
@@ -466,7 +464,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         # Multilingual test data with various UTF-8 characters
         multilingual_keywords = [
             "北京大学",           # Chinese
-            "東京大学",           # Japanese  
+            "東京大学",           # Japanese
             "Московский",        # Russian
             "café",              # French with accent
             "naïve",             # French with diaeresis
@@ -509,14 +507,14 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                                metric_type="COSINE",
                                index_type="IVF_FLAT",
                                params={"nlist": 128})
-        
+
         # Create NGRAM index with appropriate parameters for multilingual content
         min_gram = 1  # Use 1 for better multilingual support
         max_gram = 3
         index_params.add_index(field_name="content_ngram",
                                index_name="content_ngram",
                                index_type=index_type,
-                               params={"min_gram": min_gram, "max_gram": max_gram, 
+                               params={"min_gram": min_gram, "max_gram": max_gram,
                                        "json_path": "content_ngram['body']", "json_cast_type": "varchar"})
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
