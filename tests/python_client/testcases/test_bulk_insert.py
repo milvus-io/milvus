@@ -1,35 +1,37 @@
+import json
 import logging
 import random
 import time
-import pytest
-from pymilvus import DataType, Function, FunctionType, FieldSchema, CollectionSchema
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
-import numpy as np
+import uuid
 from pathlib import Path
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
+from common.bulk_insert_data import (
+    DataField as df,
+)
 from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
-    DataField as df,
 )
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
+from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import copy_files_to_minio
 from faker import Faker
+from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
+from utils.util_log import test_log as log
+
 fake = Faker()
 default_vec_only_fields = [df.vec_field]
-default_multi_fields = [
-    df.vec_field,
-    df.int_field,
-    df.string_field,
-    df.bool_field,
-    df.float_field,
-    df.array_int_field
-]
+default_multi_fields = [df.vec_field, df.int_field, df.string_field, df.bool_field, df.float_field, df.array_int_field]
 default_vec_n_int_fields = [df.vec_field, df.int_field, df.array_int_field]
 
 
@@ -48,7 +50,6 @@ def entity_suffix(entities):
 
 
 class TestcaseBaseBulkInsert(TestcaseBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, minio_host, minio_bucket):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
@@ -57,8 +58,507 @@ class TestcaseBaseBulkInsert(TestcaseBase):
         self.bucket_name = minio_bucket
 
 
-class TestBulkInsert(TestcaseBaseBulkInsert):
+class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
+    nullable_vector_field = df.float_vec_field
 
+    @staticmethod
+    def _float_vector(seed, dim):
+        return [float(seed + i) / dim for i in range(dim)]
+
+    @staticmethod
+    def _int8_vector(seed, dim):
+        return [((seed + i) % 255) - 128 for i in range(dim)]
+
+    @staticmethod
+    def _json_vector_value(vector_type, seed, dim):
+        if vector_type in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]:
+            return TestBulkInsertNullableVector._float_vector(seed, dim)
+        if vector_type == DataType.BINARY_VECTOR:
+            return [(seed + i) % 256 for i in range(dim // 8)]
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            return {0: float(seed + 1), 1: float(seed + 2)}
+        if vector_type == DataType.INT8_VECTOR:
+            return TestBulkInsertNullableVector._int8_vector(seed, dim)
+        raise ValueError(f"unsupported vector type: {vector_type}")
+
+    @staticmethod
+    def _search_vector_value(vector_type, seed, dim):
+        if vector_type == DataType.BINARY_VECTOR:
+            return cf.gen_binary_vectors(1, dim)[1]
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            return cf.gen_sparse_vectors(1, dim)
+        if vector_type == DataType.FLOAT16_VECTOR:
+            return cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)
+        if vector_type == DataType.BFLOAT16_VECTOR:
+            return cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)
+        if vector_type == DataType.INT8_VECTOR:
+            return [np.array(TestBulkInsertNullableVector._int8_vector(seed, dim), dtype=np.int8)]
+        return [TestBulkInsertNullableVector._float_vector(seed, dim)]
+
+    @staticmethod
+    def _index_params(vector_type):
+        if vector_type == DataType.BINARY_VECTOR:
+            return ct.default_binary_index
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            return ct.default_sparse_inverted_index
+        if vector_type == DataType.INT8_VECTOR:
+            return {"index_type": "HNSW", "metric_type": "COSINE", "params": {"M": 16, "efConstruction": 100}}
+        return ct.default_index
+
+    @staticmethod
+    def _search_params(vector_type):
+        if vector_type == DataType.BINARY_VECTOR:
+            return ct.default_search_binary_params
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            return ct.default_sparse_search_params
+        if vector_type == DataType.INT8_VECTOR:
+            return {"metric_type": "COSINE", "params": {"ef": 64}}
+        return ct.default_search_params
+
+    @staticmethod
+    def _vector_field(vector_type, name, dim, nullable=True):
+        if vector_type == DataType.FLOAT_VECTOR:
+            return cf.gen_float_vec_field(name=name, dim=dim, nullable=nullable)
+        if vector_type == DataType.BINARY_VECTOR:
+            return cf.gen_binary_vec_field(name=name, dim=dim, nullable=nullable)
+        if vector_type == DataType.FLOAT16_VECTOR:
+            return cf.gen_float16_vec_field(name=name, dim=dim, nullable=nullable)
+        if vector_type == DataType.BFLOAT16_VECTOR:
+            return cf.gen_bfloat16_vec_field(name=name, dim=dim, nullable=nullable)
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            return cf.gen_sparse_vec_field(name=name, nullable=nullable)
+        if vector_type == DataType.INT8_VECTOR:
+            return cf.gen_int8_vec_field(name=name, dim=dim, nullable=nullable)
+        raise ValueError(f"unsupported vector type: {vector_type}")
+
+    @staticmethod
+    def _write_json_file_to_minio(minio_endpoint, bucket_name, rows, file_num=1):
+        prefix = f"nullable-vector-json-{uuid.uuid4()}"
+        files = []
+        rows_per_file = max(1, (len(rows) + file_num - 1) // file_num)
+        for idx in range(file_num):
+            batch_rows = rows[idx * rows_per_file : (idx + 1) * rows_per_file]
+            if not batch_rows:
+                continue
+            relative_file = f"{prefix}/data_{idx}.json"
+            local_file = Path(base_dir) / relative_file
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(local_file, "w") as f:
+                json.dump(batch_rows, f)
+            files.append(relative_file)
+        copy_files_to_minio(
+            host=minio_endpoint,
+            r_source=base_dir,
+            files=files,
+            bucket_name=bucket_name,
+            force=True,
+        )
+        return files
+
+    @staticmethod
+    def _write_parquet_file_to_minio(minio_endpoint, bucket_name, rows, vector_field):
+        prefix = f"nullable-vector-parquet-{uuid.uuid4()}"
+        relative_file = f"{prefix}/data.parquet"
+        local_file = Path(base_dir) / relative_file
+        local_file.parent.mkdir(parents=True, exist_ok=True)
+        columns = {
+            df.pk_field: pa.array([row[df.pk_field] for row in rows], type=pa.int64()),
+            df.int_field: pa.array([row.get(df.int_field) for row in rows], type=pa.int64()),
+            vector_field: pa.array([row.get(vector_field) for row in rows], type=pa.list_(pa.float32())),
+        }
+        if any(df.string_field in row for row in rows):
+            columns[df.string_field] = pa.array([row.get(df.string_field) for row in rows], type=pa.string())
+        table = pa.table(columns)
+        pq.write_table(table, local_file)
+        copy_files_to_minio(
+            host=minio_endpoint,
+            r_source=base_dir,
+            files=[relative_file],
+            bucket_name=bucket_name,
+            force=True,
+        )
+        return [relative_file]
+
+    def _create_nullable_float_vector_collection(
+        self, c_name, dim, nullable=True, nullable_scalar=False, include_string_scalar=False
+    ):
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=False),
+            cf.gen_int64_field(name=df.int_field, nullable=nullable_scalar),
+            cf.gen_float_vec_field(name=self.nullable_vector_field, dim=dim, nullable=nullable),
+        ]
+        if include_string_scalar:
+            fields.insert(2, cf.gen_string_field(name=df.string_field, nullable=nullable_scalar))
+        schema = cf.gen_collection_schema(fields=fields, auto_id=False)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        return schema
+
+    def _import_files(self, c_name, files, timeout=300, **kwargs):
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files, **kwargs)
+        logging.info(f"bulk insert task ids:{task_id}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=timeout)
+        log.info(f"bulk insert state:{success} with states:{states}")
+        return success, states
+
+    def _assert_nullable_float_vector_data(self, c_name, entities, null_ids, non_null_ids, dim):
+        assert self.collection_wrap.num_entities == entities
+        self.collection_wrap.create_index(field_name=self.nullable_vector_field, index_params=ct.default_index)
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
+        self.collection_wrap.load()
+
+        results, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} >= 0",
+            output_fields=[df.pk_field, self.nullable_vector_field],
+        )
+        assert len(results) == entities
+        rows_by_id = {row[df.pk_field]: row for row in results}
+        for pk in null_ids:
+            assert rows_by_id[pk][self.nullable_vector_field] is None
+        for pk in non_null_ids:
+            vector = rows_by_id[pk][self.nullable_vector_field]
+            assert vector is not None
+            assert len(vector) == dim
+
+        search_res, _ = self.collection_wrap.search(
+            [self._float_vector(100, dim)],
+            self.nullable_vector_field,
+            param=ct.default_search_params,
+            limit=len(non_null_ids),
+        )
+        returned_ids = set(search_res[0].ids)
+        assert returned_ids
+        assert len(returned_ids) == len(non_null_ids)
+        assert returned_ids.issubset(set(non_null_ids))
+        assert returned_ids.isdisjoint(set(null_ids))
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [60])
+    def test_bulk_insert_json_nullable_float_vector_null_and_omit(self, dim, entities):
+        """
+        target: verify JSON import supports nullable vector/scalar fields and multiple vector columns
+        method: import row-based JSON with mixed valid/null/omitted dense and sparse vectors plus nullable scalars
+        expected: import succeeds; query returns None for NULL fields; each search skips NULL vectors on its field
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert_nullable_vector")
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=False),
+            cf.gen_int64_field(name=df.int_field, nullable=True),
+            cf.gen_string_field(name=df.string_field, nullable=True),
+            cf.gen_float_vec_field(name=self.nullable_vector_field, dim=dim, nullable=True),
+            cf.gen_sparse_vec_field(name=df.sparse_vec_field, nullable=True),
+        ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=False)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        rows = []
+        float_null_ids = []
+        float_non_null_ids = []
+        sparse_null_ids = []
+        sparse_non_null_ids = []
+        int_null_ids = []
+        string_null_ids = []
+        for i in range(entities):
+            row = {
+                df.pk_field: i,
+                df.int_field: None if i % 5 == 0 else i,
+                df.string_field: None if i % 4 == 0 else f"string_{i}",
+            }
+            if row[df.int_field] is None:
+                int_null_ids.append(i)
+            if row[df.string_field] is None:
+                string_null_ids.append(i)
+            if i % 4 == 0:
+                row[self.nullable_vector_field] = None
+                float_null_ids.append(i)
+            elif i % 4 == 1:
+                float_null_ids.append(i)
+            else:
+                row[self.nullable_vector_field] = self._float_vector(i, dim)
+                float_non_null_ids.append(i)
+            if i % 3 == 0:
+                row[df.sparse_vec_field] = None
+                sparse_null_ids.append(i)
+            elif i % 3 == 1:
+                sparse_null_ids.append(i)
+            else:
+                row[df.sparse_vec_field] = cf.gen_sparse_vectors(1, dim)[0]
+                sparse_non_null_ids.append(i)
+            rows.append(row)
+
+        files = self._write_json_file_to_minio(self.minio_endpoint, self.bucket_name, rows)
+        success, _ = self._import_files(c_name, files)
+        assert success
+
+        assert self.collection_wrap.num_entities == entities
+        dense_index_name = "nullable_dense_idx"
+        sparse_index_name = "nullable_sparse_idx"
+        self.collection_wrap.create_index(
+            field_name=self.nullable_vector_field, index_params=ct.default_index, index_name=dense_index_name
+        )
+        self.collection_wrap.create_index(
+            field_name=df.sparse_vec_field, index_params=ct.default_sparse_inverted_index, index_name=sparse_index_name
+        )
+        self.utility_wrap.wait_for_index_building_complete(c_name, index_name=dense_index_name, timeout=300)
+        self.utility_wrap.wait_for_index_building_complete(c_name, index_name=sparse_index_name, timeout=300)
+        self.collection_wrap.load()
+
+        results, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} >= 0",
+            output_fields=[df.pk_field, df.int_field, df.string_field, self.nullable_vector_field, df.sparse_vec_field],
+        )
+        assert len(results) == entities
+        rows_by_id = {row[df.pk_field]: row for row in results}
+        for pk in int_null_ids:
+            assert rows_by_id[pk][df.int_field] is None
+        for pk in string_null_ids:
+            assert rows_by_id[pk][df.string_field] is None
+        for pk in float_null_ids:
+            assert rows_by_id[pk][self.nullable_vector_field] is None
+        for pk in float_non_null_ids:
+            assert rows_by_id[pk][self.nullable_vector_field] is not None
+        for pk in sparse_null_ids:
+            assert rows_by_id[pk][df.sparse_vec_field] is None
+        for pk in sparse_non_null_ids:
+            assert rows_by_id[pk][df.sparse_vec_field] is not None
+
+        search_res, _ = self.collection_wrap.search(
+            [self._float_vector(100, dim)],
+            self.nullable_vector_field,
+            param=ct.default_search_params,
+            limit=len(float_non_null_ids),
+        )
+        returned_ids = set(search_res[0].ids)
+        assert returned_ids
+        assert len(returned_ids) == len(float_non_null_ids)
+        assert returned_ids.issubset(set(float_non_null_ids))
+        assert returned_ids.isdisjoint(set(float_null_ids))
+
+        search_res, _ = self.collection_wrap.search(
+            cf.gen_sparse_vectors(1, dim),
+            df.sparse_vec_field,
+            param=ct.default_sparse_search_params,
+            limit=len(sparse_non_null_ids),
+        )
+        returned_ids = set(search_res[0].ids)
+        assert returned_ids
+        assert len(returned_ids) == len(sparse_non_null_ids)
+        assert returned_ids.issubset(set(sparse_non_null_ids))
+        assert returned_ids.isdisjoint(set(sparse_null_ids))
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [12])
+    def test_bulk_insert_parquet_nullable_float_vector(self, dim, entities):
+        """
+        target: verify Parquet import supports nullable vector through Arrow List validity bitmap
+        method: import a Parquet file whose nullable vector column contains valid lists and nulls
+        expected: import succeeds; query returns None for NULL vectors; search skips NULL vectors
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert_nullable_vector")
+        self._create_nullable_float_vector_collection(c_name, dim, nullable_scalar=True, include_string_scalar=True)
+
+        rows = []
+        null_ids = []
+        non_null_ids = []
+        int_null_ids = []
+        string_null_ids = []
+        for i in range(entities):
+            row = {
+                df.pk_field: i,
+                df.int_field: None if i % 4 == 0 else i,
+                df.string_field: None if i % 5 == 0 else f"string_{i}",
+            }
+            if row[df.int_field] is None:
+                int_null_ids.append(i)
+            if row[df.string_field] is None:
+                string_null_ids.append(i)
+            if i % 3 == 0:
+                row[self.nullable_vector_field] = None
+                null_ids.append(i)
+            else:
+                row[self.nullable_vector_field] = self._float_vector(i, dim)
+                non_null_ids.append(i)
+            rows.append(row)
+
+        files = self._write_parquet_file_to_minio(
+            self.minio_endpoint, self.bucket_name, rows, self.nullable_vector_field
+        )
+        success, _ = self._import_files(c_name, files)
+        assert success
+        self._assert_nullable_float_vector_data(c_name, entities, null_ids, non_null_ids, dim)
+        results, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} >= 0",
+            output_fields=[df.pk_field, df.int_field, df.string_field],
+        )
+        rows_by_id = {row[df.pk_field]: row for row in results}
+        for pk in int_null_ids:
+            assert rows_by_id[pk][df.int_field] is None
+        for pk in string_null_ids:
+            assert rows_by_id[pk][df.string_field] is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("file_type", [BulkFileType.JSON, BulkFileType.CSV, BulkFileType.PARQUET])
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [60])
+    def test_bulk_writer_nullable_float_vector(self, file_type, dim, entities):
+        """
+        target: verify BulkWriter can write nullable vector values for import
+        method: write JSON/CSV/Parquet files with RemoteBulkWriter, then import generated batches
+        expected: import succeeds; query returns None for NULL vectors; search skips NULL vectors
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_writer_nullable_vector")
+        schema = self._create_nullable_float_vector_collection(c_name, dim)
+
+        null_ids = []
+        non_null_ids = []
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name=self.bucket_name,
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=file_type,
+            chunk_size=2048 if file_type == BulkFileType.PARQUET else 1024 * 1024 * 1024,
+        ) as remote_writer:
+            for i in range(entities):
+                vector = None if i % 3 == 0 else self._float_vector(i, dim)
+                if vector is None:
+                    null_ids.append(i)
+                else:
+                    non_null_ids.append(i)
+                remote_writer.append_row(
+                    {
+                        df.pk_field: i,
+                        df.int_field: i,
+                        self.nullable_vector_field: vector,
+                    }
+                )
+            remote_writer.commit()
+            files = remote_writer.batch_files
+
+        if file_type == BulkFileType.PARQUET:
+            assert len(files) > 1
+        for files_in_batch in files:
+            import_kwargs = {"nullkey": "null"} if file_type == BulkFileType.CSV else {}
+            success, _ = self._import_files(c_name, files_in_batch, **import_kwargs)
+            assert success
+        self._assert_nullable_float_vector_data(c_name, entities, null_ids, non_null_ids, dim)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [6])
+    def test_bulk_insert_non_nullable_float_vector_with_null_failed(self, dim, entities):
+        """
+        target: verify non-nullable vector fields still reject NULL values in import
+        method: import JSON data with null values for a non-nullable vector field
+        expected: import task fails with a field/value validation error
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert_non_nullable_vector")
+        self._create_nullable_float_vector_collection(c_name, dim, nullable=False)
+
+        rows = []
+        for i in range(entities):
+            rows.append(
+                {
+                    df.pk_field: i,
+                    df.int_field: i,
+                    self.nullable_vector_field: None if i == 0 else self._float_vector(i, dim),
+                }
+            )
+
+        files = self._write_json_file_to_minio(self.minio_endpoint, self.bucket_name, rows)
+        success, states = self._import_files(c_name, files)
+        assert not success
+        for state in states.values():
+            assert state.state_name in ["Failed", "Failed and cleaned"]
+            failed_reason = state.infos.get("failed_reason", "")
+            assert f"expected type 'FloatVector' for field '{self.nullable_vector_field}'" in failed_reason
+            assert "got type '<nil>'" in failed_reason
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "vector_type,vector_field",
+        [
+            (DataType.FLOAT_VECTOR, df.float_vec_field),
+            (DataType.BINARY_VECTOR, df.binary_vec_field),
+            (DataType.FLOAT16_VECTOR, df.fp16_vec_field),
+            (DataType.BFLOAT16_VECTOR, df.bf16_vec_field),
+            (DataType.SPARSE_FLOAT_VECTOR, df.sparse_vec_field),
+            (DataType.INT8_VECTOR, ct.default_int8_vec_field_name),
+        ],
+    )
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [6])
+    def test_bulk_insert_json_nullable_vector_all_types(self, vector_type, vector_field, dim, entities):
+        """
+        target: verify JSON import supports nullable values for every supported vector dtype
+        method: import mixed NULL/non-NULL rows for each vector type, then query and search the vector field
+        expected: import succeeds; query returns None for NULL vectors; search skips NULL vectors
+        """
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert_nullable_vector_types")
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=False),
+            cf.gen_int64_field(name=df.int_field),
+            self._vector_field(vector_type, vector_field, dim, nullable=True),
+        ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=False)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        rows = []
+        null_ids = []
+        non_null_ids = []
+        for i in range(entities):
+            row = {df.pk_field: i, df.int_field: i}
+            if i % 2 == 0:
+                row[vector_field] = None
+                null_ids.append(i)
+            else:
+                row[vector_field] = self._json_vector_value(vector_type, i, dim)
+                non_null_ids.append(i)
+            rows.append(row)
+
+        files = self._write_json_file_to_minio(self.minio_endpoint, self.bucket_name, rows)
+        success, _ = self._import_files(c_name, files)
+        assert success
+
+        self.collection_wrap.create_index(field_name=vector_field, index_params=self._index_params(vector_type))
+        self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
+        self.collection_wrap.load()
+
+        results, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} >= 0",
+            output_fields=[df.pk_field, vector_field],
+        )
+        assert len(results) == entities
+        rows_by_id = {row[df.pk_field]: row for row in results}
+        for pk in null_ids:
+            assert rows_by_id[pk][vector_field] is None
+        for pk in non_null_ids:
+            assert rows_by_id[pk][vector_field] is not None
+
+        search_res, _ = self.collection_wrap.search(
+            self._search_vector_value(vector_type, 100, dim),
+            vector_field,
+            param=self._search_params(vector_type),
+            limit=len(non_null_ids),
+        )
+        returned_ids = set(search_res[0].ids)
+        assert returned_ids
+        assert len(returned_ids) == len(non_null_ids)
+        assert returned_ids.issubset(set(non_null_ids))
+        assert returned_ids.isdisjoint(set(null_ids))
+
+
+class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -104,9 +604,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task id:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -117,20 +615,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.float_vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.float_vec_field, index_params=index_params)
         time.sleep(2)
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -188,13 +682,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{completed} in {tt}")
         assert completed
@@ -205,19 +695,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.float_vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.float_vec_field, index_params=index_params)
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 3
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -243,9 +729,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
-    def test_partition_float_vector_int_scalar(
-        self, is_row_based, auto_id, dim, entities
-    ):
+    def test_partition_float_vector_int_scalar(self, is_row_based, auto_id, dim, entities):
         """
         collection: customized partitions
         collection schema: [pk, float_vectors, int_scalar]
@@ -281,9 +765,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         m_partition, _ = self.collection_wrap.create_partition(partition_name=p_name)
         # build index before bulk insert
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load before bulk insert
         self.collection_wrap.load(partition_names=[p_name])
 
@@ -295,9 +777,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_id}")
-        success, state = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, state = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -309,12 +789,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         nq = 10
         topk = 5
@@ -376,19 +854,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             "metric_type": "JACCARD",
             "params": {"nlist": 64},
         }
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=binary_index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=binary_index_params)
         # load collection
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name,
-                                                      files=files)
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -400,7 +873,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify num entities
         assert self.collection_wrap.num_entities == entities
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_binary_vectors(1, dim)[1]
@@ -445,15 +918,12 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             [i for i in range(direct_insert_row)],
             [np.float32(i) for i in range(direct_insert_row)],
             cf.gen_vectors(direct_insert_row, dim=dim),
-
         ]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.float_vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.float_vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         if insert_before_bulk_insert:
@@ -469,17 +939,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             dim=dim,
             data_fields=[df.pk_field, df.float_field, df.float_vec_field],
             force=True,
-            schema=schema
+            schema=schema,
         )
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -497,7 +963,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         nq = 3
@@ -556,21 +1022,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         if loaded_before_bulk_insert:
             # load collection
             self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -586,7 +1046,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         nq = 3
@@ -629,7 +1089,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-
         ]
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -644,7 +1103,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
-            schema=schema
+            schema=schema,
         )
         # create index and load before bulk insert
         scalar_field_list = [df.int_field, df.float_field, df.double_field, df.string_field]
@@ -652,40 +1111,38 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in scalar_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params={"index_type": "INVERTED"}
-            )
+            self.collection_wrap.create_index(field_name=f, index_params={"index_type": "INVERTED"})
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_index)
         for f in binary_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_binary_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_binary_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
 
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -693,7 +1150,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
         # verify imported data is available for search
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(5)
 
@@ -762,8 +1219,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("add_field", [True, False])
-    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field,
-                                                        enable_partition_key, nullable, add_field):
+    def test_bulk_insert_all_field_with_new_json_format(
+        self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, nullable, add_field
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -775,9 +1233,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if enable_partition_key is True and nullable is True:
             pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
-        binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
-        bf16_vec_field_dim = dim+random.randint(-16, 32)
-        fp16_vec_field_dim = dim+random.randint(-16, 32)
+        binary_vec_field_dim = ((dim + random.randint(-16, 32)) // 8) * 8
+        bf16_vec_field_dim = dim + random.randint(-16, 32)
+        fp16_vec_field_dim = dim + random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
@@ -787,14 +1245,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(
+                name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable
+            ),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_geometry_field(name=df.geo_field),
             cf.gen_timestamptz_field(name=df.timestamp_field, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
-            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim)
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         self._connect()
@@ -809,22 +1269,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
-            schema=schema
+            schema=schema,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
-                                             nullable=True)
+            self.client.add_collection_field(
+                collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64, nullable=True
+            )
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -836,28 +1293,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in binary_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_binary_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_binary_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -918,22 +1379,28 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             expr_field = df.string_field
             expr = f"{expr_field} >= '0'"
         else:
-            res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field, df.int_field])
+            res, _ = self.collection_wrap.query(
+                expr=f"{df.string_field} >= '0'", output_fields=[df.string_field, df.int_field]
+            )
             assert len(res) == 0
             expr_field = df.pk_field
             expr = f"{expr_field} >= 0"
-        
+
         if add_field:
-            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
-            assert len(res) == 0           
+            res, _ = self.collection_wrap.query(
+                expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field]
+            )
+            assert len(res) == 0
 
         res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[expr_field, df.int_field])
         assert len(res) == entities
         log.info(res)
-        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        query_data = [r[expr_field] for r in res][: len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"text_match({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(
+            expr=f"text_match({df.text_field}, 'milvus')", output_fields=[df.text_field]
+        )
         if nullable is False:
             assert len(res) == entities
         else:
@@ -960,8 +1427,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("add_field", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key,
-                                              include_meta, nullable, add_field):
+    def test_bulk_insert_all_field_with_numpy(
+        self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta, nullable, add_field
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -976,9 +1444,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if nullable is True:
             pytest.skip("not support bulk insert numpy files in field which set nullable == true")
         float_vec_field_dim = dim
-        binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
-        bf16_vec_field_dim = dim+random.randint(-16, 32)
-        fp16_vec_field_dim = dim+random.randint(-16, 32)
+        binary_vec_field_dim = ((dim + random.randint(-16, 32)) // 8) * 8
+        bf16_vec_field_dim = dim + random.randint(-16, 32)
+        fp16_vec_field_dim = dim + random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
@@ -990,7 +1458,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
-            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim)
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         self._connect()
@@ -1005,22 +1473,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
-            schema=schema
+            schema=schema,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
-                                             nullable=True)
+            self.client.add_collection_field(
+                collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64, nullable=True
+            )
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -1032,28 +1497,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         for f in binary_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_binary_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_binary_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -1111,14 +1580,18 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "address" in fields_from_search
         # query data
         if add_field:
-            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            res, _ = self.collection_wrap.query(
+                expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field]
+            )
             assert len(res) == 0
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
         assert len(res) == entities
-        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
+        query_data = [r[df.string_field] for r in res][: len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(
+            expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field]
+        )
         if nullable is False:
             assert len(res) == entities
         else:
@@ -1139,8 +1612,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("add_field", [True, False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field,
-                                                enable_partition_key, include_meta, nullable, add_field):
+    def test_bulk_insert_all_field_with_parquet(
+        self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta, nullable, add_field
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1154,9 +1628,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if enable_partition_key is True and nullable is True:
             pytest.skip("partition key field not support nullable")
         float_vec_field_dim = dim
-        binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
-        bf16_vec_field_dim = dim+random.randint(-16, 32)
-        fp16_vec_field_dim = dim+random.randint(-16, 32)
+        binary_vec_field_dim = ((dim + random.randint(-16, 32)) // 8) * 8
+        bf16_vec_field_dim = dim + random.randint(-16, 32)
+        fp16_vec_field_dim = dim + random.randint(-16, 32)
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field, nullable=nullable),
@@ -1166,14 +1640,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_json_field(name=df.json_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(
+                name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable
+            ),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_geometry_field(name=df.geo_field),
             cf.gen_timestamptz_field(name=df.timestamp_field, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=float_vec_field_dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=binary_vec_field_dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=bf16_vec_field_dim),
-            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim)
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=fp16_vec_field_dim),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         self._connect()
@@ -1188,23 +1664,20 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
-            schema=schema
+            schema=schema,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
-                                             nullable=True)
+            self.client.add_collection_field(
+                collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64, nullable=True
+            )
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -1216,28 +1689,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         binary_vec_fields = [f.name for f in fields if "vec" in f.name and "binary" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in binary_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_binary_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_binary_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -1303,14 +1780,18 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             expr_field = df.pk_field
             expr = f"{expr_field} >= 0"
         if add_field:
-            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
-            assert len(res) == 0   
+            res, _ = self.collection_wrap.query(
+                expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field]
+            )
+            assert len(res) == 0
         res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
         assert len(res) == entities
-        query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
+        query_data = [r[expr_field] for r in res][: len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
-        res, _ = self.collection_wrap.query(expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field])
+        res, _ = self.collection_wrap.query(
+            expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field]
+        )
         if not nullable:
             assert len(res) == entities
         else:
@@ -1336,7 +1817,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
-    def test_bulk_insert_sparse_vector_with_parquet(self, auto_id, dim, entities, enable_dynamic_field, include_meta, sparse_format):
+    def test_bulk_insert_sparse_vector_with_parquet(
+        self, auto_id, dim, entities, enable_dynamic_field, include_meta, sparse_format
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1374,20 +1857,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             force=True,
             include_meta=include_meta,
             sparse_format=sparse_format,
-            schema=schema
+            schema=schema,
         )
 
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -1399,15 +1878,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1451,7 +1926,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
@@ -1459,7 +1933,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
-    def test_bulk_insert_sparse_vector_with_json(self, auto_id, dim, entities, enable_dynamic_field, include_meta, sparse_format):
+    def test_bulk_insert_sparse_vector_with_json(
+        self, auto_id, dim, entities, enable_dynamic_field, include_meta, sparse_format
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1497,19 +1973,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             force=True,
             include_meta=include_meta,
             sparse_format=sparse_format,
-            schema=schema
+            schema=schema,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
@@ -1521,15 +1993,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1580,7 +2048,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
     @pytest.mark.parametrize("nullable", [True, False])
-    def test_with_all_field_json_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable):
+    def test_with_all_field_json_with_bulk_writer(
+        self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -1599,7 +2069,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_timestamptz_field(name=df.timestamp_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(
+                name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable
+            ),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
@@ -1630,7 +2102,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 {"key": "value"},
                 {"number": 1},
                 {"name": fake.name()},
-                {"address": fake.address()}
+                {"address": fake.address()},
             ]
             for i in range(entities):
                 row = {
@@ -1638,7 +2110,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
                     df.float_field: 1.0 if not (nullable and random.random() < 0.5) else None,
                     df.string_field: "string" if not (nullable and random.random() < 0.5) else None,
-                    df.json_field: json_value[i%len(json_value)] if not (nullable and random.random() < 0.5) else None,
+                    df.json_field: json_value[i % len(json_value)]
+                    if not (nullable and random.random() < 0.5)
+                    else None,
                     df.timestamp_field: cf.gen_timestamptz_str() if not (nullable and random.random() < 0.5) else None,
                     df.array_int_field: [1, 2] if not (nullable and random.random() < 0.5) else None,
                     df.array_float_field: [1.0, 2.0] if not (nullable and random.random() < 0.5) else None,
@@ -1647,7 +2121,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
-                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0],
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1660,13 +2134,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -1678,28 +2148,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1723,9 +2197,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     assert "address" in fields_from_search
         res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
         if not nullable:
-            assert len(res) == int(entities/len(json_value))
+            assert len(res) == int(entities / len(json_value))
         else:
-            assert 0 < len(res) < int(entities/len(json_value))
+            assert 0 < len(res) < int(entities / len(json_value))
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True])
@@ -1734,7 +2208,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("sparse_format", ["doc"])
     @pytest.mark.parametrize("file_format", ["parquet", "json"])
-    def test_with_all_field_and_bm25_function_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, file_format):
+    def test_with_all_field_and_bm25_function_with_bulk_writer(
+        self, auto_id, dim, entities, enable_dynamic_field, sparse_format, file_format
+    ):
         """
         target: test bulk insert with all field and bm25 function
         method: create collection with all field and bm25 function, then import data with bulk writer
@@ -1801,13 +2277,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.float_field: 1.0,
                     df.string_field: "string",
                     df.text_field: fake.text(),
-                    df.json_field: json_value[i%len(json_value)],
+                    df.json_field: json_value[i % len(json_value)],
                     df.array_int_field: [1, 2],
                     df.array_float_field: [1.0, 2.0],
                     df.array_string_field: ["string1", "string2"],
                     df.array_bool_field: [True, False],
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
-                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0],
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1821,13 +2297,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -1840,19 +2312,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and "bm25" not in f.name]
         bm25_sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name and "bm25" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         for f in bm25_sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_text_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_text_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1893,7 +2359,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_items={"nq": 1, "limit": 1},
         )
 
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
@@ -1901,8 +2366,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
     def test_with_all_field_numpy_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, nullable):
-        """
-        """
+        """ """
         if nullable is True:
             pytest.skip("not support bulk writer numpy files in field(int_scalar) which has 'None' data")
 
@@ -1941,7 +2405,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 {"key": "value"},
                 {"number": 1},
                 {"name": fake.name()},
-                {"address": fake.address()}
+                {"address": fake.address()},
             ]
             for i in range(entities):
                 row = {
@@ -1949,7 +2413,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
                     df.float_field: 1.0,
                     df.string_field: "string",
-                    df.json_field: json_value[i%len(json_value)],
+                    df.json_field: json_value[i % len(json_value)],
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
@@ -1965,13 +2429,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -1983,28 +2443,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2036,9 +2500,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
     @pytest.mark.parametrize("nullable", [True, False])
-    def test_with_all_field_parquet_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable):
-        """
-        """
+    def test_with_all_field_parquet_with_bulk_writer(
+        self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable
+    ):
+        """ """
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
@@ -2049,7 +2514,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_timestamptz_field(name=df.timestamp_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(
+                name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable
+            ),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
@@ -2080,7 +2547,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 {"key": "value"},
                 {"number": 1},
                 {"name": fake.name()},
-                {"address": fake.address()}
+                {"address": fake.address()},
             ]
             for i in range(entities):
                 row = {
@@ -2088,7 +2555,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
                     df.float_field: 1.0 if not (nullable and random.random() < 0.5) else None,
                     df.string_field: "string" if not (nullable and random.random() < 0.5) else None,
-                    df.json_field: json_value[i%len(json_value)] if not (nullable and random.random() < 0.5) else None,
+                    df.json_field: json_value[i % len(json_value)]
+                    if not (nullable and random.random() < 0.5)
+                    else None,
                     df.timestamp_field: cf.gen_timestamptz_str() if not (nullable and random.random() < 0.5) else None,
                     df.array_int_field: [1, 2] if not (nullable and random.random() < 0.5) else None,
                     df.array_float_field: [1.0, 2.0] if not (nullable and random.random() < 0.5) else None,
@@ -2097,7 +2566,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
-                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0],
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -2110,13 +2579,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -2128,28 +2593,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2173,10 +2642,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     assert "address" in fields_from_search
         res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
         if not nullable:
-            assert len(res) == int(entities/len(json_value))
+            assert len(res) == int(entities / len(json_value))
         else:
-            assert 0 < len(res) < int(entities/len(json_value))
-
+            assert 0 < len(res) < int(entities / len(json_value))
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -2186,10 +2654,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("add_field", [True, False])
-    def test_with_all_field_csv_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format,
-                                                 nullable, add_field):
-        """
-        """
+    def test_with_all_field_csv_with_bulk_writer(
+        self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable, add_field
+    ):
+        """ """
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
@@ -2200,7 +2668,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_timestamptz_field(name=df.timestamp_field, nullable=nullable),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64, nullable=nullable),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT, nullable=nullable),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable),
+            cf.gen_array_field(
+                name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100, nullable=nullable
+            ),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL, nullable=nullable),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim),
@@ -2221,19 +2691,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ),
             file_type=BulkFileType.CSV,
         ) as remote_writer:
-            json_value = [
-                {"key": "value"},
-                {"number": 1},
-                {"name": fake.name()},
-                {"address": fake.address()}
-            ]
+            json_value = [{"key": "value"}, {"number": 1}, {"name": fake.name()}, {"address": fake.address()}]
             for i in range(entities):
                 row = {
                     df.pk_field: i,
                     df.int_field: 1 if not (nullable and random.random() < 0.5) else None,
                     df.float_field: 1.0 if not (nullable and random.random() < 0.5) else None,
                     df.string_field: "string" if not (nullable and random.random() < 0.5) else None,
-                    df.json_field: json_value[i%len(json_value)] if not (nullable and random.random() < 0.5) else None,
+                    df.json_field: json_value[i % len(json_value)]
+                    if not (nullable and random.random() < 0.5)
+                    else None,
                     df.timestamp_field: cf.gen_timestamptz_str() if not (nullable and random.random() < 0.5) else None,
                     df.array_int_field: [1, 2] if not (nullable and random.random() < 0.5) else None,
                     df.array_float_field: [1.0, 2.0] if not (nullable and random.random() < 0.5) else None,
@@ -2242,7 +2709,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
                     df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)[0],
                     df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
-                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
+                    df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0],
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -2254,18 +2721,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files = remote_writer.batch_files
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
-                                             nullable=True)
+            self.client.add_collection_field(
+                collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64, nullable=True
+            )
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             logging.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -2277,28 +2741,32 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         float_vec_fields = [f.name for f in fields if "vec" in f.name and "float" in f.name]
         sparse_vec_fields = [f.name for f in fields if "vec" in f.name and "sparse" in f.name]
         for f in float_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=index_params
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=index_params)
         for f in sparse_vec_fields:
-            self.collection_wrap.create_index(
-                field_name=f, index_params=ct.default_sparse_inverted_index
-            )
+            self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         # add json path index for json field
-        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                              "json_path": f"{df.json_field}['number']"}}
+        json_path_index_params_double = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "double", "json_path": f"{df.json_field}['number']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
-        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
-                                                                               "json_path": f"{df.json_field}['address']"}}
+        json_path_index_params_varchar = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "VARCHAR", "json_path": f"{df.json_field}['address']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
-        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
-                                                                            "json_path": f"{df.json_field}['name']"}}
+        json_path_index_params_bool = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Bool", "json_path": f"{df.json_field}['name']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
-        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
-                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        json_path_index_params_not_exist = {
+            "index_type": "INVERTED",
+            "params": {"json_cast_type": "Double", "json_path": f"{df.json_field}['not_exist']"},
+        }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2322,11 +2790,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     assert "address" in fields_from_search
         res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
         if not nullable:
-            assert len(res) == int(entities/len(json_value))
+            assert len(res) == int(entities / len(json_value))
         else:
-            assert 0 < len(res) < int(entities/len(json_value))
+            assert 0 < len(res) < int(entities / len(json_value))
         if add_field:
-            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            res, _ = self.collection_wrap.query(
+                expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field]
+            )
             assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2378,8 +2848,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if file_nums > 1:
             error = {ct.err_code: 65535, ct.err_msg: "for Parquet import, accepts only one file"}
         self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files,
-            check_task=CheckTasks.err_res, check_items=error
+            collection_name=c_name, files=files, check_task=CheckTasks.err_res, check_items=error
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2387,9 +2856,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("file_nums", [5])
-    def test_multi_numpy_files_from_diff_folders(
-        self, auto_id, dim, entities, file_nums
-    ):
+    def test_multi_numpy_files_from_diff_folders(self, auto_id, dim, entities, file_nums):
         """
         collection schema 1: [pk, float_vector]
         data file: .npy files in different folders
@@ -2411,9 +2878,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
@@ -2428,13 +2893,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 file_nums=1,
                 force=True,
             )
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=files
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
             task_ids.append(task_id)
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=300)
         log.info(f"bulk insert state:{success}")
 
         assert success
@@ -2442,7 +2903,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == entities * file_nums
 
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_vectors(1, dim)
@@ -2483,7 +2944,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_string_field(name=df.string_field, is_partition_key=(par_key_field == df.string_field)),
             cf.gen_bool_field(name=df.bool_field),
             cf.gen_float_field(name=df.float_field),
-            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64)
+            cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
@@ -2496,7 +2957,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             auto_id=auto_id,
             data_fields=data_fields,
             force=True,
-            schema=schema
+            schema=schema,
         )
         self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         assert len(self.collection_wrap.partitions) == 10
@@ -2509,9 +2970,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files=files,
         )
         logging.info(f"bulk insert task id:{task_id}")
-        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
         assert success
@@ -2522,15 +2981,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify imported data is available for search
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.float_vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.float_vec_field, index_params=index_params)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(10)
-        log.info(
-            f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
-        )
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -2572,9 +3027,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [13])
     @pytest.mark.parametrize("entities", [150])
     @pytest.mark.parametrize("file_nums", [10])
-    def test_partition_key_on_multi_numpy_files(
-            self, auto_id, dim, entities, file_nums
-    ):
+    def test_partition_key_on_multi_numpy_files(self, auto_id, dim, entities, file_nums):
         """
         collection schema 1: [pk, int64, float_vector, double]
         data file: .npy files in different folders
@@ -2596,9 +3049,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
-        )
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
@@ -2613,13 +3064,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 file_nums=1,
                 force=True,
             )
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=files
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
             task_ids.append(task_id)
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=300
-        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=300)
         log.info(f"bulk insert state:{success}")
 
         assert success
@@ -2629,7 +3076,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_vectors(1, dim)
@@ -2670,9 +3117,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ]
             data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
             files = prepare_bulk_insert_new_json_files(
-                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
-                is_row_based=True, rows=nb, dim=ct.default_dim, auto_id=False, data_fields=data_fields, force=True,
-                shuffle=True
+                minio_endpoint=self.minio_endpoint,
+                bucket_name=self.bucket_name,
+                is_row_based=True,
+                rows=nb,
+                dim=ct.default_dim,
+                auto_id=False,
+                data_fields=data_fields,
+                force=True,
+                shuffle=True,
             )
         elif pk_field == df.string_field:
             fields = [
@@ -2681,9 +3134,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ]
             data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
             files = prepare_bulk_insert_numpy_files(
-                minio_endpoint=self.minio_endpoint, bucket_name=self.bucket_name,
-                rows=nb, dim=ct.default_dim, data_fields=data_fields, enable_dynamic_field=False, force=True,
-                shuffle_pk=True
+                minio_endpoint=self.minio_endpoint,
+                bucket_name=self.bucket_name,
+                rows=nb,
+                dim=ct.default_dim,
+                data_fields=data_fields,
+                enable_dynamic_field=False,
+                force=True,
+                shuffle_pk=True,
             )
         else:
             log.error(f"pk_field name {pk_field} not supported now, [{df.pk_field}, {df.string_field}] expected~")
@@ -2695,13 +3153,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # bulk_insert data
         t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=collection_name, files=files
-        )
+        task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=collection_name, files=files)
         logging.info(f"bulk insert task ids:{task_id}")
-        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
         tt = time.time() - t0
         log.info(f"bulk insert state:{completed} with latency {tt}")
         assert completed
@@ -2720,11 +3174,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify search
         self.collection_wrap.search(
             data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
-            anns_field=df.float_vec_field, param=DefaultVectorSearchParams.IVF_SQ8(),
+            anns_field=df.float_vec_field,
+            param=DefaultVectorSearchParams.IVF_SQ8(),
             limit=ct.default_limit,
             check_task=CheckTasks.check_search_results,
-            check_items={"nq": ct.default_nq,
-                         "limit": ct.default_limit})
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
+
 
 class TestImportWithTextEmbeddingFunction(TestcaseBase):
     """
@@ -2792,18 +3248,15 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
             files = remote_writer.batch_files
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
-                                             nullable=True)
+            self.client.add_collection_field(
+                collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64, nullable=True
+            )
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             log.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert success
@@ -2859,12 +3312,11 @@ class TestImportWithFunctionNegative(TestcaseBase):
             function_type=FunctionType.BM25,
             input_field_names=["document"],
             output_field_names=["bm25"],
-            params={
-            },
+            params={},
         )
         schema.add_function(bm25_function)
         c_name = cf.gen_unique_str("import_without_embedding")
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
         # prepare import data with function output
         invalid_schema = CollectionSchema(fields=fields, description="test collection")
@@ -2888,33 +3340,29 @@ class TestImportWithFunctionNegative(TestcaseBase):
             file_type=file_type,
         ) as remote_writer:
             for i in range(nb):
-                row = {"id": i,
-                       "document": f"This is test document {i}",
-                       "bm25": {
-                            d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))
-                        }
-                       }
+                row = {
+                    "id": i,
+                    "document": f"This is test document {i}",
+                    "bm25": {d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))},
+                }
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             log.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert not success
 
-
     @pytest.mark.parametrize("file_format", ["json", "parquet"])
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_for_text_embedding_function_with_output_field(self, tei_endpoint, minio_host, minio_bucket, file_format):
+    def test_import_for_text_embedding_function_with_output_field(
+        self, tei_endpoint, minio_host, minio_bucket, file_format
+    ):
         """
         target: test import data for text embedding function with output field
         method: 1. create collection
@@ -2942,7 +3390,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
         c_name = cf.gen_unique_str("import_without_embedding")
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
         # prepare import data embedding
         invalid_schema = CollectionSchema(fields=fields, description="test collection")
@@ -2965,23 +3413,20 @@ class TestImportWithFunctionNegative(TestcaseBase):
             file_type=file_type,
         ) as remote_writer:
             for i in range(nb):
-                row = {"id": i,
-                       "document": f"This is test document {i}",
-                       "dense": [random.random() for _ in range(dim)]
-                       }
+                row = {
+                    "id": i,
+                    "document": f"This is test document {i}",
+                    "dense": [random.random() for _ in range(dim)],
+                }
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
         # import data
         for f in files:
             t0 = time.time()
-            task_id, _ = self.utility_wrap.do_bulk_insert(
-                collection_name=c_name, files=f
-            )
+            task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=f)
             log.info(f"bulk insert task ids:{task_id}")
-            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-                task_ids=[task_id], timeout=300
-            )
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=300)
             tt = time.time() - t0
             log.info(f"bulk insert state:{success} in {tt} with states:{states}")
             assert not success
