@@ -938,13 +938,13 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == default_nb
         # 3. insert diff fields
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i + default_nb, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, "new_diff_str_field": str(i)} for i in range(default_nb)]
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        insert_ids = [i for i in range(default_nb * 2)]
         self.search(client, collection_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
