@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -331,6 +332,83 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.Empty(segments)
+}
+
+func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {
+	const (
+		rowCount  = 100
+		arraySize = 3
+		vectorDim = 4
+	)
+
+	c := s.Cluster
+	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
+	defer cancel()
+
+	collectionName := "TestBulkInsert_FixedSizeList_" + funcutil.RandomString(8)
+	arrayFieldName := "fsl_array"
+
+	schema := integration.ConstructSchema(collectionName, vectorDim, true,
+		&schemapb.FieldSchema{
+			FieldID:      100,
+			Name:         integration.Int64Field,
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+			AutoID:       true,
+		},
+		&schemapb.FieldSchema{
+			FieldID:     101,
+			Name:        arrayFieldName,
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: fmt.Sprintf("%d", arraySize)},
+			},
+		},
+		&schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     integration.FloatVecField,
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: fmt.Sprintf("%d", vectorDim)},
+			},
+		},
+	)
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
+
+	filePath, err := generateFixedSizeListParquetFile(c, arrayFieldName, integration.FloatVecField, rowCount, arraySize, vectorDim)
+	s.NoError(err)
+
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: collectionName,
+		Files: []*internalpb.ImportFile{
+			{
+				Paths: []string{filePath},
+			},
+		},
+	})
+	s.NoError(err)
+	s.Equal(int32(0), importResp.GetStatus().GetCode())
+	s.NoError(WaitForImportDone(ctx, c, importResp.GetJobID()))
+
+	segments, err := c.ShowSegments(collectionName)
+	s.NoError(err)
+	s.NotEmpty(segments)
+	for _, segment := range segments {
+		s.NotEmpty(segment.GetBinlogs())
+		s.NoError(CheckLogID(segment.GetBinlogs()))
+		s.NotEmpty(segment.GetStatslogs())
+		s.NoError(CheckLogID(segment.GetStatslogs()))
+	}
 }
 
 func (s *BulkInsertSuite) TestDiskQuotaExceeded() {
