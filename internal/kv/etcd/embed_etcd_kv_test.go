@@ -23,6 +23,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,31 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-type testPredicate struct {
-	target        predicates.PredicateTarget
-	predicateType predicates.PredicateType
-}
-
-func (p testPredicate) Target() predicates.PredicateTarget {
-	return p.target
-}
-
-func (p testPredicate) Type() predicates.PredicateType {
-	return p.predicateType
-}
-
-func (p testPredicate) IsTrue(any) bool {
-	return false
-}
-
-func (p testPredicate) Key() string {
-	return ""
-}
-
-func (p testPredicate) TargetValue() any {
-	return nil
-}
 
 func TestEmbedEtcd(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
@@ -910,7 +886,11 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
-	badPredicate := testPredicate{target: predicates.PredTargetValue}
+	badPredicate := &struct{ predicates.Predicate }{}
+	targetMock := mockey.Mock((*struct{ predicates.Predicate }).Target).Return(predicates.PredTargetValue).Build()
+	defer targetMock.UnPatch()
+	typeMock := mockey.Mock((*struct{ predicates.Predicate }).Type).Return(predicates.PredicateType(0)).Build()
+	defer typeMock.UnPatch()
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string

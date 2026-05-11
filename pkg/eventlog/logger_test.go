@@ -32,9 +32,9 @@ func (s *LoggerSuite) TearDownTest() {
 }
 
 func (s *LoggerSuite) TestRecord() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	recordMock := mockey.Mock((*testLogger).Record).To(
-		func(logger *testLogger, evt Evt) {
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordMock := mockey.Mock((*struct{ Logger }).Record).To(
+		func(logger *struct{ Logger }, evt Evt) {
 			calls[logger].records = append(calls[logger].records, evt)
 		},
 	).Build()
@@ -65,10 +65,10 @@ func (s *LoggerSuite) TestRecord() {
 }
 
 func (s *LoggerSuite) TestRecordFunc() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	recordFuncMock := mockey.Mock((*testLogger).RecordFunc).To(
-		func(logger *testLogger, level Level, fn func() Evt) {
-			calls[logger].recordFuncs = append(calls[logger].recordFuncs, testRecordFuncCall{
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordFuncMock := mockey.Mock((*struct{ Logger }).RecordFunc).To(
+		func(logger *struct{ Logger }, level Level, fn func() Evt) {
+			calls[logger].recordFuncs = append(calls[logger].recordFuncs, recordFuncCall{
 				level: level,
 				evt:   fn(),
 			})
@@ -86,8 +86,8 @@ func (s *LoggerSuite) TestRecordFunc() {
 
 	RecordFunc(Level_Info, func() Evt { return rawEvt })
 
-	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
-	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
 
 	logger3 := newTestLogger(calls)
 	Register("logger3", logger3)
@@ -102,9 +102,9 @@ func (s *LoggerSuite) TestRecordFunc() {
 }
 
 func (s *LoggerSuite) TestFlush() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	flushMock := mockey.Mock((*testLogger).Flush).To(
-		func(logger *testLogger) error {
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	flushMock := mockey.Mock((*struct{ Logger }).Flush).To(
+		func(logger *struct{ Logger }) error {
 			calls[logger].flushes++
 			return nil
 		},
@@ -126,31 +126,27 @@ func TestLogger(t *testing.T) {
 	suite.Run(t, new(LoggerSuite))
 }
 
-type testLogger struct {
-	Logger
-}
-
-type testRecordFuncCall struct {
+type recordFuncCall struct {
 	level Level
 	evt   Evt
 }
 
-type testLoggerCalls struct {
+type loggerCalls struct {
 	records     []Evt
-	recordFuncs []testRecordFuncCall
+	recordFuncs []recordFuncCall
 	flushes     int
 }
 
-func (c *testLoggerCalls) recordCount() int {
+func (c *loggerCalls) recordCount() int {
 	return len(c.records)
 }
 
-func (c *testLoggerCalls) recordFuncCount() int {
+func (c *loggerCalls) recordFuncCount() int {
 	return len(c.recordFuncs)
 }
 
-func newTestLogger(calls map[*testLogger]*testLoggerCalls) *testLogger {
-	logger := &testLogger{}
-	calls[logger] = &testLoggerCalls{}
+func newTestLogger(calls map[*struct{ Logger }]*loggerCalls) *struct{ Logger } {
+	logger := &struct{ Logger }{}
+	calls[logger] = &loggerCalls{}
 	return logger
 }

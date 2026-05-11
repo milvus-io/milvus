@@ -44,9 +44,9 @@ func (s *GlobalLoggerSuite) TestGetGlobalLogger() {
 }
 
 func (s *GlobalLoggerSuite) TestRecord() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	recordMock := mockey.Mock((*testLogger).Record).To(
-		func(logger *testLogger, evt Evt) {
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordMock := mockey.Mock((*struct{ Logger }).Record).To(
+		func(logger *struct{ Logger }, evt Evt) {
 			calls[logger].records = append(calls[logger].records, evt)
 		},
 	).Build()
@@ -78,10 +78,10 @@ func (s *GlobalLoggerSuite) TestRecord() {
 }
 
 func (s *GlobalLoggerSuite) TestRecordFunc() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	recordFuncMock := mockey.Mock((*testLogger).RecordFunc).To(
-		func(logger *testLogger, level Level, fn func() Evt) {
-			calls[logger].recordFuncs = append(calls[logger].recordFuncs, testRecordFuncCall{
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	recordFuncMock := mockey.Mock((*struct{ Logger }).RecordFunc).To(
+		func(logger *struct{ Logger }, level Level, fn func() Evt) {
+			calls[logger].recordFuncs = append(calls[logger].recordFuncs, recordFuncCall{
 				level: level,
 				evt:   fn(),
 			})
@@ -99,8 +99,8 @@ func (s *GlobalLoggerSuite) TestRecordFunc() {
 
 	getGlobalLogger().RecordFunc(Level_Info, func() Evt { return rawEvt })
 
-	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
-	s.Equal([]testRecordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger1].recordFuncs)
+	s.Equal([]recordFuncCall{{level: Level_Info, evt: rawEvt}}, calls[logger2].recordFuncs)
 
 	logger3 := newTestLogger(calls)
 	getGlobalLogger().Register("logger3", logger3)
@@ -115,9 +115,9 @@ func (s *GlobalLoggerSuite) TestRecordFunc() {
 }
 
 func (s *GlobalLoggerSuite) TestFlush() {
-	calls := make(map[*testLogger]*testLoggerCalls)
-	flushMock := mockey.Mock((*testLogger).Flush).To(
-		func(logger *testLogger) error {
+	calls := make(map[*struct{ Logger }]*loggerCalls)
+	flushMock := mockey.Mock((*struct{ Logger }).Flush).To(
+		func(logger *struct{ Logger }) error {
 			calls[logger].flushes++
 			return nil
 		},
