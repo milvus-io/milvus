@@ -1179,6 +1179,56 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 	s.Contains(err.Error(), "external_field mappings")
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SamplingTypeMismatchFails() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       100,
+					Name:          "age",
+					DataType:      schemapb.DataType_Int8,
+					ExternalField: "age_col",
+				},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	typeMismatchErr := fmt.Errorf("field type mismatch, expected Arrow int8, actual Arrow int64")
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, typeMismatchErr).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{{FragmentID: 1, RowCount: 500}}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err)
+	s.Nil(result)
+	s.Contains(err.Error(), "sampling failed")
+	s.Contains(err.Error(), "field type mismatch")
+	s.Contains(err.Error(), "expected Arrow int8")
+	s.Contains(err.Error(), "actual Arrow int64")
+}
+
 // Regression: the samplePerSegment=true branch of Phase 3 was previously
 // uncovered by tests. This exercise is three parts:
 //  1. All per-segment samples succeed → each segment gets its own
@@ -1226,7 +1276,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	var callCount int32
 	perCallSizes := []int64{50, 100, 200}
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			idx := int(atomic.AddInt32(&callCount, 1)) - 1
 			if idx >= len(perCallSizes) {
 				idx = len(perCallSizes) - 1
@@ -1295,7 +1345,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	// not the third (250), since fallbackAvg latches on the first success.
 	var callCount int32
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			idx := int(atomic.AddInt32(&callCount, 1)) - 1
 			switch idx {
 			case 0:
@@ -1669,8 +1719,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 
 	var capturedStorageConfig *indexpb.StorageConfig
 	var capturedExternalSpec string
+	var capturedSchema *schemapb.CollectionSchema
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+			capturedSchema = schema
 			capturedStorageConfig = storageConfig
 			capturedExternalSpec = externalSpec
 			return map[string]int64{"vec_col": 3072}, nil
@@ -1690,6 +1742,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 	s.Equal(expectedStorageConfig.GetAddress(), capturedStorageConfig.GetAddress())
 	s.Equal(expectedStorageConfig.GetBucketName(), capturedStorageConfig.GetBucketName())
 	s.Equal(expectedStorageConfig.GetStorageType(), capturedStorageConfig.GetStorageType())
+	s.Equal(req.GetSchema(), capturedSchema, "schema must be passed to SampleExternalFieldSizes")
 
 	// Verify raw externalSpec JSON is forwarded so C++ InjectExternalSpecProperties
 	// can derive extfs.* overrides.
@@ -1732,7 +1785,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 	var capturedStorageConfig *indexpb.StorageConfig
 	var capturedExternalSpec string
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			capturedStorageConfig = storageConfig
 			capturedExternalSpec = externalSpec
 			return map[string]int64{"text_col": 64}, nil

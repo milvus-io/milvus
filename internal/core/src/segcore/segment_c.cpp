@@ -318,7 +318,8 @@ AsyncSearch(CTraceContext c_trace,
             int32_t consistency_level,
             uint64_t collection_ttl,
             uint64_t entity_ttl_physical_time_us,
-            bool filter_only) {
+            bool filter_only,
+            bool enable_expr_cache) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -334,7 +335,8 @@ AsyncSearch(CTraceContext c_trace,
          consistency_level,
          collection_ttl,
          entity_ttl_physical_time_us,
-         filter_only](folly::CancellationToken cancel_token) {
+         filter_only,
+         enable_expr_cache](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -353,7 +355,8 @@ AsyncSearch(CTraceContext c_trace,
                                                  consistency_level,
                                                  collection_ttl,
                                                  entity_ttl_physical_time_us,
-                                                 filter_only);
+                                                 filter_only,
+                                                 enable_expr_cache);
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
@@ -1261,6 +1264,31 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // to ensure deterministic column order matching the reader's expected order.
         std::vector<FieldInfo> field_infos;
         std::vector<std::shared_ptr<arrow::Field>> arrow_fields;
+
+        {
+            const auto& field_meta = milvus::FieldMeta::RowIdMeta;
+            FieldInfo info;
+            info.field_id = RowFieldID;
+            info.field_name = field_meta.get_name().get();
+            info.data_type = field_meta.get_data_type();
+            info.nullable = field_meta.is_nullable();
+            info.dim = 0;
+            info.vec_base = &insert_record.row_ids_;
+            info.valid_data = nullptr;
+            info.text_lob_spillover = nullptr;
+            field_infos.push_back(std::move(info));
+
+            auto metadata = arrow::KeyValueMetadata::Make(
+                {milvus_storage::ARROW_FIELD_ID_KEY},
+                {std::to_string(RowFieldID.get())});
+            auto arrow_type =
+                milvus::GetArrowDataType(field_meta.get_data_type(), 0);
+            arrow_fields.push_back(
+                arrow::field(std::to_string(RowFieldID.get()),
+                             arrow_type,
+                             field_meta.is_nullable(),
+                             metadata));
+        }
 
         for (const auto& field_id : schema.get_field_ids()) {
             if (field_id == RowFieldID) {

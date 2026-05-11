@@ -602,6 +602,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			t.req.GetCollectionID(),
 			t.req.GetExternalSource(),
 			t.req.GetExternalSpec(),
+			t.req.GetSchema(),
 			t.req.GetStorageConfig(),
 		)
 		if err != nil {

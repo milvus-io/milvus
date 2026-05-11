@@ -321,6 +321,12 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 	for _, segmentID := range segmentIDs {
 		_, ok := wb.metaCache.GetSegmentByID(segmentID)
 		if !ok {
+			if !wb.hasTextFields {
+				log.Warn("cannot find segment when sealSegments",
+					zap.Int64("segmentID", segmentID),
+					zap.String("channel", wb.channelName))
+				return merr.WrapErrSegmentNotFound(segmentID)
+			}
 			log.Info("segment not found in WriteBuffer metaCache, skipping seal",
 				zap.Int64("segmentID", segmentID),
 				zap.String("channel", wb.channelName))

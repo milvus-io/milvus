@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <filesystem>
 
 #include "segcore/segment_c.h"
@@ -17,6 +18,7 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/transaction/transaction.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -47,6 +49,37 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     }
 
     std::string test_dir_;
+
+    void
+    AssertManifestHasColumn(const std::string& segment_path,
+                            int64_t version,
+                            FieldId field_id) {
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        ASSERT_NE(fs, nullptr);
+
+        auto txn_result = milvus_storage::api::transaction::Transaction::Open(
+            fs, segment_path, version);
+        ASSERT_TRUE(txn_result.ok()) << txn_result.status().ToString();
+        auto txn = std::move(txn_result).ValueOrDie();
+
+        auto manifest_result = txn->GetManifest();
+        ASSERT_TRUE(manifest_result.ok())
+            << manifest_result.status().ToString();
+        auto manifest = manifest_result.ValueOrDie();
+
+        auto column_name = std::to_string(field_id.get());
+        bool found = false;
+        for (const auto& column_group : manifest->columnGroups()) {
+            ASSERT_NE(column_group, nullptr);
+            found |= std::find(column_group->columns.begin(),
+                               column_group->columns.end(),
+                               column_name) != column_group->columns.end();
+        }
+
+        EXPECT_TRUE(found) << "missing field " << column_name
+                           << " in committed manifest";
+    }
 };
 
 // test basic flush with scalar fields
@@ -91,6 +124,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     ASSERT_NE(result.manifest_path, nullptr);
     ASSERT_EQ(result.num_rows, N);
     ASSERT_GT(result.committed_version, 0);
+    AssertManifestHasColumn(segment_path, result.committed_version, RowFieldID);
 
     // Note: manifest path may be relative to ArrowFileSystem root path
     // The actual file existence should be verified via ArrowFileSystem API

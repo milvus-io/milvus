@@ -128,7 +128,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
-	segmentsToUpdate := typeutil.NewSet[int64]()
+	segmentsToUpdate := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -146,7 +146,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
 		if len(redundantIndices) > 0 {
-			segmentsToUpdate.Insert(segment.GetID())
+			segmentsToUpdate[segment.GetID()] = segment
 		}
 	}
 
@@ -163,14 +163,14 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 				if missingFields.Contain(fieldIndexInfo.GetFieldID()) &&
 					fieldIndexInfo.GetEnableIndex() &&
 					len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
-					segmentsToUpdate.Insert(segmentID)
+					segmentsToUpdate[segmentID] = idSegments[segmentID]
 				}
 			}
 		}
 	}
 
-	tasks = lo.FilterMap(segmentsToUpdate.Collect(), func(segmentID int64, _ int) (task.Task, bool) {
-		return c.createSegmentUpdateTask(ctx, idSegments[segmentID], replica)
+	tasks = lo.FilterMap(lo.Values(segmentsToUpdate), func(segment *meta.Segment, _ int) (task.Task, bool) {
+		return c.createSegmentUpdateTask(ctx, segment, replica)
 	})
 
 	segmentsStatsToUpdate := typeutil.NewSet[int64]()

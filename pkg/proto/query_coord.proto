@@ -484,6 +484,9 @@ message SearchRequest {
     int32 total_channel_num = 6;
     // If true, only execute filter and return valid counts per segment (two-stage search stage 1).
     bool filter_only = 7;
+    // If true, enable expression filter cache for two-stage search.
+    // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
+    bool enable_expr_cache = 8;
 }
 
 message QueryRequest {

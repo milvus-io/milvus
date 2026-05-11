@@ -50,6 +50,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                 int sample_rows,
                                 int64_t collection_id,
                                 const LoonProperties* properties,
+                                CProto collection_schema,
                                 CFieldMemSizeList* out);
 
 void

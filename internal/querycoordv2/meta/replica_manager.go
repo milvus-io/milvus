@@ -76,10 +76,11 @@ var _ ReplicaManagerInterface = (*ReplicaManager)(nil)
 type ReplicaManager struct {
 	rwmutex sync.RWMutex
 
-	idAllocator   func() (int64, error)
-	replicas      map[typeutil.UniqueID]*Replica
-	coll2Replicas map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
-	catalog       metastore.QueryCoordCatalog
+	idAllocator            func() (int64, error)
+	replicas               map[typeutil.UniqueID]*Replica
+	coll2Replicas          map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
+	queryInvisibleReplicas typeutil.UniqueSet
+	catalog                metastore.QueryCoordCatalog
 }
 
 // collectionReplicas maintains collection secondary index mapping
@@ -109,10 +110,11 @@ func newCollectionReplicas() *collectionReplicas {
 
 func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.QueryCoordCatalog) *ReplicaManager {
 	return &ReplicaManager{
-		idAllocator:   idAllocator,
-		replicas:      make(map[int64]*Replica),
-		coll2Replicas: make(map[int64]*collectionReplicas),
-		catalog:       catalog,
+		idAllocator:            idAllocator,
+		replicas:               make(map[int64]*Replica),
+		coll2Replicas:          make(map[int64]*collectionReplicas),
+		queryInvisibleReplicas: typeutil.NewUniqueSet(),
+		catalog:                catalog,
 	}
 }
 
@@ -162,6 +164,39 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 	defer m.rwmutex.RUnlock()
 
 	return m.replicas[id]
+}
+
+func (m *ReplicaManager) GetQueryInvisibleReplicas(ctx context.Context) []*Replica {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	replicas := make([]*Replica, 0, m.queryInvisibleReplicas.Len())
+	for replicaID := range m.queryInvisibleReplicas {
+		if replica := m.replicas[replicaID]; replica != nil {
+			replicas = append(replicas, replica)
+		}
+	}
+	return replicas
+}
+
+func (m *ReplicaManager) SetReplicasQueryVisible(ctx context.Context, replicaIDs ...typeutil.UniqueID) []typeutil.UniqueID {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collections := typeutil.NewUniqueSet()
+	modifiedReplicas := make([]*Replica, 0, len(replicaIDs))
+	for _, replicaID := range replicaIDs {
+		replica := m.replicas[replicaID]
+		if replica == nil || replica.IsQueryVisible() {
+			continue
+		}
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.SetQueryInvisible(false)
+		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
+		collections.Insert(replica.GetCollectionID())
+	}
+	m.putReplicaInMemory(modifiedReplicas...)
+	return collections.Collect()
 }
 
 type SpawnWithReplicaConfigParams struct {
@@ -244,7 +279,8 @@ func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
 type SpawnOption func(*spawnConfig)
 
 type spawnConfig struct {
-	waitRGReady bool
+	waitRGReady    bool
+	queryInvisible bool
 }
 
 // WithNeedWaitRGReady returns a SpawnOption that enables waiting for resource group readiness.
@@ -255,6 +291,12 @@ type spawnConfig struct {
 func WithNeedWaitRGReady() SpawnOption {
 	return func(cfg *spawnConfig) {
 		cfg.waitRGReady = true
+	}
+}
+
+func WithQueryInvisible() SpawnOption {
+	return func(cfg *spawnConfig) {
+		cfg.queryInvisible = true
 	}
 }
 
@@ -289,6 +331,9 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 			mutableReplica := replica.CopyForWrite()
 			if cfg.waitRGReady {
 				mutableReplica.SetWaitRGReadyAt(time.Now())
+			}
+			if cfg.queryInvisible {
+				mutableReplica.SetQueryInvisible(true)
 			}
 			if enableChannelExclusiveMode {
 				mutableReplica.TryEnableChannelExclusiveMode(channels...)
@@ -331,13 +376,20 @@ func (m *ReplicaManager) put(ctx context.Context, replicas ...*Replica) error {
 
 // putReplicaInMemory puts replicas into in-memory map and collIDToReplicaIDs.
 func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
+	if m.queryInvisibleReplicas == nil {
+		m.queryInvisibleReplicas = typeutil.NewUniqueSet()
+	}
 	for _, replica := range replicas {
 		if oldReplica, ok := m.replicas[replica.GetID()]; ok {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(oldReplica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(oldReplica.RONodesCount()))
+			m.queryInvisibleReplicas.Remove(oldReplica.GetID())
 		}
 		// update in-memory replicas.
 		m.replicas[replica.GetID()] = replica
+		if !replica.IsQueryVisible() {
+			m.queryInvisibleReplicas.Insert(replica.GetID())
+		}
 		metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Inc()
 		metrics.QueryCoordReplicaRONodeTotal.Add(float64(replica.RONodesCount()))
 
@@ -434,6 +486,7 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
 			delete(m.replicas, replica.GetID())
+			m.queryInvisibleReplicas.Remove(replica.GetID())
 		}
 		delete(m.coll2Replicas, collectionID)
 	}
@@ -460,6 +513,7 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID typeut
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
 			delete(m.replicas, replicaID)
+			m.queryInvisibleReplicas.Remove(replicaID)
 		}
 	}
 
@@ -790,30 +844,48 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 
 // buildSQNodeAssignmentHelpers builds assignment helpers for streaming query node recovery.
 // If streaming node resource groups cover all replica resource groups, creates one helper per RG (isolation mode).
+// During rolling upgrades, old StreamingNodes may not carry RG labels and are reported in DefaultResourceGroupName.
+// In that case, replicas whose RG is not covered by labeled StreamingNodes share the default legacy pool, while
+// covered replicas still use RG isolation.
 // Otherwise, behavior depends on streaming.strictResourceGroupIsolation.enabled config:
 //   - If enabled (strict isolation mode): skip replicas without matching streaming node resource groups.
-//   - If disabled (default): pool all nodes together into a single helper (flat allocation mode).
+//   - If disabled and no default legacy pool exists: pool all nodes together into a single helper (flat allocation mode).
 func (m *ReplicaManager) buildSQNodeAssignmentHelpers(
 	replicas []*Replica,
 	sqnNodesByRG map[string]typeutil.UniqueSet,
 ) map[string]*replicasInSameRGAssignmentHelper {
 	// Group replicas by resource group and check coverage.
 	rgToReplicas := make(map[string][]*Replica)
-	hasUncoveredReplicas := false
+	uncoveredReplicas := make([]*Replica, 0)
 	for _, replica := range replicas {
 		rgName := replica.GetResourceGroup()
 		if _, ok := sqnNodesByRG[rgName]; ok {
 			rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
 		} else {
-			hasUncoveredReplicas = true
+			uncoveredReplicas = append(uncoveredReplicas, replica)
 		}
 	}
 
 	helpers := make(map[string]*replicasInSameRGAssignmentHelper)
+	strictIsolation := paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+
+	if len(uncoveredReplicas) > 0 && !strictIsolation {
+		if _, ok := sqnNodesByRG[DefaultResourceGroupName]; ok {
+			// Compatibility mode for rolling upgrades from old StreamingNodes without RG labels:
+			// uncovered replicas keep using the default legacy pool, while covered replicas keep
+			// their isolated pools. If there are also replicas explicitly in the default RG, they
+			// share the same default pool with uncovered legacy replicas.
+			rgToReplicas[DefaultResourceGroupName] = append(rgToReplicas[DefaultResourceGroupName], uncoveredReplicas...)
+			for rgName, rgReplicas := range rgToReplicas {
+				helpers[rgName] = newReplicaSQNAssignmentHelper(rgName, rgReplicas, sqnNodesByRG[rgName])
+			}
+			return helpers
+		}
+	}
 
 	// Check if we should use fallback mode (flat allocation).
 	// Fallback mode is used when there are uncovered replicas and isolation is disabled.
-	useFallbackMode := hasUncoveredReplicas && !paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+	useFallbackMode := len(uncoveredReplicas) > 0 && !strictIsolation
 
 	if useFallbackMode {
 		// Fallback: pool all nodes together for ALL replicas.

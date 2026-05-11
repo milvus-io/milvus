@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -83,6 +84,29 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 
 	err = wb.SealSegments(context.Background(), []int64{segmentID})
 	s.NoError(err)
+}
+
+func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
+	segmentID := int64(1001)
+
+	s.Run("non_text_returns_error", func() {
+		s.wb.hasTextFields = false
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+
+		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
+		s.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
+
+	s.Run("text_skips_missing_segment", func() {
+		s.wb.hasTextFields = true
+		defer func() {
+			s.wb.hasTextFields = false
+		}()
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+
+		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
+		s.NoError(err)
+	})
 }
 
 func (s *WriteBufferSuite) TestSealAllSegments() {

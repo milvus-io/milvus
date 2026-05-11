@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -18,6 +19,20 @@ func (c *Client) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb
 		return merr.CheckRPCCall(resp, err)
 	})
 	return err
+}
+
+// GetReplicateConfiguration gets the current replicate configuration from the Milvus cluster.
+func (c *Client) GetReplicateConfiguration(ctx context.Context, opts ...grpc.CallOption) (*commonpb.ReplicateConfiguration, error) {
+	var config *commonpb.ReplicateConfiguration
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetReplicateConfiguration(ctx, &milvuspb.GetReplicateConfigurationRequest{}, opts...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		config = resp.GetConfiguration()
+		return nil
+	})
+	return config, err
 }
 
 // GetReplicateInfo gets replicate information from the Milvus cluster

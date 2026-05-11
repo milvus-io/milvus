@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"unsafe"
@@ -104,9 +105,6 @@ func GetFileInfo(
 	cFormat := C.CString(format)
 	defer C.free(unsafe.Pointer(cFormat))
 
-	cFilePath := C.CString(filePath)
-	defer C.free(unsafe.Pointer(cFilePath))
-
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)
@@ -115,6 +113,13 @@ func GetFileInfo(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, fmt.Errorf("inject extfs: %w", err)
 	}
+
+	normalizedFilePath, err := normalizeExternalPathForStorage(filePath, cProperties, extfs)
+	if err != nil {
+		return nil, fmt.Errorf("normalize external file path: %w", err)
+	}
+	cFilePath := C.CString(normalizedFilePath)
+	defer C.free(unsafe.Pointer(cFilePath))
 
 	var numRows C.uint64_t
 
@@ -127,6 +132,66 @@ func GetFileInfo(
 		FilePath: filePath,
 		NumRows:  int64(numRows),
 	}, nil
+}
+
+func normalizeExternalPathForStorage(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	if extfs.Source == "" || path == "" || properties == nil {
+		return path, nil
+	}
+
+	u, err := url.Parse(path)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return path, nil
+	}
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	address := loonPropertyString(properties, prefix+"address")
+	bucketName := loonPropertyString(properties, prefix+"bucket_name")
+	if address == "" || bucketName == "" || bucketName != u.Host {
+		return path, nil
+	}
+
+	addressHost, err := propertyAddressHost(address)
+	if err != nil {
+		return "", err
+	}
+	if addressHost == "" || addressHost == u.Host {
+		return path, nil
+	}
+
+	oldPath := strings.TrimPrefix(u.Path, "/")
+	if oldPath == "" {
+		u.Path = "/" + bucketName
+	} else {
+		u.Path = "/" + bucketName + "/" + oldPath
+	}
+	u.RawPath = ""
+	u.Host = addressHost
+	return u.String(), nil
+}
+
+func loonPropertyString(properties *C.LoonProperties, key string) string {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	cValue := C.loon_properties_get(properties, cKey)
+	if cValue == nil {
+		return ""
+	}
+	return C.GoString(cValue)
+}
+
+func propertyAddressHost(address string) (string, error) {
+	if !strings.Contains(address, "://") {
+		return address, nil
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return "", err
+	}
+	return u.Host, nil
 }
 
 // ExploreFilesReturnManifestPath is like ExploreFiles but also returns the manifest path
@@ -157,8 +222,6 @@ func ExploreFilesReturnManifestPath(
 	defer C.free(unsafe.Pointer(cFormat))
 	cBaseDir := C.CString(baseDir)
 	defer C.free(unsafe.Pointer(cBaseDir))
-	cExploreDir := C.CString(exploreDir)
-	defer C.free(unsafe.Pointer(cExploreDir))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
@@ -168,6 +231,13 @@ func ExploreFilesReturnManifestPath(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, "", fmt.Errorf("inject extfs: %w", err)
 	}
+
+	normalizedExploreDir, err := normalizeExternalPathForStorage(exploreDir, cProperties, extfs)
+	if err != nil {
+		return nil, "", fmt.Errorf("normalize external explore path: %w", err)
+	}
+	cExploreDir := C.CString(normalizedExploreDir)
+	defer C.free(unsafe.Pointer(cExploreDir))
 
 	var numFiles C.uint64_t
 	var outColumnGroupsPath *C.char

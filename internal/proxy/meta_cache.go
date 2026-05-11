@@ -432,6 +432,14 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 		if collection, ok := db[collectionName]; ok {
 			return collection, collection.isCollectionCached()
 		}
+		// update() stores alias requests under the real collection name.
+		if aliasDB, ok := m.aliasInfo[database]; ok {
+			if entry, ok := aliasDB[collectionName]; ok && entry.collectionName != "" {
+				if collection, ok := db[entry.collectionName]; ok {
+					return collection, collection.isCollectionCached()
+				}
+			}
+		}
 	}
 
 	return nil, false
@@ -550,6 +558,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
 		zap.Strings("partition", partitions.PartitionNames), zap.Uint64("currentVersion", curVersion),
 		zap.Uint64("version", collection.GetRequestTime()), zap.Any("aliases", collection.Aliases),
+		zap.Bool("partition key isolation", isolation), zap.String("queryMode", queryMode),
 	)
 
 	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()

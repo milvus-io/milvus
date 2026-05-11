@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arrow/array.h>
+#include <arrow/builder.h>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <simdjson.h>
@@ -33,6 +35,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
 #include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/TypeTraits.h"
@@ -56,6 +59,348 @@
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
+
+namespace {
+
+FieldMeta
+MakeExternalFieldMetaForTest(DataType data_type,
+                             DataType element_type = DataType::NONE,
+                             bool nullable = false,
+                             int64_t dim = 0) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(1000);
+    field_schema.set_name("field");
+    field_schema.set_external_field("field_col");
+    field_schema.set_data_type(ToProtoDataType(data_type));
+    field_schema.set_nullable(nullable);
+    if (element_type != DataType::NONE) {
+        field_schema.set_element_type(ToProtoDataType(element_type));
+    }
+    if (IsStringDataType(data_type)) {
+        auto* max_length = field_schema.add_type_params();
+        max_length->set_key("max_length");
+        max_length->set_value("1024");
+    }
+    if (IsVectorDataType(data_type) &&
+        !IsSparseFloatVectorDataType(data_type)) {
+        auto* dim_param = field_schema.add_type_params();
+        dim_param->set_key("dim");
+        dim_param->set_value(std::to_string(dim));
+    }
+    return FieldMeta::ParseFrom(field_schema);
+}
+
+}  // namespace
+
+TEST(storage, ExternalVarCharStringNormalizesToBinaryAndFillSucceeds) {
+    arrow::StringBuilder builder;
+    ASSERT_TRUE(builder.Append("hello").ok());
+    ASSERT_TRUE(builder.Append("world").ok());
+    std::shared_ptr<arrow::Array> string_array;
+    ASSERT_TRUE(builder.Finish(&string_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(DataType::VARCHAR);
+    auto normalized = storage::NormalizeExternalArrow(string_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto field_data = storage::CreateFieldData(storage::DataType::VARCHAR,
+                                               DataType::NONE,
+                                               false,
+                                               normalized->length());
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(normalized);
+    EXPECT_NO_THROW(field_data->FillFieldData(chunked_array));
+}
+
+TEST(storage, ExternalVarCharBinaryFillSucceeds) {
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder.Append("hello").ok());
+    ASSERT_TRUE(builder.Append("world").ok());
+    std::shared_ptr<arrow::Array> binary_array;
+    ASSERT_TRUE(builder.Finish(&binary_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(DataType::VARCHAR);
+    auto normalized = storage::NormalizeExternalArrow(binary_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto field_data = storage::CreateFieldData(storage::DataType::VARCHAR,
+                                               DataType::NONE,
+                                               false,
+                                               normalized->length());
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(normalized);
+    EXPECT_NO_THROW(field_data->FillFieldData(chunked_array));
+}
+
+TEST(storage, ExternalVarCharInt64NormalizeFails) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    ASSERT_TRUE(builder.Append(2).ok());
+    std::shared_ptr<arrow::Array> int64_array;
+    ASSERT_TRUE(builder.Finish(&int64_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(DataType::VARCHAR);
+    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(int64_array, field_meta));
+}
+
+TEST(storage, ExternalInt8Int64NormalizeFails) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    ASSERT_TRUE(builder.Append(2).ok());
+    std::shared_ptr<arrow::Array> int64_array;
+    ASSERT_TRUE(builder.Finish(&int64_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(DataType::INT8);
+    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(int64_array, field_meta));
+}
+
+TEST(storage, ExternalSampleSchemaValidationRejectsMismatchedIntType) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    ASSERT_TRUE(builder.Append(2).ok());
+    std::shared_ptr<arrow::Array> int64_array;
+    ASSERT_TRUE(builder.Finish(&int64_array).ok());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(100);
+    field_schema.set_name("age");
+    field_schema.set_external_field("age_col");
+    field_schema.set_data_type(proto::schema::DataType::Int8);
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+
+    try {
+        storage::NormalizeExternalArrow(int64_array, field_meta);
+        FAIL() << "expected NormalizeExternalArrow to reject mismatched type";
+    } catch (const std::exception& e) {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("field 'age'"), std::string::npos);
+        EXPECT_NE(msg.find("external_field 'age_col'"), std::string::npos);
+        EXPECT_NE(msg.find("field type mismatch"), std::string::npos);
+        EXPECT_NE(msg.find("expected Arrow int8"), std::string::npos);
+        EXPECT_NE(msg.find("actual Arrow int64"), std::string::npos);
+    }
+}
+
+TEST(storage,
+     ExternalSampleSchemaValidationRejectsMismatchedVectorElementType) {
+    auto value_builder = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& int_builder =
+        dynamic_cast<arrow::Int64Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(int_builder.Append(1).ok());
+    ASSERT_TRUE(int_builder.Append(2).ok());
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(101);
+    field_schema.set_name("embedding");
+    field_schema.set_external_field("embedding_col");
+    field_schema.set_data_type(proto::schema::DataType::FloatVector);
+    auto* dim = field_schema.add_type_params();
+    dim->set_key("dim");
+    dim->set_value("2");
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+
+    try {
+        storage::NormalizeExternalArrow(list_array, field_meta);
+        FAIL() << "expected NormalizeExternalArrow to reject mismatched vector "
+                  "element type";
+    } catch (const std::exception& e) {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("field 'embedding'"), std::string::npos);
+        EXPECT_NE(msg.find("external_field 'embedding_col'"),
+                  std::string::npos);
+        EXPECT_NE(msg.find("vector element type mismatch"), std::string::npos);
+        EXPECT_NE(msg.find("expected float"), std::string::npos);
+        EXPECT_NE(msg.find("actual int64"), std::string::npos);
+    }
+}
+
+TEST(storage, ExternalSampleSchemaValidationRejectsMismatchedArrayElementType) {
+    auto value_builder = std::make_shared<arrow::StringBuilder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& string_builder =
+        dynamic_cast<arrow::StringBuilder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(string_builder.Append("1").ok());
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(102);
+    field_schema.set_name("tags");
+    field_schema.set_external_field("tags_col");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+
+    try {
+        storage::NormalizeExternalArrow(list_array, field_meta);
+        FAIL() << "expected NormalizeExternalArrow to reject mismatched array "
+                  "element type";
+    } catch (const std::exception& e) {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("field 'tags'"), std::string::npos);
+        EXPECT_NE(msg.find("external_field 'tags_col'"), std::string::npos);
+        EXPECT_NE(msg.find("array element type mismatch"), std::string::npos);
+        EXPECT_NE(msg.find("expected INT64"), std::string::npos);
+        EXPECT_NE(msg.find("actual STRING"), std::string::npos);
+    }
+}
+
+TEST(storage, ExternalVarCharLargeStringNormalizesAndFillSucceeds) {
+    arrow::LargeStringBuilder builder;
+    ASSERT_TRUE(builder.Append("hello").ok());
+    ASSERT_TRUE(builder.Append("world").ok());
+    std::shared_ptr<arrow::Array> large_string_array;
+    ASSERT_TRUE(builder.Finish(&large_string_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(DataType::VARCHAR);
+    auto normalized =
+        storage::NormalizeExternalArrow(large_string_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto field_data = storage::CreateFieldData(storage::DataType::VARCHAR,
+                                               DataType::NONE,
+                                               false,
+                                               normalized->length());
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(normalized);
+    EXPECT_NO_THROW(field_data->FillFieldData(chunked_array));
+}
+
+TEST(storage, ExternalArrayListNormalizesToBinary) {
+    auto value_builder = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& int_builder =
+        dynamic_cast<arrow::Int64Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(int_builder.Append(1).ok());
+    ASSERT_TRUE(int_builder.Append(2).ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(int_builder.Append(3).ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta =
+        MakeExternalFieldMetaForTest(DataType::ARRAY, DataType::INT64);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+}
+
+TEST(storage, ExternalFloatVectorListNormalizesToFixedSizeBinary) {
+    auto value_builder = std::make_shared<arrow::FloatBuilder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& float_builder =
+        dynamic_cast<arrow::FloatBuilder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(1.0F).ok());
+    ASSERT_TRUE(float_builder.Append(2.0F).ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(3.0F).ok());
+    ASSERT_TRUE(float_builder.Append(4.0F).ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, 2);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+}
+
+TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
+    std::array<float, 2> row = {1.0F, 2.0F};
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row.data()),
+                            sizeof(float) * row.size())
+                    .ok());
+    std::shared_ptr<arrow::Array> binary_array;
+    ASSERT_TRUE(builder.Finish(&binary_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
+    auto normalized = storage::NormalizeExternalArrow(binary_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+}
+
+TEST(storage, ExternalBinaryVectorListNormalizeFails) {
+    auto value_builder = std::make_shared<arrow::UInt8Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& byte_builder =
+        dynamic_cast<arrow::UInt8Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(byte_builder.Append(0).ok());
+    ASSERT_TRUE(byte_builder.Append(1).ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_BINARY, DataType::NONE, false, 16);
+    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(list_array, field_meta));
+}
+
+TEST(storage, ExternalNullableVarCharBinaryPreservesNullCount) {
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder.Append("hello").ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append("world").ok());
+    std::shared_ptr<arrow::Array> binary_array;
+    ASSERT_TRUE(builder.Finish(&binary_array).ok());
+
+    auto field_meta =
+        MakeExternalFieldMetaForTest(DataType::VARCHAR, DataType::NONE, true);
+    auto normalized = storage::NormalizeExternalArrow(binary_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VARCHAR, DataType::NONE, true, normalized->length());
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(normalized);
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+    EXPECT_EQ(field_data->get_null_count(), 1);
+    EXPECT_EQ(field_data->get_valid_rows(), 2);
+    EXPECT_FALSE(field_data->is_valid(1));
+}
+
+TEST(storage, ExternalNullableVarCharBinaryAccumulatesNullCountAcrossChunks) {
+    arrow::BinaryBuilder first_builder;
+    ASSERT_TRUE(first_builder.Append("hello").ok());
+    ASSERT_TRUE(first_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> first_array;
+    ASSERT_TRUE(first_builder.Finish(&first_array).ok());
+
+    arrow::BinaryBuilder second_builder;
+    ASSERT_TRUE(second_builder.AppendNull().ok());
+    ASSERT_TRUE(second_builder.Append("world").ok());
+    std::shared_ptr<arrow::Array> second_array;
+    ASSERT_TRUE(second_builder.Finish(&second_array).ok());
+
+    auto field_meta =
+        MakeExternalFieldMetaForTest(DataType::VARCHAR, DataType::NONE, true);
+    auto first_normalized =
+        storage::NormalizeExternalArrow(first_array, field_meta);
+    auto second_normalized =
+        storage::NormalizeExternalArrow(second_array, field_meta);
+    ASSERT_EQ(first_normalized->type_id(), arrow::Type::BINARY);
+    ASSERT_EQ(second_normalized->type_id(), arrow::Type::BINARY);
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VARCHAR, DataType::NONE, true, 4);
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+        arrow::ArrayVector{first_normalized, second_normalized});
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+    EXPECT_EQ(field_data->get_null_count(), 2);
+    EXPECT_EQ(field_data->get_valid_rows(), 2);
+    EXPECT_FALSE(field_data->is_valid(1));
+    EXPECT_FALSE(field_data->is_valid(2));
+}
 
 TEST(storage, InsertDataBool) {
     FixedVector<bool> data = {true, false, true, false, true};

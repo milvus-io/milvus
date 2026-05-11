@@ -292,6 +292,9 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 	if field.GetIsFunctionOutput() {
 		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true
 	}
+	if field.GetExternalField() != "" {
+		fieldDetail["externalField"] = field.GetExternalField()
+	}
 	if typeutil.IsVectorType(field.DataType) {
 		fieldDetail[HTTPReturnFieldType] = field.DataType.String()
 		if oldVersion {

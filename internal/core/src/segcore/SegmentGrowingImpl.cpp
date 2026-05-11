@@ -297,6 +297,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
 
     // 1. Timestamps: always in memory for now
     memory_bytes += num_rows * sizeof(Timestamp);
+    // RowID is a system column kept for V3 manifest flush.
+    memory_bytes += num_rows * sizeof(int64_t);
 
     // 2. pk2offset_ map: always in memory
     // Use actual allocated memory from the tracking allocator
@@ -550,6 +552,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         reserved_offset, timestamps_raw, num_rows);
     stats_.mem_size += num_rows * sizeof(Timestamp);
 
+    AssertInfo(row_ids != nullptr, "row ids should not be null");
+    insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, num_rows);
+    stats_.mem_size += num_rows * sizeof(int64_t);
+
     for (auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -794,6 +800,8 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     if (field_id == RowFieldID) {
+        insert_record_.row_ids_.set_data_raw(reserved_offset, field_data);
+        stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
         return;
     }
 

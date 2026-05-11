@@ -27,6 +27,7 @@
 #include "common/Types.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprCache.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "monitor/Monitor.h"
@@ -35,6 +36,25 @@
 
 namespace milvus {
 namespace exec {
+
+namespace {
+
+std::string
+BuildExprCacheKey(const plan::FilterBitsNode& filter,
+                  QueryContext* query_context) {
+    auto key = filter.ToString();
+    auto* segment =
+        query_context != nullptr ? query_context->get_segment() : nullptr;
+    if (segment != nullptr &&
+        segment->get_schema().get_ttl_field_id().has_value()) {
+        key += fmt::format("|entity_ttl_physical_time_us:{}",
+                           query_context->get_entity_ttl_physical_time_us());
+    }
+    return key;
+}
+
+}  // namespace
+
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
     DriverContext* driverctx,
@@ -51,6 +71,11 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     exprs_ = std::make_unique<ExprSet>(filters, exec_context);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
+
+    enable_expr_cache_ = query_context_->get_enable_expr_cache();
+    if (enable_expr_cache_) {
+        expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
+    }
 }
 
 void
@@ -78,6 +103,32 @@ PhyFilterBitsNode::GetOutput() {
 
     if (AllInputProcessed()) {
         return nullptr;
+    }
+
+    // Cache read: Stage 2 of two-stage search reuses the bitset cached by Stage 1.
+    // Cache lives in the process-level ExprResCacheManager keyed by
+    // (segment_id, FilterBitsNode signature + dynamic filter context), so
+    // cross-query reuse is automatic only when the effective predicate matches.
+    auto* cache_segment = query_context_->get_segment();
+    const bool can_use_cache = enable_expr_cache_ && !expr_cache_key_.empty() &&
+                               cache_segment != nullptr &&
+                               cache_segment->type() == SegmentType::Sealed &&
+                               ExprResCacheManager::IsEnabled();
+    if (can_use_cache) {
+        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                     expr_cache_key_};
+        ExprResCacheManager::Value cached;
+        if (ExprResCacheManager::Instance().Get(key, cached) &&
+            cached.result != nullptr &&
+            cached.result->size() == need_process_rows_) {
+            num_processed_rows_ = need_process_rows_;
+            std::vector<VectorPtr> col_res;
+            col_res.push_back(std::make_shared<ColumnVector>(
+                cached.result->clone(),
+                cached.valid_result ? cached.valid_result->clone()
+                                    : TargetBitmap(need_process_rows_, true)));
+            return std::make_shared<RowVector>(col_res);
+        }
     }
 
     tracer::AutoSpan span(
@@ -116,6 +167,18 @@ PhyFilterBitsNode::GetOutput() {
                    "bitset size: {}, need_process_rows_: {}",
                    col_vec_size,
                    need_process_rows_);
+
+        if (can_use_cache) {
+            TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                        col_vec_size);
+            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                         expr_cache_key_};
+            ExprResCacheManager::Value v;
+            v.result = std::make_shared<TargetBitmap>(view);
+            v.valid_result = std::make_shared<TargetBitmap>(valid_view);
+            v.active_count = need_process_rows_;
+            ExprResCacheManager::Instance().Put(key, v);
+        }
 
         std::vector<VectorPtr> col_res;
         col_res.push_back(std::move(results_[0]));
@@ -164,6 +227,19 @@ PhyFilterBitsNode::GetOutput() {
                bitset.size(),
                need_process_rows_);
     Assert(valid_bitset.size() == need_process_rows_);
+
+    // Cache write: clone bitset into ExprResCacheManager — Stage 1 of two-stage
+    // search. Must clone before move since Stage 1 still owns the bitset for
+    // the ColumnVector return value below.
+    if (can_use_cache) {
+        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                     expr_cache_key_};
+        ExprResCacheManager::Value v;
+        v.result = std::make_shared<TargetBitmap>(bitset.clone());
+        v.valid_result = std::make_shared<TargetBitmap>(valid_bitset.clone());
+        v.active_count = need_process_rows_;
+        ExprResCacheManager::Instance().Put(key, v);
+    }
 
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;

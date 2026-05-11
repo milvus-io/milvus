@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -248,7 +249,7 @@ func TestCollectAllStatusWithResourceGroupFilter(t *testing.T) {
 		}), nil
 	})
 
-	// Filter by rg_a - should only collect status from servers 1 and 2
+	// Hint rg_a - should only return status from servers 1 and 2 while rg_a is available.
 	nodes, err := m.CollectAllStatus(context.Background(), "rg_a")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 2)
@@ -257,18 +258,195 @@ func TestCollectAllStatusWithResourceGroupFilter(t *testing.T) {
 	assert.NotContains(t, nodes, int64(3))
 	assert.NotContains(t, nodes, int64(4))
 
-	// Filter by __default_resource_group - should only collect status from server 4
+	// Empty resource group falls back to __default_resource_group when unlabeled legacy nodes exist.
+	callCount = 0
+	nodes, err = m.CollectAllStatus(context.Background(), "")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 1)
+	assert.Contains(t, nodes, int64(4))
+
+	// Hint __default_resource_group - should only return status from server 4.
 	callCount = 0
 	nodes, err = m.CollectAllStatus(context.Background(), "__default_resource_group")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 1)
 	assert.Contains(t, nodes, int64(4))
 
-	// Filter by non-existent RG - should return empty
+	// Unavailable hint falls back to the RG with the most available nodes.
 	callCount = 0
 	nodes, err = m.CollectAllStatus(context.Background(), "non_existent_rg")
 	assert.NoError(t, err)
-	assert.Len(t, nodes, 0)
+	assert.Len(t, nodes, 2)
+	assert.Contains(t, nodes, int64(1))
+	assert.Contains(t, nodes, int64(2))
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
+}
+
+func TestCollectAllStatusFallbackWhenHintUnavailable(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	managerServiceClient := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+	managerService.EXPECT().GetService(mock.Anything).RunAndReturn(func(ctx context.Context) (streamingpb.StreamingNodeManagerServiceClient, error) {
+		return managerServiceClient, nil
+	})
+	var mu sync.Mutex
+	pickedServerIDs := make([]int64, 0, 2)
+	managerServiceClient.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, snmcsr *streamingpb.StreamingNodeManagerCollectStatusRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+		serverID, ok := contextutil.GetPickServerID(ctx)
+		assert.True(t, ok)
+		mu.Lock()
+		pickedServerIDs = append(pickedServerIDs, serverID)
+		mu.Unlock()
+		return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+	})
+
+	callCount := 0
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		callCount++
+		return newVersionedStateWithRG(int64(callCount), map[uint64]serverInfo{
+			2: {resourceGroup: "rg_a"},
+			3: {resourceGroup: "rg_a"},
+			4: {resourceGroup: "rg_b"},
+		}), nil
+	})
+
+	nodes, err := m.CollectAllStatus(context.Background(), "rg_primary")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 2)
+	assert.Contains(t, nodes, int64(2))
+	assert.Contains(t, nodes, int64(3))
+	assert.ElementsMatch(t, []int64{2, 3}, pickedServerIDs)
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
+}
+
+func TestCollectAllStatusFallbackTieBreakByMaxServerID(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	managerServiceClient := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+	managerService.EXPECT().GetService(mock.Anything).RunAndReturn(func(ctx context.Context) (streamingpb.StreamingNodeManagerServiceClient, error) {
+		return managerServiceClient, nil
+	})
+	managerServiceClient.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, snmcsr *streamingpb.StreamingNodeManagerCollectStatusRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+		return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+	})
+
+	callCount := 0
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		callCount++
+		return newVersionedStateWithRG(int64(callCount), map[uint64]serverInfo{
+			1: {resourceGroup: "rg_a"},
+			5: {resourceGroup: "rg_b"},
+		}), nil
+	})
+
+	nodes, err := m.CollectAllStatus(context.Background(), "non_existent_rg")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 1)
+	assert.Contains(t, nodes, int64(5))
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
+}
+
+func TestCollectAllStatusWithEmptyResourceGroupAndExplicitDefaultRG(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	managerServiceClient := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+	managerService.EXPECT().GetService(mock.Anything).RunAndReturn(func(ctx context.Context) (streamingpb.StreamingNodeManagerServiceClient, error) {
+		return managerServiceClient, nil
+	})
+	managerServiceClient.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, snmcsr *streamingpb.StreamingNodeManagerCollectStatusRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+		return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+	})
+
+	callCount := 0
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		callCount++
+		return newVersionedStateWithRG(int64(callCount), map[uint64]serverInfo{
+			1: {resourceGroup: "__default_resource_group"},
+			2: {resourceGroup: "rg_a"},
+		}), nil
+	})
+
+	nodes, err := m.CollectAllStatus(context.Background(), "")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 1)
+	assert.Contains(t, nodes, int64(1))
+	assert.NotContains(t, nodes, int64(2))
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
+}
+
+func TestCollectAllStatusWithEmptyResourceGroupAndDefaultRGAbsent(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	managerServiceClient := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+	managerService.EXPECT().GetService(mock.Anything).RunAndReturn(func(ctx context.Context) (streamingpb.StreamingNodeManagerServiceClient, error) {
+		return managerServiceClient, nil
+	})
+	managerServiceClient.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, snmcsr *streamingpb.StreamingNodeManagerCollectStatusRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+		return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+	})
+
+	callCount := 0
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		callCount++
+		return newVersionedStateWithRG(int64(callCount), map[uint64]serverInfo{
+			1: {resourceGroup: "rg_a"},
+			2: {resourceGroup: "rg_b"},
+		}), nil
+	})
+
+	nodes, err := m.CollectAllStatus(context.Background(), "")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 2)
+	assert.Contains(t, nodes, int64(1))
+	assert.Contains(t, nodes, int64(2))
 
 	managerService.EXPECT().Close().Return()
 	rb.EXPECT().Close().Return()

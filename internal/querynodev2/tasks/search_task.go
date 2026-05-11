@@ -369,6 +369,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 
 	// Check mergeable
 	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
+		t.req.GetEnableExprCache() != other.req.GetEnableExprCache() ||
 		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||

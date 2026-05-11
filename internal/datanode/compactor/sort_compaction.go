@@ -180,11 +180,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	phaseStart := time.Now()
 
-	// For manifest-based segments, filter out RowID since manifest doesn't store it
 	writerSchema := t.plan.GetSchema()
-	if t.manifest != "" {
-		writerSchema = storage.FilterRowIDFromSchema(writerSchema)
-	}
 
 	srw, err := storage.NewBinlogRecordWriter(ctx,
 		t.collectionID,

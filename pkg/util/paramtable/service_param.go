@@ -1558,10 +1558,11 @@ The default value applies to MinIO or S3 service that started with the default d
 	p.UseSSL.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
-		Key:     "minio.ssl.tlsCACert",
-		Version: "2.3.12",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:          "minio.ssl.tlsCACert",
+		Version:      "2.3.12",
+		DefaultValue: "",
+		Doc:          "path to your CACert file",
+		Export:       true,
 	}
 	p.SslCACert.Init(base.mgr)
 

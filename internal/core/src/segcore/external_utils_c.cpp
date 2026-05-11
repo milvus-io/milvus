@@ -21,14 +21,18 @@
 #include <functional>
 #include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "arrow/array.h"
 #include "arrow/table.h"
+#include "common/FieldMeta.h"
+#include "fmt/format.h"
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/reader.h"
+#include "pb/schema.pb.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/util.h"
 
@@ -45,6 +49,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                 int sample_rows,
                                 int64_t collection_id,
                                 const LoonProperties* c_properties,
+                                CProto collection_schema,
                                 CFieldMemSizeList* out) {
     try {
         if (manifest_path == nullptr || manifest_path[0] == '\0') {
@@ -103,6 +108,25 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             return MakeCStatusError("sample returned 0 rows");
         }
 
+        std::vector<milvus::FieldMeta> external_fields;
+        if (collection_schema.proto_blob != nullptr &&
+            collection_schema.proto_size > 0) {
+            milvus::proto::schema::CollectionSchema schema;
+            auto ok = schema.ParseFromArray(collection_schema.proto_blob,
+                                            collection_schema.proto_size);
+            if (!ok) {
+                return MakeCStatusError("failed to parse collection schema");
+            }
+            external_fields.reserve(schema.fields_size());
+            for (const auto& field_schema : schema.fields()) {
+                if (field_schema.external_field().empty()) {
+                    continue;
+                }
+                external_fields.emplace_back(
+                    milvus::FieldMeta::ParseFrom(field_schema));
+            }
+        }
+
         // 6. Calculate per-column Arrow buffer size (recursive for nested types)
         std::function<int64_t(const std::shared_ptr<arrow::ArrayData>&)>
             calcArrayDataSize =
@@ -119,36 +143,66 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             return total;
         };
 
-        int num_cols = table->num_columns();
-        out->sizes = static_cast<CFieldMemSize*>(
-            malloc(sizeof(CFieldMemSize) * num_cols));
-        out->count = num_cols;
-
-        for (int i = 0; i < num_cols; i++) {
-            int64_t col_bytes = 0;
-            auto chunked = table->column(i);
-            for (int c = 0; c < chunked->num_chunks(); c++) {
-                // Single view-variant elimination via shared helper.
-                // (issue #49352: vortex schemaless emits view types whose
-                // buffer layout differs; canonicalize before sizing.)
-                auto chunk = milvus::storage::CanonicalizeArrowVariants(
-                    chunked->chunk(c));
-                col_bytes += calcArrayDataSize(chunk->data());
-            }
-
-            auto name = table->field(i)->name();
+        auto fill_size = [](CFieldMemSize& out_size,
+                            const std::string& name,
+                            int64_t avg_mem_bytes) {
             char* name_copy = static_cast<char*>(malloc(name.size() + 1));
             std::memcpy(name_copy, name.c_str(), name.size() + 1);
+            out_size.field_name = name_copy;
+            out_size.avg_mem_bytes = avg_mem_bytes;
+        };
 
-            out->sizes[i].field_name = name_copy;
-            out->sizes[i].avg_mem_bytes = col_bytes / num_rows;
+        std::vector<std::pair<std::string, int64_t>> sampled_sizes;
+        if (!external_fields.empty()) {
+            sampled_sizes.reserve(external_fields.size());
+            for (const auto& field_meta : external_fields) {
+                const auto& column_name = field_meta.get_external_field();
+                auto chunked = table->GetColumnByName(column_name);
+                if (chunked == nullptr) {
+                    return MakeCStatusError(
+                        fmt::format("Column '{}' not found in schema",
+                                    column_name)
+                            .c_str());
+                }
+
+                int64_t col_bytes = 0;
+                for (int c = 0; c < chunked->num_chunks(); c++) {
+                    auto chunk = milvus::storage::NormalizeExternalArrow(
+                        chunked->chunk(c), field_meta);
+                    col_bytes += calcArrayDataSize(chunk->data());
+                }
+                sampled_sizes.emplace_back(column_name, col_bytes / num_rows);
+            }
+        } else {
+            int num_cols = table->num_columns();
+            sampled_sizes.reserve(num_cols);
+            for (int i = 0; i < num_cols; i++) {
+                int64_t col_bytes = 0;
+                auto chunked = table->column(i);
+                for (int c = 0; c < chunked->num_chunks(); c++) {
+                    auto chunk = milvus::storage::CanonicalizeArrowVariants(
+                        chunked->chunk(c));
+                    col_bytes += calcArrayDataSize(chunk->data());
+                }
+
+                sampled_sizes.emplace_back(table->field(i)->name(),
+                                           col_bytes / num_rows);
+            }
+        }
+
+        out->sizes = static_cast<CFieldMemSize*>(
+            malloc(sizeof(CFieldMemSize) * sampled_sizes.size()));
+        out->count = static_cast<int>(sampled_sizes.size());
+        for (size_t i = 0; i < sampled_sizes.size(); i++) {
+            fill_size(
+                out->sizes[i], sampled_sizes[i].first, sampled_sizes[i].second);
         }
 
         LOG_INFO(
             "SampleExternalSegmentFieldSizes: sampled {} rows, {} "
             "columns from manifest {}",
             num_rows,
-            num_cols,
+            sampled_sizes.size(),
             manifest_path);
 
         CStatus ok;

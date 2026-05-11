@@ -6,12 +6,12 @@ on:
       - master
     paths:
       - 'tests/**/*.py'
-      - 'tests/pyproject.toml'
+      - 'tests/ruff.toml'
       - '.github/workflows/python-lint.yaml'
   pull_request:
     paths:
       - 'tests/**/*.py'
-      - 'tests/pyproject.toml'
+      - 'tests/ruff.toml'
       - '.github/workflows/python-lint.yaml'
 
 concurrency:
@@ -50,7 +50,7 @@ jobs:
           args: "format --check --diff"
 
       - name: Validate ruff configuration (smoke test)
-        # Always runs so config-only PRs still catch a broken pyproject.toml.
+        # Always runs so config-only PRs still catch a broken ruff.toml.
         # --exit-zero ignores existing baseline violations; only fails when
         # ruff cannot load the config at all.
         uses: astral-sh/ruff-action@v4.0.0

@@ -1285,7 +1285,7 @@ class InsertRecordGrowing {
         const Schema& schema,
         const int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
-        : timestamps_(size_per_chunk) {
+        : timestamps_(size_per_chunk), row_ids_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         for (auto& field : schema) {
             auto field_id = field.first;
@@ -1412,9 +1412,15 @@ class InsertRecordGrowing {
         return timestamps_;
     }
 
+    const ConcurrentVector<int64_t>&
+    row_ids() const {
+        return row_ids_;
+    }
+
     void
     clear() {
         timestamps_.clear();
+        row_ids_.clear();
         timestamp_index_ = TimestampIndex();
         if (pk2offset_) {
             pk2offset_->clear();
@@ -1720,6 +1726,7 @@ class InsertRecordGrowing {
 
  public:
     ConcurrentVector<Timestamp> timestamps_;
+    ConcurrentVector<int64_t> row_ids_;
     std::atomic<int64_t> reserved = 0;
     TimestampIndex timestamp_index_;
     std::unique_ptr<OffsetMap> pk2offset_;

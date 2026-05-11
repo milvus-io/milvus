@@ -38,6 +38,9 @@ func MatchAggregationExpression(expression string) (bool, string, string) {
 type AggregateBase interface {
 	Name() string
 	Update(target *FieldValue, new *FieldValue) error
+	NewState() []*FieldValue
+	UpdateState(slots []*FieldValue, new *FieldValue) error
+	Terminate(slots []*FieldValue) (any, error)
 	ToPB() *planpb.Aggregate
 	FieldID() int64
 	OriginalName() string
@@ -67,11 +70,8 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string, f
 	case kSum:
 		return []AggregateBase{&SumAggregate{fieldID: aggFieldID, originalName: originalName, isAvg: false}}, nil
 	case kAvg:
-		// avg is implemented as sum and count, which will be computed as sum/count later
-		return []AggregateBase{
-			&SumAggregate{fieldID: aggFieldID, originalName: originalName, isAvg: true},
-			&CountAggregate{fieldID: aggFieldID, originalName: originalName, isAvg: true},
-		}, nil
+		avg := NewAvgAggregate(aggFieldID, originalName)
+		return []AggregateBase{avg.sum, avg.count}, nil
 	case kMin:
 		return []AggregateBase{&MinAggregate{fieldID: aggFieldID, originalName: originalName}}, nil
 	case kMax:
@@ -164,6 +164,13 @@ func NewNullFieldValue() *FieldValue {
 
 func (fv *FieldValue) IsNull() bool {
 	return fv.isNull
+}
+
+// Value returns the underlying accumulated value (nil when null). Added so
+// external callers (proxy-side search aggregation) can finalize metric results
+// without reimplementing accumulator state. Read-only; does not mutate fv.
+func (fv *FieldValue) Value() any {
+	return fv.val
 }
 
 func (fv *FieldValue) SetNull() {

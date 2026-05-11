@@ -41,6 +41,7 @@ type RefreshExternalCollectionJobInfo struct {
 	Progress       int64
 	Reason         string
 	ExternalSource string
+	ExternalSpec   string
 	StartTime      int64
 	EndTime        int64
 }

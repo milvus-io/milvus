@@ -764,9 +764,15 @@ func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, j
 	return job, nil
 }
 
-// ListJobs returns jobs for the given collection, sorted by start_time descending
+// ListJobs returns jobs for the given collection, sorted by start_time descending.
+// A zero collectionID lists jobs for all external collections.
 func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error) {
-	jobs := m.refreshMeta.ListJobsByCollectionID(collectionID)
+	var jobs []*datapb.ExternalCollectionRefreshJob
+	if collectionID == 0 {
+		jobs = m.refreshMeta.ListAllJobs()
+	} else {
+		jobs = m.refreshMeta.ListJobsByCollectionID(collectionID)
+	}
 
 	result := make([]*datapb.ExternalCollectionRefreshJob, 0, len(jobs))
 	for _, job := range jobs {

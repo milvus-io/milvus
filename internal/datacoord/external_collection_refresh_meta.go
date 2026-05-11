@@ -238,6 +238,21 @@ func (m *externalCollectionRefreshMeta) ListJobsByCollectionID(collectionID int6
 	return jobs
 }
 
+// ListAllJobs returns all jobs, sorted by start_time descending.
+func (m *externalCollectionRefreshMeta) ListAllJobs() []*datapb.ExternalCollectionRefreshJob {
+	jobs := make([]*datapb.ExternalCollectionRefreshJob, 0, m.jobs.Len())
+	m.jobs.Range(func(_ int64, job *datapb.ExternalCollectionRefreshJob) bool {
+		jobs = append(jobs, proto.Clone(job).(*datapb.ExternalCollectionRefreshJob))
+		return true
+	})
+
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].GetStartTime() > jobs[j].GetStartTime()
+	})
+
+	return jobs
+}
+
 // GetAllJobs returns all jobs
 func (m *externalCollectionRefreshMeta) GetAllJobs() map[int64]*datapb.ExternalCollectionRefreshJob {
 	result := make(map[int64]*datapb.ExternalCollectionRefreshJob)

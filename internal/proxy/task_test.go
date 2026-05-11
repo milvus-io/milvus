@@ -1828,6 +1828,29 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("source spec without external field rejected", func(t *testing.T) {
+		schema := buildExternalSchema()
+		for _, field := range schema.GetFields() {
+			field.ExternalField = ""
+		}
+		freshTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshal(schema),
+				ShardsNum:      common.DefaultShardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+		}
+		err := freshTask.OnEnqueue()
+		require.NoError(t, err)
+		err = freshTask.PreExecute(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "external_field mappings")
+	})
+
 	t.Run("virtual PK injected after PreExecute", func(t *testing.T) {
 		schema := buildExternalSchema()
 		freshTask := &createCollectionTask{
@@ -6855,6 +6878,19 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		err := validateAddFieldRequest(schema, newField)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("external field mapping", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:          "external_field",
+			DataType:      schemapb.DataType_Int64,
+			ExternalField: "remote_field",
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "does not support external field mapping")
 	})
 
 	t.Run("system field name RowID", func(t *testing.T) {

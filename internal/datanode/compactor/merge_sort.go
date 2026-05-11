@@ -40,11 +40,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
-	// For V3 manifest storage, filter out RowID since manifest doesn't store it
 	writerSchema := plan.GetSchema()
-	if compactionParams.StorageVersion == storage.StorageV3 {
-		writerSchema = storage.FilterRowIDFromSchema(writerSchema)
-	}
 
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())

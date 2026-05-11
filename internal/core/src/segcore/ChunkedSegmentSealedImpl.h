@@ -1184,7 +1184,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // Load column groups from a manifest file path (for external collections)
     void
-    LoadColumnGroups(const std::string& manifest_path);
+    LoadColumnGroups(const std::string& manifest_path,
+                     milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Load a single column group at the specified index

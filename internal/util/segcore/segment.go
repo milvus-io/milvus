@@ -156,6 +156,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(searchReq.collectionTTL),
 				C.uint64_t(physicalTimeUs),
 				C.bool(searchReq.filterOnly),
+				C.bool(searchReq.enableExprCache),
 			))
 		},
 		cgo.WithName("search"),

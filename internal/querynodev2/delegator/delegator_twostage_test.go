@@ -327,10 +327,11 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		// Verify that the request has FilterOnly=true
+		// Verify that the request has FilterOnly=true and EnableExprCache=true
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.True(req.GetFilterOnly(), "FilterOnly should be true in filter stage")
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true in filter stage")
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
 		}, nil)
@@ -486,9 +487,11 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 				if callCount == 1 {
 					// First call should be filter stage with FilterOnly=true
 					s.True(req.GetFilterOnly(), "First call should have FilterOnly=true")
+					s.True(req.GetEnableExprCache(), "First call should have EnableExprCache=true")
 				} else {
-					// Second call should be normal search with FilterOnly=false
+					// Second call should be normal search with FilterOnly=false but EnableExprCache=true
 					s.False(req.GetFilterOnly(), "Second call should have FilterOnly=false")
+					s.True(req.GetEnableExprCache(), "Second call should have EnableExprCache=true")
 				}
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
@@ -529,6 +532,64 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.NotNil(results)
 		// Should have called SearchSegments twice: once for filter stage, once for vector search
 		s.Equal(2, callCount, "Should have called SearchSegments twice")
+	})
+
+	s.Run("incomplete_filter_counts_fallback_restores_enable_expr_cache", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.True(req.GetFilterOnly(), "FilterOnly should be true in filter stage")
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true in filter stage")
+			}).Return(&internalpb.SearchResults{
+			FilterValidCounts: []int64{100},
+		}, nil).Once()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		s.delegator.distribution.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 3100},
+			SegmentEntry{NodeID: 1, SegmentID: 3101},
+		)
+
+		ctx := context.Background()
+		req := &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Topk: 100,
+			},
+			DmlChannels:     []string{s.vchannelName},
+			EnableExprCache: false,
+		}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 3100, NodeID: 1},
+					{SegmentID: 3101, NodeID: 1},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+		sealedRowCount := map[int64]int64{
+			3100: 10000,
+			3101: 10000,
+		}
+
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		s.NoError(err)
+		s.True(fallback)
+		s.Nil(results)
+		s.False(req.GetFilterOnly(), "FilterOnly should be restored after fallback")
+		s.False(req.GetEnableExprCache(), "EnableExprCache should be restored after fallback")
 	})
 
 	s.Run("optimizer_path_exercised", func() {
@@ -926,6 +987,8 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				callCount++
+				// All calls in two-stage search should have EnableExprCache=true
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true for all two-stage search calls")
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
 		}, nil)
