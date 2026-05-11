@@ -48,6 +48,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -56,6 +58,18 @@ import (
 )
 
 var errIndexOperationIgnored = errors.New("index operation ignored")
+
+func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if actual > requested {
+		return merr.WrapErrParameterInvalidMsg(
+			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
+			buildID,
+			requested.String(),
+			actual.String(),
+		)
+	}
+	return nil
+}
 
 type indexMeta struct {
 	ctx     context.Context
@@ -734,7 +748,9 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 	return indexInfos
 }
 
-// MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
+// MarkIndexAsDeleted marks indexes as deleted. File cleanup is split by path layout:
+// recycleUnusedIndexFilesV0 handles legacy v0 index_files objects, and
+// recycleUnusedIndexFilesV1 handles v1 index_files_v1 objects.
 func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
@@ -1017,6 +1033,22 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return nil
 	}
 
+	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+		log.Ctx(m.ctx).Warn("invalid index store path version returned by worker",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()),
+			zap.Error(err))
+		return err
+	}
+	if actualPathVersion < segIdx.IndexStorePathVersion {
+		log.Ctx(m.ctx).Info("worker downgraded index store path version",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()))
+	}
+
 	oldSize := segIdx.IndexSerializedSize
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -1028,6 +1060,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+		segIdx.IndexStorePathVersion = actualPathVersion
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
@@ -1193,6 +1226,25 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 		return false, model.CloneSegmentIndex(segIndex)
 	}
 	return true, nil
+}
+
+// GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
+// the v1 index_files_v1 layout. v0 cleanup still walks the buildID-rooted
+// index_files prefix and does not use this metadata-driven query.
+func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
+	if m.segmentBuildInfo == nil {
+		return nil
+	}
+	var result []*model.SegmentIndex
+	for _, segIdx := range m.segmentBuildInfo.List() {
+		if !segIdx.IsDeleted {
+			continue
+		}
+		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+			result = append(result, model.CloneSegmentIndex(segIdx))
+		}
+	}
+	return result
 }
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {

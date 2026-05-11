@@ -254,15 +254,16 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	}
 
 	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-		IndexType:      indexType,
+		SegmentID:             segment.ID,
+		CollectionID:          segment.CollectionID,
+		PartitionID:           segment.PartitionID,
+		NumRows:               segment.NumOfRows,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		CreatedUTCTime:        uint64(time.Now().Unix()),
+		WriteHandoff:          false,
+		IndexType:             indexType,
+		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

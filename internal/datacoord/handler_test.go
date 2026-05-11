@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1877,6 +1878,52 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
+}
+
+func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	handler := &ServerHandler{
+		s: &Server{
+			meta: &meta{
+				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+				indexMeta:    &indexMeta{},
+			},
+		},
+	}
+
+	mockGetSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		return map[int64]*model.SegmentIndex{
+			10: {
+				CollectionID:          collectionID,
+				PartitionID:           20,
+				SegmentID:             segmentID,
+				IndexID:               10,
+				BuildID:               30,
+				IndexVersion:          40,
+				IndexState:            commonpb.IndexState_Finished,
+				IndexFileKeys:         []string{"index_data"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			},
+		}
+	}).Build()
+	defer mockGetSegmentIndexes.UnPatch()
+
+	mockFieldID := mockey.Mock((*indexMeta).GetFieldIDByIndexID).Return(int64(100)).Build()
+	defer mockFieldID.UnPatch()
+
+	mockIndexName := mockey.Mock((*indexMeta).GetIndexNameByID).Return("vec_idx").Build()
+	defer mockIndexName.UnPatch()
+
+	mockIndexParams := mockey.Mock((*indexMeta).GetIndexParams).Return(nil).Build()
+	defer mockIndexParams.UnPatch()
+
+	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
+	defer mockTypeParams.UnPatch()
+
+	indexFiles := uncompressIndexFiles(handler, 1, 2)
+
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
+	assert.Equal(t, []string{"files/index_files_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {

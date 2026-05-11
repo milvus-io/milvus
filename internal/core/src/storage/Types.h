@@ -89,6 +89,7 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
+    std::string index_store_path;
 };
 
 struct StorageConfig {

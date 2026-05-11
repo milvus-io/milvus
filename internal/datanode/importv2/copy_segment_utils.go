@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // SegmentFiles organizes source files by type for copy operations.
@@ -166,6 +167,16 @@ func extractIndexFiles(indexInfos []*indexpb.IndexFilePathInfo) []string {
 	return paths
 }
 
+func buildIndexPathVersionByFile(source *datapb.CopySegmentSource) map[string]indexpb.IndexStorePathVersion {
+	versions := make(map[string]indexpb.IndexStorePathVersion)
+	for _, indexInfo := range source.GetIndexFiles() {
+		for _, filePath := range indexInfo.GetIndexFilePaths() {
+			versions[filePath] = indexInfo.GetIndexStorePathVersion()
+		}
+	}
+	return versions
+}
+
 // extractTextIndexFiles extracts text index file paths.
 func extractTextIndexFiles(textIndexInfos map[int64]*datapb.TextIndexStats) []string {
 	var paths []string
@@ -289,6 +300,7 @@ func generateMappingsFromFiles(
 	target *datapb.CopySegmentTarget,
 ) (map[string]string, error) {
 	mappings := make(map[string]string)
+	indexPathVersions := buildIndexPathVersionByFile(source)
 
 	// Helper to add mappings with error handling
 	addMappings := func(srcPaths []string, fileType string) error {
@@ -298,8 +310,8 @@ func generateMappingsFromFiles(
 
 			// Determine path generation logic based on file type
 			switch fileType {
-			case IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
-				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType)
+			case IndexTypeVectorScalarV0, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
+				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType, indexPathVersions[srcPath])
 			case FileTypeLOB:
 				dstPath, err = generateTargetLOBPath(srcPath, source, target)
 			default:
@@ -327,7 +339,9 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.Bm25Binlogs, BinlogTypeBM25); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalar); err != nil {
+	// Vector/scalar index copy uses the v0 type as the logical input; the
+	// per-file IndexStorePathVersion switches storage matching to index_files_v1 when needed.
+	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalarV0); err != nil {
 		return nil, err
 	}
 	if err := addMappings(files.TextIndex, IndexTypeText); err != nil {
@@ -707,6 +721,7 @@ func buildIndexInfoFromSource(
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
 			IndexName:                 srcIndex.GetIndexName(),
+			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}
 	}
 
@@ -797,24 +812,27 @@ func lobFileInfosToPaths(infos []packed.LobFileInfo) []string {
 // File type constants used for path identification and generation.
 // These constants match the directory names in Milvus storage paths.
 const (
-	BinlogTypeInsert      = "insert_log"
-	BinlogTypeStats       = "stats_log"
-	BinlogTypeDelta       = "delta_log"
-	BinlogTypeBM25        = "bm25_stats"
-	IndexTypeVectorScalar = "index_files"
-	IndexTypeText         = "text_log"
-	IndexTypeJSONKey      = "json_key_index_log" // Legacy: JSON Key Inverted Index
-	IndexTypeJSONStats    = "json_stats"         // New: JSON Stats with Shredding Design
-	FileTypeLOB           = "lob"                // LOB files at partition level for TEXT fields
+	BinlogTypeInsert        = "insert_log"
+	BinlogTypeStats         = "stats_log"
+	BinlogTypeDelta         = "delta_log"
+	BinlogTypeBM25          = "bm25_stats"
+	IndexTypeVectorScalarV0 = "index_files"
+	IndexTypeVectorScalarV1 = "index_files_v1"
+	IndexTypeText           = "text_log"
+	IndexTypeJSONKey        = "json_key_index_log" // Legacy: JSON Key Inverted Index
+	IndexTypeJSONStats      = "json_stats"         // New: JSON Stats with Shredding Design
+	FileTypeLOB             = "lob"                // LOB files at partition level for TEXT fields
 )
 
 // generateTargetIndexPath is the unified function for generating target paths for all index types
 // The indexType parameter specifies which type of index path to generate
 //
 // Supported index types (use constants):
-//   - IndexTypeVectorScalar: Vector/Scalar Index path format (from BuildSegmentIndexFilePaths)
+//   - IndexTypeVectorScalarV0: Vector/Scalar v0 path format (legacy index_files prefix)
 //     {rootPath}/index_files/{build_id}/{index_version}/{partition_id}/{segment_id}/file
 //     Note: collectionID is NOT in the path, only partitionID and segmentID are replaced
+//   - IndexTypeVectorScalarV1: Vector/Scalar v1 path format (index_files_v1 prefix)
+//     {rootPath}/index_files_v1/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
 //   - IndexTypeText: Text Index path format
 //     {rootPath}/text_log/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/file
 //   - IndexTypeJSONKey: JSON Key Index path format (legacy)
@@ -823,7 +841,7 @@ const (
 //     {rootPath}/json_stats/{data_format_version}/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/(shared_key_index|shredding_data)/...
 //
 // Examples:
-// generateTargetIndexPath(..., IndexTypeVectorScalar):
+// generateTargetIndexPath(..., IndexTypeVectorScalarV0):
 //
 //	files/index_files/1001/1/222/333/scalar_index -> files/index_files/1001/1/bbb/ccc/scalar_index
 //
@@ -843,6 +861,7 @@ func generateTargetIndexPath(
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	indexType string,
+	pathVersion indexpb.IndexStorePathVersion,
 ) (string, error) {
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
@@ -851,41 +870,57 @@ func generateTargetIndexPath(
 	var keywordIdx int
 	var collectionOffset, partitionOffset, segmentOffset int
 
+	keyword := indexType
+	if indexType == IndexTypeVectorScalarV0 && metautil.IsCollectionRooted(pathVersion) {
+		// The caller still passes the vector/scalar logical type, but v1 files
+		// live under a different object-storage prefix.
+		keyword = IndexTypeVectorScalarV1
+	}
+
 	// Find the keyword position in the path
 	keywordIdx = -1
 	for i, part := range parts {
-		if part == indexType {
+		if part == keyword {
 			keywordIdx = i
 			break
 		}
 	}
 
 	if keywordIdx == -1 {
-		return "", fmt.Errorf("keyword '%s' not found in path: %s", indexType, sourcePath)
+		return "", fmt.Errorf("keyword '%s' not found in path: %s", keyword, sourcePath)
 	}
 
 	// Set offsets based on index type
 	// collectionOffset = -1 means collectionID is not present in the path
+	var buildIDOffset int
 	switch indexType {
-	case IndexTypeVectorScalar:
-		// Vector/Scalar index: index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
-		// Path generated by BuildSegmentIndexFilePaths - no collectionID in path
-		collectionOffset = -1
-		partitionOffset = 3
-		segmentOffset = 4
+	case IndexTypeVectorScalarV0:
+		if metautil.IsCollectionRooted(pathVersion) {
+			collectionOffset = 1
+			partitionOffset = 2
+			segmentOffset = 3
+			buildIDOffset = 4
+		} else {
+			collectionOffset = -1
+			partitionOffset = 3
+			segmentOffset = 4
+			buildIDOffset = 1
+		}
 	case IndexTypeText, IndexTypeJSONKey:
 		// Text/JSON index: text_log|json_key_index_log/build/ver/coll/part/seg/field
 		collectionOffset = 3
 		partitionOffset = 4
 		segmentOffset = 5
+		buildIDOffset = 1
 	case IndexTypeJSONStats:
 		// JSON Stats: json_stats/data_format_ver/build/ver/coll/part/seg/field/(shared_key_index|shredding_data)/...
 		collectionOffset = 4 // One more level than legacy (data_format_version)
 		partitionOffset = 5
 		segmentOffset = 6
+		buildIDOffset = 2
 	default:
 		return "", fmt.Errorf("unsupported index type: %s (expected '%s', '%s', '%s', or '%s')",
-			indexType, IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
+			indexType, IndexTypeVectorScalarV0, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
 	}
 
 	// Validate path structure has enough components
@@ -895,11 +930,6 @@ func generateTargetIndexPath(
 	}
 
 	// Replace buildID if a mapping exists in target.NewBuildIds
-	// All index types have buildID at offset 1, except JSONStats which has it at offset 2
-	buildIDOffset := 1
-	if indexType == IndexTypeJSONStats {
-		buildIDOffset = 2
-	}
 	if keywordIdx+buildIDOffset < len(parts) {
 		oldBuildIDStr := parts[keywordIdx+buildIDOffset]
 		oldBuildID, parseErr := strconv.ParseInt(oldBuildIDStr, 10, 64)
