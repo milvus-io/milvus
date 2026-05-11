@@ -350,6 +350,7 @@ type LocalSegment struct {
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
+	fieldJSONStatsMu   sync.RWMutex
 }
 
 func NewSegment(ctx context.Context,
@@ -1210,7 +1211,10 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-	if _, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok {
+	s.fieldJSONStatsMu.RLock()
+	_, loaded := s.fieldJSONStats[jsonKeyStats.GetFieldID()]
+	s.fieldJSONStatsMu.RUnlock()
+	if loaded {
 		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
@@ -1254,13 +1258,18 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return nil, nil
 	}).Await()
 
+	if err := HandleCStatus(ctx, &status, "Load JsonKeyStats failed"); err != nil {
+		return err
+	}
+	s.fieldJSONStatsMu.Lock()
 	s.fieldJSONStats[jsonKeyStats.GetFieldID()] = &querypb.JsonStatsInfo{
 		FieldID:           jsonKeyStats.GetFieldID(),
 		DataFormatVersion: jsonKeyStats.GetJsonKeyStatsDataFormat(),
 		BuildID:           jsonKeyStats.GetBuildID(),
 		VersionID:         jsonKeyStats.GetVersion(),
 	}
-	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
+	s.fieldJSONStatsMu.Unlock()
+	return nil
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
@@ -1321,8 +1330,59 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	return nil
 }
 
+func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) {
+	jsonStatsInfo := make(map[int64]*querypb.JsonStatsInfo)
+	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		log.Ctx(ctx).Warn("skip sync json key stats, json key stats is not enabled", zap.Int64("segmentID", s.ID()))
+		s.fieldJSONStatsMu.Lock()
+		s.fieldJSONStats = jsonStatsInfo
+		s.fieldJSONStatsMu.Unlock()
+		return
+	}
+
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
+	jsonKeyStats := statsResult.JSONKeyStats
+	if statsResult.Err() != nil {
+		log.Ctx(ctx).Warn("failed to resolve json key stats from manifest",
+			zap.Int64("segmentID", loadInfo.GetSegmentID()),
+			zap.String("manifestPath", loadInfo.GetManifestPath()),
+			zap.Error(statsResult.Err()))
+		jsonKeyStats = loadInfo.GetJsonKeyStatsLogs()
+	}
+
+	for fieldID, stats := range jsonKeyStats {
+		if stats == nil {
+			continue
+		}
+		if stats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
+			log.Ctx(ctx).Warn("skip sync json key stats, data format invalid",
+				zap.Int64("segmentID", loadInfo.GetSegmentID()),
+				zap.Int64("fieldID", fieldID),
+				zap.Int64("buildID", stats.GetBuildID()),
+				zap.Int64("version", stats.GetVersion()),
+				zap.Int64("dataFormat", stats.GetJsonKeyStatsDataFormat()),
+				zap.Int64("expectedDataFormat", common.JSONStatsDataFormatVersion))
+			continue
+		}
+		jsonStatsInfo[fieldID] = &querypb.JsonStatsInfo{
+			FieldID:           stats.GetFieldID(),
+			DataFormatVersion: stats.GetJsonKeyStatsDataFormat(),
+			BuildID:           stats.GetBuildID(),
+			VersionID:         stats.GetVersion(),
+		}
+	}
+
+	s.fieldJSONStatsMu.Lock()
+	s.fieldJSONStats = jsonStatsInfo
+	s.fieldJSONStatsMu.Unlock()
+}
+
 func (s *LocalSegment) Load(ctx context.Context) error {
-	return s.csegment.Load(ctx)
+	if err := s.csegment.Load(ctx); err != nil {
+		return err
+	}
+	s.syncFieldJSONStatsFromLoadInfo(ctx, s.LoadInfo())
+	return nil
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
@@ -1338,6 +1398,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 	s.loadInfo.Store(newLoadInfo)
+	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	return nil
 }
 
@@ -1483,7 +1544,17 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 }
 
 func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
-	return s.fieldJSONStats
+	s.fieldJSONStatsMu.RLock()
+	defer s.fieldJSONStatsMu.RUnlock()
+
+	stats := make(map[int64]*querypb.JsonStatsInfo, len(s.fieldJSONStats))
+	for fieldID, info := range s.fieldJSONStats {
+		if info == nil {
+			continue
+		}
+		stats[fieldID] = proto.Clone(info).(*querypb.JsonStatsInfo)
+	}
+	return stats
 }
 
 // FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.

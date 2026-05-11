@@ -517,7 +517,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	case querypb.LoadScope_Index:
 		return node.loadIndex(ctx, req), nil
 	case querypb.LoadScope_Stats:
-		return node.loadStats(ctx, req), nil
+		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Reopen:
 		return node.reopenSegments(ctx, req), nil
 	}

@@ -542,6 +542,69 @@ func (s *UtilsSuite) TestFieldMmapPriorityOverCollection() {
 	})
 }
 
+func (s *UtilsSuite) TestPackLoadSegmentRequestLoadScope() {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+		},
+	}
+
+	testCases := []struct {
+		name      string
+		action    ActionType
+		wantScope querypb.LoadScope
+	}{
+		{
+			name:      "index update",
+			action:    ActionTypeUpdate,
+			wantScope: querypb.LoadScope_Index,
+		},
+		{
+			name:      "legacy stats update",
+			action:    ActionTypeStatsUpdate,
+			wantScope: querypb.LoadScope_Stats,
+		},
+		{
+			name:      "reopen update",
+			action:    ActionTypeReopen,
+			wantScope: querypb.LoadScope_Reopen,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			action := NewSegmentAction(1, tc.action, "test-ch", 100)
+			task, err := NewSegmentTask(
+				ctx,
+				time.Second,
+				nil,
+				1,
+				newReplicaDefaultRG(10),
+				commonpb.LoadPriority_LOW,
+				action,
+			)
+			s.NoError(err)
+
+			req := packLoadSegmentRequest(
+				task,
+				action,
+				schema,
+				nil,
+				&querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection},
+				&querypb.SegmentLoadInfo{},
+				nil,
+			)
+
+			s.Equal(tc.wantScope, req.GetLoadScope())
+		})
+	}
+}
+
 func TestAutoWarmupForNonPKIsolationCollection(t *testing.T) {
 	paramtable.Init()
 
