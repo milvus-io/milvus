@@ -1264,14 +1264,34 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         expressions = [ct.default_bool_field_name, "true", "false"]
         for expression in expressions:
             log.debug(f"search with expression: {expression}")
-            self.search(client, collection_name,
-                        data=vectors[:default_nq], anns_field=default_search_field,
-                        search_params=default_search_params, limit=default_limit,
-                        filter=expression,
-                        check_task=CheckTasks.err_res,
-                        check_items={"err_code": 1100,
-                                     "err_msg": "failed to create query plan: predicate is not a "
-                                                "boolean expression: %s, data type: Bool" % expression})
+            if expression == "true":
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq, "limit": default_limit,
+                                         "metric": "COSINE", "enable_milvus_client_api": True,
+                                         "pk_name": ct.default_int64_field_name})
+            elif expression == "false":
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq, "limit": 0,
+                                         "metric": "COSINE", "enable_milvus_client_api": True,
+                                         "pk_name": ct.default_int64_field_name})
+            else:
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: predicate is not a "
+                                                    "boolean expression: %s, data type: Bool" % expression})
+
         expression = f"!{ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
@@ -1292,16 +1312,6 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     check_items={"err_code": 1100,
                                  "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}, "
                                             "error: 'and' can only be used between boolean expressions"})
-        expression = f"{ct.default_int64_field_name} > 0 or false"
-        log.debug(f"search with expression: {expression}")
-        self.search(client, collection_name,
-                    data=vectors[:default_nq], anns_field=default_search_field,
-                    search_params=default_search_params, limit=default_limit,
-                    filter=expression,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 or false, "
-                                            "error: 'or' can only be used between boolean expressions"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_one(self):
