@@ -169,7 +169,7 @@ func (m *ModifiedMetrics) Subtract(other ModifiedMetrics) {
 		panic(fmt.Sprintf("rows cannot be less than zero, current: %d, target: %d", m.Rows, other.Rows))
 	}
 	if m.BinarySize < other.BinarySize {
-		panic(fmt.Sprintf("binary size cannot be less than zero, current: %d, target: %d", m.Rows, other.Rows))
+		panic(fmt.Sprintf("binary size cannot be less than zero, current: %d, target: %d", m.BinarySize, other.BinarySize))
 	}
 	m.Rows -= other.Rows
 	m.BinarySize -= other.BinarySize
