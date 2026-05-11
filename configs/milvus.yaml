@@ -496,7 +496,7 @@ queryNode:
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
         scalarField: sync
-        scalarIndex: sync
+        scalarIndex: sync # cache warmup for scalar indexes and the system PK index.
         vectorField: disable # cache warmup for vector field raw data is by default disabled.
         vectorIndex: sync
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
