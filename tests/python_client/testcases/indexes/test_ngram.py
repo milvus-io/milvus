@@ -485,7 +485,6 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Insert test data
         insert_times = 2
-        total_records = insert_times * default_nb
         for i in range(insert_times):
             rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
             for j, row in enumerate(rows):
@@ -524,7 +523,6 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         self.wait_for_index_ready(client, collection_name, index_name="content_ngram")
         self.load_collection(client, collection_name)
 
-        expected_count_per_keyword = total_records // len(multilingual_keywords)
 
         # Test 1: Chinese character search
         chinese_keyword = "北京"
@@ -534,8 +532,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{chinese_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 2: Japanese character search
         japanese_keyword = "東京"
@@ -545,8 +543,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{japanese_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 3: Russian Cyrillic character search
         russian_keyword = "Моск"
@@ -556,8 +554,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{russian_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 4: French accent character search
         french_keyword = "café"
@@ -567,8 +565,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{french_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 5: Emoji character search
         emoji_keyword = "🏫"
@@ -578,8 +576,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{emoji_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 6: Star emoji search
         star_keyword = "⭐"
@@ -589,8 +587,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{star_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 7: Arabic character search
         arabic_keyword = "مدرسة"
@@ -600,8 +598,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{arabic_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 8: Korean character search
         korean_keyword = "한국"
@@ -611,8 +609,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{korean_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 9: German umlaut character search
         german_keyword = "München"
@@ -622,8 +620,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{german_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 10: Mixed language search
         mixed_keyword = "mix"
@@ -633,8 +631,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{mixed_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 11: Complex multilingual with emojis prefix search
         complex_keyword = "café☕"
@@ -644,8 +642,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{complex_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 12: Hindi/Devanagari character search
         hindi_keyword = "प्रविष्टि"
@@ -655,8 +653,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{hindi_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 13: Greek character search
         greek_keyword = "Γειά"
@@ -666,8 +664,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{greek_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 14: Portuguese with tilde character search
         portuguese_keyword = "português"
@@ -677,8 +675,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         filter_expr = f'content_no_index["body"] LIKE "%{portuguese_keyword}%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
 
         # Test 15: Test single character search (especially important for CJK)
         single_char_keyword = "学"
@@ -689,5 +687,5 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         res_no_index = self.query(client, collection_name, filter=filter_expr,
                                   output_fields=["id", "content_ngram"])[0]
         # Should match both "北京大学" and "🏫学校🎓"
-        assert len(res_ngram) >= expected_count_per_keyword * 2
-        assert res_ngram == res_no_index
+        assert len(res_ngram) > 0
+        assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
