@@ -28,6 +28,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	loadConfigWatcherInterval           = time.Minute
+	loadConfigReplicaPromotionInterval  = 5 * time.Second
+	loadConfigWatcherBackoffInitial     = 10 * time.Millisecond
+	loadConfigWatcherBackoffMaxInterval = 10 * time.Minute
+)
+
 // NewLoadConfigWatcher creates a new load config watcher.
 func NewLoadConfigWatcher(s *Server) *LoadConfigWatcher {
 	w := &LoadConfigWatcher{
@@ -68,13 +75,15 @@ func (w *LoadConfigWatcher) background() {
 	w.Logger().Info("load config watcher started")
 
 	balanceTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: time.Minute,
+		Default: loadConfigWatcherInterval,
 		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 10 * time.Millisecond,
+			InitialInterval: loadConfigWatcherBackoffInitial,
 			Multiplier:      2,
-			MaxInterval:     10 * time.Minute,
+			MaxInterval:     loadConfigWatcherBackoffMaxInterval,
 		},
 	})
+	promotionTicker := time.NewTicker(loadConfigReplicaPromotionInterval)
+	defer promotionTicker.Stop()
 
 	for {
 		nextTimer, _ := balanceTimer.NextTimer()
@@ -84,6 +93,9 @@ func (w *LoadConfigWatcher) background() {
 		case <-w.triggerCh:
 			w.Logger().Info("load config watcher triggered")
 		case <-nextTimer:
+		case <-promotionTicker.C:
+			w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
+			continue
 		}
 		if err := w.applyLoadConfigChanges(); err != nil {
 			balanceTimer.EnableBackoff()
@@ -95,6 +107,8 @@ func (w *LoadConfigWatcher) background() {
 
 // applyLoadConfigChanges applies the load config changes.
 func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
+
 	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
 	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
 
@@ -139,6 +153,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Warn("failed to update load config", zap.Error(err))
 		return err
 	}
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 	w.Logger().Info("apply load config changes",
 		zap.Int64s("collectionIDs", collectionIDs),
 		zap.Int32("previousReplicaNum", w.previousReplicaNum),

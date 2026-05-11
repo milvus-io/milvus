@@ -549,85 +549,41 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
     @pytest.mark.parametrize("value", ["LARGE_TOPK", "Large_TopK", "large_TOPK"])
     def test_query_mode_value_case_insensitive(self, value):
         """
-        target: document that query_mode value is case-insensitive (known inconsistency)
-        method:
-            1. create collection with properties={"query_mode": value} (non-lowercase value)
-            2. describe_collection to verify stored value equals input (original casing preserved)
-            3. search with limit=large_topk_first to verify large_topk is actually enabled
-        expected: value accepted, stored as-is, large_topk functionality enabled
-        note: inconsistency — error message says "valid values: [large_topk]" but uppercase works
-              tracked in https://github.com/milvus-io/milvus/issues/48725
+        target: verify query_mode value is case-sensitive
+        method: create collection with properties={"query_mode": value} (non-lowercase value)
+        expected: create collection fails with invalid query_mode value error
         """
         client = self._client()
         col = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f'invalid query_mode value "{value}", valid values: [large_topk]'}
         self.create_collection(client, col, schema=schema,
-                               properties={"query_mode": value}, force_teardown=True)
-
-        desc = client.describe_collection(col)
-        stored = desc.get("properties", {}).get("query_mode")
-        assert stored == value, f"stored={stored!r}, expected={value!r}"
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, col, index_params)
-        self.load_collection(client, col)
-        nb = ct.default_nb  # > 2048 to trigger index build
-        rows = [{vec_field: cf.gen_vectors(1, default_dim)[0]} for _ in range(nb)]
-        self.insert(client, col, rows)
-        self.flush(client, col)
-
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": nb,
-                                 "metric": "L2"})
+                               properties={"query_mode": value},
+                               check_task=CheckTasks.err_res,
+                               check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("key", ["QUERY_MODE", "Query_Mode", "query_MODE"])
     def test_query_mode_key_case_sensitive(self, key):
         """
-        target: document that query_mode key is case-sensitive
-        method:
-            1. create collection with properties={key: "large_topk"} (wrong-cased key)
-            2. verify the wrong-cased key is stored as unknown custom property
-            3. verify topk=large_topk_first is rejected (large_topk not enabled)
-        expected: wrong-cased key stored; topk>16384 rejected with error
-        note: inconsistency with value case-insensitivity
-              tracked in https://github.com/milvus-io/milvus/issues/48725
+        target: verify query_mode key is case-sensitive
+        method: create collection with properties={key: "large_topk"} (wrong-cased key)
+        expected: create collection fails with invalid property key error
         """
         client = self._client()
         col = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, col, schema=schema,
-                               properties={key: "large_topk"}, force_teardown=True)
-
-        desc = client.describe_collection(col)
-        props = desc.get("properties", {})
-        assert key in props, f"key {key!r} not stored: {props}"
-        assert "query_mode" not in props, \
-            f"query_mode should not be recognized: {props}"
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
-        self.create_index(client, col, index_params)
-        self.load_collection(client, col)
-        rows = [{vec_field: cf.gen_vectors(1, default_dim)[0]} for _ in range(default_nb)]
-        self.insert(client, col, rows)
-        self.flush(client, col)
-
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"topk [{large_topk_first}] is invalid, it should be in range [1, 16384]"}
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+                 ct.err_msg: f'invalid property key "{key}", did you mean "query_mode"?'}
+        self.create_collection(client, col, schema=schema,
+                               properties={key: "large_topk"},
+                               check_task=CheckTasks.err_res,
+                               check_items=error)
 
     # Note: search_iterator and query_iterator are NOT affected by query_mode=large_topk.
     # The SDK enforces batch_size <= 16384 client-side (ParamError code=1, regardless of property).

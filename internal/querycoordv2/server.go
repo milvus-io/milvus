@@ -894,21 +894,28 @@ func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID i
 	if len(replicas) == 0 {
 		return errors.New("no replica found")
 	}
-	channels := s.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Replica) error {
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		return errors.New("no channels in current target")
 	}
-	for _, replica := range replicas {
-		for channelName := range channels {
-			leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
-			if leader == nil {
-				return fmt.Errorf("replica %d (rg=%s): no leader for channel %s",
-					replica.GetID(), replica.GetResourceGroup(), channelName)
-			}
-			if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
-				return fmt.Errorf("replica %d (rg=%s) channel %s not serviceable: %w",
-					replica.GetID(), replica.GetResourceGroup(), channelName, err)
-			}
+	for channelName := range channels {
+		leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
+		if leader == nil || leader.View == nil {
+			return fmt.Errorf("replica %d (rg=%s): no leader for channel %s",
+				replica.GetID(), replica.GetResourceGroup(), channelName)
+		}
+		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
+			return fmt.Errorf("replica %d (rg=%s) channel %s not serviceable: %w",
+				replica.GetID(), replica.GetResourceGroup(), channelName, err)
 		}
 	}
 	return nil
