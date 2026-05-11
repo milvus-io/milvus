@@ -55,8 +55,6 @@ type BaseKV interface {
 }
 
 // TxnKV contains extra txn operations of kv. The extra operations is transactional.
-//
-//go:generate mockery --name=TxnKV --with-expecter
 type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
@@ -64,8 +62,6 @@ type TxnKV interface {
 }
 
 // MetaKv is TxnKV for metadata. It should save data with lease.
-//
-//go:generate mockery --name=MetaKv --with-expecter
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
@@ -75,8 +71,6 @@ type MetaKv interface {
 }
 
 // WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.
-//
-//go:generate mockery --name=WatchKV --with-expecter
 type WatchKV interface {
 	MetaKv
 	Watch(ctx context.Context, key string) clientv3.WatchChan
