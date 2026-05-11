@@ -35,16 +35,47 @@ pub(crate) fn read_line_file(
     let path = get_resource_path(helper, params, key)?;
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(row_data) = line {
-            dict.push(row_data);
-        } else {
-            return Err(TantivyBindingError::InternalError(format!(
+    for (line_index, line) in reader.lines().enumerate() {
+        let mut row_data = line.map_err(|err| {
+            TantivyBindingError::InternalError(format!(
                 "read {} file failed, error: {}",
                 key,
-                line.unwrap_err().to_string()
-            )));
+                err.to_string()
+            ))
+        })?;
+        if line_index == 0 {
+            row_data = row_data
+                .strip_prefix('\u{feff}')
+                .unwrap_or(&row_data)
+                .to_string();
         }
+        dict.push(row_data);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_line_file;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use serde_json as json;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_read_line_file_strips_utf8_bom_from_first_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("stop_words.txt");
+        std::fs::write(&file_path, b"\xEF\xBB\xBFthe\r\nand\r\n").unwrap();
+
+        let params = json::json!({
+            "type": "local",
+            "path": file_path.to_string_lossy()
+        });
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut dict = Vec::new();
+
+        read_line_file(&mut helper, &mut dict, &params, "test dict file").unwrap();
+
+        assert_eq!(dict, vec!["the".to_string(), "and".to_string()]);
+    }
 }
