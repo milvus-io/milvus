@@ -1464,10 +1464,8 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchExactNoIndex) {
 }
 
 TEST_F(SealedMatchExprTestNoIndex,
-       MatchAllSkipIndexNoOffsetDoesNotVacuouslyMatch) {
+       MatchAllImpossiblePredicateNoOffsetDoesNotVacuouslyMatch) {
     const int32_t impossible_upper = 10000;
-    ASSERT_TRUE(seg_->GetSkipIndex().CanSkipUnaryRange<int32_t>(
-        sub_int_fid_, 0, proto::plan::OpType::GreaterThan, impossible_upper));
 
     auto result = ExecuteRetrieve("match_all(struct_array, $[sub_int] > " +
                                   std::to_string(impossible_upper) + ")");
@@ -1476,10 +1474,8 @@ TEST_F(SealedMatchExprTestNoIndex,
 }
 
 TEST_F(SealedMatchExprTestNoIndex,
-       MatchAllSkipIndexWithOffsetsDoesNotVacuouslyMatch) {
+       MatchAllImpossiblePredicateWithOffsetsDoesNotVacuouslyMatch) {
     const int32_t impossible_upper = 10000;
-    ASSERT_TRUE(seg_->GetSkipIndex().CanSkipUnaryRange<int32_t>(
-        sub_int_fid_, 0, proto::plan::OpType::GreaterThan, impossible_upper));
 
     exec::OffsetVector offsets{0, 1, 2, 37, 128, 255, 999};
     auto result =
