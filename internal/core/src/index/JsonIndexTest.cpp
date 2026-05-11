@@ -142,6 +142,86 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     return loaded_json_index->Count();
 }
 
+std::shared_ptr<ArrayOffsetsSealed>
+BuildAndLoadJsonArrayInvertedIndexForArrayOffsetsRegression(
+    const std::vector<std::string>& json_raw_data) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t field_id = 101;
+    constexpr int64_t index_build_id = 4001;
+    constexpr int64_t index_version = 4001;
+
+    auto field_meta = milvus::segcore::gen_field_meta(
+        collection_id, partition_id, segment_id, field_id, DataType::JSON);
+    auto index_meta =
+        gen_index_meta(segment_id, field_id, index_build_id, index_version);
+
+    auto root_path = (boost::filesystem::path(TestLocalPath) /
+                      boost::filesystem::unique_path(
+                          "json-array-offsets-regression-%%%%-%%%%"))
+                         .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    ChunkManagerWrapper cm_w(cm);
+
+    storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
+    index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    create_index_info.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    create_index_info.json_path = "/a";
+
+    auto build_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(build_index.release()));
+
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_raw_data.size());
+    for (auto& json : json_raw_data) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    json_index->BuildWithFieldData({json_field});
+
+    auto stats = json_index->Upload();
+    auto index_files = stats->GetIndexFiles();
+
+    bool has_array_offsets_slice = false;
+    bool has_array_offsets_exact = false;
+    for (const auto& file : index_files) {
+        auto file_name = boost::filesystem::path(file).filename().string();
+        if (file_name == INDEX_ARRAY_OFFSETS_FILE_NAME) {
+            has_array_offsets_exact = true;
+        }
+        if (file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME + std::string("_")) !=
+            std::string::npos) {
+            has_array_offsets_slice = true;
+        }
+    }
+    EXPECT_FALSE(has_array_offsets_exact);
+    EXPECT_TRUE(has_array_offsets_slice);
+
+    build_ctx.set_for_loading_index(true);
+    auto load_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    auto loaded_json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(load_index.release()));
+
+    Config load_config;
+    load_config[index::INDEX_FILES] = index_files;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+
+    loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
+    EXPECT_TRUE(loaded_json_index->IsNestedIndex());
+    return loaded_json_index->GetArrayOffsets();
+}
+
 }  // namespace
 
 TEST(JsonIndexTest, TestJsonContains) {
@@ -261,6 +341,51 @@ TEST(JsonIndexTest, TestJsonContains) {
             EXPECT_TRUE(result[id]);
         }
     }
+}
+
+TEST(JsonIndexTest, TestJsonArrayIndexExistsUsesRowLevelJsonExistSemantics) {
+    std::vector<std::string> json_raw_data = {
+        R"({"a": [1, 2]})",
+        R"({"a": []})",
+        R"({"b": [1]})",
+        R"({"a": "not an array"})",
+    };
+
+    auto json_path = "/a";
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    index::CreateIndexInfo cii_array_double;
+    cii_array_double.index_type = index::INVERTED_INDEX_TYPE;
+    cii_array_double.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    cii_array_double.json_path = json_path;
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        cii_array_double, file_manager_ctx);
+    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
+
+    std::vector<milvus::Json> jsons;
+    for (auto& json : json_raw_data) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    json_index->BuildWithFieldData({json_field});
+
+    auto exists = json_index->Exists();
+    ASSERT_EQ(exists.size(), json_raw_data.size());
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);
+    EXPECT_FALSE(exists[2]);
+    EXPECT_TRUE(exists[3]);
 }
 
 TEST(JsonIndexTest, TestJsonCast) {
@@ -528,4 +653,22 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
 
     EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
               json_raw_data.size());
+}
+
+TEST(JsonIndexTest, TestLoadWithSlicedArrayOffsets) {
+    FileSliceSizeGuard slice_size_guard(64);
+
+    std::vector<std::string> json_raw_data;
+    for (int i = 0; i < 40; ++i) {
+        json_raw_data.emplace_back(R"({"a": [1.0, 2.0, 3.0]})");
+    }
+
+    auto array_offsets =
+        BuildAndLoadJsonArrayInvertedIndexForArrayOffsetsRegression(
+            json_raw_data);
+    ASSERT_NE(array_offsets, nullptr);
+    EXPECT_EQ(array_offsets->GetRowCount(),
+              static_cast<int64_t>(json_raw_data.size()));
+    EXPECT_EQ(array_offsets->GetTotalElementCount(),
+              static_cast<int64_t>(json_raw_data.size() * 3));
 }

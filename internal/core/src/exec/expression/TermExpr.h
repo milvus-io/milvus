@@ -78,7 +78,8 @@ class PhyTermFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level,
                       false,
-                      false,
+                      expr->column_.element_level_ &&
+                          expr->column_.data_type_ == DataType::JSON,
                       plan_options),
           expr_(expr) {
         DetermineExecPath();

@@ -18,14 +18,17 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
 
+#include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "common/Slice.h"
+#include "boost/filesystem.hpp"
 #include "index/InvertedIndexTantivy.h"
 #include "index/JsonIndexBuilder.h"
 #include "index/Meta.h"
@@ -126,6 +129,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
         return exists_bitset_.clone();
     }
 
+    std::shared_ptr<ArrayOffsetsSealed>
+    GetArrayOffsets() const override {
+        return array_offsets_;
+    }
+
     // JSON brute-force semantics: NotEqual on error (path missing / cast fail)
     // returns TRUE. Base indexes mask invalid rows to false via valid_bitset_,
     // which is correct for regular nullable columns but wrong for JSON path
@@ -158,6 +166,18 @@ class JsonScalarIndexWrapper : public BaseIndex {
                 res_set.Append(
                     INDEX_NON_EXIST_OFFSET_FILE_NAME, ne_data, ne_len);
             }
+            if (!row_to_element_start_.empty()) {
+                ArrayOffsetsSealed tmp(row_to_element_start_);
+                auto array_offsets_buf = tmp.Serialize();
+                std::shared_ptr<uint8_t[]> array_offsets_data(
+                    new uint8_t[array_offsets_buf.size()]);
+                memcpy(array_offsets_data.get(),
+                       array_offsets_buf.data(),
+                       array_offsets_buf.size());
+                res_set.Append(INDEX_ARRAY_OFFSETS_FILE_NAME,
+                               array_offsets_data,
+                               array_offsets_buf.size());
+            }
             lock.unlock();
             milvus::Disassemble(res_set);
             return res_set;
@@ -180,6 +200,17 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                non_exist_offsets_.data(),
                                non_exist_offsets_.size() * sizeof(size_t));
         }
+
+        if constexpr (kIsInverted) {
+            bool has_array_offsets = !row_to_element_start_.empty();
+            writer->PutMeta("has_array_offsets", has_array_offsets);
+            if (has_array_offsets) {
+                ArrayOffsetsSealed tmp(row_to_element_start_);
+                auto buf = tmp.Serialize();
+                writer->WriteEntry(
+                    INDEX_ARRAY_OFFSETS_FILE_NAME, buf.data(), buf.size());
+            }
+        }
     }
 
     void
@@ -194,11 +225,29 @@ class JsonScalarIndexWrapper : public BaseIndex {
             std::memcpy(
                 non_exist_offsets_.data(), e.data.data(), e.data.size());
         }
-        LOG_INFO("LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}",
-                 has_non_exist);
+        bool has_array_offsets = false;
+        if constexpr (kIsInverted) {
+            has_array_offsets =
+                reader.GetMeta<bool>("has_array_offsets", false);
+            if (has_array_offsets) {
+                auto e = reader.ReadEntry(INDEX_ARRAY_OFFSETS_FILE_NAME);
+                array_offsets_ = ArrayOffsetsSealed::Deserialize(
+                    reinterpret_cast<const uint8_t*>(e.data.data()),
+                    e.data.size());
+                this->is_nested_index_ = true;
+            } else if (cast_type_.data_type() ==
+                       JsonCastType::DataType::ARRAY) {
+                this->is_nested_index_ = false;
+            }
+        }
+        LOG_INFO(
+            "LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}, "
+            "has_array_offsets: {}",
+            has_non_exist,
+            has_array_offsets);
         // BaseIndex::LoadEntries has fully initialized the base index, so
         // Count() is safe to call and we can eagerly build the exists bitmap.
-        BuildExistsBitset(this->Count());
+        BuildExistsBitset(GetExistsRowCount(this->Count()));
     }
 
     // v2 format: override Load() to defer the eager exists bitmap build
@@ -208,7 +257,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override {
         BaseIndex::Load(ctx, config);
-        BuildExistsBitset(this->Count());
+        BuildExistsBitset(GetExistsRowCount(this->Count()));
     }
 
     JsonCastType
@@ -254,42 +303,101 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     config, milvus::LOAD_PRIORITY)
                     .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-            // Try exact file name first
-            auto it = std::find_if(
-                index_files.begin(),
-                index_files.end(),
-                [](const std::string& f) {
-                    return boost::filesystem::path(f).filename().string() ==
-                           INDEX_NON_EXIST_OFFSET_FILE_NAME;
-                });
-            if (it != index_files.end()) {
+            auto load_array_offsets = [this](const uint8_t* data, size_t size) {
+                array_offsets_ = ArrayOffsetsSealed::Deserialize(data, size);
+                this->is_nested_index_ = true;
+            };
+
+            std::optional<std::string> array_offsets_file;
+            std::vector<std::string> array_offsets_files;
+            std::optional<std::string> non_exist_offset_file;
+            std::vector<std::string> non_exist_offset_files;
+            std::optional<std::string> slice_meta_file;
+            for (const auto& file : index_files) {
+                auto file_name =
+                    boost::filesystem::path(file).filename().string();
+                if (file_name == INDEX_ARRAY_OFFSETS_FILE_NAME) {
+                    array_offsets_file = file;
+                } else if (file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME) !=
+                           std::string::npos) {
+                    array_offsets_files.push_back(file);
+                }
+
+                if (file_name == INDEX_NON_EXIST_OFFSET_FILE_NAME) {
+                    non_exist_offset_file = file;
+                } else if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                           std::string::npos) {
+                    non_exist_offset_files.push_back(file);
+                }
+
+                if (file_name == INDEX_FILE_SLICE_META) {
+                    slice_meta_file = file;
+                }
+            }
+
+            if (array_offsets_file.has_value()) {
                 auto datas = this->file_manager_->LoadIndexToMemory(
-                    {*it}, load_priority);
+                    {array_offsets_file.value()}, load_priority);
+                auto data = std::move(datas.at(INDEX_ARRAY_OFFSETS_FILE_NAME));
+                load_array_offsets(
+                    reinterpret_cast<const uint8_t*>(data->PayloadData()),
+                    static_cast<size_t>(data->PayloadSize()));
+            } else if (!array_offsets_files.empty()) {
+                AssertInfo(slice_meta_file.has_value(),
+                           "array_offsets slices found but _meta_slice is "
+                           "missing");
+                array_offsets_files.push_back(slice_meta_file.value());
+                auto datas = this->file_manager_->LoadIndexToMemory(
+                    array_offsets_files, load_priority);
+
+                auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
+                auto array_offsets_data =
+                    CompactIndexDatasByKey(INDEX_ARRAY_OFFSETS_FILE_NAME,
+                                           std::move(slice_meta),
+                                           datas);
+                AssertInfo(array_offsets_data.codecs_.size() > 0,
+                           "array offsets file is empty");
+
+                std::vector<uint8_t> assembled(
+                    static_cast<size_t>(array_offsets_data.size_));
+                size_t offset = 0;
+                for (auto&& codec : array_offsets_data.codecs_) {
+                    std::memcpy(assembled.data() + offset,
+                                codec->PayloadData(),
+                                codec->PayloadSize());
+                    offset += codec->PayloadSize();
+                }
+                AssertInfo(offset == assembled.size(),
+                           "array offsets size mismatch after slice "
+                           "compaction");
+                load_array_offsets(assembled.data(), assembled.size());
+            } else if (cast_type_.data_type() ==
+                       JsonCastType::DataType::ARRAY) {
+                this->is_nested_index_ = false;
+            }
+
+            if (non_exist_offset_file.has_value()) {
+                auto datas = this->file_manager_->LoadIndexToMemory(
+                    {non_exist_offset_file.value()}, load_priority);
                 auto& d = datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME);
                 fill(d->PayloadData(), d->PayloadSize());
                 return;
             }
-
-            // Try sliced files
-            std::vector<std::string> sliced;
-            for (auto& f : index_files) {
-                auto name = boost::filesystem::path(f).filename().string();
-                if (name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
-                    std::string::npos) {
-                    sliced.push_back(f);
-                }
-                if (name == INDEX_FILE_SLICE_META) {
-                    sliced.push_back(f);
-                }
-            }
-            if (!sliced.empty()) {
+            if (!non_exist_offset_files.empty()) {
+                AssertInfo(slice_meta_file.has_value(),
+                           "non_exist_offset slices found but _meta_slice is "
+                           "missing");
+                non_exist_offset_files.push_back(slice_meta_file.value());
                 auto datas = this->file_manager_->LoadIndexToMemory(
-                    sliced, load_priority);
+                    non_exist_offset_files, load_priority);
+
                 auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
                 auto non_exist_codecs =
                     CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
                                            std::move(slice_meta),
                                            datas);
+                AssertInfo(non_exist_codecs.codecs_.size() > 0,
+                           "non exist offset file is empty");
                 for (auto&& c : non_exist_codecs.codecs_) {
                     fill(c->PayloadData(), c->PayloadSize());
                 }
@@ -309,6 +417,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
                 InvertedIndexTantivy<T>::BuildTantivyMeta(file_names, has_null);
             std::shared_lock<folly::SharedMutex> lock(this->mutex_);
             meta["has_non_exist"] = !non_exist_offsets_.empty();
+            meta["has_array_offsets"] = !row_to_element_start_.empty();
             return meta;
         } else {
             return {};
@@ -323,11 +432,13 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     index_files.begin(),
                     index_files.end(),
                     [](const std::string& f) {
-                        return boost::filesystem::path(f)
-                                   .filename()
-                                   .string()
-                                   .find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
-                               std::string::npos;
+                        auto file_name =
+                            boost::filesystem::path(f).filename().string();
+                        return file_name.find(
+                                   INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                                   std::string::npos ||
+                               file_name.find(INDEX_ARRAY_OFFSETS_FILE_NAME) !=
+                                   std::string::npos;
                     }),
                 index_files.end());
             InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
@@ -344,6 +455,40 @@ class JsonScalarIndexWrapper : public BaseIndex {
             total_rows += data->get_num_rows();
         }
 
+        row_to_element_start_.clear();
+        array_offsets_.reset();
+
+        if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+            this->is_nested_index_ = true;
+            row_to_element_start_.push_back(0);
+            ProcessJsonFieldArrayData<T>(
+                field_datas,
+                json_schema_,
+                nested_path_,
+                [this](const T* data, int64_t size, int64_t offset) {
+                    if (size > 0) {
+                        this->wrapper_->template add_data<T>(
+                            data, size, offset);
+                    }
+                    row_to_element_start_.push_back(
+                        row_to_element_start_.back() +
+                        static_cast<int32_t>(size));
+                },
+                [this](int64_t offset) {
+                    this->null_offset_.push_back(offset);
+                },
+                [this](int64_t offset) {
+                    non_exist_offsets_.push_back(offset);
+                },
+                [](const Json&, const std::string&, simdjson::error_code) {});
+
+            array_offsets_ =
+                std::make_shared<ArrayOffsetsSealed>(row_to_element_start_);
+            BuildExistsBitset(total_rows);
+            return;
+        }
+
+        this->is_nested_index_ = false;
         ProcessJsonFieldData<T>(
             field_datas,
             json_schema_,
@@ -382,8 +527,23 @@ class JsonScalarIndexWrapper : public BaseIndex {
         }
     }
 
+    int64_t
+    GetExistsRowCount(int64_t fallback_count) const {
+        if constexpr (kIsInverted) {
+            if (this->is_nested_index_) {
+                AssertInfo(array_offsets_ != nullptr,
+                           "JSON ARRAY index requires ArrayOffsets for "
+                           "Exists()");
+                return array_offsets_->GetRowCount();
+            }
+        }
+        return fallback_count;
+    }
+
     std::vector<size_t> non_exist_offsets_;
     TargetBitmap exists_bitset_;
+    std::vector<int32_t> row_to_element_start_;
+    std::shared_ptr<ArrayOffsetsSealed> array_offsets_;
 
  private:
     JsonCastType cast_type_;

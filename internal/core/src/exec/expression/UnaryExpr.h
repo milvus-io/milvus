@@ -790,7 +790,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level,
                       false,
-                      false,
+                      expr->column_.element_level_ &&
+                          expr->column_.data_type_ == DataType::JSON,
                       plan_options),
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
@@ -956,7 +957,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
-    int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};

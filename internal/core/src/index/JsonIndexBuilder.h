@@ -115,6 +115,21 @@ ProcessJsonFieldData(
     JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
+// Array JSON cast (cast_type == ARRAY). data_adder is invoked once per row
+// with the row's element slice (size in 0..N). offset is the row's element
+// start id in the flattened nested index; the caller is responsible for
+// accumulating element counts into ArrayOffsets-style row-to-element-start data.
+template <typename T>
+void
+ProcessJsonFieldArrayData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<T> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
 extern template void
 ProcessJsonFieldData<bool>(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
@@ -158,6 +173,46 @@ ProcessJsonFieldData<std::string>(
     const std::string& nested_path,
     const JsonCastType& cast_type,
     JsonCastFunction cast_function,
+    JsonDataAdder<std::string> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<bool> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<int64_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<int64_t> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    JsonDataAdder<double> data_adder,
+    JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
+    JsonErrorRecorder error_recorder);
+
+extern template void
+ProcessJsonFieldArrayData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,

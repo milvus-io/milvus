@@ -13,12 +13,11 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "segcore/SegmentGrowingImpl.h"
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
-#include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
-#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/transaction/transaction.h"
 
 using namespace milvus;

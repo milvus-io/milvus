@@ -521,3 +521,39 @@ TEST(JsonPathIndexTest, Factory_SortBool_Rejected) {
     EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
                  std::exception);
 }
+
+TEST(JsonPathIndexTest, Factory_SortArrayDouble_Rejected) {
+    auto ctx = MakeTestContext();
+    CreateIndexInfo info;
+    info.index_type = ASCENDING_SORT;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    info.json_path = "/nums";
+
+    EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
+                 std::exception);
+}
+
+TEST(JsonPathIndexTest, Factory_BitmapArrayVarchar_Rejected) {
+    auto ctx = MakeTestContext();
+    CreateIndexInfo info;
+    info.index_type = BITMAP_INDEX_TYPE;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("ARRAY_VARCHAR");
+    info.json_path = "/tags";
+
+    EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
+                 std::exception);
+}
+
+TEST(JsonPathIndexTest, Factory_HybridArrayDouble_Rejected) {
+    auto ctx = MakeTestContext();
+    CreateIndexInfo info;
+    info.index_type = HYBRID_INDEX_TYPE;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    info.json_path = "/nums";
+
+    EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
+                 std::exception);
+}
