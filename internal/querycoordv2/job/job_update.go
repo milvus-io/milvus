@@ -142,7 +142,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
 			}
 
-			if transferErr := job.meta.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
+			if transferErr := job.meta.MoveReplica(job.ctx, collectionID, rg, replicas); transferErr != nil {
 				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
 				err = transferErr
 				return err

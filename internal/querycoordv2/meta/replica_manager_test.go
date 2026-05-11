@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -373,7 +374,17 @@ func (suite *ReplicaManagerSuite) TestResourceGroup() {
 }
 
 func (suite *ReplicaManagerSuite) clearMemory() {
-	suite.mgr.replicas = make(map[int64]*Replica)
+	suite.mgr.coll2Replicas.Range(func(collID int64, _ []*Replica) bool {
+		suite.mgr.coll2Replicas.Remove(collID)
+		return true
+	})
+	suite.mgr.flatReplicas.Range(func(replicaID int64, _ *Replica) bool {
+		suite.mgr.flatReplicas.Remove(replicaID)
+		return true
+	})
+	for _, replicaID := range suite.mgr.queryInvisibleReplicas.Collect() {
+		suite.mgr.queryInvisibleReplicas.Remove(replicaID)
+	}
 }
 
 type ReplicaManagerV2Suite struct {
@@ -599,8 +610,8 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 				replicas := suite.mgr.GetByCollection(ctx, id)
 				for _, r := range replicas {
 					outboundNodes := r.GetRONodes()
-					suite.mgr.RemoveNode(ctx, r.GetID(), outboundNodes...)
-					suite.mgr.RemoveSQNode(ctx, r.GetID(), r.GetROSQNodes()...)
+					suite.mgr.RemoveNode(ctx, id, r.GetID(), outboundNodes...)
+					suite.mgr.RemoveSQNode(ctx, id, r.GetID(), r.GetROSQNodes()...)
 				}
 			}
 		}
@@ -643,7 +654,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		Nodes:         []int64{},
 	})
 
-	err := mgr.put(ctx, replica1, replica2, replica3)
+	err := mgr.Put(ctx, replica1, replica2, replica3)
 	assert.NoError(t, err)
 
 	// Test case 1: Resource group isolation mode.
@@ -684,7 +695,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		Nodes:         []int64{},
 	})
 
-	err = mgr.put(ctx, replica4, replica5)
+	err = mgr.Put(ctx, replica4, replica5)
 	assert.NoError(t, err)
 
 	err = mgr.RecoverSQNodesInCollection(ctx, 200, sqNodesByRG)
@@ -706,12 +717,12 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 
 	// Test case 3: Rolling upgrade compatibility mode.
 	// Old StreamingNodes without RG labels are reported under the default RG. Replicas
-	// in old/uncovered RGs should use only that legacy default pool, while replicas in
-	// newly covered RGs should keep strict RG isolation.
+	// in default or old/uncovered RGs should use only that legacy default pool, while
+	// replicas in newly covered RGs should keep strict RG isolation.
 	replica8 := newReplica(&querypb.Replica{
 		ID:            8,
 		CollectionID:  250,
-		ResourceGroup: "RG_OLD_REPLICA", // Not covered by labeled streaming nodes.
+		ResourceGroup: DefaultResourceGroupName,
 		Nodes:         []int64{},
 	})
 	replica9 := newReplica(&querypb.Replica{
@@ -720,12 +731,18 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		ResourceGroup: "RG1",
 		Nodes:         []int64{},
 	})
+	replica10 := newReplica(&querypb.Replica{
+		ID:            10,
+		CollectionID:  250,
+		ResourceGroup: "RG_OLD_REPLICA", // Not covered by labeled streaming nodes.
+		Nodes:         []int64{},
+	})
 
-	err = mgr.put(ctx, replica8, replica9)
+	err = mgr.Put(ctx, replica8, replica9, replica10)
 	assert.NoError(t, err)
 
 	rollingUpgradeSQNodesByRG := map[string]typeutil.UniqueSet{
-		DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
+		DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902, 903, 904),
 		"RG1":                    typeutil.NewUniqueSet(101, 102),
 	}
 
@@ -734,7 +751,11 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 
 	updatedReplica8 := mgr.Get(ctx, 8)
 	updatedReplica9 := mgr.Get(ctx, 9)
-	assert.ElementsMatch(t, []int64{901, 902}, updatedReplica8.GetRWSQNodes())
+	updatedReplica10 := mgr.Get(ctx, 10)
+	assert.Len(t, updatedReplica8.GetRWSQNodes(), 2)
+	assert.Len(t, updatedReplica10.GetRWSQNodes(), 2)
+	defaultPoolNodes := append(updatedReplica8.GetRWSQNodes(), updatedReplica10.GetRWSQNodes()...)
+	assert.ElementsMatch(t, []int64{901, 902, 903, 904}, defaultPoolNodes)
 	assert.ElementsMatch(t, []int64{101, 102}, updatedReplica9.GetRWSQNodes())
 
 	// Test case 4: Strict isolation mode (with config enabled).
@@ -756,7 +777,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		Nodes:         []int64{},
 	})
 
-	err = mgr.put(ctx, replica6, replica7)
+	err = mgr.Put(ctx, replica6, replica7)
 	assert.NoError(t, err)
 
 	err = mgr.RecoverSQNodesInCollection(ctx, 300, sqNodesByRG)
@@ -797,7 +818,7 @@ func TestSQNodeRecoveryWithRONodes(t *testing.T) {
 		RoSqNodes:     []int64{104},           // RO SQ node (previously removed from available set)
 	})
 
-	err := mgr.put(ctx, replica1)
+	err := mgr.Put(ctx, replica1)
 	assert.NoError(t, err)
 
 	// Available SQ nodes: only 101, 102 remain. 103 is no longer available (will become RO).
@@ -843,7 +864,7 @@ func TestSQNodeRecoveryWithUnrecoverableNodes(t *testing.T) {
 		RoSqNodes:     []int64{999}, // Node 999 is not in any available set - unrecoverable
 	})
 
-	err := mgr.put(ctx, replica1)
+	err := mgr.Put(ctx, replica1)
 	assert.NoError(t, err)
 
 	// Available SQ nodes don't include 999
@@ -889,10 +910,10 @@ func TestGetReplicasJSON(t *testing.T) {
 		Nodes:         []int64{4, 5, 6},
 	})
 
-	err := replicaManager.put(ctx, replica1)
+	err := replicaManager.Put(ctx, replica1)
 	assert.NoError(t, err)
 
-	err = replicaManager.put(ctx, replica2)
+	err = replicaManager.Put(ctx, replica2)
 	assert.NoError(t, err)
 
 	meta := &Meta{
@@ -940,4 +961,231 @@ func TestGetReplicasJSON(t *testing.T) {
 	for _, replica := range replicas {
 		checkResult(replica)
 	}
+}
+
+func TestReplicaManagerCollectionViewAfterPartialUpdateAndRemove(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ReleaseReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	idAllocator := RandomIncrementIDAllocator()
+	mgr := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
+
+	collID := int64(7000)
+	replicas, err := mgr.Spawn(ctx, collID, map[string]int{"rg1": 3}, nil, commonpb.LoadPriority_LOW)
+	assert.NoError(t, err)
+	assert.Len(t, replicas, 3)
+
+	err = mgr.MoveReplica(ctx, collID, "rg2", replicas[1:])
+	assert.NoError(t, err)
+
+	updated := mgr.GetByCollection(ctx, collID)
+	assert.Len(t, updated, 3)
+	assert.Equal(t, replicas[0].GetID(), updated[0].GetID())
+	assert.Equal(t, "rg1", updated[0].GetResourceGroup())
+	assert.Equal(t, replicas[1].GetID(), updated[1].GetID())
+	assert.Equal(t, "rg2", updated[1].GetResourceGroup())
+	assert.Equal(t, replicas[2].GetID(), updated[2].GetID())
+	assert.Equal(t, "rg2", updated[2].GetResourceGroup())
+
+	err = mgr.RemoveReplicas(ctx, collID, replicas[1].GetID())
+	assert.NoError(t, err)
+
+	remaining := mgr.GetByCollection(ctx, collID)
+	assert.Len(t, remaining, 2)
+	assert.Equal(t, replicas[0].GetID(), remaining[0].GetID())
+	assert.Equal(t, replicas[2].GetID(), remaining[1].GetID())
+	assert.Nil(t, mgr.Get(ctx, replicas[1].GetID()))
+	assert.NotNil(t, mgr.Get(ctx, replicas[0].GetID()))
+	assert.NotNil(t, mgr.Get(ctx, replicas[2].GetID()))
+}
+
+func TestReplicaManagerPutMaintainsIndexesAcrossCollections(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	idAllocator := RandomIncrementIDAllocator()
+	mgr := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
+
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  10,
+		ResourceGroup: "rg1",
+		Nodes:         []int64{101},
+	})
+	replica2 := newReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  20,
+		ResourceGroup: "rg2",
+		Nodes:         []int64{201},
+	})
+
+	err := mgr.Put(ctx, replica1, replica2)
+	assert.NoError(t, err)
+
+	assert.Equal(t, replica1, mgr.Get(ctx, replica1.GetID()))
+	assert.Equal(t, replica2, mgr.Get(ctx, replica2.GetID()))
+	assert.Equal(t, []*Replica{replica1}, mgr.GetByCollection(ctx, replica1.GetCollectionID()))
+	assert.Equal(t, []*Replica{replica2}, mgr.GetByCollection(ctx, replica2.GetCollectionID()))
+	assert.Equal(t, replica1, mgr.GetByCollectionAndNode(ctx, replica1.GetCollectionID(), int64(101)))
+	assert.Equal(t, replica2, mgr.GetByCollectionAndNode(ctx, replica2.GetCollectionID(), int64(201)))
+	assert.ElementsMatch(t, []*Replica{replica1}, mgr.GetByNode(ctx, int64(101)))
+	assert.ElementsMatch(t, []*Replica{replica2}, mgr.GetByResourceGroup(ctx, "rg2"))
+}
+
+func TestReplicaManagerPutCrossCollectionPersistErrorIsAtomic(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	saveErr := errors.New("save failed")
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(saveErr).Once()
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  10,
+		ResourceGroup: "rg1",
+	})
+	replica2 := newReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  20,
+		ResourceGroup: "rg2",
+	})
+
+	err := mgr.Put(ctx, replica1, replica2)
+	assert.ErrorIs(t, err, saveErr)
+	assert.Nil(t, mgr.Get(ctx, replica1.GetID()))
+	assert.Nil(t, mgr.Get(ctx, replica2.GetID()))
+	assert.Empty(t, mgr.GetByCollection(ctx, replica1.GetCollectionID()))
+	assert.Empty(t, mgr.GetByCollection(ctx, replica2.GetCollectionID()))
+}
+
+func TestReplicaManagerRemoveCollectionReleasesKVWhenNotLoaded(t *testing.T) {
+	collectionID := int64(10)
+	ctx := context.Background()
+
+	t.Run("success", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		catalog.EXPECT().ReleaseReplicas(mock.Anything, collectionID).Return(nil).Once()
+		mgr := NewReplicaManager(nil, catalog)
+
+		err := mgr.RemoveCollection(ctx, collectionID)
+		assert.NoError(t, err)
+		assert.Empty(t, mgr.GetByCollection(ctx, collectionID))
+	})
+
+	t.Run("release error", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		releaseErr := errors.New("release failed")
+		catalog.EXPECT().ReleaseReplicas(mock.Anything, collectionID).Return(releaseErr).Once()
+		mgr := NewReplicaManager(nil, catalog)
+
+		err := mgr.RemoveCollection(ctx, collectionID)
+		assert.ErrorIs(t, err, releaseErr)
+		assert.Empty(t, mgr.GetByCollection(ctx, collectionID))
+	})
+}
+
+func TestReplicaManagerPersistErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	saveErr := errors.New("save failed")
+
+	t.Run("direct persist", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		replica := newReplica(&querypb.Replica{ID: 1, CollectionID: 10, ResourceGroup: "rg1"})
+		catalog.EXPECT().SaveReplica(mock.Anything, replica.replicaPB).Return(saveErr).Once()
+		mgr := NewReplicaManager(nil, catalog)
+
+		assert.NoError(t, mgr.put(ctx, replica.GetCollectionID()))
+		err := mgr.put(ctx, replica.GetCollectionID(), replica)
+		assert.ErrorIs(t, err, saveErr)
+	})
+
+	t.Run("remove node", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(saveErr).Once()
+		mgr := NewReplicaManager(nil, catalog)
+		replica := newReplica(&querypb.Replica{
+			ID:            1,
+			CollectionID:  10,
+			ResourceGroup: "rg1",
+			Nodes:         []int64{101},
+			RoNodes:       []int64{102},
+		})
+		mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+
+		err := mgr.RemoveNode(ctx, replica.GetCollectionID(), replica.GetID(), int64(102))
+		assert.ErrorIs(t, err, saveErr)
+		assert.ElementsMatch(t, []int64{102}, mgr.Get(ctx, replica.GetID()).GetRONodes())
+	})
+
+	t.Run("remove streaming query node", func(t *testing.T) {
+		catalog := mocks.NewQueryCoordCatalog(t)
+		catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(saveErr).Once()
+		mgr := NewReplicaManager(nil, catalog)
+		replica := newReplica(&querypb.Replica{
+			ID:            1,
+			CollectionID:  10,
+			ResourceGroup: "rg1",
+			RwSqNodes:     []int64{201},
+			RoSqNodes:     []int64{202},
+		})
+		mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+
+		err := mgr.RemoveSQNode(ctx, replica.GetCollectionID(), replica.GetID(), int64(202))
+		assert.ErrorIs(t, err, saveErr)
+		assert.ElementsMatch(t, []int64{202}, mgr.Get(ctx, replica.GetID()).GetROSQNodes())
+	})
+}
+
+func TestReplicaManagerSpawnWaitRGReadyRecovery(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Twice()
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	collID := int64(10)
+
+	replicas, err := mgr.Spawn(ctx, collID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW, WithNeedWaitRGReady())
+	assert.NoError(t, err)
+	assert.Len(t, replicas, 1)
+	replicaID := replicas[0].GetID()
+	assert.True(t, mgr.Get(ctx, replicaID).NeedWaitRGReady())
+
+	err = mgr.RecoverNodesInCollection(ctx, collID, map[string]*ResourceGroup{
+		"rg1": {
+			name:  "rg1",
+			nodes: typeutil.NewUniqueSet(int64(101)),
+			cfg:   newResourceGroupConfig(2, 2),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Empty(t, mgr.Get(ctx, replicaID).GetRWNodes())
+	assert.True(t, mgr.Get(ctx, replicaID).NeedWaitRGReady())
+
+	err = mgr.RecoverNodesInCollection(ctx, collID, map[string]*ResourceGroup{
+		"rg1": newTestResourceGroup("rg1", typeutil.NewUniqueSet(101, 102)),
+	})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{101, 102}, mgr.Get(ctx, replicaID).GetRWNodes())
+	assert.False(t, mgr.Get(ctx, replicaID).NeedWaitRGReady())
+}
+
+func TestReplicaManagerMoveReplicaPersistError(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	saveErr := errors.New("move failed")
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(saveErr).Once()
+	mgr := NewReplicaManager(nil, catalog)
+	ctx := context.Background()
+	replica := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  10,
+		ResourceGroup: "rg1",
+	})
+	assert.NoError(t, mgr.Put(ctx, replica))
+
+	err := mgr.MoveReplica(ctx, replica.GetCollectionID(), "rg2", []*Replica{replica})
+	assert.ErrorIs(t, err, saveErr)
+	assert.Equal(t, "rg1", mgr.Get(ctx, replica.GetID()).GetResourceGroup())
 }
