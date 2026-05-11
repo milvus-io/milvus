@@ -483,6 +483,52 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
 				return err
 			}
+
+			// If struct is not nullable, sub-fields must not be nullable individually
+			if !schema.GetNullable() && field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
+					schema.Name, field.Name)
+			}
+		}
+		if err := checkStructArrayFieldMaxCapacity(schema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema) (int64, error) {
+	for _, param := range field.GetTypeParams() {
+		if param.GetKey() != common.MaxCapacityKey {
+			continue
+		}
+		maxCapacity, err := strconv.ParseInt(param.GetValue(), 10, 64)
+		if err != nil {
+			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s in struct array field %s must be an integer",
+				common.MaxCapacityKey, field.GetName(), structName)
+		}
+		return maxCapacity, nil
+	}
+	return 0, merr.WrapErrParameterInvalidMsg("type param(%s) should be specified for field %s in struct array field %s",
+		common.MaxCapacityKey, field.GetName(), structName)
+}
+
+func checkStructArrayFieldMaxCapacity(schema *schemapb.StructArrayFieldSchema) error {
+	var expectedMaxCapacity int64
+	hasExpectedMaxCapacity := false
+	for _, field := range schema.GetFields() {
+		maxCapacity, err := getStructSubFieldMaxCapacity(schema.GetName(), field)
+		if err != nil {
+			return err
+		}
+		if !hasExpectedMaxCapacity {
+			expectedMaxCapacity = maxCapacity
+			hasExpectedMaxCapacity = true
+			continue
+		}
+		if maxCapacity != expectedMaxCapacity {
+			return merr.WrapErrParameterInvalidMsg("all sub-fields in struct array field must have the same max_capacity: structName=%s, subFieldName=%s, max_capacity=%d, expected=%d",
+				schema.GetName(), field.GetName(), maxCapacity, expectedMaxCapacity)
 		}
 	}
 	return nil

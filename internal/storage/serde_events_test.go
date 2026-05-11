@@ -183,6 +183,59 @@ func TestBinlogSerializeWriter(t *testing.T) {
 	})
 }
 
+func TestValueSerializer_NullArrayOfVectorRoundTrip(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      1,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:     100,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	values := []*Value{
+		{
+			Value: map[FieldID]any{
+				1:   int64(1),
+				100: makeFloatVec(4, 1, 2, 3, 4),
+			},
+		},
+		{
+			Value: map[FieldID]any{
+				1:   int64(2),
+				100: nil,
+			},
+		},
+	}
+
+	record, err := ValueSerializer(values, schema)
+	assert.NoError(t, err)
+	defer record.Release()
+	assert.True(t, record.Column(100).IsNull(1))
+
+	roundTripValues := make([]*Value, record.Len())
+	err = ValueDeserializerWithSchema(record, roundTripValues, schema, true)
+	assert.NoError(t, err)
+	assert.Nil(t, roundTripValues[1].Value.(map[FieldID]interface{})[100])
+
+	rewrittenRecord, err := ValueSerializer(roundTripValues, schema)
+	assert.NoError(t, err)
+	defer rewrittenRecord.Release()
+	assert.True(t, rewrittenRecord.Column(100).IsNull(1))
+}
+
 func TestCompositeBinlogRecordWriter_TTLFieldCollection(t *testing.T) {
 	ttlFieldID := FieldID(100)
 	w := &CompositeBinlogRecordWriter{

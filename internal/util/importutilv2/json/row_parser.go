@@ -46,6 +46,8 @@ type rowParser struct {
 	rejectedFuncOutputFields map[int64]string // fieldID → error message, pre-computed from schema
 	functionOutputFieldIDs   map[int64]struct{}
 	structArrays             map[string][]string
+	structArrayFields        map[string]*schemapb.StructArrayFieldSchema
+	structArraySubFields     map[string]string
 	allowInsertAutoID        bool
 
 	timezone string
@@ -113,6 +115,18 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 			return sa.GetName(), subFieldNames
 		},
 	)
+	structArrayFields := lo.SliceToMap(
+		schema.GetStructArrayFields(),
+		func(sa *schemapb.StructArrayFieldSchema) (string, *schemapb.StructArrayFieldSchema) {
+			return sa.GetName(), sa
+		},
+	)
+	structArraySubFields := make(map[string]string)
+	for _, structArray := range schema.GetStructArrayFields() {
+		for _, subField := range structArray.GetFields() {
+			structArraySubFields[subField.GetName()] = structArray.GetName()
+		}
+	}
 
 	return &rowParser{
 		id2Dim:                   id2Dim,
@@ -123,6 +137,8 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		rejectedFuncOutputFields: rejectedFuncOutputFields,
 		functionOutputFieldIDs:   functionOutputFieldIDs,
 		structArrays:             structArrays,
+		structArrayFields:        structArrayFields,
+		structArraySubFields:     structArraySubFields,
 		allowInsertAutoID:        allowInsertAutoID,
 		timezone:                 common.GetSchemaTimezone(schema),
 	}, nil
@@ -253,7 +269,23 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 
 	// read values from json file
 	for key, value := range stringMap {
+		if structName, ok := r.structArraySubFields[key]; ok {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf(
+				"struct field '%s' must be provided as a struct array; flat sub-field '%s' is not supported",
+				structName, key))
+		}
 		if subFieldNames, ok := r.structArrays[key]; ok {
+			structField := r.structArrayFields[key]
+			if value == nil {
+				if !structField.GetNullable() {
+					return nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("the struct field '%s' is not nullable but the file contains null value", key))
+				}
+				for _, subField := range structField.GetFields() {
+					row[subField.GetFieldID()] = nil
+				}
+				continue
+			}
 			values, err := reconstructArrayForStructArray(value, subFieldNames)
 			if err != nil {
 				return nil, err

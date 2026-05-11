@@ -110,6 +110,7 @@ func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schema
 			Name:        field.Name,
 			Description: field.Description,
 			Fields:      make([]*schemapb.FieldSchema, len(field.Fields)),
+			Nullable:    field.Nullable,
 		}
 
 		// Deep copy sub-fields

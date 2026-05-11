@@ -397,6 +397,10 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			Dim:         int64(dim),
 			Data:        make([]*schemapb.VectorField, 0, cap),
 			ElementType: fieldSchema.GetElementType(),
+			Nullable:    fieldSchema.GetNullable(),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
 		}
 		return data, nil
 	default:
@@ -563,6 +567,27 @@ type VectorArrayFieldData struct {
 	Dim         int64
 	ElementType schemapb.DataType
 	Data        []*schemapb.VectorField
+	ValidData   []bool
+	Nullable    bool
+}
+
+// emptyPerRowVectorField builds a placeholder VectorField with zero vectors,
+// used as the Data entry for null rows in Plan B dense layout.
+func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	}
+	return vf
 }
 
 func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
@@ -776,6 +801,9 @@ func (data *Int8VectorFieldData) GetRow(i int) interface{} {
 }
 
 func (data *VectorArrayFieldData) GetRow(i int) interface{} {
+	if data.GetNullable() && !data.ValidData[i] {
+		return nil
+	}
 	return data.Data[i]
 }
 
@@ -1123,11 +1151,19 @@ func (data *Int8VectorFieldData) AppendRow(row interface{}) error {
 }
 
 func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
+	if data.GetNullable() && row == nil {
+		data.Data = append(data.Data, emptyPerRowVectorField(data.Dim, data.ElementType))
+		data.ValidData = append(data.ValidData, false)
+		return nil
+	}
 	v, ok := row.(*schemapb.VectorField)
 	if !ok {
-		return merr.WrapErrParameterInvalid("[]*schemapb.VectorField", row, "Wrong row type")
+		return merr.WrapErrParameterInvalid("*schemapb.VectorField", row, "Wrong row type")
 	}
 	data.Data = append(data.Data, v)
+	if data.GetNullable() {
+		data.ValidData = append(data.ValidData, true)
+	}
 	return nil
 }
 
@@ -1644,15 +1680,14 @@ func (data *BinaryVectorFieldData) AppendValidDataRows(rows interface{}) error {
 }
 
 func (data *VectorArrayFieldData) AppendValidDataRows(rows interface{}) error {
-	if rows != nil {
-		v, ok := rows.([]bool)
-		if !ok {
-			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
-		}
-		if len(v) != 0 {
-			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
-		}
+	if rows == nil {
+		return nil
 	}
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.ValidData = append(data.ValidData, v...)
 	return nil
 }
 
@@ -1810,6 +1845,7 @@ func (data *VectorArrayFieldData) GetMemorySize() int {
 	for _, val := range data.Data {
 		size += GetVectorSize(val, data.ElementType)
 	}
+	size += binary.Size(data.ValidData) + 1
 	return size
 }
 
@@ -2061,7 +2097,7 @@ func (data *JSONFieldData) GetNullable() bool {
 }
 
 func (data *VectorArrayFieldData) GetNullable() bool {
-	return false
+	return data.Nullable
 }
 
 func (data *GeometryFieldData) GetNullable() bool {
@@ -2086,4 +2122,4 @@ func (data *Float16VectorFieldData) GetValidData() []bool     { return data.Vali
 func (data *BFloat16VectorFieldData) GetValidData() []bool    { return data.ValidData }
 func (data *SparseFloatVectorFieldData) GetValidData() []bool { return data.ValidData }
 func (data *Int8VectorFieldData) GetValidData() []bool        { return data.ValidData }
-func (data *VectorArrayFieldData) GetValidData() []bool       { return nil }
+func (data *VectorArrayFieldData) GetValidData() []bool       { return data.ValidData }

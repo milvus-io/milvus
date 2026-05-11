@@ -384,7 +384,8 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_BinaryVector,
 			schemapb.DataType_SparseFloatVector,
-			schemapb.DataType_Int8Vector:
+			schemapb.DataType_Int8Vector,
+			schemapb.DataType_ArrayOfVector:
 			if nullable {
 				for i := 0; i < rowNum; i++ {
 					if err = fieldData.AppendRow(nil); err != nil {

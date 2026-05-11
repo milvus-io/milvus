@@ -891,7 +891,10 @@ func NewFieldDataIdxComputer(fieldsData []*schemapb.FieldData) *FieldDataIdxComp
 	}
 	for i, fieldData := range fieldsData {
 		validData := fieldData.GetValidData()
-		c.isVector[i] = len(validData) > 0 && IsVectorType(fieldData.Type)
+		// ArrayOfVector stores null rows as dense empty-array placeholders (expanded
+		// in FillWithNullValue), so indexing should follow the scalar convention
+		// (rowIdx maps directly to Data[rowIdx]), not the compact vector convention.
+		c.isVector[i] = len(validData) > 0 && IsVectorType(fieldData.Type) && !IsVectorArrayType(fieldData.Type)
 	}
 	return c
 }
@@ -1197,18 +1200,20 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 					appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
 			case *schemapb.VectorField_VectorArray:
-				if !isNullRow {
-					if dstVector.GetVectorArray() == nil {
-						dstVector.Data = &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Data:        []*schemapb.VectorField{srcVector.VectorArray.Data[fieldIdx]},
-								Dim:         srcVector.VectorArray.Dim,
-								ElementType: srcVector.VectorArray.ElementType,
-							},
-						}
-					} else {
-						dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[fieldIdx])
+				// ArrayOfVector uses dense Data (null rows are empty-array placeholders),
+				// so always append Data[fieldIdx] regardless of isNullRow. fieldIdx
+				// equals rowOffset here because NewFieldDataIdxComputer treats
+				// ArrayOfVector as non-vector for indexing purposes.
+				if dstVector.GetVectorArray() == nil {
+					dstVector.Data = &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data:        []*schemapb.VectorField{srcVector.VectorArray.Data[fieldIdx]},
+							Dim:         srcVector.VectorArray.Dim,
+							ElementType: srcVector.VectorArray.ElementType,
+						},
 					}
+				} else {
+					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[fieldIdx])
 				}
 			}
 		}
@@ -1438,6 +1443,22 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector = append(
 					dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector,
 					srcVector.Int8Vector[start:end]...)
+			}
+		case *schemapb.VectorField_VectorArray:
+			if srcVector.VectorArray == nil {
+				return
+			}
+			if dstVector.GetVectorArray() == nil {
+				dstVector.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
+						Dim:         srcVector.VectorArray.Dim,
+						ElementType: srcVector.VectorArray.ElementType,
+					},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
 			}
 		}
 	}
@@ -1943,6 +1964,12 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 			for i, baseIdx := range baseIndices {
 				updateIdx := updateIndices[i]
 				copy(baseData[baseIdx*dim:(baseIdx+1)*dim], updateData[updateIdx*dim:(updateIdx+1)*dim])
+			}
+		case *schemapb.VectorField_VectorArray:
+			baseData := baseVector.GetVectorArray().Data
+			updateData := updateVector.GetVectorArray().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
 			}
 		}
 	}
@@ -2506,16 +2533,15 @@ func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schema
 
 // GetFieldByID returns the field schema with the given field ID, or nil if not found.
 func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
-	for _, field := range schema.GetFields() {
-		if field.GetFieldID() == fieldID {
-			return field
-		}
+	predicate := func(field *schemapb.FieldSchema) bool {
+		return field.GetFieldID() == fieldID
+	}
+	if field := lo.FindOrElse(schema.GetFields(), nil, predicate); field != nil {
+		return field
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			if field.GetFieldID() == fieldID {
-				return field
-			}
+		if field := lo.FindOrElse(structField.Fields, nil, predicate); field != nil {
+			return field
 		}
 	}
 	return nil

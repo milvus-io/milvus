@@ -214,13 +214,25 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	}
 
 	for _, structArrayField := range schema.GetStructArrayFields() {
+		missingFields := make([]string, 0)
+		presentLogs := make(map[int64][]string, len(structArrayField.GetFields()))
 		for _, field := range structArrayField.GetFields() {
 			id := field.GetFieldID()
 			logs, ok := insertLogs[id]
 			if !ok {
-				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", field.GetName()))
+				missingFields = append(missingFields, field.GetName())
+				continue
 			}
+			presentLogs[id] = logs
+		}
 
+		if len(missingFields) == len(structArrayField.GetFields()) && structArrayField.GetNullable() {
+			continue
+		}
+		if len(missingFields) > 0 {
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", missingFields[0]))
+		}
+		for id, logs := range presentLogs {
 			validInsertLogs[id] = logs
 		}
 		cloneSchema.StructArrayFields = append(cloneSchema.StructArrayFields, structArrayField)

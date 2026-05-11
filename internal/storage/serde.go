@@ -56,6 +56,16 @@ type (
 	Deserializer[T any] func(Record, []T) error
 )
 
+func validateVectorArrayElementCount(payloadLength int, elementsPerVector int) (int, error) {
+	if elementsPerVector <= 0 {
+		return 0, fmt.Errorf("invalid vector width %d for ArrayOfVector", elementsPerVector)
+	}
+	if payloadLength%elementsPerVector != 0 {
+		return 0, fmt.Errorf("ArrayOfVector payload length %d is not divisible by vector width %d", payloadLength, elementsPerVector)
+	}
+	return payloadLength / elementsPerVector, nil
+}
+
 // compositeRecord is a record being composed of multiple records, in which each only have 1 column
 type compositeRecord struct {
 	index map[FieldID]int16
@@ -470,11 +480,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
 		},
 		serialize: func(b array.Builder, v any, elementType schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+
 			vf, ok := v.(*schemapb.VectorField)
 			if !ok {
 				return fmt.Errorf("expected *schemapb.VectorField, got %T", v)
 			}
-
 			if vf == nil {
 				b.AppendNull()
 				return nil
@@ -485,12 +499,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return fmt.Errorf("expected *array.ListBuilder, got %T", b)
 			}
 
-			builder.Append(true)
 			valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
-			dim := vf.GetDim()
+			bytesPerVector := valueBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth
 
-			appendVectorChunks := func(data []byte, bytesPerVector int) error {
-				numVectors := len(data) / bytesPerVector
+			appendVectorChunks := func(data []byte) error {
+				numVectors, err := validateVectorArrayElementCount(len(data), bytesPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				for i := 0; i < numVectors; i++ {
 					start := i * bytesPerVector
 					end := start + bytesPerVector
@@ -505,14 +522,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					return fmt.Errorf("FloatVector data is nil for elementType FloatVector")
 				}
 				floatData := vf.GetFloatVector().GetData()
-				numVectors := len(floatData) / int(dim)
+				floatsPerVector := bytesPerVector / 4
+				numVectors, err := validateVectorArrayElementCount(len(floatData), floatsPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				// Convert float data to binary
 				for i := 0; i < numVectors; i++ {
-					start := i * int(dim)
-					end := start + int(dim)
+					start := i * floatsPerVector
+					end := start + floatsPerVector
 					vectorSlice := floatData[start:end]
 
-					bytes := make([]byte, dim*4)
+					bytes := make([]byte, bytesPerVector)
 					for j, f := range vectorSlice {
 						binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 					}
@@ -524,25 +546,25 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				if vf.GetBinaryVector() == nil {
 					return fmt.Errorf("BinaryVector data is nil for elementType BinaryVector")
 				}
-				return appendVectorChunks(vf.GetBinaryVector(), int((dim+7)/8))
+				return appendVectorChunks(vf.GetBinaryVector())
 
 			case schemapb.DataType_Float16Vector:
 				if vf.GetFloat16Vector() == nil {
 					return fmt.Errorf("Float16Vector data is nil for elementType Float16Vector")
 				}
-				return appendVectorChunks(vf.GetFloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetFloat16Vector())
 
 			case schemapb.DataType_BFloat16Vector:
 				if vf.GetBfloat16Vector() == nil {
 					return fmt.Errorf("BFloat16Vector data is nil for elementType BFloat16Vector")
 				}
-				return appendVectorChunks(vf.GetBfloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetBfloat16Vector())
 
 			case schemapb.DataType_Int8Vector:
 				if vf.GetInt8Vector() == nil {
 					return fmt.Errorf("Int8Vector data is nil for elementType Int8Vector")
 				}
-				return appendVectorChunks(vf.GetInt8Vector(), int(dim))
+				return appendVectorChunks(vf.GetInt8Vector())
 
 			case schemapb.DataType_SparseFloatVector:
 				return fmt.Errorf("SparseFloatVector in VectorArray not implemented yet")
@@ -1074,7 +1096,7 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 		)
 	}
 
-	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) && !typeutil.IsVectorArrayType(field.DataType) {
 		arrowType = arrow.BinaryTypes.Binary
 		fieldMetadata = arrow.NewMetadata(
 			[]string{"dim"},
@@ -1309,11 +1331,13 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 				validData = fd.ValidData
 			case *Int8VectorFieldData:
 				validData = fd.ValidData
+			case *VectorArrayFieldData:
+				validData = fd.ValidData
 			}
 			// Use len(validData) as logical row count, GetRow takes logical index
 			for j := 0; j < len(validData); j++ {
 				if !validData[j] {
-					fBuilder.(*array.BinaryBuilder).AppendNull()
+					fBuilder.AppendNull()
 				} else {
 					rowData := fieldData.GetRow(j)
 					err := typeEntry.serialize(fBuilder, rowData, elementType)

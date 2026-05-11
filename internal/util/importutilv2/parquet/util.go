@@ -78,6 +78,10 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
 	}
 
+	if err := rejectFlatStructSubFieldColumns(schema, pqSchema); err != nil {
+		return nil, err
+	}
+
 	// Check if we have nested struct format
 	nestedStructs := make(map[string]int) // struct name -> column index
 	for _, structField := range schema.StructArrayFields {
@@ -168,6 +172,9 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	for _, structField := range schema.StructArrayFields {
 		columnIndex, ok := nestedStructs[structField.Name]
 		if !ok {
+			if structField.GetNullable() {
+				continue
+			}
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("struct field not found in parquet schema: %s", structField.Name))
 		}
 
@@ -222,6 +229,22 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 
 	log.Info("create parquet column readers", zap.Any("readFields", readFields))
 	return crs, nil
+}
+
+func rejectFlatStructSubFieldColumns(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) error {
+	arrNameToField := lo.KeyBy(arrSchema.Fields(), func(field arrow.Field) string {
+		return field.Name
+	})
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if _, ok := arrNameToField[subField.GetName()]; ok {
+				return merr.WrapErrImportFailed(fmt.Sprintf(
+					"struct field '%s' must be provided as list<struct>; flat sub-field column '%s' is not supported",
+					structField.GetName(), subField.GetName()))
+			}
+		}
+	}
+	return nil
 }
 
 func isArrowIntegerType(dataType arrow.Type) bool {
@@ -537,6 +560,9 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 	for _, structField := range schema.StructArrayFields {
 		arrStructField, ok := arrNameToField[structField.Name]
 		if !ok {
+			if structField.GetNullable() {
+				continue
+			}
 			return merr.WrapErrImportFailed(fmt.Sprintf("struct field not found in arrow schema: %s", structField.Name))
 		}
 
