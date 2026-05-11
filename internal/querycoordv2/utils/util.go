@@ -95,8 +95,14 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 
 	// Check whether segments are fully loaded
 	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
+	for _, segment := range distSegments {
+		distBySegmentID[segment.GetID()] = append(distBySegmentID[segment.GetID()], segment)
+	}
+
 	for segmentID, segmentInfo := range segmentDist {
-		segments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithSegmentID(segmentID))
+		segments := distBySegmentID[segmentID]
 		if len(segments) == 0 {
 			log.RatedInfo(10, "segment is not available", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
