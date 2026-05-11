@@ -6201,7 +6201,10 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
 
         match_expr = "match_all(structA, $[int_val] >= 0)"
-        predicate = lambda sa: all(e["int_val"] >= 0 for e in sa)
+
+        def predicate(sa):
+            return all(e["int_val"] >= 0 for e in sa)
+
         self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
 
         self.release_collection(client, collection_name)
