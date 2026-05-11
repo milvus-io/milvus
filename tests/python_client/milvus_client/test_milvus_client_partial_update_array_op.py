@@ -1,11 +1,10 @@
 import pytest
-
-from pymilvus import DataType, FieldOp
-
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import DataType, FieldOp
+
 
 class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
     """Test field_ops: ARRAY_APPEND / ARRAY_REMOVE (Issue #49241)"""
@@ -18,42 +17,32 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
 
     # 1.1–1.7 Append all element types (parametrized)
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("element_type,field_name,init_vals,append_vals,expected", [
-        (DataType.BOOL, "flags",
-         [[True, False], [True]],
-         [[True, True], [False]],
-         [[True, False, True, True], [True, False]]),
-        (DataType.INT8, "scores",
-         [[1, 2], [10, 20]],
-         [[3, 4], [30]],
-         [[1, 2, 3, 4], [10, 20, 30]]),
-        (DataType.INT16, "tags16",
-         [[100, 200], [300]],
-         [[400], [500, 600]],
-         [[100, 200, 400], [300, 500, 600]]),
-        (DataType.INT32, "values",
-         [[1000, 2000], [3000]],
-         [[4000], [5000]],
-         [[1000, 2000, 4000], [3000, 5000]]),
-        (DataType.INT64, "ids",
-         [[10, 20], [30]],
-         [[40], [50, 60]],
-         [[10, 20, 40], [30, 50, 60]]),
-        (DataType.FLOAT, "metrics",
-         [[1.0, 2.0], [10.5]],
-         [[3.0], [20.5, 30.5]],
-         [[1.0, 2.0, 3.0], [10.5, 20.5, 30.5]]),
-        (DataType.DOUBLE, "precise",
-         [[1.0, 2.0], [10.5]],
-         [[3.0], [20.5]],
-         [[1.0, 2.0, 3.0], [10.5, 20.5]]),
-        (DataType.VARCHAR, "labels",
-         [["a", "b"], ["x", "y"]],
-         [["c"], ["z"]],
-         [["a", "b", "c"], ["x", "y", "z"]]),
-    ])
-    def test_array_partial_op_append_all_types(self, element_type, field_name,
-                                                init_vals, append_vals, expected):
+    @pytest.mark.parametrize(
+        "element_type,field_name,init_vals,append_vals,expected",
+        [
+            (
+                DataType.BOOL,
+                "flags",
+                [[True, False], [True]],
+                [[True, True], [False]],
+                [[True, False, True, True], [True, False]],
+            ),
+            (DataType.INT8, "scores", [[1, 2], [10, 20]], [[3, 4], [30]], [[1, 2, 3, 4], [10, 20, 30]]),
+            (DataType.INT16, "tags16", [[100, 200], [300]], [[400], [500, 600]], [[100, 200, 400], [300, 500, 600]]),
+            (DataType.INT32, "values", [[1000, 2000], [3000]], [[4000], [5000]], [[1000, 2000, 4000], [3000, 5000]]),
+            (DataType.INT64, "ids", [[10, 20], [30]], [[40], [50, 60]], [[10, 20, 40], [30, 50, 60]]),
+            (
+                DataType.FLOAT,
+                "metrics",
+                [[1.0, 2.0], [10.5]],
+                [[3.0], [20.5, 30.5]],
+                [[1.0, 2.0, 3.0], [10.5, 20.5, 30.5]],
+            ),
+            (DataType.DOUBLE, "precise", [[1.0, 2.0], [10.5]], [[3.0], [20.5]], [[1.0, 2.0, 3.0], [10.5, 20.5]]),
+            (DataType.VARCHAR, "labels", [["a", "b"], ["x", "y"]], [["c"], ["z"]], [["a", "b", "c"], ["x", "y", "z"]]),
+        ],
+    )
+    def test_array_partial_op_append_all_types(self, element_type, field_name, init_vals, append_vals, expected):
         """
         target: test array append with all element types
         method: insert rows with array field, then append via field_ops
@@ -72,32 +61,23 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        rows = [
-            {"id": i, "vector": [0.1 * (i + 1)] * 4, field_name: init_vals[i]}
-            for i in range(2)
-        ]
+        rows = [{"id": i, "vector": [0.1 * (i + 1)] * 4, field_name: init_vals[i]} for i in range(2)]
         self.upsert(client, collection_name, rows, partial_update=True)
 
-        append_rows = [
-            {"id": i, field_name: append_vals[i]}
-            for i in range(2)
-        ]
-        self.upsert(client, collection_name, append_rows,
-                    field_ops={field_name: FieldOp.array_append()})
+        append_rows = [{"id": i, field_name: append_vals[i]} for i in range(2)]
+        self.upsert(client, collection_name, append_rows, field_ops={field_name: FieldOp.array_append()})
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=[field_name])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=[field_name])[0]
         actual = {row["id"]: row[field_name] for row in res}
         for i in range(2):
             if element_type in (DataType.FLOAT, DataType.DOUBLE):
-                assert actual[i] == pytest.approx(expected[i]), \
-                    f"pk={i}: expected {expected[i]}, got {actual[i]}"
+                assert actual[i] == pytest.approx(expected[i]), f"pk={i}: expected {expected[i]}, got {actual[i]}"
             else:
-                assert actual[i] == expected[i], \
-                    f"pk={i}: expected {expected[i]}, got {actual[i]}"
+                assert actual[i] == expected[i], f"pk={i}: expected {expected[i]}, got {actual[i]}"
 
         self.drop_collection(client, collection_name)
 
@@ -119,20 +99,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [10, 20, 10, 30]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [10, 20, 10, 30]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [10]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [10]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
         self.flush(client, collection_name)
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [20, 30]
 
         self.drop_collection(client, collection_name)
@@ -155,21 +145,31 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "flags": [True, False, True]},
-            {"id": 1, "vector": [0.2] * 4, "flags": [False, False]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "flags": [True, False, True]},
+                {"id": 1, "vector": [0.2] * 4, "flags": [False, False]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "flags": [True]},
-            {"id": 1, "flags": [True]},
-        ], field_ops={"flags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "flags": [True]},
+                {"id": 1, "flags": [True]},
+            ],
+            field_ops={"flags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["flags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["flags"])[0]
         actual = {row["id"]: row["flags"] for row in res}
         assert actual[0] == [False]
         assert actual[1] == [False, False]
@@ -194,21 +194,31 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "values": [5, 10, 5, 15]},
-            {"id": 1, "vector": [0.2] * 4, "values": [20, 30]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "values": [5, 10, 5, 15]},
+                {"id": 1, "vector": [0.2] * 4, "values": [20, 30]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "values": [5]},
-            {"id": 1, "values": [40]},
-        ], field_ops={"values": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "values": [5]},
+                {"id": 1, "values": [40]},
+            ],
+            field_ops={"values": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["values"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["values"])[0]
         actual = {row["id"]: row["values"] for row in res}
         assert actual[0] == [10, 15]
         assert actual[1] == [20, 30]
@@ -233,21 +243,31 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "metrics": [1.0, 2.0, 1.0]},
-            {"id": 1, "vector": [0.2] * 4, "metrics": [3.0, 4.0]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "metrics": [1.0, 2.0, 1.0]},
+                {"id": 1, "vector": [0.2] * 4, "metrics": [3.0, 4.0]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "metrics": [1.0]},
-            {"id": 1, "metrics": [5.0]},
-        ], field_ops={"metrics": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "metrics": [1.0]},
+                {"id": 1, "metrics": [5.0]},
+            ],
+            field_ops={"metrics": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["metrics"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["metrics"])[0]
         actual = {row["id"]: row["metrics"] for row in res}
         assert actual[0] == pytest.approx([2.0])
         assert actual[1] == pytest.approx([3.0, 4.0])
@@ -266,28 +286,37 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
-        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_capacity=16, max_length=50)
+        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=16, max_length=50)
 
         index_params = self.prepare_index_params(client)[0]
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "labels": ["red", "blue", "red"]},
-            {"id": 1, "vector": [0.2] * 4, "labels": ["green"]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "labels": ["red", "blue", "red"]},
+                {"id": 1, "vector": [0.2] * 4, "labels": ["green"]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "labels": ["red"]},
-            {"id": 1, "labels": ["yellow"]},
-        ], field_ops={"labels": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "labels": ["red"]},
+                {"id": 1, "labels": ["yellow"]},
+            ],
+            field_ops={"labels": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["labels"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["labels"])[0]
         actual = {row["id"]: row["labels"] for row in res}
         assert actual[0] == ["blue"]
         assert actual[1] == ["green"]
@@ -313,20 +342,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2], "scores": [10, 20]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2], "scores": [10, 20]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3], "scores": [10]},
-        ], field_ops={"tags": FieldOp.array_append(), "scores": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3], "scores": [10]},
+            ],
+            field_ops={"tags": FieldOp.array_append(), "scores": FieldOp.array_remove()},
+        )
 
         self.flush(client, collection_name)
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "scores"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "scores"])[0]
         assert res[0]["tags"] == [1, 2, 3]
         assert res[0]["scores"] == [20]
 
@@ -356,18 +395,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "name": "alice"},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "name": "alice"},
+            ],
+            partial_update=True,
+        )
 
-        error = {ct.err_code: 1100, ct.err_msg: "op ARRAY_APPEND requires Array field, but field \"name\" is VarChar"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "name": "bob"},
-        ], field_ops={"name": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: 'op ARRAY_APPEND requires Array field, but field "name" is VarChar'}
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "name": "bob"},
+            ],
+            field_ops={"name": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -388,18 +439,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 1100, ct.err_msg: "is the primary key and cannot carry a partial-update op"}
-        self.upsert(client, collection_name, [
-            {"id": 0},
-        ], field_ops={"id": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0},
+            ],
+            field_ops={"id": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -421,18 +484,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 1100, ct.err_msg: "nonexistent_field"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "nonexistent_field": [1]},
-        ], field_ops={"nonexistent_field": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "nonexistent_field": [1]},
+            ],
+            field_ops={"nonexistent_field": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -454,18 +529,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": ["string_value"]},
-        ], field_ops={"tags": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": ["string_value"]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -487,18 +574,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+            ],
+            partial_update=True,
+        )
 
-        error = {ct.err_code: 1100, ct.err_msg: "partial-update op targets field \"tags\" not present in fields_data"}
-        self.upsert(client, collection_name, [
-            {"id": 0},
-        ], field_ops={"tags": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: 'partial-update op targets field "tags" not present in fields_data'}
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -522,30 +621,45 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1], "name": "alice"},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1], "name": "alice"},
+            ],
+            partial_update=True,
+        )
 
         # field_ops without explicit partial_update
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [2]},
-        ], field_ops={"tags": FieldOp.array_append()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [2]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "name"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "name"])[0]
         assert res[0]["tags"] == [1, 2]
         assert res[0]["name"] == "alice"
 
         # field_ops with explicit partial_update=False — should still auto-enable
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3]},
-        ], field_ops={"tags": FieldOp.array_append()}, partial_update=False)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+            partial_update=False,
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "name"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "name"])[0]
         assert res[0]["tags"] == [1, 2, 3]
         assert res[0]["name"] == "alice"
 
@@ -570,25 +684,35 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2], "name": "alice"},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2], "name": "alice"},
+            ],
+            partial_update=True,
+        )
 
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "op ARRAY_APPEND requires Array field, but field \"name\" is VarChar"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3], "name": "bob"},
-        ], field_ops={"tags": FieldOp.array_append(), "name": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: 'op ARRAY_APPEND requires Array field, but field "name" is VarChar'}
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3], "name": "bob"},
+            ],
+            field_ops={"tags": FieldOp.array_append(), "name": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # verify atomicity — neither field should have been modified
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "name"])[0]
-        assert res[0]["tags"] == [1, 2]       # append did NOT apply
-        assert res[0]["name"] == "alice"      # scalar field unchanged
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "name"])[0]
+        assert res[0]["tags"] == [1, 2]  # append did NOT apply
+        assert res[0]["name"] == "alice"  # scalar field unchanged
 
         self.drop_collection(client, collection_name)
 
@@ -611,26 +735,37 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1], "labels": [1]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1], "labels": [1]},
+            ],
+            partial_update=True,
+        )
 
         # tags append is valid: [1] + [2] = [1,2] (length 2 <= 4)
         # labels append exceeds capacity: [1] + [2,3,4,5] = [1,2,3,4,5] (length 5 > 4)
         error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [2], "labels": [2, 3, 4, 5]},
-        ], field_ops={"tags": FieldOp.array_append(), "labels": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [2], "labels": [2, 3, 4, 5]},
+            ],
+            field_ops={"tags": FieldOp.array_append(), "labels": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # verify atomicity — neither field should have been modified
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "labels"])[0]
-        assert res[0]["tags"] == [1]      # valid append did NOT apply
-        assert res[0]["labels"] == [1]    # invalid append did NOT apply
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "labels"])[0]
+        assert res[0]["tags"] == [1]  # valid append did NOT apply
+        assert res[0]["labels"] == [1]  # invalid append did NOT apply
 
         self.drop_collection(client, collection_name)
 
@@ -647,33 +782,43 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
         schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64, max_capacity=16)
-        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_capacity=16, max_length=10)
+        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=16, max_length=10)
 
         index_params = self.prepare_index_params(client)[0]
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1], "labels": ["short"]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1], "labels": ["short"]},
+            ],
+            partial_update=True,
+        )
 
         # tags append is valid: [1] + [2] = [1,2]
         # labels append exceeds max_length: "this_string_is_way_too_long" > 10 chars
         error = {ct.err_code: 1100, ct.err_msg: "exceeds max length"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [2], "labels": ["this_string_is_way_too_long"]},
-        ], field_ops={"tags": FieldOp.array_append(), "labels": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [2], "labels": ["this_string_is_way_too_long"]},
+            ],
+            field_ops={"tags": FieldOp.array_append(), "labels": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # verify atomicity — neither field should have been modified
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags", "labels"])[0]
-        assert res[0]["tags"] == [1]           # valid append did NOT apply
-        assert res[0]["labels"] == ["short"]   # invalid append did NOT apply
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags", "labels"])[0]
+        assert res[0]["tags"] == [1]  # valid append did NOT apply
+        assert res[0]["labels"] == ["short"]  # invalid append did NOT apply
 
         self.drop_collection(client, collection_name)
 
@@ -701,19 +846,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": []},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": []},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [1, 2, 3]},
-        ], field_ops={"tags": FieldOp.array_append()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1, 2, 3]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [1, 2, 3]
 
         self.drop_collection(client, collection_name)
@@ -736,19 +891,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [1, 2, 3]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1, 2, 3]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == []
 
         self.drop_collection(client, collection_name)
@@ -771,19 +936,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [99]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [99]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [1, 2, 3]
 
         self.drop_collection(client, collection_name)
@@ -806,19 +981,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 1, 2, 1, 3]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 1, 2, 1, 3]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [1]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [2, 3]
 
         self.drop_collection(client, collection_name)
@@ -841,19 +1026,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [42]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [42]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [42]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [42]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == []
 
         self.drop_collection(client, collection_name)
@@ -870,29 +1065,38 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
-        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64,
-                         max_capacity=16, nullable=True)
+        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64, max_capacity=16, nullable=True)
 
         index_params = self.prepare_index_params(client)[0]
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
-            {"id": 1, "vector": [0.2] * 4, "tags": [10, 20]},
-            {"id": 2, "vector": [0.3] * 4, "tags": [100]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+                {"id": 1, "vector": [0.2] * 4, "tags": [10, 20]},
+                {"id": 2, "vector": [0.3] * 4, "tags": [100]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3]},
-            {"id": 1, "tags": None},
-        ], field_ops={"tags": FieldOp.array_append()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3]},
+                {"id": 1, "tags": None},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         actual = {row["id"]: row["tags"] for row in res}
         assert actual[0] == [1, 2, 3]
         assert actual[1] == [10, 20]
@@ -911,26 +1115,35 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
-        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64,
-                         max_capacity=16, nullable=True)
+        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64, max_capacity=16, nullable=True)
 
         index_params = self.prepare_index_params(client)[0]
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": None},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": None},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [1, 2]},
-        ], field_ops={"tags": FieldOp.array_append()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1, 2]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [1, 2]
 
         self.drop_collection(client, collection_name)
@@ -953,18 +1166,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3, 4, 5]},
-        ], field_ops={"tags": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3, 4, 5]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -980,25 +1205,36 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
-        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_capacity=16, max_length=10)
+        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=16, max_length=10)
 
         index_params = self.prepare_index_params(client)[0]
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "labels": ["short"]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "labels": ["short"]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 1100, ct.err_msg: "exceeds max length"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "labels": ["this_string_is_way_too_long"]},
-        ], field_ops={"labels": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "labels": ["this_string_is_way_too_long"]},
+            ],
+            field_ops={"labels": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -1020,18 +1256,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "flags": [True, False, True]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "flags": [True, False, True]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "flags": [True, False]},
-        ], field_ops={"flags": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "flags": [True, False]},
+            ],
+            field_ops={"flags": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -1053,18 +1301,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "metrics": [1.0, 2.0, 3.0]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "metrics": [1.0, 2.0, 3.0]},
+            ],
+            partial_update=True,
+        )
 
         error = {ct.err_code: 65535, ct.err_msg: "array length 5 exceeds max_capacity 4"}
-        self.upsert(client, collection_name, [
-            {"id": 0, "metrics": [4.0, 5.0]},
-        ], field_ops={"metrics": FieldOp.array_append()},
-            check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "metrics": [4.0, 5.0]},
+            ],
+            field_ops={"metrics": FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -1086,20 +1346,30 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [3, 4]},
-        ], field_ops={"tags": FieldOp.array_append()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3, 4]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
 
         self.flush(client, collection_name)
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [1, 2, 3, 4]
 
         self.drop_collection(client, collection_name)
@@ -1122,21 +1392,29 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         for f in schema.fields:
             index_params.add_index(f.name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, 4, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3, 4]},
-        ], partial_update=True)
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 3, 4]},
+            ],
+            partial_update=True,
+        )
 
-        self.upsert(client, collection_name, [
-            {"id": 0, "tags": [1]},
-        ], field_ops={"tags": FieldOp.array_remove()})
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
 
-        res = self.query(client, collection_name, filter="id >= 0",
-                         output_fields=["tags"])[0]
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
         assert res[0]["tags"] == [2, 3, 4]
 
         self.drop_collection(client, collection_name)
-
-
