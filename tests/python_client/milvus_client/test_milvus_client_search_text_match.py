@@ -1,11 +1,11 @@
-import pytest
 import pandas as pd
-from pymilvus import DataType
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
-from utils.util_log import test_log as log
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
 from faker import Faker
+from pymilvus import DataType
+from utils.util_log import test_log as log
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -53,9 +53,14 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
             if field_name == "word" and enable_partition_key:
                 extra["is_partition_key"] = True
             schema.add_field(
-                field_name, DataType.VARCHAR, max_length=65535,
-                enable_analyzer=True, enable_match=True,
-                analyzer_params=analyzer_params, **extra)
+                field_name,
+                DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+                **extra,
+            )
         schema.add_field("float32_emb", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
         self.create_collection(client, collection_name, schema=schema)
@@ -81,8 +86,9 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
 
         # Build indexes
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name="float32_emb", index_type="HNSW", metric_type="L2",
-                      params={"M": 16, "efConstruction": 500})
+        idx.add_index(
+            field_name="float32_emb", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 500}
+        )
         idx.add_index(field_name="sparse_emb", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
         if enable_inverted_index:
             idx.add_index(field_name="word", index_type="INVERTED")
@@ -101,9 +107,7 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
-    def test_search_with_text_match_filter_normal_en(
-        self, enable_inverted_index, enable_partition_key
-    ):
+    def test_search_with_text_match_filter_normal_en(self, enable_inverted_index, enable_partition_key):
         """
         target: verify text_match filter with standard tokenizer on English text across dense+sparse ANN
         method: 1. create collection with enable_analyzer+enable_match on 4 varchar fields
@@ -115,8 +119,9 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
         expected: all results contain matched token(s); search-by-pk works with text_match filter
         """
         client = self._client()
-        collection_name, df_split, wf_map, dim = \
-            self._setup_text_match_collection(client, "standard", enable_inverted_index, enable_partition_key)
+        collection_name, df_split, wf_map, dim = self._setup_text_match_collection(
+            client, "standard", enable_inverted_index, enable_partition_key
+        )
 
         text_fields = self.TEXT_FIELDS
         for ann_field in ["float32_emb", "sparse_emb"]:
@@ -132,18 +137,18 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
             for field in text_fields:
                 token = wf_map[field].most_common()[0][0]
                 expr = f"text_match({field}, '{token}')"
-                manual_result = df_split[
-                    df_split.apply(lambda row, t=token, f=field: t in row[f], axis=1)
-                ]
+                manual_result = df_split[df_split.apply(lambda row, t=token, f=field: t in row[f], axis=1)]
                 log.info(f"expr: {expr}, manual_check_result: {len(manual_result)}")
                 res_list, _ = self.search(
-                    client, collection_name,
+                    client,
+                    collection_name,
                     data=search_data,
                     anns_field=ann_field,
                     search_params=search_params,
                     limit=100,
                     filter=expr,
-                    output_fields=["id", field])
+                    output_fields=["id", field],
+                )
                 assert len(res_list) >= 1
                 assert len(res_list[0]) > 0
                 assert len(res_list[0]) <= len(manual_result)
@@ -160,13 +165,15 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
                 expr = f"text_match({field}, '{string_of_top_10_words}')"
                 log.info(f"expr {expr}")
                 res_list, _ = self.search(
-                    client, collection_name,
+                    client,
+                    collection_name,
                     data=search_data,
                     anns_field=ann_field,
                     search_params=search_params,
                     limit=100,
                     filter=expr,
-                    output_fields=["id", field])
+                    output_fields=["id", field],
+                )
                 assert len(res_list) >= 1
                 assert len(res_list[0]) > 0
                 for res in res_list:
@@ -177,7 +184,8 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
 
             # verify text_match supports search-by-pk
             res_list, _ = self.search(
-                client, collection_name,
+                client,
+                collection_name,
                 data=None,
                 ids=[1, 2],
                 anns_field=ann_field,
@@ -186,19 +194,79 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
                 filter=expr,
                 output_fields=["id", field],
                 check_task=CheckTasks.check_search_results,
-                check_items={"nq": 2, "limit": 100,
-                             "enable_milvus_client_api": True})
+                check_items={"nq": 2, "limit": 100, "enable_milvus_client_api": True},
+            )
             for res in res_list:
                 for r in res:
                     assert any(token in r["entity"][field] for token in top_10_tokens)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_with_text_and_phrase_match_filter_template(self):
+        """
+        target: verify text_match and phrase_match query strings support filter templating
+        method: create a small analyzer-enabled collection and compare literal filters with template filters
+        expected: template filters return the same IDs as equivalent literal filters
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        schema = self.create_schema(client)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field(
+            "text",
+            DataType.VARCHAR,
+            max_length=65535,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params={"tokenizer": "standard"},
+        )
+        schema.add_field("float32_emb", DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        data = [
+            {"id": 0, "text": "vector database search", "float32_emb": [0.1] * dim},
+            {"id": 1, "text": "database vector search", "float32_emb": [0.2] * dim},
+            {"id": 2, "text": "hybrid sparse retrieval", "float32_emb": [0.3] * dim},
+        ]
+        self.insert(client, collection_name, data=data)
+        self.flush(client, collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name="float32_emb", index_type="FLAT", metric_type="L2", params={})
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
+
+        cases = [
+            ('text_match(text, "vector")', "text_match(text, {query})", {"query": "vector"}),
+            (
+                'phrase_match(text, "vector database", 0)',
+                "phrase_match(text, {query}, 0)",
+                {"query": "vector database"},
+            ),
+        ]
+        for literal_expr, template_expr, template_params in cases:
+            literal_res, _ = self.query(
+                client,
+                collection_name,
+                filter=literal_expr,
+                output_fields=["id"],
+            )
+            template_res, _ = self.query(
+                client,
+                collection_name,
+                filter=template_expr,
+                filter_params=template_params,
+                output_fields=["id"],
+            )
+            literal_ids = {row["id"] for row in literal_res}
+            template_ids = {row["id"] for row in template_res}
+            assert template_ids == literal_ids
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.skip(reason="unstable: jieba tokenization vs Python substring mismatch, see analysis below")
-    def test_search_with_text_match_filter_normal_zh(
-        self, enable_inverted_index, enable_partition_key
-    ):
+    def test_search_with_text_match_filter_normal_zh(self, enable_inverted_index, enable_partition_key):
         """
         target: verify text_match filter with jieba tokenizer on Chinese text across dense+sparse ANN
         method: 1. create collection with enable_analyzer+enable_match using jieba tokenizer
@@ -210,8 +278,9 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
         expected: all results contain matched token(s); search-by-pk works with text_match filter
         """
         client = self._client()
-        collection_name, df_split, wf_map, dim = \
-            self._setup_text_match_collection(client, "jieba", enable_inverted_index, enable_partition_key)
+        collection_name, df_split, wf_map, dim = self._setup_text_match_collection(
+            client, "jieba", enable_inverted_index, enable_partition_key
+        )
 
         text_fields = self.TEXT_FIELDS
         for ann_field in ["float32_emb", "sparse_emb"]:
@@ -227,18 +296,18 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
             for field in text_fields:
                 token = wf_map[field].most_common()[0][0]
                 expr = f"text_match({field}, '{token}')"
-                manual_result = df_split[
-                    df_split.apply(lambda row, t=token, f=field: t in row[f], axis=1)
-                ]
+                manual_result = df_split[df_split.apply(lambda row, t=token, f=field: t in row[f], axis=1)]
                 log.info(f"expr: {expr}, manual_check_result: {len(manual_result)}")
                 res_list, _ = self.search(
-                    client, collection_name,
+                    client,
+                    collection_name,
                     data=search_data,
                     anns_field=ann_field,
                     search_params=search_params,
                     limit=100,
                     filter=expr,
-                    output_fields=["id", field])
+                    output_fields=["id", field],
+                )
                 assert len(res_list) >= 1
                 assert len(res_list[0]) > 0
                 assert len(res_list[0]) <= len(manual_result)
@@ -255,13 +324,15 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
                 expr = f"text_match({field}, '{string_of_top_10_words}')"
                 log.info(f"expr {expr}")
                 res_list, _ = self.search(
-                    client, collection_name,
+                    client,
+                    collection_name,
                     data=search_data,
                     anns_field=ann_field,
                     search_params=search_params,
                     limit=100,
                     filter=expr,
-                    output_fields=["id", field])
+                    output_fields=["id", field],
+                )
                 assert len(res_list) >= 1
                 assert len(res_list[0]) > 0
                 for res in res_list:
@@ -272,7 +343,8 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
 
             # verify text_match supports search-by-pk
             res_list, _ = self.search(
-                client, collection_name,
+                client,
+                collection_name,
                 data=None,
                 ids=[1, 2],
                 anns_field=ann_field,
@@ -281,8 +353,8 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
                 filter=expr,
                 output_fields=["id", field],
                 check_task=CheckTasks.check_search_results,
-                check_items={"nq": 2, "limit": 100,
-                             "enable_milvus_client_api": True})
+                check_items={"nq": 2, "limit": 100, "enable_milvus_client_api": True},
+            )
             for res in res_list:
                 for r in res:
                     assert any(token in r["entity"][field] for token in top_10_tokens)
