@@ -86,7 +86,7 @@ func (_c *MockShardManager_AlterCollection_Call) RunAndReturn(run func(message.M
 }
 
 // ApplyDelete provides a mock function with given fields: msg
-func (_m *MockShardManager) ApplyDelete(msg message.ImmutableDeleteMessageV1) error {
+func (_m *MockShardManager) ApplyDelete(msg message.MutableDeleteMessageV1) error {
 	ret := _m.Called(msg)
 
 	if len(ret) == 0 {
@@ -94,7 +94,7 @@ func (_m *MockShardManager) ApplyDelete(msg message.ImmutableDeleteMessageV1) er
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableDeleteMessageV1) error); ok {
+	if rf, ok := ret.Get(0).(func(message.MutableDeleteMessageV1) error); ok {
 		r0 = rf(msg)
 	} else {
 		r0 = ret.Error(0)
@@ -109,14 +109,14 @@ type MockShardManager_ApplyDelete_Call struct {
 }
 
 // ApplyDelete is a helper method to define mock.On call
-//   - msg message.ImmutableDeleteMessageV1
+//   - msg message.MutableDeleteMessageV1
 func (_e *MockShardManager_Expecter) ApplyDelete(msg interface{}) *MockShardManager_ApplyDelete_Call {
 	return &MockShardManager_ApplyDelete_Call{Call: _e.mock.On("ApplyDelete", msg)}
 }
 
-func (_c *MockShardManager_ApplyDelete_Call) Run(run func(msg message.ImmutableDeleteMessageV1)) *MockShardManager_ApplyDelete_Call {
+func (_c *MockShardManager_ApplyDelete_Call) Run(run func(msg message.MutableDeleteMessageV1)) *MockShardManager_ApplyDelete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableDeleteMessageV1))
+		run(args[0].(message.MutableDeleteMessageV1))
 	})
 	return _c
 }
@@ -126,7 +126,7 @@ func (_c *MockShardManager_ApplyDelete_Call) Return(_a0 error) *MockShardManager
 	return _c
 }
 
-func (_c *MockShardManager_ApplyDelete_Call) RunAndReturn(run func(message.ImmutableDeleteMessageV1) error) *MockShardManager_ApplyDelete_Call {
+func (_c *MockShardManager_ApplyDelete_Call) RunAndReturn(run func(message.MutableDeleteMessageV1) error) *MockShardManager_ApplyDelete_Call {
 	_c.Call.Return(run)
 	return _c
 }

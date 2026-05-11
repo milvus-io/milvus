@@ -268,14 +268,14 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicyRows(t *testing.T) {
 	segment11.CreateSegmentTimeTick = 200
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 11}, segment11)
 
-	m.RecordDelete("vchannel", 50, 1000, 10)
-	m.RecordDelete("vchannel", 120, 60, 10)
-	m.RecordDelete("vchannel", 140, 30, 10)
+	m.RecordDelete("pchannel", "vchannel", 50, 1000, 10)
+	m.RecordDelete("pchannel", "vchannel", 120, 60, 10)
+	m.RecordDelete("pchannel", "vchannel", 140, 30, 10)
 
 	selected := m.selectSegmentsWithBlockingL0Policy()
 	require.Empty(t, selected)
 
-	m.RecordDelete("vchannel", 160, 10, 10)
+	m.RecordDelete("pchannel", "vchannel", 160, 10, 10)
 	selected = m.selectSegmentsWithBlockingL0Policy()
 
 	require.Len(t, selected, 1)
@@ -303,7 +303,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicySizeOnly(t *testing.T) {
 	segment10.CreateSegmentTimeTick = 100
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
 
-	m.RecordDelete("vchannel", 120, 0, 1024*1024)
+	m.RecordDelete("pchannel", "vchannel", 120, 0, 1024*1024)
 
 	selected := m.selectSegmentsWithBlockingL0Policy()
 
@@ -332,7 +332,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicyDisabled(t *testing.T) {
 	segment10.CreateSegmentTimeTick = 100
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
 
-	m.RecordDelete("vchannel", 120, 1024*1024, 1024*1024*1024)
+	m.RecordDelete("pchannel", "vchannel", 120, 1024*1024, 1024*1024*1024)
 
 	selected := m.selectSegmentsWithBlockingL0Policy()
 
@@ -363,8 +363,8 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicySkipsUnknownCreateTimeTic
 	segment11.CreateSegmentTimeTick = 100
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 11}, segment11)
 
-	m.RecordDelete("vchannel", 50, 1000, 1)
-	m.RecordDelete("vchannel", 120, 100, 1)
+	m.RecordDelete("pchannel", "vchannel", 50, 1000, 1)
+	m.RecordDelete("pchannel", "vchannel", 120, 100, 1)
 
 	selected := m.selectSegmentsWithBlockingL0Policy()
 
@@ -392,13 +392,14 @@ func TestStatsManagerAdvanceDeleteWindowOnUnregister(t *testing.T) {
 	segment11.CreateSegmentTimeTick = 200
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 11}, segment11)
 
-	m.RecordDelete("vchannel", 120, 1, 10)
-	m.RecordDelete("vchannel", 220, 1, 10)
+	m.RecordDelete("pchannel", "vchannel", 120, 1, 10)
+	m.RecordDelete("pchannel", "vchannel", 220, 1, 10)
 
 	m.UnregisterSealedSegment(10)
 
-	require.Len(t, m.deleteWindows["vchannel"], 1)
-	assert.Equal(t, uint64(220), m.deleteWindows["vchannel"][0].timeTick)
+	assert.NotContains(t, m.segmentDeletePressures, int64(10))
+	require.Contains(t, m.segmentDeletePressures, int64(11))
+	assert.Equal(t, deletePressure{rows: 1, bytes: 10}, m.segmentDeletePressures[11])
 }
 
 func TestStatsManagerClearDeleteWindowWhenNoGrowingL1(t *testing.T) {
@@ -415,11 +416,11 @@ func TestStatsManagerClearDeleteWindowWhenNoGrowingL1(t *testing.T) {
 	segment10.CreateSegmentTimeTick = 100
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
 
-	m.RecordDelete("vchannel", 120, 1, 10)
+	m.RecordDelete("pchannel", "vchannel", 120, 1, 10)
 
 	m.UnregisterSealedSegment(10)
 
-	assert.NotContains(t, m.deleteWindows, "vchannel")
+	assert.Empty(t, m.segmentDeletePressures)
 }
 
 func TestStatsManagerClearDeleteWindowOnUnregisterSealOperatorWithoutL1(t *testing.T) {
@@ -436,11 +437,101 @@ func TestStatsManagerClearDeleteWindowOnUnregisterSealOperatorWithoutL1(t *testi
 	segment10.Level = datapb.SegmentLevel_L0
 	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
 
-	m.RecordDelete("vchannel", 120, 1, 10)
+	m.RecordDelete("pchannel", "vchannel", 120, 1, 10)
 
 	m.UnregisterSealOperator(sealOperator)
 
-	assert.NotContains(t, m.deleteWindows, "vchannel")
+	assert.Empty(t, m.segmentDeletePressures)
+}
+
+func TestStatsManagerBlockingL0PolicyScopesDeletePressureByPChannel(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.BlockingL0EntryNum.Key, "100")
+	defer params.Reset(params.DataCoordCfg.BlockingL0EntryNum.Key)
+	params.Save(params.DataCoordCfg.BlockingL0SizeInMB.Key, "-1")
+	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
+
+	m := NewStatsManager()
+	m.cfg = newStatsConfig()
+
+	sealOperator1 := mock_utils.NewMockSealOperator(t)
+	sealOperator1.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel1"}).Maybe()
+	sealOperator1.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator1, nil, nil)
+
+	sealOperator2 := mock_utils.NewMockSealOperator(t)
+	sealOperator2.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel2"}).Maybe()
+	sealOperator2.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator2, nil, nil)
+
+	segment10 := createSegmentStats(100, 100, 300)
+	segment10.CreateSegmentTimeTick = 100
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel1", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
+
+	segment20 := createSegmentStats(100, 100, 300)
+	segment20.CreateSegmentTimeTick = 100
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel2", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 20}, segment20)
+
+	m.RecordDelete("pchannel1", "vchannel", 120, 100, 1)
+	selected := m.selectSegmentsWithBlockingL0Policy()
+
+	require.Len(t, selected, 1)
+	assert.Contains(t, selected, int64(10))
+	assert.NotContains(t, selected, int64(20))
+}
+
+func TestStatsManagerRecordDeleteWithoutGrowingL1DoesNotCreateOrphanPressure(t *testing.T) {
+	paramtable.Init()
+
+	m := NewStatsManager()
+
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
+	sealOperator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator, nil, nil)
+
+	m.RecordDelete("pchannel", "vchannel", 120, 1, 10)
+	assert.Empty(t, m.segmentDeletePressures)
+
+	m.UnregisterSealOperator(sealOperator)
+	assert.Empty(t, m.segmentDeletePressures)
+}
+
+func TestStatsManagerIndexesGrowingL1SegmentsByChannel(t *testing.T) {
+	paramtable.Init()
+
+	m := NewStatsManager()
+
+	sealOperator := mock_utils.NewMockSealOperator(t)
+	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
+	sealOperator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	m.RegisterSealOperator(sealOperator, nil, nil)
+
+	segment10 := createSegmentStats(100, 100, 300)
+	segment10.CreateSegmentTimeTick = 100
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 10}, segment10)
+
+	segment11 := createSegmentStats(100, 100, 300)
+	segment11.CreateSegmentTimeTick = 100
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel2", CollectionID: 1, PartitionID: 2, SegmentID: 11}, segment11)
+
+	segment12 := createSegmentStats(100, 100, 300)
+	segment12.Level = datapb.SegmentLevel_L0
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 12}, segment12)
+
+	key := channelKey{pchannel: "pchannel", vchannel: "vchannel"}
+	require.Contains(t, m.growingL1SegmentsByChannel, key)
+	assert.Contains(t, m.growingL1SegmentsByChannel[key], int64(10))
+	assert.NotContains(t, m.growingL1SegmentsByChannel[key], int64(12))
+
+	m.RecordDelete("pchannel", "vchannel", 120, 1, 10)
+	assert.Equal(t, deletePressure{rows: 1, bytes: 10}, m.segmentDeletePressures[10])
+	assert.NotContains(t, m.segmentDeletePressures, int64(11))
+	assert.NotContains(t, m.segmentDeletePressures, int64(12))
+
+	m.UnregisterSealedSegment(10)
+	assert.NotContains(t, m.growingL1SegmentsByChannel, key)
 }
 
 func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *SegmentStats {

@@ -153,13 +153,13 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 }
 
 // ApplyDelete: TODO move the L0 flush operation here.
-func (m *shardManagerImpl) ApplyDelete(msg message.ImmutableDeleteMessageV1) error {
+func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	rows := msg.Header().GetRows()
 	m.metrics.ObserveDelete(rows)
-	resource.Resource().SegmentStatsManager().RecordDelete(msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
+	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
 	return nil
 }
 
