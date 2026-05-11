@@ -22,6 +22,15 @@ DECOMPOUNDER_PATH = "decompounder/decompounder_dict.txt"
 class FileResourceTestBase(TestMilvusClientV2Base):
     """Base class with shared helpers for file resource tests."""
 
+    # Work around milvus-io/milvus#49279: DropCollection can return before
+    # streamingnode has consumed the matching CreateCollection DDL.
+    FILE_RESOURCE_DDL_SETTLE_SECONDS = 2
+    EXPECTED_FAILURE_CHECK_TASKS = {
+        CheckTasks.err_res,
+        CheckTasks.check_permission_deny,
+        CheckTasks.check_auth_failure,
+    }
+
     @pytest.fixture(autouse=True)
     def init_minio_client(self, minio_host):
         """Initialise a MinIO client reusing the existing --minio_host option."""
@@ -34,63 +43,46 @@ class FileResourceTestBase(TestMilvusClientV2Base):
             secure=False,
         )
 
-    @pytest.fixture(autouse=True)
-    def _force_clean_stale_resources(self, request):
-        """Before each test, sweep any leftover file resources from earlier runs.
-
-        Server has a known bug where a resource whose MinIO object is missing
-        blocks every subsequent add/remove with 'node sync failed' until it is
-        finally purged. Retrying removal a few times usually drains it.
-        """
-        host = request.config.getoption("--host")
-        port = request.config.getoption("--port")
-        user = request.config.getoption("--user")
-        password = request.config.getoption("--password")
-        try:
-            from pymilvus import MilvusClient
-
-            sweeper = MilvusClient(uri=f"http://{host}:{port}", user=user, password=password, timeout=10)
-            for _ in range(5):
-                leftovers = sweeper.list_file_resources()
-                if not leftovers:
-                    break
-                for r in leftovers:
-                    try:
-                        sweeper.remove_file_resource(name=r.name)
-                    except Exception:
-                        pass
-            sweeper.close()
-        except Exception:
-            # Non-fatal — real connectivity issues will surface in the actual test.
-            pass
-        yield
-
     def setup_method(self, method):
         super().setup_method(method)
+        self.tear_down_collection_names = []
+        self.resource_group_list = []
         self._file_resources_to_cleanup = []
         self._minio_objects_to_cleanup = []
         self._teardown_client = None
+        self._last_collection_drop_ts = None
 
     def teardown_method(self, method):
-        # Phase 1: drop collections first (releases file resource references)
-        super().teardown_method(method)
-        # Phase 2: clean up file resources via MilvusClient independent gRPC channel.
-        # Retry a few times: server has a known bug where remove returns
-        # "node sync failed" on first call but succeeds on a subsequent attempt.
         client = self._teardown_client
-        if client and self._file_resources_to_cleanup:
-            pending = list(self._file_resources_to_cleanup)
-            for _ in range(3):
-                if not pending:
-                    break
-                still = []
-                for name in pending:
-                    try:
-                        client.remove_file_resource(name=name)
-                    except Exception:
+        self._drop_tracked_collections(client)
+        self._remove_tracked_file_resources(client)
+        self._remove_tracked_minio_objects()
+        self._close_teardown_client(client)
+
+    def _remove_tracked_file_resources(self, client):
+        if not client or not self._file_resources_to_cleanup:
+            return
+        self._settle_after_collection_drop()
+        pending = list(self._file_resources_to_cleanup)
+        deadline = time.time() + 30
+        while pending and time.time() < deadline:
+            still = []
+            for name in pending:
+                try:
+                    client.remove_file_resource(name=name)
+                except Exception as exc:
+                    if "not found" not in str(exc):
                         still.append(name)
-                pending = still
-        # Phase 3: clean up MinIO temporary objects (large file tests only)
+            pending = still
+            if pending:
+                time.sleep(1)
+        for name in pending:
+            try:
+                client.remove_file_resource(name=name)
+            except Exception:
+                pass
+
+    def _remove_tracked_minio_objects(self):
         minio = self._minio_client
         if minio and self._minio_objects_to_cleanup:
             for bucket, path in self._minio_objects_to_cleanup:
@@ -99,23 +91,63 @@ class FileResourceTestBase(TestMilvusClientV2Base):
                 except Exception:
                     pass
 
+    def _drop_tracked_collections(self, client):
+        if client and self.tear_down_collection_names:
+            dropped = False
+            for collection_name in reversed(dict.fromkeys(self.tear_down_collection_names)):
+                try:
+                    if client.has_collection(collection_name):
+                        client.drop_collection(collection_name)
+                        dropped = True
+                except Exception:
+                    pass
+            if dropped:
+                self._mark_collection_drop()
+            self.tear_down_collection_names = []
+
+    def _close_teardown_client(self, client):
+        try:
+            if client:
+                client.close()
+        except Exception:
+            pass
+
     def _client(self, active_trace=False, **kwargs):
         client = super()._client(active_trace=active_trace, **kwargs)
         self._teardown_client = client
         return client
 
+    def _mark_collection_drop(self):
+        self._last_collection_drop_ts = time.time()
+
+    def _settle_after_collection_drop(self):
+        if self._last_collection_drop_ts is None:
+            return
+        remaining = self.FILE_RESOURCE_DDL_SETTLE_SECONDS - (time.time() - self._last_collection_drop_ts)
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_collection_drop_ts = None
+
+    def drop_collection(self, client, collection_name, **kwargs):
+        result = super().drop_collection(client, collection_name, **kwargs)
+        if result[1] is True:
+            self._mark_collection_drop()
+        return result
+
     def add_file_resource(self, client, name, path, **kwargs):
         result = super().add_file_resource(client, name, path, **kwargs)
-        # Only track successful additions (skip expected-error calls)
-        if kwargs.get("check_task") != CheckTasks.err_res:
+        # Only track successful additions (skip expected-failure calls)
+        if kwargs.get("check_task") not in self.EXPECTED_FAILURE_CHECK_TASKS:
             if name not in self._file_resources_to_cleanup:
                 self._file_resources_to_cleanup.append(name)
         return result
 
     def remove_file_resource(self, client, name, **kwargs):
+        if kwargs.get("check_task") not in self.EXPECTED_FAILURE_CHECK_TASKS:
+            self._settle_after_collection_drop()
         result = super().remove_file_resource(client, name, **kwargs)
-        # Unregister on successful removal (skip expected-error calls)
-        if kwargs.get("check_task") != CheckTasks.err_res:
+        # Unregister on successful removal (skip expected-failure calls)
+        if kwargs.get("check_task") not in self.EXPECTED_FAILURE_CHECK_TASKS:
             if name in self._file_resources_to_cleanup:
                 self._file_resources_to_cleanup.remove(name)
         return result
@@ -411,26 +443,6 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
         listed = {r.name for r in res}
         for n in names:
             assert n not in listed, f"{n} should not appear after removal"
-
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48612")
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_list_force_cleanup_all_resources(self, file_resource_env):
-        """
-        target: reproduce panic when force-removing in-use resources under concurrency
-        method: list all resources -> force remove each (including those in use by
-                other parallel workers) -> list again
-        expected: with -n 6, removing in-use resources may trigger server panic
-        """
-        client = self._client()
-        # 1. force remove all existing resources (may fail for in-use ones)
-        res, _ = self.list_file_resources(client)
-        for r in res:
-            try:
-                client.remove_file_resource(name=r.name)
-            except Exception:
-                pass
-        # 2. list remaining resources (may not be empty under concurrency)
-        res, _ = self.list_file_resources(client)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_list_after_add(self, file_resource_env):
@@ -1061,11 +1073,13 @@ class TestMilvusClientFileResourceSyncCheck(FileResourceTestBase):
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_create_collection_without_add(self, file_resource_env):
+    def test_create_collection_with_nonexistent_file_resource(self, file_resource_env):
         """
-        target: create collection referencing a resource that was never added
-        method: create collection with non-existent resource_name
-        expected: error on create_collection
+        target: issue #48612 - missing file resource during collection creation
+                returns an error instead of crashing Milvus
+        method: create collection whose analyzer references a never-added
+                remote file resource
+        expected: create_collection fails gracefully and the server remains usable
         """
         client = self._client()
         col_name = cf.gen_unique_str(prefix)
@@ -1078,6 +1092,8 @@ class TestMilvusClientFileResourceSyncCheck(FileResourceTestBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        # 2. server should still be reachable after the failed create_collection
+        self.list_file_resources(client)
 
 
 class TestMilvusClientFileResourceIdempotency(FileResourceTestBase):
@@ -1256,7 +1272,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = "large_test/jieba_5mb.txt"
+        remote_path = f"large_test/{res_name}/jieba_5mb.txt"
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(5)
         self._upload_and_add(client, bucket, remote_path, content)
@@ -1302,7 +1318,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = "large_test/jieba_50mb.txt"
+        remote_path = f"large_test/{res_name}/jieba_50mb.txt"
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(50)
         self._upload_and_add(client, bucket, remote_path, content)
@@ -1347,7 +1363,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = "large_test/stopwords_5mb.txt"
+        remote_path = f"large_test/{res_name}/stopwords_5mb.txt"
         # 1. generate and upload large stop words
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(5)
@@ -1393,7 +1409,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = "large_test/stopwords_50mb.txt"
+        remote_path = f"large_test/{res_name}/stopwords_50mb.txt"
         # 1. generate and upload large stop words
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(50)
@@ -1454,14 +1470,15 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         target: overwrite MinIO file then re-add (same name+path) and confirm
                 the new content is actually picked up by BM25 tokenization.
         method: upload v1 -> add -> create col_v1 -> run_analyzer (v1 stop set)
-                -> upload v2 -> re-add -> create col_v2 -> run_analyzer (v2 set)
+                -> drop col_v1 -> remove resource -> upload v2 -> re-add
+                -> create col_v2 -> run_analyzer (v2 set)
         expected: col_v1 filters only v1 stop words; col_v2 also filters the
                   v2-only words (在/了/和) proving the overwrite took effect
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
-        remote_path = "update_test/custom_stop.txt"
+        remote_path = f"update_test/{res_name}/custom_stop.txt"
         text = "这是一个在测试的文本和数据在这里了"
         v1_only_stop = {"的", "是"}
         v2_only_stop = {"在", "了", "和"}
@@ -1489,6 +1506,7 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         # 2. first collection uses v1 content — 在/了/和 should still appear as tokens
         col_v1 = cf.gen_unique_str(prefix)
         self.create_bm25_collection(client, col_v1, analyzer_params)
+        self.build_and_load_bm25(client, col_v1)
         res_v1, _ = self.run_analyzer(client, text, None, collection_name=col_v1, field_name="text")
         tokens_v1 = set(res_v1.tokens)
         assert not (v1_only_stop & tokens_v1), f"v1 stop words should be filtered, got {tokens_v1}"
@@ -1496,14 +1514,29 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
             f"v2-only stop words should NOT be filtered under v1 content, tokens={tokens_v1}"
         )
 
-        # 3. overwrite MinIO object with v2 (adds 在/了/和) and re-add (idempotent)
+        # 3. remove the old resource registration before re-adding the same path.
+        self.drop_collection(client, col_v1)
+
+        def _removed():
+            try:
+                self.remove_file_resource(client, res_name)
+                return True
+            except Exception as exc:
+                if "is still in use" in str(exc):
+                    return False
+                raise
+
+        assert self.wait_until(_removed, timeout=30, interval=1), f"{res_name} still in-use after dropping {col_v1}"
+
+        # 4. overwrite MinIO object with v2 (adds 在/了/和) and re-add.
         content2_bytes = "的\n是\n在\n了\n和\n".encode()
         self._minio_client.put_object(bucket, remote_path, io.BytesIO(content2_bytes), len(content2_bytes))
         self.add_file_resource(client, res_name, remote_path)
 
-        # 4. fresh collection should read v2 content — 在/了/和 now filtered too
+        # 5. fresh collection should read v2 content — 在/了/和 now filtered too
         col_v2 = cf.gen_unique_str(prefix)
         self.create_bm25_collection(client, col_v2, analyzer_params)
+        self.build_and_load_bm25(client, col_v2)
         res_v2, _ = self.run_analyzer(client, text, None, collection_name=col_v2, field_name="text")
         tokens_v2 = set(res_v2.tokens)
         all_stop = v1_only_stop | v2_only_stop
@@ -1611,7 +1644,7 @@ class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        nested = "a/b/c/d/e/f/deep_dict.txt"
+        nested = f"a/b/c/d/e/f/{cf.gen_unique_str(prefix)}_deep_dict.txt"
         self._minio_objects_to_cleanup.append((bucket, nested))
         payload = b"deeply nested word 5 n\n"
         self._minio_client.put_object(bucket, nested, io.BytesIO(payload), len(payload))
@@ -1628,7 +1661,7 @@ class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = "with space/dict file.txt"
+        remote = f"with space/{cf.gen_unique_str(prefix)} dict file.txt"
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = b"word 5 n\n"
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1652,7 +1685,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = "empty/zero.txt"
+        remote = f"empty/{cf.gen_unique_str(prefix)}_zero.txt"
         self._minio_objects_to_cleanup.append((bucket, remote))
         self._minio_client.put_object(bucket, remote, io.BytesIO(b""), 0)
         res_name = cf.gen_unique_str(prefix)
@@ -1669,7 +1702,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = "encoding/gbk_stop.txt"
+        remote = f"encoding/{cf.gen_unique_str(prefix)}_gbk_stop.txt"
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "的\n是\n".encode("gbk")
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1678,7 +1711,8 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         self.remove_file_resource(client, res_name)
 
     @pytest.mark.xfail(
-        reason="Known: UTF-8 BOM is not stripped from first line of stop-words file, "
+        reason="https://github.com/milvus-io/milvus/issues/49684: "
+        "UTF-8 BOM is not stripped from first line of stop-words file, "
         "so the first stop word (`\\ufeff的`) fails to match `的` and leaks through.",
         strict=False,
     )
@@ -1692,7 +1726,8 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = "encoding/bom_crlf_stop.txt"
+        file_name = f"{cf.gen_unique_str(prefix)}_bom_crlf_stop.txt"
+        remote = f"encoding/{file_name}"
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "﻿的\r\n是\r\n".encode()
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1707,7 +1742,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
                     "stop_words_file": {
                         "type": "remote",
                         "resource_name": res_name,
-                        "file_name": "bom_crlf_stop.txt",
+                        "file_name": file_name,
                     },
                 }
             ],
@@ -1725,12 +1760,6 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
 class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
     """Reference-counting and lifecycle scenarios beyond the basic RefCount suite."""
 
-    @pytest.mark.xfail(
-        reason="Known server bug: combining remote jieba dict + stop + synonym filters "
-        "can panic the datanode — tokenizer.h:31 assert `res.result_->success` fails "
-        "with 'No such file or directory' when the analyzer loads before file sync completes.",
-        strict=False,
-    )
     @pytest.mark.tags(CaseLabel.L1)
     def test_multi_resource_same_collection(self, file_resource_env):
         """
@@ -1800,6 +1829,76 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
 
             assert self.wait_until(_ok, timeout=30, interval=1), f"{name} still in-use after collection drop"
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/49279")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_then_remove_remote_resources_no_panic(self, file_resource_env):
+        """
+        target: issue #49279 - dropping a collection and immediately removing
+                its remote file resources must not panic streamingnode/flusher
+        method: add jieba + stop + synonym resources -> create BM25 collection
+                referencing all three -> drop collection -> remove resources
+                as soon as refcount allows it
+        expected: resources are removed and the server remains usable
+        """
+        client = self._client()
+        jieba_name = cf.gen_unique_str(prefix + "_jieba")
+        stop_name = cf.gen_unique_str(prefix + "_stop")
+        synonym_name = cf.gen_unique_str(prefix + "_syn")
+        self.add_file_resource(client, jieba_name, JIEBA_DICT_PATH)
+        self.add_file_resource(client, stop_name, STOPWORDS_PATH)
+        self.add_file_resource(client, synonym_name, SYNONYMS_PATH)
+
+        col = cf.gen_unique_str(prefix)
+        analyzer_params = {
+            "tokenizer": {
+                "type": "jieba",
+                "extra_dict_file": {
+                    "type": "remote",
+                    "resource_name": jieba_name,
+                    "file_name": "jieba_dict.txt",
+                },
+            },
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words_file": {
+                        "type": "remote",
+                        "resource_name": stop_name,
+                        "file_name": "stop_words.txt",
+                    },
+                },
+                {
+                    "type": "synonym",
+                    "synonyms_file": {
+                        "type": "remote",
+                        "resource_name": synonym_name,
+                        "file_name": "synonyms.txt",
+                    },
+                },
+            ],
+        }
+        self.create_bm25_collection(client, col, analyzer_params)
+        self.drop_collection(client, col)
+
+        def _remove_without_settle(name):
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    client.remove_file_resource(name=name)
+                    if name in self._file_resources_to_cleanup:
+                        self._file_resources_to_cleanup.remove(name)
+                    return True
+                except Exception as exc:
+                    if "is still in use" not in str(exc):
+                        raise
+                    time.sleep(0.02)
+            return False
+
+        for name in (jieba_name, stop_name, synonym_name):
+            assert _remove_without_settle(name), f"{name} still in-use after dropping {col}"
+
+        self.list_file_resources(client)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_same_resource_multi_collection(self, file_resource_env):
         """
@@ -1836,15 +1935,6 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
 
         assert self.wait_until(_ok, timeout=30, interval=1), f"{res_name} still in use after all 3 collections dropped"
 
-    @pytest.mark.xfail(
-        reason="Known server bug: deleting a MinIO object that an active file "
-        "resource points to puts the resource meta into a state where every "
-        "subsequent add/remove_file_resource returns 'node sync failed', "
-        "cascading failures across the whole instance until the orphan is "
-        "purged manually. This test also leaves the orphan behind so it is "
-        "skipped in the normal suite.",
-        strict=False,
-    )
     @pytest.mark.tags(CaseLabel.L2)
     def test_minio_object_deleted_while_loaded(self, file_resource_env):
         """
@@ -1857,7 +1947,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = "cache_test/stop.txt"
+        remote = f"cache_test/{cf.gen_unique_str(prefix)}/stop.txt"
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "的\n是\n".encode()
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1976,11 +2066,6 @@ class TestMilvusClientFileResourceRunAnalyzer(FileResourceTestBase):
         tokens = set(res.tokens)
         assert "的" not in tokens and "是" not in tokens, f"remote stop-words should have been applied, got {tokens}"
 
-    @pytest.mark.xfail(
-        reason="Known server bug: see TestMilvusClientFileResourceLifecycleAdvanced::"
-        "test_multi_resource_same_collection — same tokenizer.h:31 panic.",
-        strict=False,
-    )
     @pytest.mark.tags(CaseLabel.L2)
     def test_combined_remote_filters(self, file_resource_env):
         """
@@ -2054,31 +2139,27 @@ class TestMilvusClientFileResourceRestart(FileResourceTestBase):
     def _restart_standalone_pods(self, namespace, release):
         """Rollout restart the standalone deployment and wait ready.
 
-        Silent skip if kubectl unavailable or the deployment is not found —
-        these tests are opt-in when running against a live K8s cluster.
+        These L3 tests require kubectl and a matching live K8s deployment.
         """
         deploy = f"{release}-milvus-standalone"
-        try:
-            subprocess.check_call(
-                ["kubectl", "-n", namespace, "rollout", "restart", f"deployment/{deploy}"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.STDOUT,
-            )
-            subprocess.check_call(
-                [
-                    "kubectl",
-                    "-n",
-                    namespace,
-                    "rollout",
-                    "status",
-                    f"deployment/{deploy}",
-                    f"--timeout={self.RESTART_TIMEOUT_SECONDS}s",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.STDOUT,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            pytest.skip(f"kubectl restart not available/applicable: {exc}")
+        subprocess.check_call(
+            ["kubectl", "-n", namespace, "rollout", "restart", f"deployment/{deploy}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        subprocess.check_call(
+            [
+                "kubectl",
+                "-n",
+                namespace,
+                "rollout",
+                "status",
+                f"deployment/{deploy}",
+                f"--timeout={self.RESTART_TIMEOUT_SECONDS}s",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
 
     def _resolve_release(self, request):
         return request.config.getoption("--minio_bucket")
@@ -2171,22 +2252,38 @@ class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
         user_name = cf.gen_unique_str(prefix + "_u")
         role_name = cf.gen_unique_str(prefix + "_r")
         password = cf.gen_str_by_length(contain_numbers=True)
-        self.create_user(root_client, user_name=user_name, password=password)
-        self.create_role(root_client, role_name=role_name)
-        self.grant_role(root_client, user_name=user_name, role_name=role_name)
-        user_client, _ = self.init_milvus_client(uri=f"http://{host}:{port}", user=user_name, password=password)
-        yield root_client, user_client, user_name, role_name, password
-        # teardown
+        user_client = None
         try:
-            root_client.drop_role(role_name, force_drop=True)
-        except Exception:
-            pass
-        try:
-            root_client.drop_user(user_name)
-        except Exception:
-            pass
+            self.create_user(root_client, user_name=user_name, password=password)
+            self.create_role(root_client, role_name=role_name)
+            self.grant_role(root_client, user_name=user_name, role_name=role_name)
+            user_client, _ = self.init_milvus_client(uri=f"http://{host}:{port}", user=user_name, password=password)
+            yield root_client, user_client, user_name, role_name, password
+        finally:
+            if user_client:
+                try:
+                    user_client.close()
+                except Exception:
+                    pass
+            for privilege in ("AddFileResource", "RemoveFileResource", "ListFileResources"):
+                try:
+                    root_client.revoke_privilege_v2(role_name, privilege, "*", "*")
+                except Exception:
+                    pass
+            try:
+                root_client.revoke_role(user_name, role_name)
+            except Exception:
+                pass
+            try:
+                root_client.drop_user(user_name)
+            except Exception:
+                pass
+            try:
+                root_client.drop_role(role_name)
+            except Exception:
+                pass
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rbac_unprivileged_user_cannot_add(self, rbac_actors, file_resource_env):
         """
         target: without PrivilegeAddFileResource, add_file_resource is denied
@@ -2201,7 +2298,7 @@ class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
             check_task=CheckTasks.check_permission_deny,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rbac_unprivileged_user_cannot_remove(self, rbac_actors, file_resource_env):
         """
         target: without PrivilegeRemoveFileResource, remove is denied even for an
@@ -2214,7 +2311,7 @@ class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
         self.add_file_resource(root_client, res_name, JIEBA_DICT_PATH)
         self.remove_file_resource(user_client, res_name, check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rbac_granted_add_privilege_succeeds(self, rbac_actors, file_resource_env):
         """
         target: after granting PrivilegeAddFileResource, add succeeds
@@ -2230,7 +2327,7 @@ class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
         listed = {r.name for r in self.list_file_resources(root_client)[0]}
         assert res_name in listed
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rbac_add_granted_but_remove_not(self, rbac_actors, file_resource_env):
         """
         target: AddFileResource and RemoveFileResource are separate privileges
@@ -2245,7 +2342,7 @@ class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
         self.add_file_resource(user_client, res_name, JIEBA_DICT_PATH)
         self.remove_file_resource(user_client, res_name, check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rbac_list_requires_list_privilege(self, rbac_actors, file_resource_env):
         """
         target: list_file_resources is gated by PrivilegeListFileResources
