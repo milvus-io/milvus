@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -62,6 +64,7 @@ type IDFOracle interface {
 	// Internally handles: streaming download → local disk → optional parse → register.
 	// Idempotent: skips if segment already loaded.
 	LoadSealed(ctx context.Context, segmentID int64, bm25Logs []*datapb.FieldBinlog, cm storage.ChunkManager) error
+	SyncFunctions(functions []*schemapb.FunctionSchema) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
@@ -71,7 +74,44 @@ type IDFOracle interface {
 	Close()
 }
 
+type bm25FunctionSet map[typeutil.UniqueID]*schemapb.FunctionSchema
+
 type bm25Stats map[int64]*storage.BM25Stats
+
+func newBM25FunctionSet(schema *schemapb.CollectionSchema) bm25FunctionSet {
+	result := make(bm25FunctionSet)
+	if schema == nil {
+		return result
+	}
+	for _, function := range schema.GetFunctions() {
+		if function.GetType() != schemapb.FunctionType_BM25 || len(function.GetOutputFieldIds()) == 0 {
+			continue
+		}
+		result[function.GetOutputFieldIds()[0]] = function
+	}
+	return result
+}
+
+func (s bm25FunctionSet) IsSupersetOf(old bm25FunctionSet) bool {
+	for outputFieldID, oldFunction := range old {
+		newFunction, ok := s[outputFieldID]
+		if !ok || !sameBM25Function(newFunction, oldFunction) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s bm25FunctionSet) Equal(other bm25FunctionSet) bool {
+	return len(s) == len(other) && s.IsSupersetOf(other)
+}
+
+func sameBM25Function(a, b *schemapb.FunctionSchema) bool {
+	return a.GetType() == b.GetType() &&
+		slices.Equal(a.GetInputFieldIds(), b.GetInputFieldIds()) &&
+		slices.Equal(a.GetOutputFieldIds(), b.GetOutputFieldIds()) &&
+		common.KeyValuePairs(a.GetParams()).Equal(b.GetParams())
+}
 
 func (s bm25Stats) Merge(stats bm25Stats) {
 	for fieldID, newstats := range stats {
@@ -194,6 +234,18 @@ func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
 	return stats
 }
 
+func (s bm25Stats) AddMissingFunctions(functions []*schemapb.FunctionSchema) {
+	for _, function := range functions {
+		if function.GetType() != schemapb.FunctionType_BM25 || len(function.GetOutputFieldIds()) == 0 {
+			continue
+		}
+		fieldID := function.GetOutputFieldIds()[0]
+		if _, ok := s[fieldID]; !ok {
+			s[fieldID] = storage.NewBM25Stats()
+		}
+	}
+}
+
 type idfTarget struct {
 	sync.RWMutex
 	snapshot *snapshot
@@ -276,6 +328,14 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 	o.current.Merge(stats)
 	o.Unlock()
 	o.syncResource()
+}
+
+func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
+	o.Lock()
+	o.current.AddMissingFunctions(functions)
+	o.Unlock()
+	o.syncResource()
+	return nil
 }
 
 // LoadSealed loads BM25 stats for a sealed segment from remote storage to local disk.
