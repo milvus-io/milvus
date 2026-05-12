@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <memory>
 
@@ -244,17 +245,20 @@ namespace {
 
 // Helper function to process group_by fields
 void
-ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
-                     const SchemaPtr& schema,
-                     std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
-                     std::vector<FieldId>& project_id_list,
-                     std::vector<std::string>& project_name_list,
-                     std::vector<milvus::DataType>& project_type_list) {
+ProcessGroupByFields(
+    const proto::plan::QueryPlanNode& query,
+    const SchemaPtr& schema,
+    std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
+    std::vector<FieldId>& project_id_list,
+    std::vector<std::string>& project_name_list,
+    std::vector<milvus::DataType>& project_type_list,
+    std::vector<plan::ProjectNode::ProjectionMode>& project_mode_list) {
     auto group_by_field_count = query.group_by_field_ids_size();
     groupingKeys.reserve(group_by_field_count);
     project_id_list.reserve(group_by_field_count);
     project_name_list.reserve(group_by_field_count);
     project_type_list.reserve(group_by_field_count);
+    project_mode_list.reserve(group_by_field_count);
 
     auto insert_project_field_if_not_exist = [&](FieldId field_id,
                                                  const std::string& field_name,
@@ -265,6 +269,8 @@ ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
             project_id_list.emplace_back(field_id);
             project_name_list.emplace_back(field_name);
             project_type_list.emplace_back(field_type);
+            project_mode_list.emplace_back(
+                plan::ProjectNode::ProjectionMode::Value);
         }
     };
 
@@ -286,25 +292,41 @@ ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
 
 // Helper function to process aggregates
 void
-ProcessAggregates(const proto::plan::QueryPlanNode& query,
-                  const SchemaPtr& schema,
-                  std::vector<plan::AggregationNode::Aggregate>& aggregates,
-                  std::vector<std::string>& agg_names,
-                  std::vector<FieldId>& project_id_list,
-                  std::vector<std::string>& project_name_list,
-                  std::vector<milvus::DataType>& project_type_list) {
+ProcessAggregates(
+    const proto::plan::QueryPlanNode& query,
+    const SchemaPtr& schema,
+    std::vector<plan::AggregationNode::Aggregate>& aggregates,
+    std::vector<std::string>& agg_names,
+    std::vector<FieldId>& project_id_list,
+    std::vector<std::string>& project_name_list,
+    std::vector<milvus::DataType>& project_type_list,
+    std::vector<plan::ProjectNode::ProjectionMode>& project_mode_list) {
     aggregates.reserve(query.aggregates_size());
     agg_names.reserve(query.aggregates_size());
 
-    auto insert_project_field_if_not_exist = [&](FieldId field_id,
-                                                 const std::string& field_name,
-                                                 milvus::DataType field_type) {
-        if (std::count(project_id_list.begin(),
-                       project_id_list.end(),
-                       field_id) == 0) {
+    auto insert_project_field_if_not_exist =
+        [&](FieldId field_id,
+            const std::string& field_name,
+            milvus::DataType field_type,
+            plan::ProjectNode::ProjectionMode projection_mode) {
+        auto it = std::find(project_id_list.begin(),
+                            project_id_list.end(),
+                            field_id);
+        if (it == project_id_list.end()) {
             project_id_list.emplace_back(field_id);
             project_name_list.emplace_back(field_name);
-            project_type_list.emplace_back(field_type);
+            project_type_list.emplace_back(
+                projection_mode == plan::ProjectNode::ProjectionMode::Value
+                    ? field_type
+                    : DataType::INT8);
+            project_mode_list.emplace_back(projection_mode);
+            return;
+        }
+        auto index = std::distance(project_id_list.begin(), it);
+        if (projection_mode == plan::ProjectNode::ProjectionMode::Value &&
+            project_mode_list[index] != plan::ProjectNode::ProjectionMode::Value) {
+            project_type_list[index] = field_type;
+            project_mode_list[index] = projection_mode;
         }
     };
 
@@ -336,7 +358,13 @@ ProcessAggregates(const proto::plan::QueryPlanNode& query,
             aggregates.back().rawInputTypes_.emplace_back(field_type);
             aggregates.back().resultType_ =
                 GetAggResultType(agg_name, field_type);
-            insert_project_field_if_not_exist(field_id, field_name, field_type);
+            insert_project_field_if_not_exist(
+                field_id,
+                field_name,
+                field_type,
+                agg_name == KCount
+                    ? plan::ProjectNode::ProjectionMode::ValidityOnly
+                    : plan::ProjectNode::ProjectionMode::Value);
         }
     }
 }
@@ -351,7 +379,8 @@ BuildProjectAndAggregationNodes(
     std::vector<plan::AggregationNode::Aggregate> aggregates,
     std::vector<FieldId> project_id_list,
     std::vector<std::string> project_name_list,
-    std::vector<milvus::DataType> project_type_list) {
+    std::vector<milvus::DataType> project_type_list,
+    std::vector<plan::ProjectNode::ProjectionMode> project_mode_list) {
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
     // Always build ProjectNode when aggregation is present.
@@ -366,6 +395,7 @@ BuildProjectAndAggregationNodes(
             std::move(project_field_id_list),
             std::move(project_name_list),
             std::move(project_type_list),
+            std::move(project_mode_list),
             sources);
     }
 
@@ -795,6 +825,7 @@ ProtoParser::RetrievePlanNodeFromProto(
             std::vector<FieldId> project_id_list;
             std::vector<std::string> project_name_list;
             std::vector<milvus::DataType> project_type_list;
+            std::vector<plan::ProjectNode::ProjectionMode> project_mode_list;
             std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
             std::vector<plan::AggregationNode::Aggregate> aggregates;
             std::vector<std::string> agg_names;
@@ -805,7 +836,8 @@ ProtoParser::RetrievePlanNodeFromProto(
                                  groupingKeys,
                                  project_id_list,
                                  project_name_list,
-                                 project_type_list);
+                                 project_type_list,
+                                 project_mode_list);
 
             // Process aggregates
             ProcessAggregates(query,
@@ -814,7 +846,8 @@ ProtoParser::RetrievePlanNodeFromProto(
                               agg_names,
                               project_id_list,
                               project_name_list,
-                              project_type_list);
+                              project_type_list,
+                              project_mode_list);
 
             // Build ProjectNode and AggregationNode
             plannode =
@@ -825,7 +858,8 @@ ProtoParser::RetrievePlanNodeFromProto(
                                                 std::move(aggregates),
                                                 std::move(project_id_list),
                                                 std::move(project_name_list),
-                                                std::move(project_type_list));
+                                                std::move(project_type_list),
+                                                std::move(project_mode_list));
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 

@@ -40,7 +40,10 @@ PhyProjectNode::PhyProjectNode(
                operator_id,
                projectNode->id(),
                "Project"),
-      fields_to_project_(projectNode->FieldsToProject()) {
+      fields_to_project_(projectNode->FieldsToProject()),
+      projection_modes_(projectNode->ProjectionModes()) {
+    AssertInfo(fields_to_project_.size() == projection_modes_.size(),
+               "Project fields and projection modes must have the same size");
     auto exec_context = operator_context_->get_exec_context();
     segment_ = exec_context->get_query_context()->get_segment();
     op_context_ = exec_context->get_query_context()->get_op_context();
@@ -93,6 +96,7 @@ PhyProjectNode::GetOutput() {
     for (int i = 0; i < fields_to_project_.size(); i++) {
         auto column_type = row_type->column_type(i);
         auto field_id = fields_to_project_.at(i);
+        auto projection_mode = projection_modes_.at(i);
 
         if (field_id == SegmentOffsetFieldID) {
             FixedVector<int64_t> offsets(selected_count);
@@ -109,12 +113,33 @@ PhyProjectNode::GetOutput() {
         }
 
         if (!segment_->is_field_exist(field_id)) {
-            auto field_data =
-                InitScalarFieldDataWithLength(column_type, selected_count);
-            auto valid_map = TargetBitmap(selected_count, false);
-            auto col = std::make_shared<ColumnVector>(
-                std::move(field_data), std::move(valid_map), selected_count);
-            column_vectors.emplace_back(std::move(col));
+            if (projection_mode ==
+                plan::ProjectNode::ProjectionMode::ValidityOnly) {
+                TargetBitmap null_bitmap(selected_count, true);
+                TargetBitmap valid_bitmap(selected_count, true);
+                column_vectors.emplace_back(std::make_shared<ColumnVector>(
+                    std::move(null_bitmap), std::move(valid_bitmap)));
+            } else {
+                auto field_data =
+                    InitScalarFieldDataWithLength(column_type, selected_count);
+                auto valid_map = TargetBitmap(selected_count, false);
+                auto col = std::make_shared<ColumnVector>(
+                    std::move(field_data), std::move(valid_map), selected_count);
+                column_vectors.emplace_back(std::move(col));
+            }
+            continue;
+        }
+
+        if (projection_mode == plan::ProjectNode::ProjectionMode::ValidityOnly) {
+            TargetBitmap null_bitmap(selected_count);
+            segment_->bulk_subscript_null_bitmap(op_context_,
+                                                 field_id,
+                                                 selected_offsets.data(),
+                                                 selected_count,
+                                                 null_bitmap);
+            TargetBitmap valid_bitmap(selected_count, true);
+            column_vectors.emplace_back(std::make_shared<ColumnVector>(
+                std::move(null_bitmap), std::move(valid_bitmap)));
             continue;
         }
 

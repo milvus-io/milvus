@@ -60,7 +60,15 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
             input_column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
             AssertInfo(input_column != nullptr,
                        "input[0] must be ColumnVector for count aggregation");
-            if (input_column->nullCount() == 0) {
+            if (input_column->IsBitmap()) {
+                BitsetTypeView view(input_column->GetRawData(),
+                                    input_column->size());
+                for (auto i = 0; i < input_column->size(); i++) {
+                    if (!view[i]) {
+                        addToGroup(groups[i], 1);
+                    }
+                }
+            } else if (input_column->nullCount() == 0) {
                 for (auto i = 0; i < input_column->size(); i++) {
                     addToGroup(groups[i], 1);
                 }
