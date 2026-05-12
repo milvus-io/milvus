@@ -1395,20 +1395,21 @@ type IndexFilePathInfo struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	SegmentID                 int64                    `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	FieldID                   int64                    `protobuf:"varint,2,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
-	IndexID                   int64                    `protobuf:"varint,3,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	BuildID                   int64                    `protobuf:"varint,4,opt,name=buildID,proto3" json:"buildID,omitempty"`
-	IndexName                 string                   `protobuf:"bytes,5,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	IndexParams               []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
-	IndexFilePaths            []string                 `protobuf:"bytes,7,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
-	SerializedSize            uint64                   `protobuf:"varint,8,opt,name=serialized_size,json=serializedSize,proto3" json:"serialized_size,omitempty"`
-	IndexVersion              int64                    `protobuf:"varint,9,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
-	NumRows                   int64                    `protobuf:"varint,10,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
-	CurrentIndexVersion       int32                    `protobuf:"varint,11,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`
-	MemSize                   uint64                   `protobuf:"varint,12,opt,name=mem_size,json=memSize,proto3" json:"mem_size,omitempty"`
-	CurrentScalarIndexVersion int32                    `protobuf:"varint,13,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
-	IndexStorePathVersion     IndexStorePathVersion    `protobuf:"varint,14,opt,name=index_store_path_version,json=indexStorePathVersion,proto3,enum=milvus.proto.index.IndexStorePathVersion" json:"index_store_path_version,omitempty"`
+	SegmentID   int64                    `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	FieldID     int64                    `protobuf:"varint,2,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
+	IndexID     int64                    `protobuf:"varint,3,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	BuildID     int64                    `protobuf:"varint,4,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	IndexName   string                   `protobuf:"bytes,5,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	IndexParams []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	// Logical index paths without storage root, e.g. index_v1/{coll}/{part}/{seg}/{build}/{version}/{file}.
+	IndexFilePaths            []string              `protobuf:"bytes,7,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
+	SerializedSize            uint64                `protobuf:"varint,8,opt,name=serialized_size,json=serializedSize,proto3" json:"serialized_size,omitempty"`
+	IndexVersion              int64                 `protobuf:"varint,9,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
+	NumRows                   int64                 `protobuf:"varint,10,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
+	CurrentIndexVersion       int32                 `protobuf:"varint,11,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`
+	MemSize                   uint64                `protobuf:"varint,12,opt,name=mem_size,json=memSize,proto3" json:"mem_size,omitempty"`
+	CurrentScalarIndexVersion int32                 `protobuf:"varint,13,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
+	IndexStorePathVersion     IndexStorePathVersion `protobuf:"varint,14,opt,name=index_store_path_version,json=indexStorePathVersion,proto3,enum=milvus.proto.index.IndexStorePathVersion" json:"index_store_path_version,omitempty"`
 }
 
 func (x *IndexFilePathInfo) Reset() {

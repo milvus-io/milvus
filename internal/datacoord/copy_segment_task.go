@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync/atomic"
 	"time"
 
@@ -757,6 +758,14 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 // Index Synchronization: Vector and Scalar Indexes
 // ===========================================================================================
 
+func indexFileKeysFromLogicalPaths(indexFilePaths []string) []string {
+	keys := make([]string, 0, len(indexFilePaths))
+	for _, indexFilePath := range indexFilePaths {
+		keys = append(keys, path.Base(indexFilePath))
+	}
+	return keys
+}
+
 // syncVectorScalarIndexes synchronizes vector and scalar index metadata to indexMeta.
 //
 // Process flow:
@@ -829,13 +838,14 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
-			SegmentID:                 result.GetSegmentId(),
-			CollectionID:              task.GetCollectionId(),
-			PartitionID:               partitionID,
-			IndexID:                   targetIndexID,
-			BuildID:                   indexInfo.GetBuildId(),
-			IndexState:                commonpb.IndexState_Finished,
-			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
+			SegmentID:    result.GetSegmentId(),
+			CollectionID: task.GetCollectionId(),
+			PartitionID:  partitionID,
+			IndexID:      targetIndexID,
+			BuildID:      indexInfo.GetBuildId(),
+			IndexState:   commonpb.IndexState_Finished,
+			// SegmentIndex stores file keys; copy result paths are logical full paths.
+			IndexFileKeys:             indexFileKeysFromLogicalPaths(indexInfo.GetIndexFilePaths()),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
 			IndexMemSize:              uint64(indexInfo.GetIndexSize()),
 			IndexVersion:              indexInfo.GetVersion(),

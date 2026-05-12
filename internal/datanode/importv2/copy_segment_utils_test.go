@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -277,10 +278,10 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 	}{
 		{
 			name:        "vector scalar index path v0 format",
-			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			sourcePath:  "index_files/1001/1/222/333/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-			wantPath:    "files/index_files/1001/1/555/666/scalar_index",
+			wantPath:    "index_files/1001/1/555/666/scalar_index",
 			wantErr:     false,
 		},
 		{
@@ -320,7 +321,7 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 		},
 		{
 			name:       "invalid - path too short",
-			sourcePath: "files/index_files/111",
+			sourcePath: "index_files/111",
 			indexType:  IndexTypeVectorScalarV0,
 			wantPath:   "",
 			wantErr:    true,
@@ -334,10 +335,10 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 		},
 		{
 			name:        "vector scalar index path v1 format",
-			sourcePath:  "files/index_files_v1/111/222/333/1001/1/scalar_index",
+			sourcePath:  "index_v1/111/222/333/1001/1/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-			wantPath:    "files/index_files_v1/444/555/666/1001/1/scalar_index",
+			wantPath:    "index_v1/444/555/666/1001/1/scalar_index",
 			wantErr:     false,
 		},
 	}
@@ -380,17 +381,17 @@ func TestGenerateTargetIndexPath_BuildIDMapping(t *testing.T) {
 	}{
 		{
 			name:        "v0 vector scalar maps buildID at offset 1",
-			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			sourcePath:  "index_files/1001/1/222/333/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-			wantPath:    "files/index_files/2001/1/555/666/scalar_index",
+			wantPath:    "index_files/2001/1/555/666/scalar_index",
 		},
 		{
 			name:        "v1 vector scalar maps buildID at offset 4",
-			sourcePath:  "files/index_files_v1/111/222/333/1001/1/scalar_index",
+			sourcePath:  "index_v1/111/222/333/1001/1/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-			wantPath:    "files/index_files_v1/444/555/666/2001/1/scalar_index",
+			wantPath:    "index_v1/444/555/666/2001/1/scalar_index",
 		},
 		{
 			name:       "text index maps buildID at offset 1",
@@ -425,13 +426,13 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 				BuildID:               1001,
 				IndexVersion:          1,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+				IndexFilePaths:        []string{"index_files/1001/1/222/333/v0_file"},
 			},
 			{
 				BuildID:               1002,
 				IndexVersion:          1,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-				IndexFilePaths:        []string{"files/index_files_v1/111/222/333/1002/1/v1_file"},
+				IndexFilePaths:        []string{"index_v1/111/222/333/1002/1/v1_file"},
 			},
 		},
 	}
@@ -443,15 +444,24 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 	}
 	files := &SegmentFiles{
 		VectorScalarIndex: []string{
-			"files/index_files/1001/1/222/333/v0_file",
-			"files/index_files_v1/111/222/333/1002/1/v1_file",
+			"index_files/1001/1/222/333/v0_file",
+			"index_v1/111/222/333/1002/1/v1_file",
 		},
 	}
 
 	mappings, err := generateMappingsFromFiles(files, source, target)
 	assert.NoError(t, err)
-	assert.Equal(t, "files/index_files/2001/1/555/666/v0_file", mappings["files/index_files/1001/1/222/333/v0_file"])
-	assert.Equal(t, "files/index_files_v1/444/555/666/2002/1/v1_file", mappings["files/index_files_v1/111/222/333/1002/1/v1_file"])
+	assert.Equal(t, "index_files/2001/1/555/666/v0_file", mappings["index_files/1001/1/222/333/v0_file"])
+	assert.Equal(t, "index_v1/444/555/666/2002/1/v1_file", mappings["index_v1/111/222/333/1002/1/v1_file"])
+}
+
+func TestResolveVectorScalarIndexCopyPath(t *testing.T) {
+	assert.Equal(t,
+		"files/index_v1/111/222/333/1002/1/v1_file",
+		resolveVectorScalarIndexCopyPath("files", "index_v1/111/222/333/1002/1/v1_file"))
+	assert.Equal(t,
+		"/var/lib/milvus/data/index_v1/111/222/333/1002/1/v1_file",
+		resolveVectorScalarIndexCopyPath("/var/lib/milvus/data", "index_v1/111/222/333/1002/1/v1_file"))
 }
 
 func TestTransformFieldBinlogs(t *testing.T) {
@@ -575,7 +585,7 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 				FieldID:        100,
 				IndexID:        1001,
 				BuildID:        1002,
-				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1"},
+				IndexFilePaths: []string{"index_files/1002/1/222/333/index1"},
 			},
 		},
 	}
@@ -587,10 +597,15 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	}
 
 	t.Run("successful copy", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
+		var copiedSrc, copiedDst []string
+		mCopy := mockey.Mock(copyFile).To(func(ctx context.Context, cm storage.ChunkManager, src, dst string) error {
+			copiedSrc = append(copiedSrc, src)
+			copiedDst = append(copiedDst, dst)
+			return nil
+		}).Build()
 		defer mCopy.UnPatch()
 
-		cm := &struct{ storage.ChunkManager }{}
+		cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
 		assert.NoError(t, err)
@@ -600,13 +615,17 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 		assert.Equal(t, 1, len(result.Binlogs))
 		assert.Equal(t, 1, len(result.IndexInfos))
 		assert.Len(t, copiedFiles, 2)
+		assert.Contains(t, copiedSrc, cm.RootPath()+"/index_files/1002/1/222/333/index1")
+		assert.Contains(t, copiedDst, cm.RootPath()+"/index_files/1002/1/555/666/index1")
+		assert.Equal(t, "index_files/1002/1/555/666/index1", result.IndexInfos[1002].IndexFilePaths[0])
+		assert.Contains(t, copiedFiles, "index_files/1002/1/555/666/index1")
 	})
 
 	t.Run("copy failure", func(t *testing.T) {
 		mCopy := mockey.Mock(copyFile).Return(errors.New("copy failed")).Build()
 		defer mCopy.UnPatch()
 
-		cm := &struct{ storage.ChunkManager }{}
+		cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
 		assert.Error(t, err)
@@ -681,7 +700,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 				FieldID:        100,
 				IndexID:        1001,
 				BuildID:        1002,
-				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1"},
+				IndexFilePaths: []string{"index_files/1002/1/222/333/index1"},
 				SerializedSize: 5000,
 			},
 		},
@@ -725,7 +744,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	}
 
 	mappings := map[string]string{
-		"files/index_files/1002/1/222/333/index1":                           "files/index_files/1002/1/555/666/index1",
+		"index_files/1002/1/222/333/index1":                                 "index_files/1002/1/555/666/index1",
 		"files/text_log/123/1/111/222/333/100/text1":                        "files/text_log/123/1/444/555/666/100/text1",
 		"files/json_key_index_log/123/1/111/222/333/101/json1":              "files/json_key_index_log/123/1/444/555/666/101/json1",
 		"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/index1": "files/json_stats/2/3002/1/444/555/666/102/shared_key_index/index1",
@@ -741,7 +760,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 
 	t.Run("error on missing text index mapping", func(t *testing.T) {
 		partialMappings := map[string]string{
-			"files/index_files/1002/1/222/333/index1": "files/index_files/1002/1/555/666/index1",
+			"index_files/1002/1/222/333/index1": "index_files/1002/1/555/666/index1",
 		}
 		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
 		assert.Error(t, err)
@@ -750,7 +769,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 
 	t.Run("error on missing json index mapping", func(t *testing.T) {
 		partialMappings := map[string]string{
-			"files/index_files/1002/1/222/333/index1":    "files/index_files/1002/1/555/666/index1",
+			"index_files/1002/1/222/333/index1":          "index_files/1002/1/555/666/index1",
 			"files/text_log/123/1/111/222/333/100/text1": "files/text_log/123/1/444/555/666/100/text1",
 		}
 		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
@@ -769,7 +788,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		assert.Equal(t, int64(1001), indexInfos[1002].IndexId)
 		assert.Equal(t, int64(1002), indexInfos[1002].BuildId)
 		assert.Equal(t, int64(5000), indexInfos[1002].IndexSize)
-		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[1002].IndexFilePaths[0])
+		assert.Equal(t, "index_files/1002/1/555/666/index1", indexInfos[1002].IndexFilePaths[0])
 
 		// Verify text index info
 		assert.Equal(t, 1, len(textIndexInfos))
@@ -813,7 +832,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          1,
 				SerializedSize:        1024,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+				IndexFilePaths:        []string{"index_files/1001/1/222/333/v0_file"},
 			},
 			{
 				FieldID:               101,
@@ -823,7 +842,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          1,
 				SerializedSize:        2048,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-				IndexFilePaths:        []string{"files/index_files_v1/111/222/333/1002/1/v1_file"},
+				IndexFilePaths:        []string{"index_v1/111/222/333/1002/1/v1_file"},
 			},
 		},
 	}
@@ -834,8 +853,8 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
 	}
 	mappings := map[string]string{
-		"files/index_files/1001/1/222/333/v0_file":        "files/index_files/2001/1/555/666/v0_file",
-		"files/index_files_v1/111/222/333/1002/1/v1_file": "files/index_files_v1/444/555/666/2002/1/v1_file",
+		"index_files/1001/1/222/333/v0_file":  "index_files/2001/1/555/666/v0_file",
+		"index_v1/111/222/333/1002/1/v1_file": "index_v1/444/555/666/2002/1/v1_file",
 	}
 
 	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
@@ -954,7 +973,7 @@ func TestGenerateTargetIndexPath_PathTooShort(t *testing.T) {
 		},
 		{
 			name:      "vector scalar path exactly at keyword",
-			path:      "files/index_files",
+			path:      "index_files",
 			indexType: IndexTypeVectorScalarV0,
 		},
 	}
@@ -983,9 +1002,9 @@ func TestGenerateTargetIndexPath_VectorScalarPreservesIDs(t *testing.T) {
 	// Verify buildID (1001) and indexVersion (1) are preserved, NOT replaced
 	// partitionID (222->555) and segmentID (333->666) ARE replaced
 	// collectionID is NOT in path at all
-	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalarV0, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
+	result, err := generateTargetIndexPath("index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalarV0, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	assert.NoError(t, err)
-	assert.Equal(t, "files/index_files/1001/1/555/666/HNSW_SQ_3", result)
+	assert.Equal(t, "index_files/1001/1/555/666/HNSW_SQ_3", result)
 
 	// Verify collectionID (111) does NOT appear in target path
 	assert.NotContains(t, result, "111")
@@ -1127,7 +1146,7 @@ func TestBuildIndexInfoFromSource_MultipleIndexesPerField(t *testing.T) {
 				IndexID:        1001,
 				BuildID:        2001,
 				IndexName:      "idx_category",
-				IndexFilePaths: []string{"files/index_files/2001/1/222/333/index1"},
+				IndexFilePaths: []string{"index_files/2001/1/222/333/index1"},
 				SerializedSize: 3000,
 			},
 			{
@@ -1135,7 +1154,7 @@ func TestBuildIndexInfoFromSource_MultipleIndexesPerField(t *testing.T) {
 				IndexID:        1002,
 				BuildID:        2002,
 				IndexName:      "idx_price",
-				IndexFilePaths: []string{"files/index_files/2002/1/222/333/index2"},
+				IndexFilePaths: []string{"index_files/2002/1/222/333/index2"},
 				SerializedSize: 4000,
 			},
 		},
@@ -1152,8 +1171,8 @@ func TestBuildIndexInfoFromSource_MultipleIndexesPerField(t *testing.T) {
 	}
 
 	mappings := map[string]string{
-		"files/index_files/2001/1/222/333/index1": "files/index_files/3001/1/555/666/index1",
-		"files/index_files/2002/1/222/333/index2": "files/index_files/3002/1/555/666/index2",
+		"index_files/2001/1/222/333/index1": "index_files/3001/1/555/666/index1",
+		"index_files/2002/1/222/333/index2": "index_files/3002/1/555/666/index2",
 	}
 
 	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
@@ -1322,42 +1341,6 @@ func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Nil(t, copiedFiles)
 	assert.Contains(t, err.Error(), "failed to generate file mappings")
-}
-
-func TestShortenIndexFilePaths(t *testing.T) {
-	tests := []struct {
-		name      string
-		fullPaths []string
-		expected  []string
-	}{
-		{
-			name: "vector/scalar index paths",
-			fullPaths: []string{
-				"files/index_files/1001/1/555/666/scalar_index",
-				"files/index_files/1001/1/555/666/vector_index",
-			},
-			expected: []string{"scalar_index", "vector_index"},
-		},
-		{
-			name:      "empty path list",
-			fullPaths: []string{},
-			expected:  []string{},
-		},
-		{
-			name: "single file name",
-			fullPaths: []string{
-				"index_file",
-			},
-			expected: []string{"index_file"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := shortenIndexFilePaths(tt.fullPaths)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 func TestShortenSingleJsonStatsPath(t *testing.T) {
@@ -1794,7 +1777,7 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			DeltaBinlogs:      []string{"files/delta_log/111/222/333/100/delta1"},
 			StatsBinlogs:      []string{"files/stats_log/111/222/333/100/stats1"},
 			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
-			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
+			VectorScalarIndex: []string{"index_files/1002/1/222/333/idx1"},
 			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
 			JSONKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
 			JSONStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
@@ -1810,8 +1793,8 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			mappings["files/delta_log/111/222/333/100/delta1"])
 		assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1",
 			mappings["files/bm25_stats/111/222/333/100/bm25_1"])
-		assert.Equal(t, "files/index_files/1002/1/555/666/idx1",
-			mappings["files/index_files/1002/1/222/333/idx1"])
+		assert.Equal(t, "index_files/1002/1/555/666/idx1",
+			mappings["index_files/1002/1/222/333/idx1"])
 	})
 
 	t.Run("empty files", func(t *testing.T) {

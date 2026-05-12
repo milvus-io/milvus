@@ -145,6 +145,10 @@ func copyFile(ctx context.Context, cm storage.ChunkManager, src, dst string) err
 	return cm.Copy(ctx, src, dst)
 }
 
+func resolveVectorScalarIndexCopyPath(rootPath, logicalPath string) string {
+	return path.Join(rootPath, logicalPath)
+}
+
 // extractFromPb extracts file paths from FieldBinlog list (insert/delta/stats/bm25).
 func extractFromPb(fieldBinlogs []*datapb.FieldBinlog) []string {
 	var paths []string
@@ -339,8 +343,7 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.Bm25Binlogs, BinlogTypeBM25); err != nil {
 		return nil, err
 	}
-	// Vector/scalar index copy uses the v0 type as the logical input; the
-	// per-file IndexStorePathVersion switches storage matching to index_files_v1 when needed.
+	// Vector/scalar indexes use per-file IndexStorePathVersion to choose v0/v1 layout.
 	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalarV0); err != nil {
 		return nil, err
 	}
@@ -386,20 +389,30 @@ func CopySegmentAndIndexFiles(
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate file mappings: %w", err)
 	}
+	vectorScalarIndexPaths := make(map[string]struct{}, len(files.VectorScalarIndex))
+	for _, indexPath := range files.VectorScalarIndex {
+		vectorScalarIndexPaths[indexPath] = struct{}{}
+	}
 
 	// Step 3: Execute all copy operations
 	copiedFiles := make([]string, 0, len(mappings))
 	for src, dst := range mappings {
+		copySrc := src
+		copyDst := dst
+		if _, ok := vectorScalarIndexPaths[src]; ok {
+			copySrc = resolveVectorScalarIndexCopyPath(cm.RootPath(), src)
+			copyDst = resolveVectorScalarIndexCopyPath(cm.RootPath(), dst)
+		}
 		log.Debug("copying file",
-			zap.String("src", src),
-			zap.String("dst", dst))
+			zap.String("src", copySrc),
+			zap.String("dst", copyDst))
 
-		if err := copyFile(ctx, cm, src, dst); err != nil {
+		if err := copyFile(ctx, cm, copySrc, copyDst); err != nil {
 			fields := make([]zap.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
-			fields = append(fields, zap.String("src", src), zap.String("dst", dst), zap.Error(err))
+			fields = append(fields, zap.String("src", copySrc), zap.String("dst", copyDst), zap.Error(err))
 			log.Warn("failed to copy file", fields...)
-			return nil, copiedFiles, fmt.Errorf("failed to copy file from %s to %s: %w", src, dst, err)
+			return nil, copiedFiles, fmt.Errorf("failed to copy file from %s to %s: %w", copySrc, copyDst, err)
 		}
 		copiedFiles = append(copiedFiles, dst)
 	}
@@ -443,10 +456,6 @@ func CopySegmentAndIndexFiles(
 		segmentInfo.GetDeltalogs(), segmentInfo.GetBm25Logs())
 	if err != nil {
 		return nil, copiedFiles, fmt.Errorf("failed to compress binlog paths: %w", err)
-	}
-
-	for _, indexInfo := range indexInfos {
-		indexInfo.IndexFilePaths = shortenIndexFilePaths(indexInfo.IndexFilePaths)
 	}
 
 	jsonKeyIndexInfos = shortenJSONStatsPath(jsonKeyIndexInfos)
@@ -817,45 +826,15 @@ const (
 	BinlogTypeDelta         = "delta_log"
 	BinlogTypeBM25          = "bm25_stats"
 	IndexTypeVectorScalarV0 = "index_files"
-	IndexTypeVectorScalarV1 = "index_files_v1"
+	IndexTypeVectorScalarV1 = common.SegmentIndexV1Path
 	IndexTypeText           = "text_log"
 	IndexTypeJSONKey        = "json_key_index_log" // Legacy: JSON Key Inverted Index
 	IndexTypeJSONStats      = "json_stats"         // New: JSON Stats with Shredding Design
 	FileTypeLOB             = "lob"                // LOB files at partition level for TEXT fields
 )
 
-// generateTargetIndexPath is the unified function for generating target paths for all index types
-// The indexType parameter specifies which type of index path to generate
-//
-// Supported index types (use constants):
-//   - IndexTypeVectorScalarV0: Vector/Scalar v0 path format (legacy index_files prefix)
-//     {rootPath}/index_files/{build_id}/{index_version}/{partition_id}/{segment_id}/file
-//     Note: collectionID is NOT in the path, only partitionID and segmentID are replaced
-//   - IndexTypeVectorScalarV1: Vector/Scalar v1 path format (index_files_v1 prefix)
-//     {rootPath}/index_files_v1/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
-//   - IndexTypeText: Text Index path format
-//     {rootPath}/text_log/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/file
-//   - IndexTypeJSONKey: JSON Key Index path format (legacy)
-//     {rootPath}/json_key_index_log/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/file
-//   - IndexTypeJSONStats: JSON Stats path format (new, data_format >= 2)
-//     {rootPath}/json_stats/{data_format_version}/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/(shared_key_index|shredding_data)/...
-//
-// Examples:
-// generateTargetIndexPath(..., IndexTypeVectorScalarV0):
-//
-//	files/index_files/1001/1/222/333/scalar_index -> files/index_files/1001/1/bbb/ccc/scalar_index
-//
-// generateTargetIndexPath(..., IndexTypeText):
-//
-//	files/text_log/123/1/111/222/333/444/index_file -> files/text_log/123/1/aaa/bbb/ccc/444/index_file
-//
-// generateTargetIndexPath(..., IndexTypeJSONKey):
-//
-//	files/json_key_index_log/123/1/111/222/333/444/index_file -> files/json_key_index_log/123/1/aaa/bbb/ccc/444/index_file
-//
-// generateTargetIndexPath(..., IndexTypeJSONStats):
-//
-//	files/json_stats/2/123/1/111/222/333/444/shared_key_index/file -> files/json_stats/2/123/1/aaa/bbb/ccc/444/shared_key_index/file
+// generateTargetIndexPath rewrites source collection/partition/segment IDs to target IDs.
+// Vector/scalar index paths may use either v0 or v1 layout.
 func generateTargetIndexPath(
 	sourcePath string,
 	source *datapb.CopySegmentSource,
@@ -963,38 +942,6 @@ const (
 	jsonStatsSharedIndexPath   = "shared_key_index"
 	jsonStatsShreddingDataPath = "shredding_data"
 )
-
-// shortenIndexFilePaths shortens vector/scalar index file paths to only keep the base filename.
-//
-// In normal index building flow, only the base filename (last path segment) is stored in IndexFileKeys.
-// In copy segment flow, DataNode returns full paths after file copying.
-// This function extracts the base filename to match the format expected by QueryNode loading.
-//
-// Path transformation:
-//   - Input:  "files/index_files/444/555/666/100/1001/1002/scalar_index"
-//   - Output: "scalar_index"
-//
-// Why only base filename:
-// - DataCoord rebuilds full paths using BuildSegmentIndexFilePaths when needed
-// - Storing full paths would cause duplicate path concatenation
-// - Matches the convention from normal index building
-//
-// Parameters:
-//   - fullPaths: List of full index file paths
-//
-// Returns:
-//   - List of base filenames (last segment of each path)
-func shortenIndexFilePaths(fullPaths []string) []string {
-	result := make([]string, 0, len(fullPaths))
-	for _, fullPath := range fullPaths {
-		// Extract base filename (last segment after final '/')
-		parts := strings.Split(fullPath, "/")
-		if len(parts) > 0 {
-			result = append(result, parts[len(parts)-1])
-		}
-	}
-	return result
-}
 
 // shortenJSONStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
 //

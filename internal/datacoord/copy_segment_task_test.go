@@ -535,7 +535,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 				IndexId:        200, // source indexID
 				BuildId:        5001,
 				IndexName:      "vec_idx",
-				IndexFilePaths: []string{"HNSW"},
+				IndexFilePaths: []string{"index_v1/1/10/100/5001/1/HNSW"},
 				IndexSize:      10000,
 			},
 		},
@@ -550,6 +550,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	s.True(ok)
 	s.Equal(int64(300), segIdx.IndexID) // target indexID, not source 200
 	s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
+	s.Equal([]string{"HNSW"}, segIdx.IndexFileKeys)
 }
 
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePathVersion() {

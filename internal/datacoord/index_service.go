@@ -1114,7 +1114,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
+					builder := metautil.NewLogicalIndexPathBuilder(
 						segIdx.IndexStorePathVersion, segIdx.CollectionID,
 						segIdx.PartitionID, segIdx.SegmentID,
 						segIdx.BuildID, segIdx.IndexVersion)

@@ -8931,11 +8931,12 @@ type VectorScalarIndexInfo struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	FieldId                   int64                         `protobuf:"varint,1,opt,name=field_id,json=fieldId,proto3" json:"field_id,omitempty"`
-	IndexId                   int64                         `protobuf:"varint,2,opt,name=index_id,json=indexId,proto3" json:"index_id,omitempty"`
-	BuildId                   int64                         `protobuf:"varint,3,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
-	Version                   int64                         `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
-	IndexFilePaths            []string                      `protobuf:"bytes,5,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`                                     // Full paths to index files
+	FieldId int64 `protobuf:"varint,1,opt,name=field_id,json=fieldId,proto3" json:"field_id,omitempty"`
+	IndexId int64 `protobuf:"varint,2,opt,name=index_id,json=indexId,proto3" json:"index_id,omitempty"`
+	BuildId int64 `protobuf:"varint,3,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+	Version int64 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
+	// Logical index paths without storage root, e.g. index_v1/{coll}/{part}/{seg}/{build}/{version}/{file}.
+	IndexFilePaths            []string                      `protobuf:"bytes,5,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
 	IndexSize                 int64                         `protobuf:"varint,6,opt,name=index_size,json=indexSize,proto3" json:"index_size,omitempty"`                                                     // Total index size in bytes
 	CurrentIndexVersion       int32                         `protobuf:"varint,7,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`                     // Index engine version
 	CurrentScalarIndexVersion int32                         `protobuf:"varint,8,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"` // Scalar index engine version

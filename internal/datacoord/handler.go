@@ -837,7 +837,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
+			builder := metautil.NewLogicalIndexPathBuilder(
 				segIdx.IndexStorePathVersion, segIdx.CollectionID,
 				segIdx.PartitionID, segIdx.SegmentID,
 				segIdx.BuildID, segIdx.IndexVersion)

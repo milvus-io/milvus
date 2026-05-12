@@ -887,16 +887,17 @@ type FieldIndexInfo struct {
 
 	FieldID int64 `protobuf:"varint,1,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
 	// Deprecated: Marked as deprecated in segcore.proto.
-	EnableIndex         bool                     `protobuf:"varint,2,opt,name=enable_index,json=enableIndex,proto3" json:"enable_index,omitempty"`
-	IndexName           string                   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	IndexID             int64                    `protobuf:"varint,4,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	BuildID             int64                    `protobuf:"varint,5,opt,name=buildID,proto3" json:"buildID,omitempty"`
-	IndexParams         []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
-	IndexFilePaths      []string                 `protobuf:"bytes,7,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
-	IndexSize           int64                    `protobuf:"varint,8,opt,name=index_size,json=indexSize,proto3" json:"index_size,omitempty"`
-	IndexVersion        int64                    `protobuf:"varint,9,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
-	NumRows             int64                    `protobuf:"varint,10,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
-	CurrentIndexVersion int32                    `protobuf:"varint,11,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`
+	EnableIndex bool                     `protobuf:"varint,2,opt,name=enable_index,json=enableIndex,proto3" json:"enable_index,omitempty"`
+	IndexName   string                   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	IndexID     int64                    `protobuf:"varint,4,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	BuildID     int64                    `protobuf:"varint,5,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	IndexParams []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	// Logical index paths without storage root, e.g. index_v1/{coll}/{part}/{seg}/{build}/{version}/{file}.
+	IndexFilePaths      []string `protobuf:"bytes,7,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
+	IndexSize           int64    `protobuf:"varint,8,opt,name=index_size,json=indexSize,proto3" json:"index_size,omitempty"`
+	IndexVersion        int64    `protobuf:"varint,9,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
+	NumRows             int64    `protobuf:"varint,10,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
+	CurrentIndexVersion int32    `protobuf:"varint,11,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`
 	// Deprecated: Marked as deprecated in segcore.proto.
 	IndexStoreVersion         int64 `protobuf:"varint,12,opt,name=index_store_version,json=indexStoreVersion,proto3" json:"index_store_version,omitempty"`
 	CurrentScalarIndexVersion int32 `protobuf:"varint,13,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`

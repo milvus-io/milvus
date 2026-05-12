@@ -103,6 +103,7 @@ message FieldIndexInfo {
   int64 indexID = 4;
   int64 buildID = 5;
   repeated common.KeyValuePair index_params = 6;
+  // Logical index paths without storage root, e.g. index_v1/{coll}/{part}/{seg}/{build}/{version}/{file}.
   repeated string index_file_paths = 7;
   int64 index_size = 8;
   int64 index_version = 9;

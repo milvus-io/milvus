@@ -250,7 +250,7 @@ type AvroIndexFilePathInfo struct {
 	IndexName string `avro:"index_name"`
 	// IndexParams contains index-specific parameters (e.g., nlist, m for IVF).
 	IndexParams []AvroKeyValuePair `avro:"index_params"`
-	// IndexFilePaths contains paths to all index files in object storage.
+	// IndexFilePaths contains logical index paths without storage root.
 	IndexFilePaths []string `avro:"index_file_paths"`
 	// SerializedSize is the total size of all index files in bytes.
 	SerializedSize int64 `avro:"serialized_size"`

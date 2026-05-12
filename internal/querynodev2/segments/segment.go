@@ -1076,8 +1076,6 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 			indexParams[common.WarmupKey] = warmupPolicy
 		}
 	}
-	// Pass DataCoord-built index file paths through; QueryNode should not
-	// attach v0/v1 path layout semantics to the read path.
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:              loadInfo.GetCollectionID(),
 		PartitionID:               loadInfo.GetPartitionID(),

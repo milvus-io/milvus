@@ -750,7 +750,7 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 
 // MarkIndexAsDeleted marks indexes as deleted. File cleanup is split by path layout:
 // recycleUnusedIndexFilesV0 handles legacy v0 index_files objects, and
-// recycleUnusedIndexFilesV1 handles v1 index_files_v1 objects.
+// recycleUnusedIndexFilesV1 handles v1 index_v1 objects.
 func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
@@ -1229,7 +1229,7 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 }
 
 // GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
-// the v1 index_files_v1 layout. v0 cleanup still walks the buildID-rooted
+// the v1 index_v1 layout. v0 cleanup still walks the buildID-rooted
 // index_files prefix and does not use this metadata-driven query.
 func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
 	if m.segmentBuildInfo == nil {

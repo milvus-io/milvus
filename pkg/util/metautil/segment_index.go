@@ -7,10 +7,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
-// IndexPathBuilder constructs object storage paths for index files.
-// All index file path construction MUST go through this builder.
-// The builder reads IndexStorePathVersion from metadata to decide the path format,
-// providing compile-time safety — callers cannot forget to pass the version.
+// IndexPathBuilder constructs index storage paths. An empty root builds logical paths.
 type IndexPathBuilder struct {
 	rootPath     string
 	pathVersion  indexpb.IndexStorePathVersion
@@ -35,16 +32,19 @@ func NewIndexPathBuilder(rootPath string, pathVersion indexpb.IndexStorePathVers
 	}
 }
 
+// NewLogicalIndexPathBuilder builds paths without storage root.
+func NewLogicalIndexPathBuilder(pathVersion indexpb.IndexStorePathVersion, collID, partID, segID, buildID, indexVersion int64) *IndexPathBuilder {
+	return NewIndexPathBuilder("", pathVersion, collID, partID, segID, buildID, indexVersion)
+}
+
 func IsCollectionRooted(pathVersion indexpb.IndexStorePathVersion) bool {
 	return pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 }
 
-// BuildFilePath returns the full path for a single index file.
 func (b *IndexPathBuilder) BuildFilePath(fileKey string) string {
 	return path.Join(b.BuildPrefix(), fileKey)
 }
 
-// BuildFilePaths returns full paths for multiple index files.
 func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 	paths := make([]string, 0, len(fileKeys))
 	for _, fileKey := range fileKeys {
@@ -53,9 +53,10 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 	return paths
 }
 
-// BuildPrefix returns the directory prefix containing all files for this index build.
-// v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
-// v1: {root}/index_files_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+// v0 rooted: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
+// v1 rooted: {root}/index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+// v0 logical: index_files/{buildID}/{indexVersion}/{partID}/{segID}
+// v1 logical: index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
 func (b *IndexPathBuilder) BuildPrefix() string {
 	if IsCollectionRooted(b.pathVersion) {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)

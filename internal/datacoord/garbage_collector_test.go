@@ -37,6 +37,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -51,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -880,8 +884,8 @@ func TestGetAllIndexFilesOfIndex_PathVersions(t *testing.T) {
 			IndexFileKeys:         []string{"file1", "file2"},
 		}
 		files := gc.getAllIndexFilesOfIndex(segIdx)
-		assert.Contains(t, files, "root/index_files_v1/100/200/300/1000/1/file1")
-		assert.Contains(t, files, "root/index_files_v1/100/200/300/1000/1/file2")
+		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file1")
+		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file2")
 		assert.Len(t, files, 2)
 	})
 }
@@ -1094,7 +1098,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		// v1 path prefix should be removed
 		assert.Len(t, removedPrefixes, 1)
-		assert.Equal(t, "root/index_files_v1/100/200/300/2000/1/", removedPrefixes[0])
+		assert.Equal(t, "root/index_v1/100/200/300/2000/1/", removedPrefixes[0])
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(2000)
 		assert.False(t, ok, "deleted v1 segment index tombstone should be removed after file deletion")
 	})
@@ -1168,14 +1172,24 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_files_v1/101/201/301/2001/1/").Return(errors.New("remove failed"))
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/101/201/301/2001/1/").Return(errors.New("remove failed"))
+
+		core, logs := observer.New(zapcore.WarnLevel)
+		ctx := context.WithValue(context.TODO(), log.CtxLogKey, &log.MLogger{Logger: zap.New(core)})
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
-		gc.recycleUnusedIndexFilesV1(context.TODO())
+		gc.recycleUnusedIndexFilesV1(ctx)
 
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(2001)
 		assert.True(t, ok, "metadata must remain when file deletion fails")
 		catalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		taskFailures := logs.FilterMessage("some task failure in remove object pool").All()
+		require.Len(t, taskFailures, 1)
+		errMsg := fmt.Sprint(taskFailures[0].ContextMap()["error"])
+		assert.Contains(t, errMsg, "collectionID=101")
+		assert.Contains(t, errMsg, "buildID=2001")
+		assert.Contains(t, errMsg, "segmentID=301")
 	})
 
 	t.Run("snapshot protected v1 build keeps files and metadata", func(t *testing.T) {

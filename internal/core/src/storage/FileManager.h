@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <boost/filesystem/path.hpp>
 
@@ -113,6 +114,7 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    // INDEX_FILES values are logical Milvus index paths during index loading.
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -192,8 +194,8 @@ class FileManagerImpl : public milvus::FileManager {
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         std::string remote_file_path;
-        if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
-            remote_file_path = NormalizePath(filename);
+        if (is_index_file && index_files_are_logical_paths_) {
+            remote_file_path = ResolveIndexFilePathForArrowOpen(filename);
         } else {
             auto local_file_name = GetFileName(filename);
             remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
@@ -323,21 +325,37 @@ class FileManagerImpl : public milvus::FileManager {
         return boost::filesystem::path(filepath).filename().string();
     }
 
-    bool
-    ShouldOpenIndexFileDirectly(const std::string& filename,
-                                bool is_index_file) const {
-        if (!is_index_file || filename.find('/') == std::string::npos) {
-            return false;
+    std::string
+    ResolveIndexFilePathForArrowOpen(const std::string& logical_path) const {
+        // Local FS is rooted at localStorage.path; remote FS needs rootPath.
+        if (milvus_storage::IsLocalFileSystem(fs_)) {
+            return NormalizePath(logical_path);
+        }
+        return NormalizePath(GetStorageRootPath() / logical_path);
+    }
+
+    std::vector<std::string>
+    ResolveIndexFilePathsForChunkManagerRead(
+        const std::vector<std::string>& logical_paths) const {
+        if (!index_files_are_logical_paths_) {
+            return logical_paths;
         }
 
-        // Absolute local paths are legacy caller inputs, not object keys.
-        // Local Arrow FS already applies its own root path.
-        if (milvus_storage::IsLocalFileSystem(fs_) &&
-            boost::filesystem::path(filename).is_absolute()) {
-            return false;
+        std::vector<std::string> resolved_paths;
+        resolved_paths.reserve(logical_paths.size());
+        auto root_path = GetStorageRootPath();
+        for (const auto& logical_path : logical_paths) {
+            resolved_paths.emplace_back(
+                NormalizePath(root_path / logical_path));
         }
+        return resolved_paths;
+    }
 
-        return true;
+    boost::filesystem::path
+    GetStorageRootPath() const {
+        return index::kOverrideRootPathForUT.empty()
+                   ? boost::filesystem::path(rcm_->GetRootPath())
+                   : boost::filesystem::path(index::kOverrideRootPathForUT);
     }
 
     std::string
@@ -358,6 +376,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    bool index_files_are_logical_paths_{false};
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
 

@@ -78,6 +78,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    index_files_are_logical_paths_ = fileManagerContext.for_loading_index;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -404,7 +405,9 @@ DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, GetLocalIndexObjectPrefix(), priority);
+        ResolveIndexFilePathsForChunkManagerRead(remote_files),
+        GetLocalIndexObjectPrefix(),
+        priority);
 }
 
 void

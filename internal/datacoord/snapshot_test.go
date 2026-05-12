@@ -577,7 +577,7 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 			{Key: "index_type", Value: "IVF_FLAT"},
 			{Key: "nlist", Value: "1024"},
 		},
-		IndexFilePaths:        []string{"/idx/path1", "/idx/path2", "/idx/path3"},
+		IndexFilePaths:        []string{"index_v1/9999/2001/1001/6666/5/path1", "index_v1/9999/2001/1001/6666/5/path2", "index_v1/9999/2001/1001/6666/5/path3"},
 		SerializedSize:        16384,
 		IndexVersion:          5,
 		NumRows:               50000,
@@ -628,7 +628,7 @@ func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t
 				IndexID:        201,
 				BuildID:        301,
 				IndexName:      "vec_idx",
-				IndexFilePaths: []string{"files/index_files/301/1/2001/1001/index_data"},
+				IndexFilePaths: []string{"index_files/301/1/2001/1001/index_data"},
 			},
 		},
 	}

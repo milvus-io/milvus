@@ -1103,7 +1103,8 @@ message VectorScalarIndexInfo {
   int64 index_id = 2;
   int64 build_id = 3;
   int64 version = 4;
-  repeated string index_file_paths = 5;    // Full paths to index files
+  // Logical index paths without storage root, e.g. index_v1/{coll}/{part}/{seg}/{build}/{version}/{file}.
+  repeated string index_file_paths = 5;
   int64 index_size = 6;                    // Total index size in bytes
   int32 current_index_version = 7;         // Index engine version
   int32 current_scalar_index_version = 8;  // Scalar index engine version
