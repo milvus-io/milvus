@@ -1979,7 +1979,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			StorageVersion: seg.GetStorageVersion(),
 			ManifestPath:   seg.GetManifest(),
 			ExpirQuantiles: seg.GetExpirQuantiles(),
-			SchemaVersion:  compactFromSegInfos[0].GetSchemaVersion(),
+			SchemaVersion:  t.GetSchema().GetVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -2097,7 +2097,7 @@ func (m *meta) completeMixCompactionMutation(
 				ManifestPath:        compactToSegment.GetManifest(),
 				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
 				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-				SchemaVersion:       compactFromSegInfos[0].GetSchemaVersion(),
+				SchemaVersion:       t.GetSchema().GetVersion(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {

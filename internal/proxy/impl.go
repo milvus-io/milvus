@@ -977,25 +977,6 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	// Prevent concurrent schema-change requests (AddCollectionField / AlterCollectionSchema)
-	// on the same collection from racing past the schema version consistency gate.
-	collKey := request.GetDbName() + "/" + request.GetCollectionName()
-	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(
-			"another schema-change request is already in progress for collection %s", request.GetCollectionName())), nil
-	}
-	defer node.alterSchemaInFlight.Delete(collKey)
-
-	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
-	// Retry the schema consistency gate in Proxy first to hide short backfill
-	// convergence windows from clients until SDK retry handling is fixed.
-	if err := retry.Handle(ctx, func() (bool, error) {
-		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
-		return merr.IsRetryableErr(err), err
-	}); err != nil {
-		return merr.Status(err), nil
-	}
-
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -1070,30 +1051,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Prevent concurrent AlterCollectionSchema requests on the same collection from
-	// racing past the schema version consistency gate. Only one request per collection
-	// is allowed to proceed at a time; others are rejected immediately.
-	collKey := request.GetDbName() + "/" + request.GetCollectionName()
-	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"another AlterCollectionSchema request is already in progress for collection %s", request.GetCollectionName())),
-		}, nil
-	}
-	defer node.alterSchemaInFlight.Delete(collKey)
-
-	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
-	// Retry the schema consistency gate in Proxy first to hide short backfill
-	// convergence windows from clients until SDK retry handling is fixed.
-	if err := retry.Handle(ctx, func() (bool, error) {
-		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
-		return merr.IsRetryableErr(err), err
-	}); err != nil {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(err),
-		}, nil
-	}
-
 	task := &alterCollectionSchemaTask{
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
@@ -1143,95 +1100,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return task.AlterCollectionSchemaResponse, nil
-}
-
-// checkSchemaVersionConsistency checks if all segments have consistent schema version
-// Returns error if schema version consistency proportion is less than 100%.
-//
-// NOTE: this is a Proxy-local fast-path check only. The `alterSchemaInFlight` map
-// on the Proxy is per-instance, so in a multi-Proxy deployment two concurrent
-// schema-change requests routed to different Proxy instances each see their own
-// empty local map and both pass this check before either has bumped the schema
-// version, allowing the race through. The authoritative cluster-wide consistency
-// gate lives at RootCoord and is enforced after acquiring the collection resource
-// key lock — see checkSchemaVersionConsistencyAtRootCoord in rootcoord, added by
-// companion PR #48989. This Proxy-side check remains as a cheap early reject to
-// avoid unnecessary RootCoord round-trips on the common single-Proxy path.
-func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", dbName),
-		zap.String("collection", collectionName))
-
-	// Get collection statistics to check schema version consistency
-	statsResp, err := node.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
-		Base:           commonpbutil.NewMsgBase(),
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if err := merr.CheckRPCCall(statsResp, err); err != nil {
-		log.Warn("failed to get collection statistics for schema version consistency check", zap.Error(err))
-		return err
-	}
-
-	// Find schema_version_consistent_segments and schema_version_total_segments from Stats.
-	// DataCoord emits these two integer keys only when the collection's schema version > 0
-	// (i.e. AlterCollectionSchema has been called at least once).  Absent keys mean the
-	// schema version is still 0 — no function field has ever been added — so there is no
-	// in-flight backfill and no DDL can be racing with one.  This does NOT open a window
-	// for concurrent DDL to slip through: RootCoord serializes all schema-change DDLs through
-	// a single DDL queue, so a second AlterCollectionSchema call can only enter this check
-	// after the first has already bumped the schema version and DataCoord has started reporting
-	// the count keys.
-	//
-	// Integer counts are used instead of a floating-point proportion to avoid the rounding
-	// hazard where e.g. 99999/100000 = 99.999% would format as "100.00" with "%.2f" and
-	// falsely satisfy the 100% gate check.
-	consistentSegments := -1
-	totalSegments := -1
-	for _, stat := range statsResp.GetStats() {
-		switch stat.GetKey() {
-		case common.SchemaVersionConsistentSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_consistent_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_consistent_segments value: %s", stat.GetValue())
-			}
-			consistentSegments = v
-		case common.SchemaVersionTotalSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_total_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_total_segments value: %s", stat.GetValue())
-			}
-			totalSegments = v
-		}
-	}
-
-	log.Info("checked schema version consistency",
-		zap.Int("consistentSegments", consistentSegments),
-		zap.Int("totalSegments", totalSegments))
-
-	if consistentSegments < 0 && totalSegments < 0 {
-		// Both keys absent: schema version is 0, no backfill has ever been triggered.
-		return nil
-	}
-	if consistentSegments < 0 || totalSegments < 0 {
-		// Exactly one key present — should never happen since DataCoord emits both atomically.
-		// Treat as a data corruption signal and block the DDL rather than silently passing.
-		log.Warn("incomplete schema version consistency stats, blocking DDL",
-			zap.Int("consistentSegments", consistentSegments),
-			zap.Int("totalSegments", totalSegments))
-		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
-	}
-	if consistentSegments < totalSegments {
-		return merr.WrapErrCollectionSchemaVersionNotReady(collectionName, consistentSegments, totalSegments)
-	}
-	return nil
 }
 
 // GetStatistics get the statistics, such as `num_rows`.

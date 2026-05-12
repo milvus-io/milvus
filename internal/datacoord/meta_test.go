@@ -601,6 +601,116 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, droppedCount)
 	})
 
+	suite.Run("mixed schema version mix compaction uses task schema version", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				Deltalogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000)},
+				NumOfRows:     2,
+				SchemaVersion: 1,
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				Deltalogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 31000)},
+				NumOfRows:     2,
+				SchemaVersion: 4,
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 9},
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Len(infos, 1)
+		suite.EqualValues(9, infos[0].GetSchemaVersion())
+	})
+
+	suite.Run("mixed schema version clustering compaction uses task schema version", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:     2,
+				SchemaVersion: 1,
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:     2,
+				SchemaVersion: 4,
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 9},
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Len(infos, 1)
+		suite.EqualValues(9, infos[0].GetSchemaVersion())
+	})
+
 	suite.Run("test L2 sort", func() {
 		getLatestSegments := func() *SegmentsInfo {
 			latestSegments := NewSegmentsInfo()
