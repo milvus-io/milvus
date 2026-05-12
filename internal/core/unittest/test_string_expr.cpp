@@ -2309,6 +2309,20 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
     // wrap_for_substring wrapping
     EXPECT_EQ(regex_to_tantivy_pattern("a.b", true),
               "[\\s\\S]*(?:a[\\s\\S]b)[\\s\\S]*");
+    // RE2 PartialMatch anchors must be translated because Tantivy regex
+    // matches the whole indexed key and does not support zero-width anchors.
+    EXPECT_EQ(regex_to_tantivy_pattern("^user_[0-9]+", true),
+              "user_[0-9]+[\\s\\S]*");
+    EXPECT_EQ(regex_to_tantivy_pattern("user_[0-9]+$", true),
+              "[\\s\\S]*(?:user_[0-9]+)");
+    EXPECT_EQ(regex_to_tantivy_pattern("^user_[0-9]+$", true),
+              "user_[0-9]+");
+    EXPECT_EQ(regex_to_tantivy_pattern("\\^user_[0-9]+", true),
+              "[\\s\\S]*(?:\\^user_[0-9]+)[\\s\\S]*");
+    EXPECT_EQ(regex_to_tantivy_pattern("user_[0-9]+\\$", true),
+              "[\\s\\S]*(?:user_[0-9]+\\$)[\\s\\S]*");
+    EXPECT_EQ(regex_to_tantivy_pattern("[^a]+$", true),
+              "[\\s\\S]*(?:[^a]+)");
 
     // ── Alternation edge cases ──
     // Simple alternation

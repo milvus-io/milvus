@@ -245,6 +245,33 @@ regex_to_tantivy_pattern(const std::string& pattern,
         }
     }
     if (wrap_for_substring) {
+        bool anchored_at_start = !result.empty() && result.front() == '^';
+        bool anchored_at_end = false;
+        if (!result.empty() && result.back() == '$') {
+            size_t slash_count = 0;
+            for (size_t i = result.size() - 1; i > 0 && result[i - 1] == '\\';
+                 --i) {
+                ++slash_count;
+            }
+            anchored_at_end = (slash_count % 2 == 0);
+        }
+
+        if (anchored_at_start) {
+            result.erase(result.begin());
+        }
+        if (anchored_at_end) {
+            result.pop_back();
+        }
+
+        if (anchored_at_start && anchored_at_end) {
+            return result;
+        }
+        if (anchored_at_start) {
+            return result + "[\\s\\S]*";
+        }
+        if (anchored_at_end) {
+            return "[\\s\\S]*(?:" + result + ")";
+        }
         return "[\\s\\S]*(?:" + result + ")[\\s\\S]*";
     }
     return result;
