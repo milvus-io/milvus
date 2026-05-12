@@ -290,6 +290,16 @@ var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
 func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	recs := make([]arrow.Array, len(crr.fields))
+	releaseRecsOnError := true
+	defer func() {
+		if releaseRecsOnError {
+			for _, rec := range recs {
+				if rec != nil {
+					rec.Release()
+				}
+			}
+		}
+	}()
 	nonExistingFields := make([]*schemapb.FieldSchema, 0)
 	nRows := 0
 	for _, f := range crr.fields {
@@ -300,6 +310,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 			}
 			r := crr.rrs[idx].Record()
 			recs[idx] = r.Column(0)
+			recs[idx].Retain()
 			if nRows == 0 {
 				nRows = int(r.NumRows())
 			}
@@ -318,6 +329,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		}
 		recs[crr.index[f.FieldID]] = arr
 	}
+	releaseRecsOnError = false
 	return &compositeRecord{
 		index: crr.index,
 		recs:  recs,

@@ -299,10 +299,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
 		UserIndexParams: req.GetUserIndexParams(),
-		// MinSchemaVersion prevents building an index on a function-output column (e.g. BM25 sparse
-		// vector) before backfill has written that column into old segments.  The inspector skips any
-		// segment whose SchemaVersion is still below this value.
-		MinSchemaVersion: schema.GetVersion(),
 	}
 	// Validate the index params.
 	if err := ValidateIndexParams(index); err != nil {
@@ -332,7 +328,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	log.Info("CreateIndex successfully",
 		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
-		zap.Int64("IndexID", index.IndexID), zap.Int32("MinSchemaVersion", index.MinSchemaVersion),
+		zap.Int64("IndexID", index.IndexID),
 		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil

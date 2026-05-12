@@ -272,6 +272,12 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
+	if pw.writer != nil {
+		pw.writer.AsNewColumnGroups()
+	}
+}
+
 func NewPackedRecordBatchWriter(
 	basePath string,
 	schema *schemapb.CollectionSchema,
@@ -281,10 +287,36 @@ func NewPackedRecordBatchWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordBatchWriter, error) {
-	// Validate PK field exists before proceeding
-	_, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true)
+}
+
+func NewPartialPackedRecordBatchWriter(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false)
+}
+
+func newPackedRecordBatchWriter(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	validatePK bool,
+) (*packedRecordBatchWriter, error) {
+	if validatePK {
+		_, err := typeutil.GetPrimaryFieldSchema(schema)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	arrowSchema, err := ConvertToArrowSchema(schema, true)

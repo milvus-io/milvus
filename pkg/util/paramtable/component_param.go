@@ -4973,26 +4973,27 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout                      ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks                ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks             ParamItem `refreshable:"true"`
-	CompactionMaxFullSegmentThreshold         ParamItem `refreshable:"true"`
-	CompactionForceMergeDataNodeMemoryFactor  ParamItem `refreshable:"true"`
-	CompactionForceMergeQueryNodeMemoryFactor ParamItem `refreshable:"true"`
-	MinSegmentToMerge                         ParamItem `refreshable:"true"`
-	SegmentSmallProportion                    ParamItem `refreshable:"true"`
-	SegmentCompactableProportion              ParamItem `refreshable:"true"`
-	SegmentExpansionRate                      ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds                ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds          ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds             ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds          ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval                ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval              ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
-	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
-	BackfillCompactionTriggerInterval         ParamItem `refreshable:"true"`
+	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks                 ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks              ParamItem `refreshable:"true"`
+	CompactionMaxFullSegmentThreshold          ParamItem `refreshable:"true"`
+	CompactionForceMergeDataNodeMemoryFactor   ParamItem `refreshable:"true"`
+	CompactionForceMergeQueryNodeMemoryFactor  ParamItem `refreshable:"true"`
+	MinSegmentToMerge                          ParamItem `refreshable:"true"`
+	SegmentSmallProportion                     ParamItem `refreshable:"true"`
+	SegmentCompactableProportion               ParamItem `refreshable:"true"`
+	SegmentExpansionRate                       ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds                 ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds           ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds              ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds           ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval                 ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval               ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval                ParamItem `refreshable:"false"`
+	GlobalCompactionInterval                   ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5097,14 +5098,14 @@ type dataCoordConfig struct {
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
-	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
-	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
-	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
-	BackfillCompactionSlotUsage   ParamItem `refreshable:"true"`
-	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
-	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
-	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
-	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
+	ClusteringCompactionSlotUsage        ParamItem `refreshable:"true"`
+	MixCompactionSlotUsage               ParamItem `refreshable:"true"`
+	L0DeleteCompactionSlotUsage          ParamItem `refreshable:"true"`
+	BumpSchemaVersionCompactionSlotUsage ParamItem `refreshable:"true"`
+	IndexTaskSlotUsage                   ParamItem `refreshable:"true"`
+	ScalarIndexTaskSlotUsage             ParamItem `refreshable:"true"`
+	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
+	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
 	EnableSortCompaction             ParamItem `refreshable:"true"`
 	TaskCheckInterval                ParamItem `refreshable:"true"`
@@ -5594,14 +5595,23 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.CompactionExpiryTolerance.Init(base.mgr)
 
-	p.BackfillCompactionTriggerInterval = ParamItem{
-		Key:          "dataCoord.compaction.backfill.triggerInterval",
-		Version:      "2.6.2",
-		Doc:          "The time interval in seconds for trigger backfill compaction",
+	p.BumpSchemaVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.bumpSchemaVersion.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable schema version bump compaction",
+		Export:       true,
+	}
+	p.BumpSchemaVersionCompactionEnabled.Init(base.mgr)
+
+	p.BumpSchemaVersionCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.bumpSchemaVersion.triggerInterval",
+		Version:      "3.0.0",
+		Doc:          "The time interval in seconds for trigger schema bump compaction",
 		DefaultValue: "20",
 		Export:       true,
 	}
-	p.BackfillCompactionTriggerInterval.Init(base.mgr)
+	p.BumpSchemaVersionCompactionTriggerInterval.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
@@ -6424,10 +6434,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 
-	p.BackfillCompactionSlotUsage = ParamItem{
-		Key:          "dataCoord.slot.backfillCompactionUsage",
-		Version:      "2.6.9",
-		Doc:          "slot usage of backfill compaction task.",
+	p.BumpSchemaVersionCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.bumpSchemaVersionCompactionUsage",
+		Version:      "3.0.0",
+		Doc:          "slot usage of schema bump compaction task.",
 		DefaultValue: "1",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -6439,7 +6449,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 			return strconv.Itoa(slot)
 		},
 	}
-	p.BackfillCompactionSlotUsage.Init(base.mgr)
+	p.BumpSchemaVersionCompactionSlotUsage.Init(base.mgr)
 
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",

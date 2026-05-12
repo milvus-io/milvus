@@ -16,6 +16,129 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestFFIPackedWriterDestroyIsIdempotent(t *testing.T) {
+	var nilWriter *FFIPackedWriter
+	require.NotPanics(t, func() {
+		nilWriter.Destroy()
+	})
+
+	writer := &FFIPackedWriter{}
+	require.NotPanics(t, func() {
+		writer.Destroy()
+		writer.Destroy()
+	})
+	_, err := writer.Close()
+	require.Error(t, err)
+}
+
+func TestFFIPackedWriter_AsNewColumnGroupsAddsFields(t *testing.T) {
+	writer := &FFIPackedWriter{}
+	returned := writer.AsNewColumnGroups()
+
+	require.Same(t, writer, returned)
+	assert.True(t, writer.addNewColumnGroups)
+}
+
+func TestGetManifestFieldIDs_InvalidManifestPath(t *testing.T) {
+	fields, err := GetManifestFieldIDs("not-a-manifest-path", nil)
+
+	require.Error(t, err)
+	assert.Nil(t, fields)
+}
+
+func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	pt.Save(pt.LocalStorageCfg.Path.Key, t.TempDir())
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "bad_column",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+	}, nil)
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	basePath := "files/packed_writer_invalid_column/1"
+	cfg := CreateStorageConfig()
+	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(1)
+	record := builder.NewRecord()
+	defer record.Release()
+	require.NoError(t, writer.WriteRecordBatch(record))
+	out, err := writer.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+
+	fields, err := GetManifestFieldIDs(manifest, cfg)
+	require.ErrorContains(t, err, "invalid manifest column name")
+	assert.Nil(t, fields)
+}
+
+func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	pt.Save(pt.LocalStorageCfg.Path.Key, t.TempDir())
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "100",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+		{
+			Name:     "101",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"}),
+		},
+	}, nil)
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	basePath := "files/packed_writer_field_ids/1"
+	cfg := CreateStorageConfig()
+	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(1)
+	builder.Field(1).(*array.Int64Builder).Append(1000)
+	record := builder.NewRecord()
+	defer record.Release()
+	require.NoError(t, writer.WriteRecordBatch(record))
+	out, err := writer.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+
+	fields, err := GetManifestFieldIDs(manifest, cfg)
+	require.NoError(t, err)
+	assert.Contains(t, fields, int64(100))
+	assert.Contains(t, fields, int64(101))
+
+	_, err = writer.Close()
+	require.ErrorContains(t, err, "FFIPackedWriter already closed")
+}
+
 func TestPackedFFIWriter(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()

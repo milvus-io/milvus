@@ -144,6 +144,10 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 	err = HandleLoonFFIResult(result)
 	if err != nil {
+		if writerHandle != 0 {
+			C.loon_writer_destroy(writerHandle)
+		}
+		FreeProperties(cProperties)
 		return nil, err
 	}
 
@@ -162,6 +166,21 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
 	pw.addNewColumnGroups = true
 	return pw
+}
+
+// Destroy releases writer resources without committing pending output.
+func (pw *FFIPackedWriter) Destroy() {
+	if pw == nil {
+		return
+	}
+	if pw.cWriterHandle != 0 {
+		C.loon_writer_destroy(pw.cWriterHandle)
+		pw.cWriterHandle = 0
+	}
+	if pw.cProperties != nil {
+		FreeProperties(pw.cProperties)
+		pw.cProperties = nil
+	}
 }
 
 func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
@@ -240,6 +259,10 @@ func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 	}
 	pw.closed = true
 	defer func() {
+		if pw.cWriterHandle != 0 {
+			C.loon_writer_destroy(pw.cWriterHandle)
+			pw.cWriterHandle = 0
+		}
 		if pw.cProperties != nil {
 			C.loon_properties_free(pw.cProperties)
 			pw.cProperties = nil

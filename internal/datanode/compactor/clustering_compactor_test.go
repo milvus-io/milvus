@@ -387,12 +387,20 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 
 func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() {
 	s.SetupTest()
+	s.prepareCompactionWithBM25OutputTask(10240, false)
+}
+
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithMissingBM25OutputTask(rowNum int) {
+	s.prepareCompactionWithBM25OutputTask(rowNum, true)
+}
+
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowNum int, removeBM25Output bool) {
 	schema := genCollectionSchemaWithBM25()
-	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
+	segmentID := int64(1001)
+	segWriter, err := NewSegmentWriter(schema, int64(rowNum), compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
 	s.Require().NoError(err)
 
-	for i := 0; i < 10240; i++ {
+	for i := 0; i < rowNum; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
@@ -404,13 +412,12 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
-	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
-		result := make([][]byte, 0, len(strings))
-		for _, path := range strings {
-			result = append(result, kvs[path])
-		}
-		return result, nil
+	s.Require().NoError(err)
+	if removeBM25Output {
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+	}
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, paths)
 	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
@@ -421,7 +428,6 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 		},
 	}
 
-	s.task.bm25FieldIds = []int64{102}
 	s.task.plan.Schema = schema
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
@@ -488,6 +494,42 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 
 	s.Equal(1, bm25BinlogNum)
 	s.Equal(totalRowNum, bm25RowNum)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestScalarClusteringMaterializesMissingBM25OutputFromOldSegment() {
+	s.prepareCompactionWithMissingBM25OutputTask(3)
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+
+	s.EqualValues(3, lo.SumBy(result.GetSegments(), func(segment *datapb.CompactionSegment) int64 {
+		return segment.GetNumOfRows()
+	}))
+	bm25Rows := int64(0)
+	for _, segment := range result.GetSegments() {
+		bm25Rows += fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102)
+	}
+	s.EqualValues(3, bm25Rows)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOrMissingFields() {
+	s.prepareCompactionWithMissingBM25OutputTask(2)
+	s.task.plan.ClusteringKeyField = 101
+	s.task.plan.SegmentBinlogs[0].FieldBinlogs = append(s.task.plan.SegmentBinlogs[0].FieldBinlogs, &datapb.FieldBinlog{
+		FieldID: common.StartOfUserFieldID + 1000,
+		Binlogs: []*datapb.Binlog{{
+			LogPath: "dropped-field-should-not-be-read",
+		}},
+	})
+
+	err := s.task.init()
+	s.Require().NoError(err)
+	defer s.task.cleanUp(context.Background())
+
+	analyzeResult, err := s.task.scalarAnalyzeSegment(context.Background(), s.task.plan.SegmentBinlogs[0])
+	s.Require().NoError(err)
+	s.Equal(map[interface{}]int64{"varchar": 2}, analyzeResult)
 }
 
 func genRow(magic int64) map[int64]interface{} {

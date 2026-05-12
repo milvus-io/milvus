@@ -271,7 +271,7 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 	if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
 		arrowType = arrow.BinaryTypes.Binary
 	}
-	builder := array.NewBuilder(memory.DefaultAllocator, arrowType) // serdeEntry[schema.GetDataType()].newBuilder()
+	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 	if schema.GetDefaultValue() != nil {
 		switch schema.GetDataType() {
 		case schemapb.DataType_Bool:
@@ -371,6 +371,12 @@ func (b *RecordBuilder) GetRowNum() int {
 
 func (b *RecordBuilder) GetSize() uint64 {
 	return b.size
+}
+
+func (b *RecordBuilder) Release() {
+	for _, builder := range b.builders {
+		builder.Release()
+	}
 }
 
 func (b *RecordBuilder) Build() Record {

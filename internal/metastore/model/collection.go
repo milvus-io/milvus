@@ -58,7 +58,6 @@ type Collection struct {
 	FileResourceIds      []int64
 	ExternalSource       string
 	ExternalSpec         string
-	DoPhysicalBackfill   bool
 }
 
 type ShardInfo struct {
@@ -101,7 +100,6 @@ func (c *Collection) ShallowClone() *Collection {
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -143,14 +141,13 @@ func (c *Collection) Clone() *Collection {
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
 // ToCollectionSchemaPB returns a schemapb.CollectionSchema populated from the
 // current Collection. All schema-level fields are copied verbatim — callers
-// override Version, Properties, EnableDynamicField, DoPhysicalBackfill, etc.
-// after the call when the operation requires a different value.
+// override Version, Properties, EnableDynamicField, etc. after the call when
+// the operation requires a different value.
 //
 // Centralizing the conversion here ensures that newly added schema fields are
 // propagated consistently across every rootcoord broadcast/response path.
@@ -170,7 +167,6 @@ func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
 		FileResourceIds:    c.FileResourceIds,
 		ExternalSource:     c.ExternalSource,
 		ExternalSpec:       c.ExternalSpec,
-		DoPhysicalBackfill: c.DoPhysicalBackfill,
 	}
 }
 
@@ -223,7 +219,6 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.SchemaVersion = updates.Schema.Version
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
-			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		case message.FieldMaskCollectionExternalSpec:
 			// Defensive: only overwrite when the update carries a value.
 			// Legacy WAL messages from before the atomic-tuple invariant may
@@ -297,7 +292,6 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
-		DoPhysicalBackfill:   coll.Schema.DoPhysicalBackfill,
 	}
 }
 
@@ -353,7 +347,6 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		FileResourceIds:    coll.FileResourceIds,
 		ExternalSource:     coll.ExternalSource,
 		ExternalSpec:       coll.ExternalSpec,
-		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	if c.withFields {

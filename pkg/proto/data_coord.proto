@@ -680,7 +680,7 @@ enum CompactionType {
   SortCompaction = 9;
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
-  BackfillCompaction = 12;
+  BumpSchemaVersionCompaction = 12;
 }
 
 message CompactionStateRequest {

@@ -7430,33 +7430,26 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("PreExecute rejects non-BM25 function with DoPhysicalBackfill", func(t *testing.T) {
-		req := &milvuspb.AlterCollectionSchemaRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
-				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
-					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-						DoPhysicalBackfill: true,
-						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: sparseOutputField},
-						},
-						FuncSchema: []*schemapb.FunctionSchema{
-							{
-								Name:             "text_embedding_func",
-								Type:             schemapb.FunctionType_TextEmbedding,
-								InputFieldNames:  []string{"text"},
-								OutputFieldNames: []string{"sparse_bm25"},
-							},
-						},
-					},
-				},
-			},
-		}
+	t.Run("PreExecute rejects non-BM25 function", func(t *testing.T) {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
+		functionSchema.Type = schemapb.FunctionType_MinHash
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{functionSchema}
+
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "only BM25 function is supported")
+	})
+
+	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {
+		schema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		schema.DoPhysicalBackfill = true
+		task := buildTask(buildValidRequest(), schema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 
 	t.Run("PreExecute happy path", func(t *testing.T) {

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -282,6 +283,34 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.NoError(err)
 		s.True(merr.Ok(resp))
 		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("bump schema version compaction", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
+		s.Require().NoError(err)
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1001,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+				SegmentID:      102,
+				Level:          datapb.SegmentLevel_L1,
+				StorageVersion: storage.StorageV3,
+				Manifest:       "manifest",
+			}},
+			Type:               datapb.CompactionType_BumpSchemaVersionCompaction,
+			BeginLogID:         100,
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:         jsonParams,
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(resp))
 	})
 
 	s.Run("beginLogID is invalid", func() {

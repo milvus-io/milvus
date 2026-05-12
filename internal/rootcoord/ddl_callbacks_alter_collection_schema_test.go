@@ -29,10 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // buildAlterSchemaReq constructs a valid AlterCollectionSchemaRequest with an add operation.
-func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName string, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
+func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName string) *milvuspb.AlterCollectionSchemaRequest {
 	outputFieldSchema := &schemapb.FieldSchema{
 		Name:             outputField,
 		DataType:         schemapb.DataType_SparseFloatVector,
@@ -53,8 +54,7 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{FieldSchema: outputFieldSchema},
 					},
-					FuncSchema:         []*schemapb.FunctionSchema{functionSchema},
-					DoPhysicalBackfill: doBackfill,
+					FuncSchema: []*schemapb.FunctionSchema{functionSchema},
 				},
 			},
 		},
@@ -112,7 +112,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FuncSchema: []*schemapb.FunctionSchema{
-						{Name: "fn1", Type: schemapb.FunctionType_BM25},
+						{Name: "fn1", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}, OutputFieldNames: []string{"sparse1"}},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{},
 				},
@@ -121,9 +121,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
-	// case 4.1: physical backfill with non-BM25 function must be rejected.
-	// Otherwise the backfill task would fail at datanode with "unsupported function type"
-	// and permanently block subsequent schema-change DDLs via the consistency gate.
+	// case 5: BM25 arity invalid
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -131,34 +129,20 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FuncSchema: []*schemapb.FunctionSchema{
-						{
-							Name:             "minhash_fn",
-							Type:             schemapb.FunctionType_MinHash,
-							InputFieldNames:  []string{"text_input"},
-							OutputFieldNames: []string{"sparse_minhash"},
-						},
+						{Name: "fn_bad_arity", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: &schemapb.FieldSchema{
-							Name:             "sparse_minhash",
-							DataType:         schemapb.DataType_SparseFloatVector,
-							IsFunctionOutput: true,
-						}},
+						{FieldSchema: &schemapb.FieldSchema{Name: "sparse_bad_arity", DataType: schemapb.DataType_SparseFloatVector}},
 					},
-					DoPhysicalBackfill: true,
 				},
 			},
 		},
 	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "physical backfill is currently only supported for BM25 functions")
+	arityErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, arityErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, arityErr, "one or two input fields and exactly one output field")
 
-	// case 4.2: non-BM25 function with DoPhysicalBackfill=false should NOT be rejected by
-	// the type check (it may still fail later for other reasons, but the type check must pass).
-	// This path never invokes the backfill_compactor, so "unsupported type" cannot be triggered.
-	// We don't assert success here because downstream validation may reject for unrelated
-	// reasons in this minimal test setup — we only assert that the error, if any, is not the
-	// physical-backfill type rejection.
+	// case 6: fieldSchema nil in fieldInfos
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -166,41 +150,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FuncSchema: []*schemapb.FunctionSchema{
-						{
-							Name:             "minhash_fn_nophys",
-							Type:             schemapb.FunctionType_MinHash,
-							InputFieldNames:  []string{"text_input"},
-							OutputFieldNames: []string{"sparse_minhash2"},
-						},
-					},
-					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: &schemapb.FieldSchema{
-							Name:             "sparse_minhash2",
-							DataType:         schemapb.DataType_SparseFloatVector,
-							IsFunctionOutput: true,
-						}},
-					},
-					DoPhysicalBackfill: false,
-				},
-			},
-		},
-	})
-	// Whatever happens, it must not be the BM25-only rejection.
-	if err := merr.CheckRPCCall(resp.GetAlterStatus(), err); err != nil {
-		require.NotContains(t, resp.GetAlterStatus().GetReason(),
-			"physical backfill is currently only supported for BM25 functions",
-			"non-BM25 with DoPhysicalBackfill=false must not be rejected by the BM25-only type check")
-	}
-
-	// case 5: fieldSchema nil in fieldInfos
-	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
-			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
-				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
-					FuncSchema: []*schemapb.FunctionSchema{
-						{Name: "fn1", Type: schemapb.FunctionType_BM25},
+						{Name: "fn1", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}, OutputFieldNames: []string{"sparse_nil_field"}},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{FieldSchema: nil},
@@ -230,10 +180,30 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
+	// case 7: output field points to an existing field while FieldInfos adds a different field
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FuncSchema: []*schemapb.FunctionSchema{
+						{Name: "fn_output_existing_field", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}, OutputFieldNames: []string{"field1"}},
+					},
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{Name: "sparse_output_existing_bypass", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}},
+					},
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
 	// Add a VARCHAR input field so that the happy-path call below can succeed.
 	varcharFieldSchema := &schemapb.FieldSchema{
 		Name:     "text_input",
 		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "256"},
 		},
@@ -247,17 +217,37 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
+	// Non-BM25 function is not supported by schema evolution backfill.
+	nonBM25Req := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output_non_bm25", "minhash_fn")
+	nonBM25Req.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
+	resp, err = core.AlterCollectionSchema(ctx, nonBM25Req)
+	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, alterErr, "only BM25 function is supported")
+
+	nullableOutputReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output_nullable", "bm25_nullable_output")
+	nullableOutputReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().Nullable = true
+	resp, err = core.AlterCollectionSchema(ctx, nullableOutputReq)
+	alterErr = merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, alterErr, "function output field cannot be nullable")
+
 	// happy path: add sparse vector output field + BM25 function → schema version bumps (AddCollectionField already bumped to 1, so now 2)
-	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn", false)
+	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 
-	// happy path with DoPhysicalBackfill=true: flag propagates through broadcast, schema version bumps to 3
-	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2", true)
+	// second happy path: schema version bumps to 3
+	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2")
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	schema := updated.ToCollectionSchemaPB()
+	require.False(t, schema.GetDoPhysicalBackfill())
+	require.EqualValues(t, 3, schema.GetVersion())
 
 	// case 7: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
