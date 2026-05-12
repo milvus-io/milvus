@@ -18,11 +18,11 @@ package http
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,11 +38,9 @@ const (
 	ExprAuthModeRBAC     = "rbac"
 )
 
-var (
-	// getUserRoleFunc is a callback function to get user roles.
-	// This is set by the proxy package to avoid circular dependency.
-	getUserRoleFunc func(username string) ([]string, error)
-)
+// getUserRoleFunc is a callback function to get user roles.
+// This is set by the proxy package to avoid circular dependency.
+var getUserRoleFunc func(username string) ([]string, error)
 
 // RegisterGetUserRoleFunc registers a function to get user roles.
 // This should be called by the proxy package during initialization.
@@ -128,7 +126,8 @@ func checkExprRootAuth(ctx context.Context, req *http.Request) error {
 
 // CheckPrivilege checks if the authenticated user has the specified privilege.
 func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.ObjectType,
-	objectPrivilege string, objectName string, dbName string) error {
+	objectPrivilege string, objectName string, dbName string,
+) error {
 	// Check if authorization is enabled
 	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return &ErrPermissionDenied{msg: "authorization must be enabled for RBAC privilege checks"}

@@ -117,7 +117,7 @@ func registerDefaults() {
 
 			if err := CheckExprAuth(req.Context(), req); err != nil {
 				w.WriteHeader(HTTPStatusFromPrivilegeError(err))
-				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
+				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error()) //nolint:gosec // error message is authored by CheckExprAuth and safe to include in response
 				return
 			}
 			// Use bypass since we've already authenticated

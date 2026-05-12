@@ -509,6 +509,8 @@ func isPrivilegeNameForMetastoreDefined(name string) bool {
 	if _, ok := commonpb.ObjectPrivilege_value[name]; ok {
 		return true
 	}
+	// TODO: drop this special case once PrivilegeExpr is promoted to a proto enum value
+	// in milvus-io/milvus-proto (commonpb.ObjectPrivilege_PrivilegeExpr).
 	return name == PrivilegeExpr
 }
 

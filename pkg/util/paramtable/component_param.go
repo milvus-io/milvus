@@ -944,8 +944,10 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Key:          "common.security.exprAuthMode",
 		Version:      "2.6.0",
 		DefaultValue: "rootOnly",
-		Doc:          "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac.",
-		Export:       true,
+		Doc: "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. " +
+			"rootOnly accepts only the root credentials via HTTP Basic Auth. " +
+			"rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.",
+		Export: true,
 	}
 	p.ExprAuthMode.Init(base.mgr)
 
