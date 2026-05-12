@@ -327,7 +327,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
 	for i, vr := range validRetrieveResults {
-		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.Result.GetFieldsData())
+		idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.Result.GetFieldsData(), param.schema)
 	}
 
 	var retSize int64
@@ -521,7 +521,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
 		for i, vr := range validRetrieveResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.Result.GetFieldsData())
+			idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.Result.GetFieldsData(), param.schema)
 		}
 
 		for _, selection := range selections {
@@ -581,7 +581,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(segmentResults))
 		for i, r := range segmentResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputer(r.GetFieldsData())
+			idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(r.GetFieldsData(), param.schema)
 		}
 
 		// retrieve result is compacted, use 0,1,2...end

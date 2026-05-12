@@ -1703,7 +1703,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
 	}
 
 	// Call pickFieldData - this should NOT panic
-	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
 	s.NoError(err)
 	s.NotNil(result)
 	s.Len(result, 2)
@@ -1772,7 +1772,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 		},
 	}
 
-	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
 	s.NoError(err)
 	s.NotNil(result)
 
@@ -1780,4 +1780,64 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 	sparseValidData := result[1].GetValidData()
 	s.Equal([]bool{false, false}, sparseValidData)
 	s.Len(result[1].GetVectors().GetSparseFloatVector().GetContents(), 0)
+}
+
+func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVectorMissingValidData() {
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+	pkOffset := map[any]int{
+		int64(1): 0,
+		int64(2): 1,
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "sparse_vec",
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: true,
+			},
+		},
+	}
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, schema, 12345)
+	s.NoError(err)
+	s.Equal([]int64{2, 1}, result[0].GetScalars().GetLongData().GetData())
+	s.Equal([]bool{false, false}, result[1].GetValidData())
+	s.Empty(result[1].GetVectors().GetSparseFloatVector().GetContents())
 }

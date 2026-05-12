@@ -215,6 +215,37 @@ TEST(Util_Segcore, CreateVectorDataArrayFromNullableVectors) {
     ASSERT_EQ(result->vectors().float_vector().data_size(), valid_count * dim);
 }
 
+TEST(Util_Segcore, CreateEmptyVectorDataArrayForNullableVectors) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    auto sparse_vec = schema->AddDebugField("sparse",
+                                            DataType::VECTOR_SPARSE_U32_F32,
+                                            0,
+                                            knowhere::metric::IP,
+                                            true);
+
+    auto dense_result =
+        CreateEmptyVectorDataArray(3, 0, nullptr, (*schema)[vec]);
+    ASSERT_EQ(dense_result->valid_data().size(), 3);
+    ASSERT_FALSE(dense_result->valid_data(0));
+    ASSERT_FALSE(dense_result->valid_data(1));
+    ASSERT_FALSE(dense_result->valid_data(2));
+    ASSERT_EQ(dense_result->vectors().float_vector().data_size(), 0);
+
+    auto sparse_result =
+        CreateEmptyVectorDataArray(3, 0, nullptr, (*schema)[sparse_vec]);
+    ASSERT_EQ(sparse_result->valid_data().size(), 3);
+    ASSERT_FALSE(sparse_result->valid_data(0));
+    ASSERT_FALSE(sparse_result->valid_data(1));
+    ASSERT_FALSE(sparse_result->valid_data(2));
+    ASSERT_EQ(sparse_result->vectors().sparse_float_vector().contents_size(),
+              0);
+}
+
 TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     using namespace milvus;
     using namespace milvus::segcore;

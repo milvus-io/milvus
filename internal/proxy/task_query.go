@@ -772,7 +772,7 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	return fieldName + " in [ " + idsStr + " ]"
 }
 
-func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
+func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
 	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
 		ret     = &milvuspb.QueryResults{}
@@ -796,7 +796,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	cursors := make([]int64, len(validRetrieveResults))
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
 	for i, vr := range validRetrieveResults {
-		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.GetFieldsData())
+		idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.GetFieldsData(), schema)
 	}
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
@@ -842,7 +842,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 }
 
 func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, outputFieldsID []int64, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
-	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams)
+	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams, schema)
 	if err != nil {
 		return nil, err
 	}

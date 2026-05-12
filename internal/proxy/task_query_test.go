@@ -670,9 +670,56 @@ func TestTaskQuery_functions(t *testing.T) {
 		fieldDataArray2 = append(fieldDataArray2, getFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
 
 		t.Run("test nil results", func(t *testing.T) {
-			ret, err := reduceRetrieveResults(context.Background(), nil, &queryParams{})
+			ret, err := reduceRetrieveResults(context.Background(), nil, &queryParams{}, nil)
 			assert.NoError(t, err)
 			assert.Empty(t, ret.GetFieldsData())
+		})
+
+		t.Run("test nullable sparse vector missing valid data", func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      Int64FieldID,
+						Name:         Int64FieldName,
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID:  FloatVectorFieldID,
+						Name:     FloatVectorFieldName,
+						DataType: schemapb.DataType_SparseFloatVector,
+						Nullable: true,
+					},
+				},
+			}
+			result := &internalpb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{
+					getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1, 2}, 1),
+					{
+						Type:      schemapb.DataType_SparseFloatVector,
+						FieldName: FloatVectorFieldName,
+						FieldId:   FloatVectorFieldID,
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Data: &schemapb.VectorField_SparseFloatVector{
+									SparseFloatVector: &schemapb.SparseFloatArray{},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			ret, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result}, &queryParams{limit: typeutil.Unlimited}, schema)
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{1, 2}, ret.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			assert.Equal(t, []bool{false, false}, ret.GetFieldsData()[1].GetValidData())
+			assert.Empty(t, ret.GetFieldsData()[1].GetVectors().GetSparseFloatVector().GetContents())
 		})
 
 		t.Run("test merge", func(t *testing.T) {
@@ -717,7 +764,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				resultField0 := []int64{11, 11, 22, 22}
 				for _, test := range tests {
 					t.Run(test.description, func(t *testing.T) {
-						result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{r1, r2}, &queryParams{limit: test.limit})
+						result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{r1, r2}, &queryParams{limit: test.limit}, nil)
 						assert.Equal(t, 2, len(result.GetFieldsData()))
 						assert.Equal(t, resultField0[0:test.limit], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 						assert.InDeltaSlice(t, resultFloat[0:test.limit*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
@@ -748,7 +795,7 @@ func TestTaskQuery_functions(t *testing.T) {
 					FieldsData: []*schemapb.FieldData{fieldData},
 				}
 
-				_, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result}, &queryParams{limit: typeutil.Unlimited})
+				_, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result}, &queryParams{limit: typeutil.Unlimited}, nil)
 				assert.Error(t, err)
 				paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
 			})
@@ -766,7 +813,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				resultField0 := []int64{11, 11, 22, 22}
 				for _, test := range tests {
 					t.Run(test.description, func(t *testing.T) {
-						result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{r1, r2}, &queryParams{limit: 1, offset: test.offset})
+						result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{r1, r2}, &queryParams{limit: 1, offset: test.offset}, nil)
 						assert.NoError(t, err)
 						assert.Equal(t, 2, len(result.GetFieldsData()))
 						assert.Equal(t, resultField0[test.offset:test.offset+1], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -780,7 +827,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 2, reduceType: reduce.IReduceInOrderForBest})
+					&queryParams{limit: 2, reduceType: reduce.IReduceInOrderForBest}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -793,7 +840,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 1, offset: 1, reduceType: reduce.IReduceInOrderForBest})
+					&queryParams{limit: 1, offset: 1, reduceType: reduce.IReduceInOrderForBest}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -804,7 +851,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 2, offset: 1, reduceType: reduce.IReduceInOrderForBest})
+					&queryParams{limit: 2, offset: 1, reduceType: reduce.IReduceInOrderForBest}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 
@@ -817,7 +864,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: typeutil.Unlimited, reduceType: reduce.IReduceInOrderForBest})
+					&queryParams{limit: typeutil.Unlimited, reduceType: reduce.IReduceInOrderForBest}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -828,7 +875,7 @@ func TestTaskQuery_functions(t *testing.T) {
 			t.Run("test stop reduce for best for unlimited set amd offset", func(t *testing.T) {
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceType: reduce.IReduceInOrderForBest})
+					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceType: reduce.IReduceInOrderForBest}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -838,7 +885,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
-					&queryParams{limit: 1, reduceType: reduce.IReduceInOrder})
+					&queryParams{limit: 1, reduceType: reduce.IReduceInOrder}, nil)
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -893,7 +940,7 @@ func TestTaskQuery_functions(t *testing.T) {
 			// The reduced result should include the maxInt64PK result
 			result, err := reduceRetrieveResults(context.Background(),
 				[]*internalpb.RetrieveResults{rMaxPK, rEmpty},
-				&queryParams{limit: typeutil.Unlimited})
+				&queryParams{limit: typeutil.Unlimited}, nil)
 			assert.NoError(t, err)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			// Should include the maxInt64PK result

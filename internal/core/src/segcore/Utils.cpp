@@ -445,14 +445,19 @@ CreateEmptyVectorDataArray(int64_t count,
                            int64_t valid_count,
                            const void* valid_data,
                            const FieldMeta& field_meta) {
-    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr)
-                             ? valid_count
-                             : count;
+    int64_t data_count = count;
+    if (field_meta.is_nullable()) {
+        data_count = valid_data != nullptr ? valid_count : 0;
+    }
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
-    if (field_meta.is_nullable() && valid_data != nullptr) {
+    if (field_meta.is_nullable()) {
         auto obj = data_array->mutable_valid_data();
-        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
-        obj->Add(valid_data_bool, valid_data_bool + count);
+        if (valid_data != nullptr) {
+            auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+            obj->Add(valid_data_bool, valid_data_bool + count);
+        } else {
+            obj->Resize(count, false);
+        }
     }
     return data_array;
 }

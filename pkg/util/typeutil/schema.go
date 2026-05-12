@@ -858,24 +858,46 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 }
 
 type FieldDataIdxComputer struct {
-	fieldsData   []*schemapb.FieldData
-	lastRowIdx   int64
-	dataIndices  []int64
-	isVector     []bool
-	resultBuffer []int64
+	fieldsData                     []*schemapb.FieldData
+	lastRowIdx                     int64
+	dataIndices                    []int64
+	isVector                       []bool
+	nullableVectorWithoutValidData []bool
+	resultBuffer                   []int64
 }
 
 func NewFieldDataIdxComputer(fieldsData []*schemapb.FieldData) *FieldDataIdxComputer {
+	return NewFieldDataIdxComputerWithSchema(fieldsData, nil)
+}
+
+func NewFieldDataIdxComputerWithSchema(fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema) *FieldDataIdxComputer {
 	c := &FieldDataIdxComputer{
-		fieldsData:   fieldsData,
-		lastRowIdx:   0,
-		dataIndices:  make([]int64, len(fieldsData)),
-		isVector:     make([]bool, len(fieldsData)),
-		resultBuffer: make([]int64, len(fieldsData)),
+		fieldsData:                     fieldsData,
+		lastRowIdx:                     0,
+		dataIndices:                    make([]int64, len(fieldsData)),
+		isVector:                       make([]bool, len(fieldsData)),
+		nullableVectorWithoutValidData: make([]bool, len(fieldsData)),
+		resultBuffer:                   make([]int64, len(fieldsData)),
 	}
+
+	fieldSchemas := make(map[int64]*schemapb.FieldSchema)
+	if schema != nil {
+		for _, field := range schema.GetFields() {
+			fieldSchemas[field.GetFieldID()] = field
+		}
+	}
+
 	for i, fieldData := range fieldsData {
 		validData := fieldData.GetValidData()
-		c.isVector[i] = len(validData) > 0 && IsVectorType(fieldData.Type)
+		fieldSchema := fieldSchemas[fieldData.GetFieldId()]
+		isVector := IsVectorType(fieldData.GetType())
+		isNullableVector := false
+		if fieldSchema != nil {
+			isVector = IsVectorType(fieldSchema.GetDataType())
+			isNullableVector = fieldSchema.GetNullable() && isVector
+		}
+		c.isVector[i] = isVector && (len(validData) > 0 || isNullableVector)
+		c.nullableVectorWithoutValidData[i] = isNullableVector && len(validData) == 0
 	}
 	return c
 }
@@ -890,6 +912,10 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 
 	for i, fieldData := range c.fieldsData {
 		if c.isVector[i] {
+			if c.nullableVectorWithoutValidData[i] {
+				c.resultBuffer[i] = -1
+				continue
+			}
 			validData := fieldData.GetValidData()
 			for j := c.lastRowIdx; j < rowIdx && j < int64(len(validData)); j++ {
 				if validData[j] {
@@ -935,6 +961,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 			}
 			valid := fieldData.ValidData[idx]
 			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
+		} else if fieldIdx < 0 {
+			if dstFieldData.ValidData == nil {
+				dstFieldData.ValidData = make([]bool, 0)
+			}
+			dstFieldData.ValidData = append(dstFieldData.ValidData, false)
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1087,7 +1118,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
-			isNullRow := len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx]
+			isNullRow := fieldIdx < 0 || (len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
