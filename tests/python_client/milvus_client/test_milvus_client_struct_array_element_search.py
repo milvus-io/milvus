@@ -6165,6 +6165,10 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail "
+        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
+    )
     @pytest.mark.parametrize(
         "match_type,match_expr,predicate",
         [
