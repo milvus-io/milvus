@@ -1318,7 +1318,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if it.req.GetPartialUpdate() && len(schema.CollectionSchema.GetStructArrayFields()) > 0 {
+	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("partial upsert is not supported for collections with struct array fields")
 	}
 
