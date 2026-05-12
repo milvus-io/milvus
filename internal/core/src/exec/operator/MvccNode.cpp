@@ -75,14 +75,19 @@ PhyMvccNode::GetOutput() {
 
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
 
-    // Visibility filtering disabled globally: skip all filtering.
+    // Visibility filtering disabled globally: skip MVCC masks only.
+    // When an upstream FilterBitsNode is present, preserve its scalar filter
+    // bitset for downstream vector search; only the source-node case may
+    // promote to all_rows_visible=true.
     if (!segcore::SegcoreConfig::default_config()
              .get_visibility_filter_enabled()) {
         auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
                                                TargetBitmap(active_count_),
                                                TargetBitmap(active_count_))
                                          : GetColumnVector(input_);
-        query_context->set_all_rows_visible(true);
+        if (is_source_node_) {
+            query_context->set_all_rows_visible(true);
+        }
         is_finished_ = true;
         return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
     }

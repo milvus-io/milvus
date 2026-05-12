@@ -410,3 +410,69 @@ TEST_F(MvccFastPathTest, VisibilityFilterDisabled_GrowingSegment) {
         << "visibilityFilterEnabled=false should skip filtering on growing "
            "segments too";
 }
+
+// ---------------------------------------------------------------------------
+// Regression for issue #49735.
+// visibilityFilterEnabled=false with an upstream FilterBitsNode (scalar
+// predicate) MUST preserve the scalar filter bitset for downstream vector
+// search.  In particular, MvccNode must NOT set all_rows_visible=true when it
+// has an input source — otherwise VectorSearchNode passes an empty BitsetView
+// and scalar filtering is silently dropped.
+// ---------------------------------------------------------------------------
+TEST_F(MvccFastPathTest,
+       VisibilityFilterDisabled_PreservesScalarFilter_WithFilterBitsNode) {
+    VisibilityFilterGuard guard(false);
+    auto segment = CreateSealedSegment();
+
+    // counter < 100 → first 100 rows match the predicate.
+    proto::plan::GenericValue value;
+    value.set_int64_val(100);
+    auto filter_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid_, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        value,
+        std::vector<proto::plan::GenericValue>{});
+
+    auto filter_node = std::make_shared<plan::FilterBitsNode>(
+        "filter_1", filter_expr, std::vector<plan::PlanNodePtr>{});
+    auto mvcc_node = std::make_shared<plan::MvccNode>(
+        "mvcc_1", std::vector<plan::PlanNodePtr>{filter_node});
+    auto plan = plan::PlanFragment(mvcc_node);
+
+    auto query_context = std::make_shared<QueryContext>(
+        "test_filter_preserved",
+        segment.get(),
+        N_,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_filter_preserved", plan, 0, query_context);
+    RowVectorPtr last_output;
+    for (;;) {
+        auto output = task->Next();
+        if (!output) {
+            break;
+        }
+        last_output = output;
+    }
+
+    // Must NOT promote to all_rows_visible — the FilterBitsNode bitset has to
+    // be honored by VectorSearchNode downstream.
+    EXPECT_FALSE(query_context->get_all_rows_visible())
+        << "MvccNode with upstream FilterBitsNode must NOT set "
+           "all_rows_visible=true, even when visibilityFilterEnabled=false";
+
+    // The bitmap emitted by MvccNode (a "filter-out" bitmap: 1 = excluded)
+    // must reflect the scalar predicate, not be all zeros.  counter < 100
+    // matches 100 rows, so the filter-out count is N_ - 100.
+    ASSERT_NE(last_output, nullptr);
+    auto col = std::dynamic_pointer_cast<ColumnVector>(last_output->child(0));
+    ASSERT_NE(col, nullptr);
+    TargetBitmapView view(col->GetRawData(), col->size());
+    EXPECT_EQ(view.count(), N_ - 100)
+        << "MvccNode must pass through the upstream scalar filter bitset";
+}
