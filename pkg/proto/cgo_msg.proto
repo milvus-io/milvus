@@ -22,6 +22,7 @@ message LoadIndexInfo {
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
   int64 num_rows = 17;
+  int32 current_scalar_index_version = 18;
 }
 
 message IndexStats {

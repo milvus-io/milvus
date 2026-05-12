@@ -1,9 +1,45 @@
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <cstddef>
 #include <cstdint>
-#include "index/ScalarIndexSort.h"
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+#include "bitset/bitset.h"
+#include "common/Tracer.h"
+#include "common/TracerBase.h"
 #include "common/Types.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "index/ScalarIndexSort.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/TmpPath.h"
+#include "test_utils/storage_test_utils.h"
 using namespace milvus;
 using namespace milvus::index;
+
+static storage::FileManagerContext
+CreateScalarSortTestFileManagerContext() {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Int64);
+    storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    return ctx;
+}
 
 void
 test_stlsort_for_range(
@@ -31,6 +67,34 @@ test_stlsort_for_range(
 
         auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
         index->Load(binary_set, config);
+
+        auto cnt = index->Count();
+        ASSERT_EQ(cnt, nb);
+        auto bitset = exec_expr(index);
+        for (size_t i = 0; i < nb; i++) {
+            ASSERT_EQ(bitset[i], expected_result[i]);
+        }
+    }
+
+    std::vector<std::string> index_files;
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
+        index->Build(nb, data.data());
+
+        auto create_index_result = index->UploadUnified({});
+        index_files = create_index_result->GetIndexFiles();
+    }
+    {
+        Config config;
+        config[milvus::index::ENABLE_MMAP] = enable_mmap;
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        config["index_files"] = index_files;
+
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);

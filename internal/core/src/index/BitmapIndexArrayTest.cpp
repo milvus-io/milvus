@@ -9,59 +9,54 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/container/vector.hpp>
+#include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-#include <functional>
-#include <boost/filesystem.hpp>
-#include <unordered_set>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <stdlib.h>
+#include <iosfwd>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
+#include "common/Array.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
-
-template <typename T>
-static std::vector<T>
-GenerateData(const size_t size, const size_t cardinality) {
-    std::vector<T> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % cardinality);
-    }
-    return result;
-}
-
-template <>
-std::vector<bool>
-GenerateData<bool>(const size_t size, const size_t cardinality) {
-    std::vector<bool> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % 2 == 0);
-    }
-    return result;
-}
-
-template <>
-std::vector<std::string>
-GenerateData<std::string>(const size_t size, const size_t cardinality) {
-    std::vector<std::string> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(std::to_string(rand() % cardinality));
-    }
-    return result;
-}
 
 std::vector<milvus::Array>
 GenerateArrayData(proto::schema::DataType element_type,
@@ -188,7 +183,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         auto index_meta = storage::IndexMeta{
             segment_id, field_id, index_build_id, index_version};
 
-        data_ = GenerateArrayData(element_type, cardinality_, nb_, 10);
+        data_ = GenerateArrayData(element_type, cardinality_, nb_, array_len_);
         auto field_data = storage::CreateFieldData(
             DataType::ARRAY, DataType::NONE, nullable_);
         if (nullable_) {
@@ -237,6 +232,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "100";
         config[INDEX_NUM_ROWS_KEY] = nb_;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
@@ -265,7 +261,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index_->Load(milvus::tracer::TraceContext{}, config);
+        index_->LoadUnified(config);
     }
 
     virtual void
@@ -353,6 +349,40 @@ class ArrayBitmapIndexTest : public testing::Test {
         }
     }
 
+    void
+    TestIsNullFunc() {
+        auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+        auto bitset = index_ptr->IsNull();
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                ASSERT_EQ(bitset[i], true);
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            ASSERT_EQ(bitset[i], nullable_ && !valid_data_[i - start])
+                << "row " << i;
+        }
+    }
+
+    void
+    TestIsNotNullFunc() {
+        auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+        auto bitset = index_ptr->IsNotNull();
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                ASSERT_EQ(bitset[i], false);
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            ASSERT_EQ(bitset[i], !nullable_ || valid_data_[i - start])
+                << "row " << i;
+        }
+    }
+
  private:
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
@@ -369,6 +399,7 @@ class ArrayBitmapIndexTest : public testing::Test {
     int index_build_id_;
     bool has_lack_binlog_row_{false};
     size_t lack_binlog_row_{100};
+    int array_len_{10};
 };
 
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTest);
@@ -488,6 +519,41 @@ INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
 
 INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
                                ArrayBitmapIndexTestV2,
+                               BitmapTypeV1);
+
+template <typename T>
+class ArrayBitmapIndexTestNullableEmptyArray : public ArrayBitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 1000;
+        this->cardinality_ = 30;
+        this->nullable_ = true;
+        this->index_version_ = 2004;
+        this->index_build_id_ = 2004;
+        this->array_len_ = 0;
+    }
+
+    virtual ~ArrayBitmapIndexTestNullableEmptyArray() {
+    }
+};
+
+TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullableEmptyArray);
+
+TYPED_TEST_P(ArrayBitmapIndexTestNullableEmptyArray, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(ArrayBitmapIndexTestNullableEmptyArray, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
+REGISTER_TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullableEmptyArray,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
+                               ArrayBitmapIndexTestNullableEmptyArray,
                                BitmapTypeV1);
 
 struct BitmapIndexArrayRegressionParam {

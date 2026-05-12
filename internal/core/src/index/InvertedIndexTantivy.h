@@ -11,17 +11,35 @@
 
 #pragma once
 
-#include <cstddef>
-#include <vector>
 #include <folly/SharedMutex.h>
+#include <stdint.h>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/RegexQuery.h"
-#include "index/Index.h"
-#include "storage/FileManager.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "rust-array.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
-#include "index/StringIndex.h"
 
 namespace milvus::index {
 
@@ -166,12 +184,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     const bool
@@ -266,6 +284,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         is_growing_ = is_growing;
     }
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     void
     finish();
@@ -306,7 +331,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      * 3, load phase, we need the index on the disk instead of memory, we use DiskFileManager.CacheIndexToDisk;
      * Btw, this approach can be applied to DiskANN also.
      */
-    MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};

@@ -64,6 +64,18 @@ class IndexBase {
     virtual IndexStatsPtr
     Upload(const Config& config = {}) = 0;
 
+    virtual void
+    LoadUnified(const Config& config) {
+        ThrowInfo(Unsupported,
+                  "LoadUnified is not supported for this index type");
+    }
+
+    virtual IndexStatsPtr
+    UploadUnified(const Config& config) {
+        ThrowInfo(Unsupported,
+                  "UploadUnified is not supported for this index type");
+    }
+
     virtual const bool
     HasRawData() const = 0;
 

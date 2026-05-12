@@ -50,12 +50,6 @@ class MemFileManagerImpl : public FileManagerImpl {
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override;
 
-    virtual std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override;
-
-    virtual std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override;
-
  public:
     virtual std::string
     GetName() const {

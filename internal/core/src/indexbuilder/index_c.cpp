@@ -505,7 +505,9 @@ BuildTextIndex(ProtoLayoutInterface result,
             "milvus_tokenizer",
             field_schema.get_analyzer_params().c_str());
         index->Build(config);
-        auto create_index_result = index->Upload(config);
+        auto create_index_result = scalar_index_engine_version >= 3
+                                       ? index->UploadUnified(config)
+                                       : index->Upload(config);
         create_index_result->SerializeAt(
             reinterpret_cast<milvus::ProtoLayout*>(result));
         auto status = CStatus();

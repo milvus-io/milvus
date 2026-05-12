@@ -454,18 +454,19 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 		}
 
 		result = append(result, &segcorepb.FieldIndexInfo{
-			FieldID:             fii.GetFieldID(),
-			EnableIndex:         fii.GetEnableIndex(),
-			IndexName:           fii.GetIndexName(),
-			IndexID:             fii.GetIndexID(),
-			BuildID:             fii.GetBuildID(),
-			IndexParams:         fii.GetIndexParams(),
-			IndexFilePaths:      fii.GetIndexFilePaths(),
-			IndexSize:           fii.GetIndexSize(),
-			IndexVersion:        fii.GetIndexVersion(),
-			NumRows:             fii.GetNumRows(),
-			CurrentIndexVersion: fii.GetCurrentIndexVersion(),
-			IndexStoreVersion:   fii.GetIndexStoreVersion(),
+			FieldID:                   fii.GetFieldID(),
+			EnableIndex:               fii.GetEnableIndex(),
+			IndexName:                 fii.GetIndexName(),
+			IndexID:                   fii.GetIndexID(),
+			BuildID:                   fii.GetBuildID(),
+			IndexParams:               fii.GetIndexParams(),
+			IndexFilePaths:            fii.GetIndexFilePaths(),
+			IndexSize:                 fii.GetIndexSize(),
+			IndexVersion:              fii.GetIndexVersion(),
+			NumRows:                   fii.GetNumRows(),
+			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
+			IndexStoreVersion:         fii.GetIndexStoreVersion(),
+			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
 		})
 	}
 	return result
@@ -484,12 +485,13 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segc
 		}
 
 		result[k] = &segcorepb.TextIndexStats{
-			FieldID:    v.GetFieldID(),
-			Version:    v.GetVersion(),
-			Files:      v.GetFiles(),
-			LogSize:    v.GetLogSize(),
-			MemorySize: v.GetMemorySize(),
-			BuildID:    v.GetBuildID(),
+			FieldID:                   v.GetFieldID(),
+			Version:                   v.GetVersion(),
+			Files:                     v.GetFiles(),
+			LogSize:                   v.GetLogSize(),
+			MemorySize:                v.GetMemorySize(),
+			BuildID:                   v.GetBuildID(),
+			CurrentScalarIndexVersion: v.GetCurrentScalarIndexVersion(),
 		}
 	}
 	return result

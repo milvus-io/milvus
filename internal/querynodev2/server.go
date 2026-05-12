@@ -162,7 +162,10 @@ func (node *QueryNode) initSession() error {
 	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := getIndexEngineVersion()
 	node.session = sessionutil.NewSession(node.ctx,
 		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion, maximumIndexVersion),
-		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")

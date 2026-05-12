@@ -216,10 +216,11 @@ func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 }
 
 // WithScalarIndexEngineVersion should be only used by querynode.
-func WithScalarIndexEngineVersion(minimal, current int32) SessionOption {
+func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
+		session.ScalarIndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 

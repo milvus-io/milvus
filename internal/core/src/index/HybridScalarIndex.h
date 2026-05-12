@@ -130,14 +130,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     const TargetBitmap
-    Range(T value, OpType op) override {
+    Range(const T& value, OpType op) override {
         return internal_index_->Range(value, op);
     }
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override {
         return internal_index_->Range(
             lower_bound_value, lb_inclusive, upper_bound_value, ub_inclusive);
@@ -174,6 +174,13 @@ class HybridScalarIndex : public ScalarIndex<T> {
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  private:
     ScalarIndexType
     SelectBuildTypeForPrimitiveType(
@@ -187,6 +194,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     ScalarIndexType
     SelectIndexBuildType(size_t n, const T* values);
+
+    ScalarIndexType
+    SelectIndexTypeByCardinality(size_t cardinality);
 
     BinarySet
     SerializeIndexType();
@@ -206,11 +216,12 @@ class HybridScalarIndex : public ScalarIndex<T> {
  public:
     bool is_built_{false};
     int32_t bitmap_index_cardinality_limit_;
+    ScalarIndexType low_cardinality_index_type_;
+    ScalarIndexType high_cardinality_index_type_;
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
-    std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node
