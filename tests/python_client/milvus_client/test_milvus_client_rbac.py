@@ -12,6 +12,14 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 
 
+# RBAC test classes share teardown logic that lists and drops every user,
+# role, privilege group, and database on the server. Under pytest-xdist `-n`
+# this cross-deletes objects owned by sibling workers. Pin the whole module
+# to a single xdist worker (loadgroup) so tests run serially without
+# starving other test files of parallelism.
+pytestmark = pytest.mark.xdist_group(name="rbac_serial")
+
+
 prefix = "client_rbac"
 
 
@@ -1473,12 +1481,13 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # wait for privilege to take effect
         time.sleep(10)
         
-        # create new client with the user credentials
+        # create new client with the user credentials, bind db_name at connection
+        # time to avoid a describe_database call (which requires DescribeDatabase
+        # privilege not granted to this test role)
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test load privilege
-        self.using_database(user_client, db_name)
         self.load_collection(user_client, collection_name)
         
         # cleanup
@@ -1525,12 +1534,13 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # wait for privilege to take effect
         time.sleep(10)
         
-        # create new client with the user credentials
+        # create new client with the user credentials, bind db_name at connection
+        # time to avoid a describe_database call (which requires DescribeDatabase
+        # privilege not granted to this test role)
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test release privilege
-        self.using_database(user_client, db_name)
         self.release_collection(user_client, collection_name)
         
         # cleanup
@@ -1574,12 +1584,13 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # wait for privilege to take effect
         time.sleep(10)
         
-        # create new client with the user credentials
+        # create new client with the user credentials, bind db_name at connection
+        # time to avoid a describe_database call (which requires DescribeDatabase
+        # privilege not granted to this test role)
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test insert privilege
-        self.using_database(user_client, db_name)
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
@@ -1626,15 +1637,16 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         # wait for privilege to take effect
         time.sleep(10)
         
-        # create new client with the user credentials
+        # create new client with the user credentials, bind db_name at connection
+        # time to avoid a describe_database call (which requires DescribeDatabase
+        # privilege not granted to this test role)
         uri = f"http://{host}:{port}"
-        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
-        
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password, db_name=db_name)
+
         # test delete privilege
-        self.using_database(user_client, db_name)
         delete_expr = f'{default_primary_key_field_name} == 0'
         self.delete(user_client, collection_name, filter=delete_expr)
-        
+
         # cleanup
         self.drop_collection(client, collection_name)
         if with_db:

@@ -681,7 +681,10 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-limit error
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `limit [<displayed>] is invalid`
+        displayed = limit.strip() if isinstance(limit, str) else limit
+        error = {ct.err_code: 1, ct.err_msg: f"limit [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -729,7 +732,10 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-offset error
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `offset [<displayed>] is invalid`
+        displayed = offset.strip() if isinstance(offset, str) else offset
+        error = {ct.err_code: 1, ct.err_msg: f"offset [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,

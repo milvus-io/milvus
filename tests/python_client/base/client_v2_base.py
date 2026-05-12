@@ -947,6 +947,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, user_name=user_name, password=password, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and user_name not in self.tear_down_user_names:
+            self.tear_down_user_names.append(user_name)
         return res, check_result
 
     @trace()
@@ -1022,6 +1025,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, role_name=role_name, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and role_name not in self.tear_down_role_names:
+            self.tear_down_role_names.append(role_name)
         return res, check_result
 
     @trace()
