@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::index {
@@ -75,6 +77,9 @@ constexpr const char* HYBRID_LOW_CARDINALITY_INDEX_TYPE =
     "hybrid_low_cardinality_index_type";
 constexpr const char* HYBRID_HIGH_CARDINALITY_INDEX_TYPE =
     "hybrid_high_cardinality_index_type";
+// Version 4 gate shared by JSON path multi-type indexes and nested ARRAY
+// index layouts.
+constexpr int32_t MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE = 4;
 
 // index config key
 constexpr const char* MMAP_FILE_PATH = "mmap_filepath";

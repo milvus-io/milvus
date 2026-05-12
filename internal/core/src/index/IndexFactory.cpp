@@ -489,10 +489,25 @@ IndexFactory::CreatePrimitiveScalarIndex(
 }
 
 IndexBasePtr
-IndexFactory::CreateCompositeScalarIndex(
+IndexFactory::CreateArrayScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
     auto index_type = create_index_info.index_type;
+    if (IsStructSubField(create_index_info.field_name)) {
+        assert(create_index_info.field_type == DataType::ARRAY);
+        return CreateNestedIndex(index_type,
+                                 create_index_info.tantivy_index_version,
+                                 file_manager_context);
+    }
+
+    if ((index_type == INVERTED_INDEX_TYPE || index_type == ASCENDING_SORT) &&
+        create_index_info.scalar_index_engine_version >=
+            MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE) {
+        return CreateNestedIndex(index_type,
+                                 create_index_info.tantivy_index_version,
+                                 file_manager_context);
+    }
+
     if (index_type == HYBRID_INDEX_TYPE || index_type == BITMAP_INDEX_TYPE ||
         index_type == INVERTED_INDEX_TYPE) {
         auto element_type = static_cast<DataType>(
@@ -754,13 +769,6 @@ IndexFactory::CreateScalarIndex(
     const storage::FileManagerContext& file_manager_context) {
     auto data_type = create_index_info.field_type;
 
-    if (IsStructSubField(create_index_info.field_name)) {
-        assert(data_type == DataType::ARRAY);
-        return CreateNestedIndex(create_index_info.index_type,
-                                 create_index_info.tantivy_index_version,
-                                 file_manager_context);
-    }
-
     switch (data_type) {
         case DataType::BOOL:
         case DataType::INT8:
@@ -775,8 +783,8 @@ IndexFactory::CreateScalarIndex(
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {
-            return CreateCompositeScalarIndex(create_index_info,
-                                              file_manager_context);
+            return CreateArrayScalarIndex(create_index_info,
+                                          file_manager_context);
         }
         case DataType::JSON: {
             return CreateJsonIndex(create_index_info, file_manager_context);

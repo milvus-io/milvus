@@ -560,7 +560,7 @@ class SealedMatchExprTest : public ::testing::Test {
         }
     }
 
-    void
+    virtual void
     LoadNestedInvertedIndexes() {
         // Load nested index for sub_str field
         {
@@ -1021,6 +1021,39 @@ class SealedMatchExprTestNoIndex : public SealedMatchExprTest {
     }
 };
 
+class SealedMatchExprTestLegacyRowLevelIndex : public SealedMatchExprTest {
+ protected:
+    void
+    LoadNestedInvertedIndexes() override {
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<std::string>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = sub_str_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_str_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            index->BuildWithRawDataForUT(N_, sub_int_arrays_.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = sub_int_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_int_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
+    }
+};
+
 TEST_F(SealedMatchExprTestNoIndex, MatchAnyNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
@@ -1376,6 +1409,26 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAnyNoIndex) {
     VerifyRetrieveResults(
         result.get(),
         "Retrieve MatchAny (No Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTestLegacyRowLevelIndex,
+       RetrieveMatchAnyFallsBackFromRowLevelStructArrayIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAny (Legacy Row-Level Index)",
         0,
         target_str,
         target_int,
@@ -3007,7 +3060,7 @@ class SealedMatchExprPlainArrayTest : public ::testing::Test {
         }
     }
 
-    void
+    virtual void
     LoadArrayIndexes() {
         {
             auto index =
@@ -3109,6 +3162,50 @@ class SealedMatchExprPlainArrayTestNoIndex
     bool
     WithIndex() const override {
         return false;
+    }
+};
+
+class SealedMatchExprPlainArrayLegacyIndexTest
+    : public SealedMatchExprPlainArrayTest {
+ public:
+    void
+    LoadArrayIndexes() override {
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            std::vector<boost::container::vector<int32_t>> per_row(N_);
+            for (size_t i = 0; i < N_; ++i) {
+                per_row[i].assign(arr_int_raw_[i].begin(),
+                                  arr_int_raw_[i].end());
+            }
+            index->BuildWithRawDataForUT(N_, per_row.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = arr_int_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("plain_arr_int_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
+        {
+            auto index =
+                std::make_unique<index::InvertedIndexTantivy<std::string>>();
+            Config cfg;
+            cfg["is_array"] = true;
+            std::vector<boost::container::vector<std::string>> per_row(N_);
+            for (size_t i = 0; i < N_; ++i) {
+                per_row[i].assign(arr_str_raw_[i].begin(),
+                                  arr_str_raw_[i].end());
+            }
+            index->BuildWithRawDataForUT(N_, per_row.data(), cfg);
+            LoadIndexInfo info{};
+            info.field_id = arr_str_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("plain_arr_str_legacy", std::move(index));
+            seg_->LoadIndex(info);
+        }
     }
 };
 
@@ -3318,6 +3415,16 @@ CheckOuterOrTwoCompoundInner(SealedMatchExprPlainArrayTest* f) {
 
 PLAIN_ARRAY_MATCH_CASES(SealedMatchExprPlainArrayTest)
 PLAIN_ARRAY_MATCH_CASES(SealedMatchExprPlainArrayTestNoIndex)
+
+TEST_F(SealedMatchExprPlainArrayLegacyIndexTest,
+       MatchAnyIntSimpleFallsBackFromRowLevelArrayIndex) {
+    plain_array_match_cases::CheckMatchAnyIntSimple(this);
+}
+
+TEST_F(SealedMatchExprPlainArrayLegacyIndexTest,
+       MatchAnyInnerTermFallsBackFromRowLevelArrayIndex) {
+    plain_array_match_cases::CheckMatchAnyInnerTerm(this);
+}
 
 // ====================================================================
 // SealedMatchExprPlainArrayNullableTest

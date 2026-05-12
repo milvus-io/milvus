@@ -84,7 +84,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
         if constexpr (kIsInverted) {
-            BuildInvertedWithJsonFieldData(field_datas);
+            // Non-production path without scalar-index-version config; use the
+            // current nested JSON ARRAY layout. Production Build(config) applies
+            // the rolling-upgrade version gate.
+            BuildInvertedWithJsonFieldData(field_datas, true);
         } else {
             auto result = ConvertJsonToTypedFieldData<T>(field_datas,
                                                          json_schema_,
@@ -104,7 +107,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
             storage::CacheRawDataAndFillMissing(json_file_manager_, config);
 
         if constexpr (kIsInverted) {
-            BuildInvertedWithJsonFieldData(json_field_datas);
+            BuildInvertedWithJsonFieldData(
+                json_field_datas, ShouldBuildNestedJsonArrayIndex(config));
         } else {
             auto result = ConvertJsonToTypedFieldData<T>(json_field_datas,
                                                          json_schema_,
@@ -448,8 +452,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
  protected:
     template <typename B = BaseIndex>
     std::enable_if_t<std::is_base_of_v<InvertedIndexTantivy<T>, B>>
-    BuildInvertedWithJsonFieldData(
-        const std::vector<FieldDataPtr>& field_datas) {
+    BuildInvertedWithJsonFieldData(const std::vector<FieldDataPtr>& field_datas,
+                                   bool use_nested_array_index) {
         int64_t total_rows = 0;
         for (const auto& data : field_datas) {
             total_rows += data->get_num_rows();
@@ -458,7 +462,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
         row_to_element_start_.clear();
         array_offsets_.reset();
 
-        if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        if (cast_type_.data_type() == JsonCastType::DataType::ARRAY &&
+            use_nested_array_index) {
             this->is_nested_index_ = true;
             row_to_element_start_.push_back(0);
             ProcessJsonFieldArrayData<T>(
@@ -510,6 +515,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
             [](const Json&, const std::string&, simdjson::error_code) {});
 
         BuildExistsBitset(total_rows);
+    }
+
+    static bool
+    ShouldBuildNestedJsonArrayIndex(const Config& config) {
+        constexpr auto min_version =
+            MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE;
+        auto scalar_index_version =
+            GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(min_version);
+        return scalar_index_version >= min_version;
     }
 
     // Build the exists bitmap. The caller must supply the total row count

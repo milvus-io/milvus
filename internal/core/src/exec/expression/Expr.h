@@ -2259,7 +2259,8 @@ class SegmentExpr : public Expr {
  public:
     bool
     CanUseNestedIndex() const override {
-        if (!HasCompatibleScalarIndex() || pinned_index_.empty()) {
+        if (exec_path_ != ExprExecPath::ScalarIndex ||
+            !HasCompatibleScalarIndex() || pinned_index_.empty()) {
             return false;
         }
         auto* index_ptr = pinned_index_[0].get();
@@ -2400,6 +2401,10 @@ class SegmentExpr : public Expr {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
+        if (IsElementLevelExpression() && !AllPinnedIndexesAreNested()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         exec_path_ = ExprExecPath::ScalarIndex;
     }
 
@@ -2463,6 +2468,20 @@ class SegmentExpr : public Expr {
     }
 
  protected:
+    bool
+    IsElementLevelExpression() const {
+        auto column_info = GetColumnInfo();
+        return column_info.has_value() && column_info->element_level_;
+    }
+
+    bool
+    AllPinnedIndexesAreNested() const {
+        return std::all_of(
+            pinned_index_.begin(), pinned_index_.end(), [](const auto& index) {
+                return index.get() != nullptr && index.get()->IsNestedIndex();
+            });
+    }
+
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};

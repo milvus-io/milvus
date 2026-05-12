@@ -100,9 +100,9 @@ class IndexFactory {
                      const storage::FileManagerContext& file_manager_context =
                          storage::FileManagerContext());
 
-    // For types like array, struct, union, etc
+    // For array scalar indexes.
     IndexBasePtr
-    CreateCompositeScalarIndex(
+    CreateArrayScalarIndex(
         const CreateIndexInfo& create_index_info,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());

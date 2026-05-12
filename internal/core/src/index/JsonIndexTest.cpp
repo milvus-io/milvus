@@ -78,6 +78,69 @@ struct FileSliceSizeGuard {
     int64_t old_slice_size_;
 };
 
+class JsonArrayInvertedIndexForTest : public JsonInvertedIndex<double> {
+ public:
+    using Base = JsonInvertedIndex<double>;
+    using Base::Base;
+
+    void
+    BuildWithNestedFlagForTest(const std::vector<FieldDataPtr>& field_datas,
+                               bool use_nested_array_index) {
+        BuildInvertedWithJsonFieldData(field_datas, use_nested_array_index);
+    }
+
+    static bool
+    ShouldBuildNestedForConfig(const Config& config) {
+        return Base::ShouldBuildNestedJsonArrayIndex(config);
+    }
+};
+
+storage::FileManagerContext
+MakeJsonArrayVersionGateContext(int64_t build_id) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t field_id = 101;
+
+    auto field_meta = milvus::segcore::gen_field_meta(
+        collection_id, partition_id, segment_id, field_id, DataType::JSON);
+    auto index_meta = gen_index_meta(segment_id, field_id, build_id, build_id);
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("json-array-version-gate-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    return storage::FileManagerContext(field_meta, index_meta, cm, fs);
+}
+
+storage::FileManagerContext
+MakePlainArrayVersionGateContext(int64_t build_id) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t field_id = 101;
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id,
+                                                      DataType::ARRAY,
+                                                      DataType::INT32);
+    auto index_meta = gen_index_meta(segment_id, field_id, build_id, build_id);
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("plain-array-version-gate-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    return storage::FileManagerContext(field_meta, index_meta, cm, fs);
+}
+
 int64_t
 BuildAndLoadJsonInvertedIndexForOffsetRegression(
     const std::vector<std::string>& json_raw_data) {
@@ -223,6 +286,117 @@ BuildAndLoadJsonArrayInvertedIndexForArrayOffsetsRegression(
 }
 
 }  // namespace
+
+TEST(InvertedIndex, PlainArrayNestedIndexIsVersionGated) {
+    auto make_index = [](int64_t build_id,
+                         const std::string& field_name,
+                         const std::string& index_type,
+                         int32_t scalar_index_version) {
+        auto file_manager_ctx = MakePlainArrayVersionGateContext(build_id);
+
+        index::CreateIndexInfo index_info{};
+        index_info.field_type = DataType::ARRAY;
+        index_info.field_name = field_name;
+        index_info.index_type = index_type;
+        index_info.scalar_index_engine_version = scalar_index_version;
+        index_info.tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION;
+
+        return index::IndexFactory::GetInstance().CreateIndex(index_info,
+                                                              file_manager_ctx);
+    };
+
+    auto legacy_index = make_index(
+        4000,
+        "",
+        index::INVERTED_INDEX_TYPE,
+        index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE - 1);
+    EXPECT_FALSE(legacy_index->IsNestedIndex());
+
+    auto nested_inverted_index =
+        make_index(4001,
+                   "",
+                   index::INVERTED_INDEX_TYPE,
+                   index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE);
+    EXPECT_TRUE(nested_inverted_index->IsNestedIndex());
+
+    auto nested_sort_index =
+        make_index(4002,
+                   "",
+                   index::ASCENDING_SORT,
+                   index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE);
+    EXPECT_TRUE(nested_sort_index->IsNestedIndex());
+
+    auto struct_nested_inverted_index = make_index(
+        4003,
+        "struct_array[sub_int]",
+        index::INVERTED_INDEX_TYPE,
+        index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE - 1);
+    EXPECT_TRUE(struct_nested_inverted_index->IsNestedIndex());
+
+    auto struct_nested_sort_index = make_index(
+        4004,
+        "struct_array[sub_int]",
+        index::ASCENDING_SORT,
+        index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE - 1);
+    EXPECT_TRUE(struct_nested_sort_index->IsNestedIndex());
+}
+
+TEST(JsonIndexTest, TestJsonArrayNestedIndexBuildIsVersionGated) {
+    Config legacy_config;
+    legacy_config[index::SCALAR_INDEX_ENGINE_VERSION] =
+        index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE - 1;
+    EXPECT_FALSE(JsonArrayInvertedIndexForTest::ShouldBuildNestedForConfig(
+        legacy_config));
+
+    Config nested_config;
+    nested_config[index::SCALAR_INDEX_ENGINE_VERSION] =
+        index::MIN_SCALAR_INDEX_VERSION_FOR_JSON_PATH_MULTI_TYPE;
+    EXPECT_TRUE(JsonArrayInvertedIndexForTest::ShouldBuildNestedForConfig(
+        nested_config));
+    EXPECT_TRUE(
+        JsonArrayInvertedIndexForTest::ShouldBuildNestedForConfig(Config{}));
+
+    auto json_path = "/a";
+    auto make_index = [&](int64_t build_id) {
+        auto file_manager_ctx = MakeJsonArrayVersionGateContext(build_id);
+        return std::make_unique<JsonArrayInvertedIndexForTest>(
+            JsonCastType::FromString("ARRAY_DOUBLE"),
+            json_path,
+            JsonCastFunction::FromString(""),
+            file_manager_ctx.fieldDataMeta.field_schema,
+            file_manager_ctx,
+            index::TANTIVY_INDEX_LATEST_VERSION);
+    };
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": [1, 2]})",
+        R"({"a": []})",
+        R"({"b": [3]})",
+        R"({"a": [4, "skip", 5]})",
+    };
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_raw_data.size());
+    for (auto& json : json_raw_data) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+
+    auto legacy_index = make_index(1);
+    legacy_index->BuildWithNestedFlagForTest({json_field}, false);
+    EXPECT_FALSE(legacy_index->IsNestedIndex());
+    EXPECT_EQ(legacy_index->GetArrayOffsets(), nullptr);
+
+    auto nested_index = make_index(2);
+    nested_index->BuildWithNestedFlagForTest({json_field}, true);
+    EXPECT_TRUE(nested_index->IsNestedIndex());
+    ASSERT_NE(nested_index->GetArrayOffsets(), nullptr);
+    EXPECT_EQ(nested_index->GetArrayOffsets()->GetRowCount(),
+              json_raw_data.size());
+    EXPECT_EQ(nested_index->GetArrayOffsets()->GetTotalElementCount(), 4);
+}
 
 TEST(JsonIndexTest, TestJsonContains) {
     std::vector<std::string> json_raw_data = {
