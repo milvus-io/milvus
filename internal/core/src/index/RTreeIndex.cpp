@@ -96,10 +96,6 @@ RTreeIndex<T>::RTreeIndex(const storage::FileManagerContext& ctx)
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     this->file_manager_ = mem_file_manager_;
-
-    if (ctx.for_loading_index) {
-        return;
-    }
 }
 
 template <typename T>
@@ -205,15 +201,6 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                                                  f) != null_offset_files.end();
                             }),
                         files.end());
-        }
-    }
-
-    // 2. Ensure each file has full remote path. If only filename provided, prepend remote prefix.
-    for (auto& f : files) {
-        boost::filesystem::path p(f);
-        if (!p.has_parent_path()) {
-            auto remote_prefix = disk_file_manager_->GetRemoteIndexPrefix();
-            f = remote_prefix + "/" + f;
         }
     }
 

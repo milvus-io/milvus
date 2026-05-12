@@ -57,7 +57,7 @@ class MemFileManagerImpl : public FileManagerImpl {
     }
 
     std::map<std::string, std::unique_ptr<DataCodec>>
-    LoadIndexToMemory(const std::vector<std::string>& remote_files,
+    LoadIndexToMemory(const std::vector<std::string>& logical_paths,
                       milvus::proto::common::LoadPriority priority);
 
     std::vector<FieldDataPtr>

@@ -1486,7 +1486,6 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     AssertInfo(fs != nullptr, "arrow file system is nullptr");
     milvus::storage::FileManagerContext file_manager_context(
         field_meta, index_meta, remote_chunk_manager, fs);
-    file_manager_context.set_for_loading_index(true);
 
     // use cache layer to load vector/scalar index
     std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>

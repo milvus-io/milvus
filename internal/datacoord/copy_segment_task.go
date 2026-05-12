@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -758,14 +758,6 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 // Index Synchronization: Vector and Scalar Indexes
 // ===========================================================================================
 
-func indexFileKeysFromLogicalPaths(indexFilePaths []string) []string {
-	keys := make([]string, 0, len(indexFilePaths))
-	for _, indexFilePath := range indexFilePaths {
-		keys = append(keys, path.Base(indexFilePath))
-	}
-	return keys
-}
-
 // syncVectorScalarIndexes synchronizes vector and scalar index metadata to indexMeta.
 //
 // Process flow:
@@ -844,8 +836,8 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexID:      targetIndexID,
 			BuildID:      indexInfo.GetBuildId(),
 			IndexState:   commonpb.IndexState_Finished,
-			// SegmentIndex stores file keys; copy result paths are logical full paths.
-			IndexFileKeys:             indexFileKeysFromLogicalPaths(indexInfo.GetIndexFilePaths()),
+			// SegmentIndex stores file keys; copy result paths are logical paths.
+			IndexFileKeys:             metautil.IndexFileKeysFromLogicalPaths(indexInfo.GetIndexFilePaths()),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
 			IndexMemSize:              uint64(indexInfo.GetIndexSize()),
 			IndexVersion:              indexInfo.GetVersion(),

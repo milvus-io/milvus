@@ -308,8 +308,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	// Keep v0/v1 path layout construction on the write side.
-	indexPathBuilder := metautil.NewIndexPathBuilder(it.chunkManager.RootPath(),
-		segIndex.IndexStorePathVersion, segment.GetCollectionID(),
+	indexPathBuilder := metautil.NewIndexPathBuilder(segIndex.IndexStorePathVersion, segment.GetCollectionID(),
 		segment.GetPartitionID(), segment.GetID(),
 		segIndex.BuildID, segIndex.IndexVersion+1)
 	req := &workerpb.CreateJobRequest{
@@ -332,7 +331,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		FieldType:                 field.GetDataType(),
 		Dim:                       int64(dim),
 		DataIds:                   binlogIDs,
-		IndexStorePath:            indexPathBuilder.BuildPrefix(),
+		IndexStorePath:            indexPathBuilder.BuildFullPrefix(it.chunkManager.RootPath()),
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,

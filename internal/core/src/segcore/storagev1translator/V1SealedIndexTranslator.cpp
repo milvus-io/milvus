@@ -146,7 +146,6 @@ V1SealedIndexTranslator::LoadVecIndex() {
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager, fs);
-        fileManagerContext.set_for_loading_index(true);
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info, fileManagerContext);

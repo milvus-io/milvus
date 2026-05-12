@@ -145,10 +145,6 @@ func copyFile(ctx context.Context, cm storage.ChunkManager, src, dst string) err
 	return cm.Copy(ctx, src, dst)
 }
 
-func resolveVectorScalarIndexCopyPath(rootPath, logicalPath string) string {
-	return path.Join(rootPath, logicalPath)
-}
-
 // extractFromPb extracts file paths from FieldBinlog list (insert/delta/stats/bm25).
 func extractFromPb(fieldBinlogs []*datapb.FieldBinlog) []string {
 	var paths []string
@@ -400,8 +396,8 @@ func CopySegmentAndIndexFiles(
 		copySrc := src
 		copyDst := dst
 		if _, ok := vectorScalarIndexPaths[src]; ok {
-			copySrc = resolveVectorScalarIndexCopyPath(cm.RootPath(), src)
-			copyDst = resolveVectorScalarIndexCopyPath(cm.RootPath(), dst)
+			copySrc = metautil.BuildFullIndexFilePath(cm.RootPath(), src)
+			copyDst = metautil.BuildFullIndexFilePath(cm.RootPath(), dst)
 		}
 		log.Debug("copying file",
 			zap.String("src", copySrc),

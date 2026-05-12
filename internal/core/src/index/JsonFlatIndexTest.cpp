@@ -183,8 +183,6 @@ class JsonFlatIndexTest : public ::testing::Test {
         load_config["index_files"] = index_files_;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-
-        ctx_->set_for_loading_index(true);
         json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
         json_index_->LoadUnified(load_config);
 

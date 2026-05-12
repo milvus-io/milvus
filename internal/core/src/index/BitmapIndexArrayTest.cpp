@@ -258,7 +258,6 @@ class ArrayBitmapIndexTest : public testing::Test {
         config["index_files"] = index_files;
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->LoadUnified(config);
@@ -686,7 +685,6 @@ TEST_P(BitmapIndexArrayRegressionTest,
         if (param.use_mmap) {
             config[milvus::index::MMAP_FILE_PATH] = mmap_path;
         }
-        ctx.set_for_loading_index(true);
 
         auto loaded_index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);

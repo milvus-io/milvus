@@ -1248,13 +1248,12 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 // getAllIndexFilesOfIndex returns all expected index files using the path version
 // recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_v1 paths.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
-	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
-		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
+	builder := metautil.NewIndexPathBuilder(segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
 		segmentIndex.PartitionID, segmentIndex.SegmentID,
 		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
-		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
+		filesMap[builder.BuildFullFilePath(gc.option.cli.RootPath(), fileID)] = struct{}{}
 	}
 	return filesMap
 }
@@ -1283,11 +1282,10 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 		}
 
 		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-			builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
-				segIdx.IndexStorePathVersion, segIdx.CollectionID,
+			builder := metautil.NewIndexPathBuilder(segIdx.IndexStorePathVersion, segIdx.CollectionID,
 				segIdx.PartitionID, segIdx.SegmentID,
 				segIdx.BuildID, segIdx.IndexVersion)
-			prefix := builder.BuildPrefix() + "/"
+			prefix := builder.BuildFullPrefix(gc.option.cli.RootPath()) + "/"
 
 			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
 				log.Warn("recycleUnusedIndexFilesV1 remove failed",

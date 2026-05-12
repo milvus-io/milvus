@@ -137,7 +137,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
-    CacheIndexToDisk(const std::vector<std::string>& remote_files,
+    CacheIndexToDisk(const std::vector<std::string>& logical_paths,
                      milvus::proto::common::LoadPriority priority);
 
     void

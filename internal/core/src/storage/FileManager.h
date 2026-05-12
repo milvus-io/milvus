@@ -81,11 +81,6 @@ struct FileManagerContext {
     }
 
     void
-    set_for_loading_index(bool value) {
-        for_loading_index = value;
-    }
-
-    void
     set_plugin_context(std::shared_ptr<CPluginContext> context) {
         plugin_context = context;
     }
@@ -114,8 +109,6 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
-    // INDEX_FILES values are logical Milvus index paths during index loading.
-    bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
     std::string stats_base_path;
@@ -194,12 +187,12 @@ class FileManagerImpl : public milvus::FileManager {
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         std::string remote_file_path;
-        if (is_index_file && index_files_are_logical_paths_) {
-            remote_file_path = ResolveIndexFilePathForArrowOpen(filename);
+        if (is_index_file) {
+            remote_file_path =
+                ResolveLogicalIndexFilePathForArrowFileSystem(filename);
         } else {
             auto local_file_name = GetFileName(filename);
-            remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
-                                             : GetRemoteTextLogPrefix();
+            remote_file_path = GetRemoteTextLogPrefix();
             remote_file_path += "/" + local_file_name;
         }
         auto remote_file = fs_->OpenInputFile(remote_file_path);
@@ -325,8 +318,17 @@ class FileManagerImpl : public milvus::FileManager {
         return boost::filesystem::path(filepath).filename().string();
     }
 
+    // Resolves a logical Milvus index path to the path expected by Arrow FS.
+    // Example logical path:
+    //   index_v1/1/20/2/30/40/index_data
+    // Remote Arrow FS with rootPath=files opens:
+    //   files/index_v1/1/20/2/30/40/index_data
+    // Local Arrow FS with rootPath=/var/lib/milvus/data opens:
+    //   index_v1/1/20/2/30/40/index_data
+    // because the local Arrow FS is already mounted at localStorage.path.
     std::string
-    ResolveIndexFilePathForArrowOpen(const std::string& logical_path) const {
+    ResolveLogicalIndexFilePathForArrowFileSystem(
+        const std::string& logical_path) const {
         // Local FS is rooted at localStorage.path; remote FS needs rootPath.
         if (milvus_storage::IsLocalFileSystem(fs_)) {
             return NormalizePath(logical_path);
@@ -334,13 +336,22 @@ class FileManagerImpl : public milvus::FileManager {
         return NormalizePath(GetStorageRootPath() / logical_path);
     }
 
-    std::vector<std::string>
-    ResolveIndexFilePathsForChunkManagerRead(
-        const std::vector<std::string>& logical_paths) const {
-        if (!index_files_are_logical_paths_) {
-            return logical_paths;
-        }
+    std::string
+    ResolveLogicalIndexFilePathForChunkManager(
+        const std::string& logical_path) const {
+        return NormalizePath(GetStorageRootPath() / logical_path);
+    }
 
+    // Resolves logical Milvus index paths to ChunkManager read paths.
+    // Example logical path:
+    //   index_v1/1/20/2/30/40/index_data
+    // Remote ChunkManager with rootPath=files reads:
+    //   files/index_v1/1/20/2/30/40/index_data
+    // Local ChunkManager with rootPath=/var/lib/milvus/data reads:
+    //   /var/lib/milvus/data/index_v1/1/20/2/30/40/index_data
+    std::vector<std::string>
+    ResolveLogicalIndexFilePathsForChunkManager(
+        const std::vector<std::string>& logical_paths) const {
         std::vector<std::string> resolved_paths;
         resolved_paths.reserve(logical_paths.size());
         auto root_path = GetStorageRootPath();
@@ -376,7 +387,6 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
-    bool index_files_are_logical_paths_{false};
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
 

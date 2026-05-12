@@ -455,15 +455,6 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 	assert.Equal(t, "index_v1/444/555/666/2002/1/v1_file", mappings["index_v1/111/222/333/1002/1/v1_file"])
 }
 
-func TestResolveVectorScalarIndexCopyPath(t *testing.T) {
-	assert.Equal(t,
-		"files/index_v1/111/222/333/1002/1/v1_file",
-		resolveVectorScalarIndexCopyPath("files", "index_v1/111/222/333/1002/1/v1_file"))
-	assert.Equal(t,
-		"/var/lib/milvus/data/index_v1/111/222/333/1002/1/v1_file",
-		resolveVectorScalarIndexCopyPath("/var/lib/milvus/data", "index_v1/111/222/333/1002/1/v1_file"))
-}
-
 func TestTransformFieldBinlogs(t *testing.T) {
 	mappings := map[string]string{
 		"files/insert_log/111/222/333/100/log1.log": "files/insert_log/444/555/666/100/log1.log",

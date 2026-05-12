@@ -230,7 +230,6 @@ TEST_F(RTreeIndexTest, Build_Upload_Load) {
     // ---------- Load back ----------
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -266,7 +265,6 @@ TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
     // Load using filename only list
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -305,7 +303,6 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -337,7 +334,6 @@ TEST_F(RTreeIndexTest, Build_VariousGeometries) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -369,7 +365,6 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -396,7 +391,6 @@ TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -409,7 +403,6 @@ TEST_F(RTreeIndexTest, Load_MixedFileNamesAndPaths) {
 TEST_F(RTreeIndexTest, Load_NonexistentRemote_ShouldThrow) {
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     // nonexist file
@@ -441,7 +434,6 @@ TEST_F(RTreeIndexTest, Build_EndToEnd_FromInsertFiles) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
     cfg["index_files"] = stats->GetIndexFiles();
@@ -484,7 +476,6 @@ TEST_F(RTreeIndexTest, Build_Upload_Load_LargeDataset) {
     // Load index back and verify
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg_load;
@@ -538,7 +529,6 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
 
     nlohmann::json cfg;
@@ -571,7 +561,6 @@ TEST_F(RTreeIndexTest, Query_CoarseAndExact_Equals_Intersects_Within) {
     auto stats = rtree.UploadUnified({});
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
     cfg["index_files"] = stats->GetIndexFiles();
@@ -647,7 +636,6 @@ TEST_F(RTreeIndexTest, Query_Touches_Contains_Crosses_Overlaps) {
     auto stats = rtree.UploadUnified({});
     milvus::storage::FileManagerContext ctx_load(
         field_meta_, index_meta_, chunk_manager_, fs_);
-    ctx_load.set_for_loading_index(true);
     milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
     nlohmann::json cfg;
     cfg["index_files"] = stats->GetIndexFiles();

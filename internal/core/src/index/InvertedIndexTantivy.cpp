@@ -105,11 +105,6 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
       is_nested_index_(is_nested_index) {
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
-    // push init wrapper to load process
-    if (ctx.for_loading_index) {
-        return;
-    }
-    InitForBuildIndex();
 }
 
 template <typename T>

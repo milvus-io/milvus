@@ -126,8 +126,6 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
     auto stats = json_index->Upload();
     auto index_files = stats->GetIndexFiles();
-
-    build_ctx.set_for_loading_index(true);
     auto load_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         create_index_info, build_ctx);
     auto loaded_json_index = std::unique_ptr<JsonInvertedIndex<double>>(

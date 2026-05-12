@@ -135,13 +135,15 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     EXPECT_EQ(remote_files_to_size.size(),
               index_size % slice_size == 0 ? num_slice : num_slice + 1);
 
-    std::vector<std::string> remote_files;
+    std::vector<std::string> index_files;
+    auto root_path = cm_->GetRootPath() + "/";
     for (auto& file2size : remote_files_to_size) {
         std::cout << file2size.first << std::endl;
-        remote_files.emplace_back(file2size.first);
+        ASSERT_EQ(file2size.first.find(root_path), 0);
+        index_files.emplace_back(file2size.first.substr(root_path.size()));
     }
     diskAnnFileManager->CacheIndexToDisk(
-        remote_files, milvus::proto::common::LoadPriority::HIGH);
+        index_files, milvus::proto::common::LoadPriority::HIGH);
     auto local_files = diskAnnFileManager->GetLocalFilePaths();
     for (auto& file : local_files) {
         auto file_size = lcm->Size(file);
@@ -306,16 +308,17 @@ TEST_F(DiskAnnFileManagerTest, ResolveLogicalIndexPathForLoad) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
     storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
-    context.set_for_loading_index(true);
 
     auto file_manager = std::make_shared<DiskFileManagerImpl>(context);
     std::string logical_path = "index_v1/1/2/3/1000/1/index_file";
 
-    EXPECT_EQ(file_manager->ResolveIndexFilePathForArrowOpen(logical_path),
+    EXPECT_EQ(file_manager->ResolveLogicalIndexFilePathForArrowFileSystem(
+                  logical_path),
               logical_path);
 
     auto chunk_manager_paths =
-        file_manager->ResolveIndexFilePathsForChunkManagerRead({logical_path});
+        file_manager->ResolveLogicalIndexFilePathsForChunkManager(
+            {logical_path});
     ASSERT_EQ(chunk_manager_paths.size(), 1);
     EXPECT_EQ(chunk_manager_paths[0],
               NormalizePath(boost::filesystem::path(cm_->GetRootPath()) /
