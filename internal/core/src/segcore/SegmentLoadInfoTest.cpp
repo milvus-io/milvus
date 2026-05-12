@@ -2647,6 +2647,29 @@ MakeColumnGroups(
     return cgs;
 }
 
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+MakeExternalColumnGroups(
+    std::initializer_list<
+        std::pair<std::vector<std::string>, std::vector<std::string>>> groups) {
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto& [columns, paths] : groups) {
+        auto cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        cg->format = "parquet";
+        for (const auto& column : columns) {
+            cg->columns.push_back(column);
+        }
+        for (const auto& p : paths) {
+            milvus_storage::api::ColumnGroupFile f;
+            f.path = p;
+            f.start_index = 0;
+            f.end_index = 0;
+            cg->files.push_back(std::move(f));
+        }
+        cgs->push_back(std::move(cg));
+    }
+    return cgs;
+}
+
 proto::segcore::SegmentLoadInfo
 MakeManifestProto(const std::string& manifest_path) {
     proto::segcore::SegmentLoadInfo p;
@@ -2657,6 +2680,70 @@ MakeManifestProto(const std::string& manifest_path) {
 }
 
 }  // namespace
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffExternalManifestWithNewIndexDoesNotParseColumnNames) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    auto cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}});
+
+    auto current_proto = MakeManifestProto("/manifest/v1");
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetColumnGroupsForTesting(cgs);
+
+    auto new_proto = MakeManifestProto("/manifest/v1");
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(2001);
+    index_info->set_buildid(3001);
+    index_info->set_index_version(1);
+    index_info->add_index_file_paths("/path/to/index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(cgs);
+
+    LoadDiff diff;
+    EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
+    ASSERT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_FALSE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffExternalManifestUpdateReloadsExternalManifest) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    auto current_cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id_v1.parquet"}},
+         {{"vector", "tenant"}, {"/external/data_v1.parquet"}}});
+    auto new_cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id_v2.parquet"}},
+         {{"vector", "tenant"}, {"/external/data_v2.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v2"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    LoadDiff diff;
+    EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
+    EXPECT_TRUE(diff.manifest_updated);
+    EXPECT_EQ(diff.new_manifest_path, "/manifest/v2");
+    EXPECT_TRUE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
 
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffColumnGroupSameIndexDifferentFilesTriggersReplace) {

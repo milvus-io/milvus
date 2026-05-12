@@ -578,23 +578,27 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
             }
         }
     } else {
-        // Manifest mode: collect fields per column group, emplace each
-        // group index only once
-        auto column_groups = new_info.GetColumnGroups();
-        if (column_groups) {
-            std::map<int, std::vector<FieldId>> cg_fields;
-            for (size_t i = 0; i < column_groups->size(); i++) {
-                auto cg = column_groups->at(i);
-                for (const auto& column : cg->columns) {
-                    FieldId fid(std::stoll(column));
-                    if (fields_to_reload.count(fid) > 0) {
-                        cg_fields[static_cast<int>(i)].emplace_back(fid);
+        if (schema_->is_external_collection()) {
+            diff.load_external_manifest = true;
+        } else {
+            // Manifest mode: collect fields per column group, emplace each
+            // group index only once
+            auto column_groups = new_info.GetColumnGroups();
+            if (column_groups) {
+                std::map<int, std::vector<FieldId>> cg_fields;
+                for (size_t i = 0; i < column_groups->size(); i++) {
+                    auto cg = column_groups->at(i);
+                    for (const auto& column : cg->columns) {
+                        FieldId fid(std::stoll(column));
+                        if (fields_to_reload.count(fid) > 0) {
+                            cg_fields[static_cast<int>(i)].emplace_back(fid);
+                        }
                     }
                 }
-            }
-            for (auto& [cg_idx, fids] : cg_fields) {
-                diff.column_groups_to_replace.emplace_back(cg_idx,
-                                                           std::move(fids));
+                for (auto& [cg_idx, fids] : cg_fields) {
+                    diff.column_groups_to_replace.emplace_back(cg_idx,
+                                                               std::move(fids));
+                }
             }
         }
     }
@@ -876,7 +880,13 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }
-        ComputeDiffColumnGroups(diff, new_info);
+        if (schema_->is_external_collection()) {
+            if (diff.manifest_updated) {
+                diff.load_external_manifest = true;
+            }
+        } else {
+            ComputeDiffColumnGroups(diff, new_info);
+        }
     } else {
         AssertInfo(
             !new_info.HasManifestPath(),
@@ -885,7 +895,9 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     }
 
     // Compute fields that need default value filling (schema evolution)
-    ComputeDiffDefaultFields(diff, new_info);
+    if (!schema_->is_external_collection()) {
+        ComputeDiffDefaultFields(diff, new_info);
+    }
 
     return diff;
 }
