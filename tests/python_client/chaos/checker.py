@@ -12,10 +12,11 @@ from collections import Counter
 from datetime import datetime
 from enum import Enum
 from time import sleep
-
-import pandas as pd
-import pytest
-from chaos import constants
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections, LexicalHighlighter
+from pymilvus.milvus_client.index import IndexParams
+from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
+from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.exceptions import SchemaMismatchRetryableException
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CheckTasks
@@ -1426,6 +1427,26 @@ class InsertChecker(Checker):
                 timeout=timeout,
             )
             return res, True
+        except SchemaMismatchRetryableException:
+            # AddVectorFieldChecker can update schema_timestamp while this checker is using
+            # a cached schema. Refresh the SDK schema cache and retry once.
+            log.debug("[InsertChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
+            for i in range(len(data)):
+                data[i][self.int64_field_name] = int(time.time() * self.scale)
+            try:
+                res = self.milvus_client.insert(collection_name=self.c_name,
+                                               data=data,
+                                               partition_name=self.p_names[0] if self.p_names else None,
+                                               timeout=timeout)
+                return res, True
+            except Exception as e:
+                log.info(f"insert error (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"insert error: {e}")
             return str(e), False
@@ -1558,6 +1579,23 @@ class UpsertChecker(Checker):
         try:
             res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
             return res, True
+        except SchemaMismatchRetryableException:
+            # AddVectorFieldChecker can update schema_timestamp while this checker is using
+            # a cached schema. Refresh the SDK schema cache and retry once.
+            log.debug("[UpsertChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
+            try:
+                res = self.milvus_client.upsert(collection_name=self.c_name,
+                                               data=self.data,
+                                               timeout=timeout)
+                return res, True
+            except Exception as e:
+                log.info(f"upsert failed (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"upsert failed: {e}")
             return str(e), False
@@ -1657,6 +1695,23 @@ class PartialUpdateChecker(Checker):
                 collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
             )
             return res, True
+        except SchemaMismatchRetryableException:
+            # AddVectorFieldChecker can update schema_timestamp while this checker is using
+            # a cached schema. Refresh the SDK schema cache and retry once.
+            log.debug("[PartialUpdateChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            try:
+                res = self.milvus_client.upsert(collection_name=self.c_name,
+                                               data=self.data,
+                                               partial_update=True,
+                                               timeout=timeout)
+                return res, True
+            except Exception as e:
+                log.info(f"partial update failed (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"error {e}")
             return str(e), False

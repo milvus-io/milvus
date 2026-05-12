@@ -469,8 +469,10 @@ def output_field_value_check(search_res, original, pk_name):
                 else:
                     num = original[original[pk_name] == _id].index.to_list()[0]
                     expected_val = original[field][num]
-                    # pandas converts None to NaN, while Milvus returns None for nullable fields
-                    if entity[field] is None and (expected_val is None or (isinstance(expected_val, float) and np.isnan(expected_val))):
+                    # pandas converts None to NaN, while Milvus returns None for nullable fields.
+                    if entity[field] is None and (
+                        expected_val is None or (isinstance(expected_val, float) and np.isnan(expected_val))
+                    ):
                         continue
                     assert expected_val == entity[field], f"the output field values are wrong at nq={n}"
 
