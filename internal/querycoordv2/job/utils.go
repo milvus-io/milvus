@@ -89,7 +89,9 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 		lastSegmentCount = currentSegmentCount
 
 		// trigger check more frequently
-		checkerController.Check()
+		if checkerController != nil {
+			checkerController.Check()
+		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	return nil
