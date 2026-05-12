@@ -255,15 +255,10 @@ func (sched *TaskScheduler) processTask(t Task) {
 	t.SetState(indexpb.JobState_JobStateFinished, "")
 
 	// Publish filesystem metrics after index task completion
-	// Only publish for index build tasks (not stats or analyze tasks)
 	if indexTask, ok := t.(*indexBuildTask); ok {
-		// Extract storage config from task to get the filesystem key
-		var fsKey string
 		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			fsKey = storagev2.GetFilesystemKeyFromStorageConfig(indexTask.req.GetStorageConfig())
+			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
 		}
-		// If no storage config or empty key, use default filesystem (empty key)
-		storagev2.PublishCachedFilesystemMetrics(fsKey)
 	}
 }
 

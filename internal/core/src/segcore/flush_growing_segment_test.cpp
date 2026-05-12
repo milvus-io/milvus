@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/c_api_test_utils.h"
@@ -33,11 +34,7 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         test_dir_ = "/tmp/flush_growing_test_" + std::to_string(time(nullptr));
         fs::create_directories(test_dir_);
 
-        // initialize Arrow filesystem singleton (local filesystem for testing)
-        milvus_storage::ArrowFileSystemConfig fs_config;
-        fs_config.storage_type = "local";
-        fs_config.root_path = test_dir_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(fs_config);
+        // Arrow filesystem is initialized by init_gtest.cpp
     }
 
     void
@@ -54,8 +51,7 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     AssertManifestHasColumn(const std::string& segment_path,
                             int64_t version,
                             FieldId field_id) {
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = GetDefaultArrowFileSystem();
         ASSERT_NE(fs, nullptr);
 
         auto txn_result = milvus_storage::api::transaction::Transaction::Open(

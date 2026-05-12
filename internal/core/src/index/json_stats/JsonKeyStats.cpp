@@ -24,6 +24,7 @@
 #include <iosfwd>
 #include <unordered_set>
 #include <variant>
+#include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
@@ -119,8 +120,7 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
         auto trueFs = ctx.fs;
         // try singleton if possible
         if (!trueFs) {
-            trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                         .GetArrowFileSystem();
+            trueFs = milvus::segcore::GetDefaultArrowFileSystem();
         }
         if (!trueFs) {
             ThrowInfo(ErrorCode::UnexpectedError, "Failed to get filesystem");
@@ -812,8 +812,7 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
 void
 JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
                                          const std::string& file) {
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
     AssertInfo(result.ok(),
                "[StorageV2] Failed to create file row group reader: {}",
@@ -876,8 +875,7 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
              file,
              segment_id_);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
     AssertInfo(result.ok(),
                "[StorageV2] Failed to create file row group reader: {}",
@@ -984,8 +982,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             remote_prefix, column_group_id, file_id));
     }
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, files[0]);
     AssertInfo(result.ok(),
                "[StorageV2] Failed to create file row group reader: {}",

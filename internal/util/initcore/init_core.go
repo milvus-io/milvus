@@ -155,10 +155,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 }
 
 func InitLocalArrowFileSystem(path string) error {
-	CLocalRootPath := C.CString(path)
-	defer C.free(unsafe.Pointer(CLocalRootPath))
-	status := C.InitLocalArrowFileSystemSingleton(CLocalRootPath)
-	return HandleCStatus(&status, "InitLocalArrowFileSystemSingleton failed")
+	cRootPath := C.CString(path)
+	cStorageType := C.CString("local")
+	defer C.free(unsafe.Pointer(cRootPath))
+	defer C.free(unsafe.Pointer(cStorageType))
+	storageConfig := C.CStorageConfig{
+		root_path:    cRootPath,
+		storage_type: cStorageType,
+	}
+	status := C.InitArrowFileSystem(storageConfig)
+	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
 func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
@@ -211,8 +217,8 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
-	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
-	return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
+	status := C.InitArrowFileSystem(storageConfig)
+	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
