@@ -6089,9 +6089,9 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		return bs
 	}
 
-	// paramsJSON is inlined into the ParamsKey field; setting withIterator adds
-	// the iterator flag as a separate KV pair.
-	makeTask := func(annsField string, phType commonpb.PlaceholderType, paramsJSON string, withIterator bool) *searchTask {
+	// paramsJSON is inlined into the ParamsKey field; iterator flags are
+	// separate KV pairs to match SDK requests.
+	makeTask := func(annsField string, phType commonpb.PlaceholderType, paramsJSON string, withIterator bool, withIteratorV2 bool) *searchTask {
 		params := []*commonpb.KeyValuePair{
 			{Key: AnnsFieldKey, Value: annsField},
 			{Key: TopKKey, Value: "10"},
@@ -6100,6 +6100,12 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		}
 		if withIterator {
 			params = append(params, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		}
+		if withIteratorV2 {
+			params = append(params,
+				&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "True"},
+				&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "10"},
+			)
 		}
 
 		phgBytes := makePlaceholderGroup(phType)
@@ -6134,19 +6140,27 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	const plainParams = `{"nprobe": 10}`
 
 	t.Run("element-level range search should succeed", func(t *testing.T) {
-		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false)
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false, false)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
 	})
 
-	t.Run("element-level iterator should succeed", func(t *testing.T) {
-		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true)
+	t.Run("element-level legacy iterator should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true, false)
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "legacy search iterator is not supported for element-level search")
+	})
+
+	t.Run("element-level iterator v2 should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true, true)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
 	})
 
 	t.Run("emblist range search should fail", func(t *testing.T) {
-		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, rangeParams, false)
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, rangeParams, false, false)
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -6154,7 +6168,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	})
 
 	t.Run("emblist iterator should fail", func(t *testing.T) {
-		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, true)
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, true, false)
 		err := task.initSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -6163,7 +6177,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 
 	t.Run("regular vector range search should succeed", func(t *testing.T) {
 		// Regression: new checks must not impact plain FloatVector fields.
-		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false)
+		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false, false)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
 	})
