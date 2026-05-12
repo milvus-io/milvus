@@ -1100,6 +1100,7 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         actual = {row["id"]: row["tags"] for row in res}
         assert actual[0] == [1, 2, 3]
         assert actual[1] == [10, 20]
+        assert actual[2] == [100]
 
         self.drop_collection(client, collection_name)
 
