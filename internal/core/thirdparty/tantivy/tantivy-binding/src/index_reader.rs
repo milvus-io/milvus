@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -417,6 +418,36 @@ impl IndexReaderWrapper {
 
     pub fn regex_query(&self, pattern: &str, bitset: *mut c_void) -> Result<()> {
         let q = RegexQuery::from_pattern(&pattern, self.field)?;
+        self.search(&q, bitset)
+    }
+
+    pub fn regex_match_query(&self, pattern: &str, bitset: *mut c_void) -> Result<()> {
+        let regex = regex::Regex::new(&format!("(?s:{})", pattern))
+            .map_err(|err| TantivyBindingError::InvalidArgument(err.to_string()))?;
+        let searcher = self.reader.searcher();
+        let mut matching_terms = HashSet::new();
+
+        for segment_reader in searcher.segment_readers() {
+            let inverted_index = segment_reader.inverted_index(self.field)?;
+            let term_dict = inverted_index.terms();
+            let mut stream = term_dict.stream()?;
+            while stream.advance() {
+                let term = std::str::from_utf8(stream.key())?;
+                if regex.is_match(term) {
+                    matching_terms.insert(term.to_owned());
+                }
+            }
+        }
+
+        if matching_terms.is_empty() {
+            return Ok(());
+        }
+
+        let terms: Vec<_> = matching_terms
+            .iter()
+            .map(|term| Term::from_field_text(self.field, term))
+            .collect();
+        let q = TermSetQuery::new(terms);
         self.search(&q, bitset)
     }
 

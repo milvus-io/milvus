@@ -2322,6 +2322,14 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
               "[\\s\\S]*(?:user_[0-9]+\\$)[\\s\\S]*");
     EXPECT_EQ(regex_to_tantivy_pattern("[^a]+$", true), "[\\s\\S]*(?:[^a]+)");
 
+    auto multiline_end = TryTranslateRegexToTantivyPattern("(?m)user_[0-9]+$");
+    EXPECT_FALSE(multiline_end.use_tantivy_regex);
+    auto word_boundary = TryTranslateRegexToTantivyPattern("\\buser\\b");
+    EXPECT_FALSE(word_boundary.use_tantivy_regex);
+    auto lazy_quantifier = TryTranslateRegexToTantivyPattern("user+?");
+    EXPECT_TRUE(lazy_quantifier.use_tantivy_regex);
+    EXPECT_EQ(lazy_quantifier.pattern, "[\\s\\S]*(?:user+)[\\s\\S]*");
+
     // ── Alternation edge cases ──
     // Simple alternation
     PartialRegexMatcher alt1("abc|xyz");

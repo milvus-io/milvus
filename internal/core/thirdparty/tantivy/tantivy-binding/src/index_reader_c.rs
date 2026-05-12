@@ -323,6 +323,18 @@ pub extern "C" fn tantivy_regex_query(
     unsafe { (*real).regex_query(pattern, bitset).into() }
 }
 
+#[no_mangle]
+pub extern "C" fn tantivy_regex_match_query(
+    ptr: *mut c_void,
+    pattern: *const u8,
+    pattern_len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let pattern = ptr_to_str!(pattern, pattern_len);
+    unsafe { (*real).regex_match_query(pattern, bitset).into() }
+}
+
 // -------------------------json query--------------------
 #[no_mangle]
 pub extern "C" fn tantivy_json_term_query_i64(
