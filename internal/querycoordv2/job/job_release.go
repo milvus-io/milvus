@@ -91,16 +91,20 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 		// try best discard cache
 		// shall not affect releasing if failed
-		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
+		if err := job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
 			&proxypb.InvalidateCollMetaCacheRequest{
 				CollectionID: collectionID,
 			},
-			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection)); err != nil {
+			log.Warn("failed to invalidate collection meta cache", zap.Error(err))
+		}
 
 		// try best clean shard leader cache
-		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+		if err := job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 			CollectionIDs: []int64{collectionID},
-		})
+		}); err != nil {
+			log.Warn("failed to invalidate shard leader cache", zap.Error(err))
+		}
 	}
 
 	if err := WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
