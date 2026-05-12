@@ -1474,6 +1474,7 @@ message ExternalCollectionRefreshTask {
   int64 file_index_end = 14;          // File range end for this task
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
   repeated SegmentInfo updated_segments = 16;  // New segments created by this task result
+  bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
 }
 
 message GetRefreshExternalCollectionProgressResponse {

@@ -665,8 +665,8 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FinishedApplyOnce(t 
 		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
 	}
 	tasks := []*datapb.ExternalCollectionRefreshTask{
-		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
-		{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+		{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
 	}
 
 	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
@@ -711,8 +711,9 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FinishedApplyOnce(t 
 		checker.aggregateJobState(secondJob)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, int32(1), applyCalls.Load())
+	assert.Never(t, func() bool {
+		return applyCalls.Load() > 1
+	}, 50*time.Millisecond, 5*time.Millisecond)
 
 	close(applyRelease)
 	wg.Wait()
@@ -735,6 +736,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ClearsTaskResultsAft
 			JobId:           1,
 			State:           indexpb.JobState_JobStateFinished,
 			Progress:        100,
+			ResultReady:     true,
 			KeptSegments:    []int64{1},
 			UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
 		},
@@ -743,6 +745,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ClearsTaskResultsAft
 			JobId:           1,
 			State:           indexpb.JobState_JobStateFinished,
 			Progress:        100,
+			ResultReady:     true,
 			UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 8}},
 		},
 	}

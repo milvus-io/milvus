@@ -318,6 +318,10 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 			return fmt.Errorf("job %d has non-finished task %d in state %s",
 				job.GetJobId(), task.GetTaskId(), task.GetState().String())
 		}
+		if !task.GetResultReady() {
+			return fmt.Errorf("job %d has finished task %d without persisted refresh result; please retry refresh",
+				job.GetJobId(), task.GetTaskId())
+		}
 		for _, segmentID := range task.GetKeptSegments() {
 			if _, ok := keptSet[segmentID]; ok {
 				continue
