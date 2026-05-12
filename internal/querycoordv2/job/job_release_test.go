@@ -119,7 +119,7 @@ func newReleaseCollectionJobMeta(t *testing.T, collectionID, replicaID int64, no
 
 	catalog := newReleaseJobCatalog()
 	m := meta.NewMeta(func() (int64, error) { return 0, nil }, catalog, session.NewNodeManager())
-	err := m.CollectionManager.PutCollectionWithoutSave(context.Background(), &meta.Collection{
+	err := m.PutCollectionWithoutSave(context.Background(), &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID: collectionID,
 			LoadType:     querypb.LoadType_LoadCollection,
@@ -128,7 +128,7 @@ func newReleaseCollectionJobMeta(t *testing.T, collectionID, replicaID int64, no
 	})
 	require.NoError(t, err)
 
-	err = m.ReplicaManager.Put(context.Background(), utils.CreateTestReplica(replicaID, collectionID, nodes))
+	err = m.Put(context.Background(), utils.CreateTestReplica(replicaID, collectionID, nodes))
 	require.NoError(t, err)
 	return m, catalog
 }
