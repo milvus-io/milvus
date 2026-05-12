@@ -578,6 +578,9 @@ func (m *externalCollectionRefreshMeta) GetTasksByJobID(jobID int64) []*datapb.E
 		tasks = append(tasks, proto.Clone(task).(*datapb.ExternalCollectionRefreshTask))
 		return true
 	})
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].GetTaskId() < tasks[j].GetTaskId()
+	})
 	return tasks
 }
 
@@ -683,6 +686,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 		task.FailReason = failReason
 		task.KeptSegments = append([]int64(nil), keptSegments...)
 		task.UpdatedSegments = cloneProtoSegments(updatedSegments)
+		task.ResultReady = true
 		if state == indexpb.JobState_JobStateFinished {
 			task.Progress = 100
 		}

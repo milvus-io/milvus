@@ -76,6 +76,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
 		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
 	}))
@@ -84,6 +85,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
 		KeptSegments:    []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 7}},
 	}))
@@ -136,6 +138,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFini
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
 	}))
 	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
@@ -182,6 +185,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplica
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
 	}))
 	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
@@ -189,6 +193,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplica
 		JobId:           1,
 		CollectionId:    100,
 		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
 		UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 8}},
 	}))
 
@@ -215,6 +220,54 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplica
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate updated segment")
+	assert.Equal(t, 0, updateCalls)
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissingTaskResult(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       1001,
+		JobId:        1,
+		CollectionId: 100,
+		State:        indexpb.JobState_JobStateFinished,
+	}))
+	assert.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:          1002,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
+		KeptSegments:    []int64{1},
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 7}},
+	}))
+
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(100),
+	}
+	updateCalls := 0
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+		updateCalls++
+		return nil
+	}).Build()
+	defer mockUpdate.UnPatch()
+
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "without persisted refresh result")
 	assert.Equal(t, 0, updateCalls)
 }
 
