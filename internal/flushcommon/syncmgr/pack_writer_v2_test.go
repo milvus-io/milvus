@@ -255,7 +255,7 @@ func genInsertData(size int, schema *schemapb.CollectionSchema) []*storage.Inser
 		data[101] = vector
 
 		arraySize := rand.Intn(3) + 2
-		vectorData := lo.RepeatBy(arraySize, func(_ int) float32 {
+		vectorData := lo.RepeatBy(arraySize*128, func(_ int) float32 {
 			return rand.Float32()
 		})
 		vectorArray := &schemapb.VectorField{

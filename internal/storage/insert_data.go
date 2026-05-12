@@ -571,8 +571,6 @@ type VectorArrayFieldData struct {
 	Nullable    bool
 }
 
-// emptyPerRowVectorField builds a placeholder VectorField with zero vectors,
-// used as the Data entry for null rows in Plan B dense layout.
 func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
 	vf := &schemapb.VectorField{Dim: dim}
 	switch elementType {
