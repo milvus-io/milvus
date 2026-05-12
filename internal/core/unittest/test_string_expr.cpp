@@ -2315,14 +2315,12 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
               "user_[0-9]+[\\s\\S]*");
     EXPECT_EQ(regex_to_tantivy_pattern("user_[0-9]+$", true),
               "[\\s\\S]*(?:user_[0-9]+)");
-    EXPECT_EQ(regex_to_tantivy_pattern("^user_[0-9]+$", true),
-              "user_[0-9]+");
+    EXPECT_EQ(regex_to_tantivy_pattern("^user_[0-9]+$", true), "user_[0-9]+");
     EXPECT_EQ(regex_to_tantivy_pattern("\\^user_[0-9]+", true),
               "[\\s\\S]*(?:\\^user_[0-9]+)[\\s\\S]*");
     EXPECT_EQ(regex_to_tantivy_pattern("user_[0-9]+\\$", true),
               "[\\s\\S]*(?:user_[0-9]+\\$)[\\s\\S]*");
-    EXPECT_EQ(regex_to_tantivy_pattern("[^a]+$", true),
-              "[\\s\\S]*(?:[^a]+)");
+    EXPECT_EQ(regex_to_tantivy_pattern("[^a]+$", true), "[\\s\\S]*(?:[^a]+)");
 
     // ── Alternation edge cases ──
     // Simple alternation
