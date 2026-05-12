@@ -93,15 +93,21 @@ func TestPackedFFIWriter(t *testing.T) {
 		}
 
 		// Create FFI packed writer
-		pw, err := NewFFIPackedWriter(basePath, version, schema, columnGroups, nil, nil)
+		cfg := CreateStorageConfig()
+		pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 		require.NoError(t, err)
 
 		// Write record batch
 		err = pw.WriteRecordBatch(rec)
 		require.NoError(t, err)
 
-		// Close writer and get manifest
-		manifest, err := pw.Close()
+		// Close writer to obtain column groups, commit via manifest update.
+		cgs, err := pw.Close()
+		require.NoError(t, err)
+
+		manifest, err := CommitManifestUpdates(basePath, version, cfg,
+			&ManifestUpdates{NewColumnGroups: cgs})
+		cgs.Destroy()
 		require.NoError(t, err)
 		require.NotEmpty(t, manifest)
 
@@ -113,4 +119,57 @@ func TestPackedFFIWriter(t *testing.T) {
 
 		t.Logf("Successfully wrote %d rows with %d-dim float vectors, manifest: %s", numRows, dim, manifest)
 	}
+}
+
+func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "pk",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+	}, nil)
+
+	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer b.Release()
+	pkb := b.Field(0).(*array.Int64Builder)
+	for i := 0; i < 4; i++ {
+		pkb.Append(int64(i))
+	}
+	rec := b.NewRecord()
+	defer rec.Release()
+
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID},
+	}
+
+	basePath := "files/close_commit_test/1"
+	cfg := CreateStorageConfig()
+	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	require.NoError(t, w.WriteRecordBatch(rec))
+
+	cgs, err := w.Close()
+	require.NoError(t, err)
+	require.NotNil(t, cgs)
+	defer cgs.Destroy()
+
+	mfPath, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
+		&ManifestUpdates{NewColumnGroups: cgs})
+	require.NoError(t, err)
+
+	_, v, err := UnmarshalManifestPath(mfPath)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), v, "exactly one version bump expected")
 }
