@@ -794,6 +794,13 @@ class SegmentInternalInterface : public SegmentInterface {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const = 0;
 
+    virtual void
+    bulk_subscript_null_bitmap(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               const int64_t* seg_offsets,
+                               int64_t count,
+                               TargetBitmap& null_bitmap) const = 0;
+
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual std::unique_ptr<DataArray>
     bulk_subscript(milvus::OpContext* op_ctx,

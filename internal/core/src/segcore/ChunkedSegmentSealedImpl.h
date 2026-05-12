@@ -574,6 +574,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
 
+    void
+    bulk_subscript_null_bitmap(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               const int64_t* seg_offsets,
+                               int64_t count,
+                               TargetBitmap& null_bitmap) const override;
+
     // Override to inject take() fast path for Search output fields.
     // Uses existing vtable slot — no layout change.
     void
