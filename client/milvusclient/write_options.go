@@ -57,6 +57,11 @@ type columnBasedDataOption struct {
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
 	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
 	deferredErr error
+
+	// partialOps carries per-field FieldPartialUpdateOp directives. Keyed by
+	// field name. Entries with REPLACE (or nil) are treated as no-ops and are
+	// not serialized onto the wire.
+	partialOps map[string]*schemapb.FieldPartialUpdateOp
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -379,6 +384,59 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 	return opt
 }
 
+// WithArrayAppend declares that the Array field `fieldName` should be merged
+// with ARRAY_APPEND semantics during an Upsert. The server implicitly enables
+// partial_update when any non-REPLACE op is present, so callers do not need
+// to also invoke WithPartialUpdate(true).
+func (opt *columnBasedDataOption) WithArrayAppend(fieldName string) *columnBasedDataOption {
+	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_APPEND)
+}
+
+// WithArrayRemove declares that the Array field `fieldName` should be merged
+// with ARRAY_REMOVE semantics during an Upsert. See WithArrayAppend for the
+// implicit partial_update promotion.
+func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBasedDataOption {
+	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
+}
+
+// WithFieldPartialOp attaches an explicit FieldPartialUpdateOp to the field
+// with name `fieldName`. Intended for advanced callers; typical users should
+// prefer the op-specific helpers (WithArrayAppend, WithArrayRemove).
+func (opt *columnBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *columnBasedDataOption {
+	if op == schemapb.FieldPartialUpdateOp_REPLACE {
+		// REPLACE is the default; clear any prior directive rather than
+		// transmitting a no-op message.
+		if opt.partialOps != nil {
+			delete(opt.partialOps, fieldName)
+		}
+		return opt
+	}
+	if opt.partialOps == nil {
+		opt.partialOps = make(map[string]*schemapb.FieldPartialUpdateOp)
+	}
+	opt.partialOps[fieldName] = &schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op}
+	return opt
+}
+
+// buildFieldOps materializes the recorded FieldPartialUpdateOp directives
+// into a proto-ready slice. Only non-REPLACE ops are emitted — REPLACE is
+// the on-wire default and emitting it would waste bytes on every upsert.
+//
+// The returned slice is independent of the input fieldsData; a field
+// referenced by an op that was not in fieldsData is still emitted so the
+// server can surface a validation error rather than silently drop the
+// op. Client-side filtering would hide user typos.
+func (opt *columnBasedDataOption) buildFieldOps() []*schemapb.FieldPartialUpdateOp {
+	if len(opt.partialOps) == 0 {
+		return nil
+	}
+	out := make([]*schemapb.FieldPartialUpdateOp, 0, len(opt.partialOps))
+	for _, op := range opt.partialOps {
+		out = append(out, op)
+	}
+	return out
+}
+
 func (opt *columnBasedDataOption) CollectionName() string {
 	return opt.collName
 }
@@ -408,13 +466,22 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	if err != nil {
 		return nil, err
 	}
+	// Materialize any WithArrayAppend/WithArrayRemove/WithFieldPartialOp
+	// directives into UpsertRequest.field_ops. Auto-promote partial_update
+	// when any non-REPLACE op is present.
+	fieldOps := opt.buildFieldOps()
+	partialUpdate := opt.partialUpdate
+	if len(fieldOps) > 0 {
+		partialUpdate = true
+	}
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
-		PartialUpdate:   opt.partialUpdate,
+		PartialUpdate:   partialUpdate,
+		FieldOps:        fieldOps,
 	}, nil
 }
 
@@ -470,12 +537,18 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	if err != nil {
 		return nil, err
 	}
+	fieldOps := opt.buildFieldOps()
+	partialUpdate := opt.partialUpdate
+	if len(fieldOps) > 0 {
+		partialUpdate = true
+	}
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
-		PartialUpdate:  opt.partialUpdate,
+		PartialUpdate:  partialUpdate,
+		FieldOps:       fieldOps,
 	}, nil
 }
 
