@@ -1129,6 +1129,18 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	server.Stop()
 }
 
+// freeTCPPort grabs a random unused TCP port. The TLS HTTP-server tests
+// below hardcoded port 8080 originally, which collides with anything else
+// already bound to that port on the dev machine (e.g. the TEI text-embedding
+// container in our compose stack).
+func freeTCPPort(t *testing.T) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	assert.NoError(t, ln.Close())
+	return strconv.Itoa(port)
+}
+
 func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	server := getServer(t)
 
@@ -1149,7 +1161,7 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1183,7 +1195,7 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 
 	err := runAndWaitForServerReady(server)
 	fmt.Printf("err: %v\n", err)
@@ -1242,7 +1254,7 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
