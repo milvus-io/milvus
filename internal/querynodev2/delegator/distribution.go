@@ -122,6 +122,9 @@ type distribution struct {
 	// protects current & segments
 	mut sync.RWMutex
 
+	closed    *atomic.Bool
+	closeOnce sync.Once
+
 	// distribution info
 	channelName string
 	queryView   *channelQueryView
@@ -152,6 +155,7 @@ func NewDistribution(channelName string, queryView *channelQueryView) *distribut
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
 		queryView:       queryView,
+		closed:          atomic.NewBool(false),
 	}
 	dist.genSnapshot()
 	dist.updateServiceable("NewDistribution")
@@ -335,9 +339,19 @@ func (d *distribution) updateServiceable(triggerAction string) {
 
 // AddDistributions add multiple segment entries.
 func (d *distribution) AddDistributions(entries ...SegmentEntry) {
-	d.mut.Lock()
 	var toRefund []pkoracle.Candidate
 
+	d.mut.Lock()
+	if d.closed.Load() {
+		d.mut.Unlock()
+		for _, entry := range entries {
+			if entry.Candidate != nil {
+				toRefund = append(toRefund, entry.Candidate)
+			}
+		}
+		refundCandidates(toRefund)
+		return
+	}
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
@@ -693,6 +707,15 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 	}
 
 	return result
+}
+
+// Close marks the distribution closed so stale updates can be ignored.
+func (d *distribution) Close() {
+	d.closeOnce.Do(func() {
+		d.mut.Lock()
+		defer d.mut.Unlock()
+		d.closed.Store(true)
+	})
 }
 
 // RefundAllCandidates refunds resources for all sealed segment candidates.

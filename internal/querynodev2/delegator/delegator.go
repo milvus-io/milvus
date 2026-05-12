@@ -1229,6 +1229,9 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.L.Unlock()
 	sd.lifetime.Wait()
 
+	// Mark distribution closed before refunding candidates so stale updates are ignored.
+	sd.distribution.Close()
+
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
 
