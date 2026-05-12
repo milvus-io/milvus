@@ -25,22 +25,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
+// WriterOutput is the data carrier returned by an FFI writer's Close. It
+// owns C memory and must be released via Destroy after the surrounding
+// CommitManifestUpdates call returns (success or failure).
+//
+// Concrete implementations live alongside the writers that produce them:
+//   - *ColumnGroups (FFIPackedWriter.Close)
+//   - *SegmentOutput (FFISegmentWriter.Close)
+//
+// Each implementation knows how to stage its payload onto a loon
+// transaction handle via the package-internal applyTo method.
+type WriterOutput interface {
+	// Destroy releases the underlying C resources. Idempotent.
+	Destroy()
+	// applyTo stages the output onto a loon transaction handle. Called by
+	// applyManifestUpdates as part of CommitManifestUpdates.
+	applyTo(handle C.LoonTransactionHandle) error
+}
+
 // ManifestUpdates bundles every data-file-level change a single caller
 // wants to apply atomically to a manifest. The slow file writes (parquet,
 // deltalog, stat blobs) happen before this payload is assembled;
 // CommitManifestUpdates then opens a transaction, applies everything in
 // one shot, and commits.
 //
-// NewColumnGroups and NewSegmentOutput hold C memory produced by FFI
-// writers and MUST be released by the caller via Destroy after
-// CommitManifestUpdates returns (success or failure).
+// NewFiles holds C memory produced by an FFI writer and MUST be released
+// by the caller via Destroy after CommitManifestUpdates returns (success
+// or failure).
 type ManifestUpdates struct {
-	// NewColumnGroups is the column-groups payload returned by
-	// FFIPackedWriter.Close. nil if no insert files were written.
-	NewColumnGroups *ColumnGroups
-	// NewSegmentOutput is the column-groups + LOB payload returned by
-	// FFISegmentWriter.Close. nil if no segment-writer close happened.
-	NewSegmentOutput *SegmentOutput
+	// NewFiles is the column-groups / LOB payload returned by an FFI
+	// writer's Close. nil if no insert files were written.
+	NewFiles WriterOutput
 	// DeltaLogs is the list of delta-log entries to register.
 	DeltaLogs []DeltaLogEntry
 	// Stats is the list of stat entries (bloom filter, bm25, etc.) to
@@ -49,20 +64,17 @@ type ManifestUpdates struct {
 	Stats []StatEntry
 }
 
+// isEmpty short-circuits CommitManifestUpdates when the caller assembled
+// no work. A non-nil NewFiles is treated as real work; callers must not
+// pass an already-destroyed payload here (the C transaction would then
+// commit with zero staged ops and the loon side would return
+// "Cannot commit: no updates recorded").
 func (u *ManifestUpdates) isEmpty() bool {
 	if u == nil {
 		return true
 	}
-	if u.NewColumnGroups != nil && u.NewColumnGroups.cColumnGroups != nil {
+	if u.NewFiles != nil {
 		return false
-	}
-	if u.NewSegmentOutput != nil {
-		if u.NewSegmentOutput.cOutput.column_groups != nil {
-			return false
-		}
-		if u.NewSegmentOutput.cOutput.num_lob_files > 0 {
-			return false
-		}
 	}
 	return len(u.DeltaLogs) == 0 && len(u.Stats) == 0
 }
@@ -72,9 +84,9 @@ func (u *ManifestUpdates) isEmpty() bool {
 // path. With no effective changes it returns the unchanged manifest path
 // without opening a transaction.
 //
-// The caller retains ownership of any ColumnGroups / SegmentOutput
-// referenced by updates and is responsible for calling Destroy on them
-// after CommitManifestUpdates returns.
+// The caller retains ownership of any WriterOutput referenced by updates
+// and is responsible for calling Destroy on it after CommitManifestUpdates
+// returns.
 func CommitManifestUpdates(basePath string, baseVersion int64,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
@@ -122,34 +134,9 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 // applyManifestUpdates stages every operation in updates onto the loon
 // transaction handle.
 func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates) error {
-	if cg := updates.NewColumnGroups; cg != nil && cg.cColumnGroups != nil {
-		if cg.addNewColumnGroups {
-			slice := unsafe.Slice(cg.cColumnGroups.column_group_array, int(cg.cColumnGroups.num_of_column_groups))
-			for i := range slice {
-				if err := HandleLoonFFIResult(C.loon_transaction_add_column_group(handle, &slice[i])); err != nil {
-					return fmt.Errorf("commit manifest add_column_group: %w", err)
-				}
-			}
-		} else {
-			if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, cg.cColumnGroups)); err != nil {
-				return fmt.Errorf("commit manifest append_files: %w", err)
-			}
-		}
-	}
-
-	if so := updates.NewSegmentOutput; so != nil {
-		if so.cOutput.column_groups != nil {
-			if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, so.cOutput.column_groups)); err != nil {
-				return fmt.Errorf("commit manifest append_files (segment): %w", err)
-			}
-		}
-		if so.cOutput.num_lob_files > 0 && so.cOutput.lob_files != nil {
-			lob := unsafe.Slice(so.cOutput.lob_files, so.cOutput.num_lob_files)
-			for i := range lob {
-				if err := HandleLoonFFIResult(C.loon_transaction_add_lob_file(handle, &lob[i])); err != nil {
-					return fmt.Errorf("commit manifest add_lob_file: %w", err)
-				}
-			}
+	if updates.NewFiles != nil {
+		if err := updates.NewFiles.applyTo(handle); err != nil {
+			return err
 		}
 	}
 

@@ -75,12 +75,12 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	err = pw.WriteRecordBatch(rec)
 	require.NoError(t, err)
 
-	cgs, err := pw.Close()
+	out, err := pw.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
 
 	manifestPath, err := CommitManifestUpdates(basePath, ManifestEarliest, storageConfig,
-		&ManifestUpdates{NewColumnGroups: cgs})
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	return manifestPath
 }

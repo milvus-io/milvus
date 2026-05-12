@@ -105,12 +105,12 @@ func TestPackedFFIReader(t *testing.T) {
 	err = pw.WriteRecordBatch(rec)
 	require.NoError(t, err)
 
-	cgs, err := pw.Close()
+	out, err := pw.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
 
 	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
-		&ManifestUpdates{NewColumnGroups: cgs})
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	require.NotEmpty(t, manifest)
 
@@ -255,12 +255,12 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 	err = pw.WriteRecordBatch(rec)
 	require.NoError(t, err)
 
-	cgs, err := pw.Close()
+	out, err := pw.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
 
 	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
-		&ManifestUpdates{NewColumnGroups: cgs})
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	// Read only pk and score columns (skip vector)
@@ -384,12 +384,12 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 		err = pw.WriteRecordBatch(rec)
 		require.NoError(t, err)
 
-		cgs, err := pw.Close()
+		out, err := pw.Close()
 		require.NoError(t, err)
 
 		manifest, err = CommitManifestUpdates(basePath, version, storageConfig,
-			&ManifestUpdates{NewColumnGroups: cgs})
-		cgs.Destroy()
+			&ManifestUpdates{NewFiles: out})
+		out.Destroy()
 		require.NoError(t, err)
 
 		_, version, err = UnmarshalManifestPath(manifest)

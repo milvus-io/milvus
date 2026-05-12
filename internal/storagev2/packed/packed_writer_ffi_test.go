@@ -102,12 +102,12 @@ func TestPackedFFIWriter(t *testing.T) {
 		require.NoError(t, err)
 
 		// Close writer to obtain column groups, commit via manifest update.
-		cgs, err := pw.Close()
+		out, err := pw.Close()
 		require.NoError(t, err)
 
 		manifest, err := CommitManifestUpdates(basePath, version, cfg,
-			&ManifestUpdates{NewColumnGroups: cgs})
-		cgs.Destroy()
+			&ManifestUpdates{NewFiles: out})
+		out.Destroy()
 		require.NoError(t, err)
 		require.NotEmpty(t, manifest)
 
@@ -160,13 +160,13 @@ func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.WriteRecordBatch(rec))
 
-	cgs, err := w.Close()
+	out, err := w.Close()
 	require.NoError(t, err)
-	require.NotNil(t, cgs)
-	defer cgs.Destroy()
+	require.NotNil(t, out)
+	defer out.Destroy()
 
 	mfPath, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
-		&ManifestUpdates{NewColumnGroups: cgs})
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	_, v, err := UnmarshalManifestPath(mfPath)

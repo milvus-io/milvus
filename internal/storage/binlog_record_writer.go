@@ -473,19 +473,19 @@ func (pw *PackedManifestRecordWriter) Close() error {
 	if pw.writer == nil {
 		return nil
 	}
-	cgs, err := pw.writer.Close()
+	out, err := pw.writer.Close()
 	if err != nil {
 		return err
 	}
-	if cgs != nil {
-		defer cgs.Destroy()
+	if out != nil {
+		defer out.Destroy()
 	}
 	pw.finalizeBinlogs()
-	if cgs == nil {
+	if out == nil {
 		return nil
 	}
 
-	updates := &packed.ManifestUpdates{NewColumnGroups: cgs}
+	updates := &packed.ManifestUpdates{NewFiles: out}
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
@@ -702,7 +702,7 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	}
 
 	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
-		&packed.ManifestUpdates{NewSegmentOutput: out})
+		&packed.ManifestUpdates{NewFiles: out})
 	if err != nil {
 		return fmt.Errorf("PackedTextManifestRecordWriter.Close commit: %w", err)
 	}

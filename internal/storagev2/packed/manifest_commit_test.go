@@ -147,9 +147,9 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteRecordBatch(rec))
-	cgs, err := w.Close()
+	out, err := w.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
 
 	statPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
 	require.NoError(t, WriteFile(cfg, statPath, []byte("bloom-blob")))
@@ -157,8 +157,8 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
 	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
-		NewColumnGroups: cgs,
-		DeltaLogs:       []DeltaLogEntry{{Path: deltaPath, NumEntries: 4}},
+		NewFiles:  out,
+		DeltaLogs: []DeltaLogEntry{{Path: deltaPath, NumEntries: 4}},
 		Stats: []StatEntry{{
 			Key:      "bloom_filter.100",
 			Files:    []string{statPath},
@@ -201,14 +201,16 @@ func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 	require.NoError(t, err)
 	w.AsNewColumnGroups()
 	require.NoError(t, w.WriteRecordBatch(rec))
-	cgs, err := w.Close()
+	out, err := w.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
+	cgs, ok := out.(*ColumnGroups)
+	require.True(t, ok, "Close should return *ColumnGroups for FFIPackedWriter")
 	require.True(t, cgs.addNewColumnGroups,
 		"AsNewColumnGroups should propagate into ColumnGroups handle")
 
 	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
-		&ManifestUpdates{NewColumnGroups: cgs})
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	_, version, err := UnmarshalManifestPath(got)
 	require.NoError(t, err)
@@ -240,8 +242,10 @@ func TestColumnGroups_DestroyIdempotent(t *testing.T) {
 		cfg, nil)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteRecordBatch(rec))
-	cgs, err := w.Close()
+	out, err := w.Close()
 	require.NoError(t, err)
+	cgs, ok := out.(*ColumnGroups)
+	require.True(t, ok, "Close should return *ColumnGroups")
 	require.NotNil(t, cgs.cColumnGroups, "Close should yield non-nil cColumnGroups")
 
 	cgs.Destroy()
@@ -281,9 +285,9 @@ func TestFFIPackedWriter_DoubleCloseRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.WriteRecordBatch(rec))
 
-	cgs, err := w.Close()
+	out, err := w.Close()
 	require.NoError(t, err)
-	defer cgs.Destroy()
+	defer out.Destroy()
 
 	_, err = w.Close()
 	require.Error(t, err, "second Close must return an error")

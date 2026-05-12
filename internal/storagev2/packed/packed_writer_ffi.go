@@ -199,28 +199,56 @@ func (f *ColumnGroups) Destroy() {
 	f.cColumnGroups = nil
 }
 
+// applyTo stages the column groups onto a loon transaction.
+//
+// When addNewColumnGroups is true the groups are added one-by-one via
+// loon_transaction_add_column_group (function-backfill case where the
+// schema is being extended). Otherwise they are appended in one call via
+// loon_transaction_append_files (normal multi-batch write case).
+func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
+	if f == nil || f.cColumnGroups == nil {
+		return nil
+	}
+	if f.addNewColumnGroups {
+		num := int(f.cColumnGroups.num_of_column_groups)
+		slice := unsafe.Slice(f.cColumnGroups.column_group_array, num)
+		for i := range slice {
+			if err := HandleLoonFFIResult(C.loon_transaction_add_column_group(handle, &slice[i])); err != nil {
+				return fmt.Errorf("commit manifest add_column_group: %w", err)
+			}
+		}
+		return nil
+	}
+	if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cColumnGroups)); err != nil {
+		return fmt.Errorf("commit manifest append_files: %w", err)
+	}
+	return nil
+}
+
 // Close closes the underlying loon writer and returns the column-groups
 // payload. The writer never touches the manifest — the caller is
 // responsible for passing the returned handle to CommitManifestUpdates
 // and calling Destroy when done.
 //
-// After Close, the writer is exhausted; further Close or Write calls fail.
-func (pw *FFIPackedWriter) Close() (*ColumnGroups, error) {
+// Close releases the writer's C resources (loon writer handle and
+// cProperties) in a defer, so even when loon_writer_close fails those
+// resources are reclaimed. After Close the writer is exhausted; further
+// Close or Write calls fail.
+func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 	if pw.closed {
 		return nil, fmt.Errorf("FFIPackedWriter already closed")
 	}
+	pw.closed = true
+	defer func() {
+		if pw.cProperties != nil {
+			C.loon_properties_free(pw.cProperties)
+			pw.cProperties = nil
+		}
+	}()
 	var cColumnGroups *C.LoonColumnGroups
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
-	}
-	pw.closed = true
-	// The writer's cProperties belong to the FFI writer; they are no
-	// longer needed once the C writer is closed. Release here to keep
-	// the writer's Destroy responsibilities minimal.
-	if pw.cProperties != nil {
-		C.loon_properties_free(pw.cProperties)
-		pw.cProperties = nil
 	}
 	return &ColumnGroups{
 		cColumnGroups:      cColumnGroups,

@@ -149,36 +149,62 @@ func (f *SegmentOutput) Destroy() {
 	f.cOutput.num_lob_files = 0
 }
 
+// applyTo stages the column-groups + LOB payload onto a loon transaction.
+// Column groups (when present) are appended via loon_transaction_append_files,
+// and each LOB file is registered via loon_transaction_add_lob_file.
+func (f *SegmentOutput) applyTo(handle C.LoonTransactionHandle) error {
+	if f == nil {
+		return nil
+	}
+	if f.cOutput.column_groups != nil {
+		if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cOutput.column_groups)); err != nil {
+			return fmt.Errorf("commit manifest append_files (segment): %w", err)
+		}
+	}
+	if f.cOutput.num_lob_files > 0 && f.cOutput.lob_files != nil {
+		lob := unsafe.Slice(f.cOutput.lob_files, f.cOutput.num_lob_files)
+		for i := range lob {
+			if err := HandleLoonFFIResult(C.loon_transaction_add_lob_file(handle, &lob[i])); err != nil {
+				return fmt.Errorf("commit manifest add_lob_file: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // Close closes the underlying segment writer and returns the column-groups
 // + LOB payload. The writer never touches the manifest — the caller is
 // responsible for passing the returned handle to CommitManifestUpdates
-// and calling Destroy when done.
-func (w *FFISegmentWriter) Close() (*SegmentOutput, error) {
+// and calling Destroy on the returned WriterOutput when done.
+//
+// Close releases the writer's C resources (segment-writer handle and
+// cProperties) in a defer, so even when loon_segment_writer_close fails
+// those resources are reclaimed. After Close the writer is exhausted;
+// further Close or Write calls fail.
+func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 	if w.closed {
 		return nil, fmt.Errorf("FFISegmentWriter already closed")
 	}
+	w.closed = true
+	defer func() {
+		if w.handle != 0 {
+			C.loon_segment_writer_destroy(w.handle)
+			w.handle = 0
+		}
+		if w.cProperties != nil {
+			C.loon_properties_free(w.cProperties)
+			w.cProperties = nil
+		}
+	}()
 	var cOutput C.LoonSegmentWriteOutput
 	result := C.loon_segment_writer_close(w.handle, &cOutput)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
-	w.closed = true
 	return &SegmentOutput{
 		cOutput:     cOutput,
 		rowsWritten: int64(cOutput.rows_written),
 	}, nil
-}
-
-// Destroy destroys the writer and releases resources.
-func (w *FFISegmentWriter) Destroy() {
-	if w.handle != 0 {
-		C.loon_segment_writer_destroy(w.handle)
-		w.handle = 0
-	}
-	if w.cProperties != nil {
-		C.loon_properties_free(w.cProperties)
-		w.cProperties = nil
-	}
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.

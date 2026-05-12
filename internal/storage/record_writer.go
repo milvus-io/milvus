@@ -257,7 +257,7 @@ func (pw *packedRecordBatchWriter) GetWrittenRowNum() int64 {
 // column-groups payload. The writer never touches the manifest — the
 // caller passes the returned handle to packed.CommitManifestUpdates and
 // calls Destroy on it when done.
-func (pw *packedRecordBatchWriter) Close() (*packed.ColumnGroups, error) {
+func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	if pw.writer == nil {
 		return nil, nil
 	}
@@ -416,20 +416,20 @@ func (pw *packedTextBatchWriter) GetWrittenRowNum() int64 {
 // Close closes the underlying segment writer and returns the resulting
 // column-groups + LOB payload. The writer never touches the manifest —
 // the caller passes the returned handle to packed.CommitManifestUpdates
-// and calls Destroy on it when done.
-func (pw *packedTextBatchWriter) Close() (*packed.SegmentOutput, error) {
+// and calls Destroy on it when done. FFISegmentWriter.Close releases its
+// own handle and properties, so no extra cleanup is needed here.
+func (pw *packedTextBatchWriter) Close() (packed.WriterOutput, error) {
 	if pw.writer == nil {
 		return nil, nil
 	}
-	defer func() {
-		pw.writer.Destroy()
-		pw.writer = nil
-	}()
 	out, err := pw.writer.Close()
+	pw.writer = nil
 	if err != nil {
 		return nil, err
 	}
-	pw.rowNum = out.RowsWritten()
+	if so, ok := out.(*packed.SegmentOutput); ok {
+		pw.rowNum = so.RowsWritten()
+	}
 	for id := range pw.pathsMap {
 		pw.columnGroupCompressed[id] = uint64(0)
 	}
