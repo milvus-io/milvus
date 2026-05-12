@@ -560,7 +560,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 				return err
 			}
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -581,7 +581,7 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			vectorArray.Data = expanded
 		}
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	return nil
@@ -748,7 +748,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 			}
 
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -756,7 +756,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 		return merr.WrapErrParameterInvalidMsg("vector type not support default value")
 
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	if !typeutil.IsVectorType(field.Type) {

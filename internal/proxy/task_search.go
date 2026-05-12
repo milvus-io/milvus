@@ -225,7 +225,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("maximum of ann search requests is %d", defaultMaxSearchRequest))
+			return merr.WrapErrParameterInvalidMsg("maximum of ann search requests is %d", defaultMaxSearchRequest)
 		}
 	}
 
@@ -708,7 +708,7 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)

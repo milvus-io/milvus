@@ -166,7 +166,7 @@ func findFieldSchemaByName(schema *schemapb.CollectionSchema, name string) (*sch
 			return f, nil
 		}
 	}
-	return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %q not found in collection schema", name))
+	return nil, merr.WrapErrParameterInvalidMsg("field %q not found in collection schema", name)
 }
 
 // checkArrayAppendPayloadWithinCapacity checks that the per-row payload
