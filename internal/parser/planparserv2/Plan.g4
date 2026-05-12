@@ -14,9 +14,9 @@ expr:
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| EmptyArray                                                                 # EmptyArray
 	| EXISTS expr                                                                # Exists
-	| expr LIKE StringLiteral                                                    # Like
-	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'         # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
+	| expr LIKE expr                                                             # Like
+	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                  # TextMatch
+	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			         # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
@@ -28,14 +28,14 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
-	| STEuqals'('Identifier','StringLiteral')'				                     # STEuqals	
-	| STTouches'('Identifier','StringLiteral')'				             		 # STTouches
-	| STOverlaps'('Identifier','StringLiteral')'						 		 # STOverlaps
-	| STCrosses'('Identifier','StringLiteral')'									 # STCrosses
-	| STContains'('Identifier','StringLiteral')'						 		 # STContains
-	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
-	| STWithin'('Identifier','StringLiteral')'									 # STWithin
-	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
+	| STEuqals'('Identifier',' expr')'				                             # STEuqals
+	| STTouches'('Identifier',' expr')'				             		         # STTouches
+	| STOverlaps'('Identifier',' expr')'						 		         # STOverlaps
+	| STCrosses'('Identifier',' expr')'									         # STCrosses
+	| STContains'('Identifier',' expr')'						 		         # STContains
+	| STIntersects'('Identifier',' expr')'								         # STIntersects
+	| STWithin'('Identifier',' expr')'									         # STWithin
+	| STDWithin'('Identifier',' expr',' expr')'                                  # STDWithin
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range

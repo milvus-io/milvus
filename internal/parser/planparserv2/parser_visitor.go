@@ -190,6 +190,28 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 	}
 }
 
+func (v *ParserVisitor) parseStringLiteralOrTemplate(ctx parser.IExprContext, argName string) (string, string, bool, error) {
+	if ctx == nil {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("%s is missing", argName)
+	}
+	parsed := ctx.Accept(v)
+	if err := getError(parsed); err != nil {
+		return "", "", false, err
+	}
+	valueExpr := getValueExpr(parsed)
+	if valueExpr == nil {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("%s should be a string literal or template variable, got: %s", argName, ctx.GetText())
+	}
+	if isTemplateExpr(valueExpr) {
+		return "", valueExpr.GetTemplateVariableName(), true, nil
+	}
+	value := valueExpr.GetValue()
+	if value == nil || !IsString(value) {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("%s should be a string literal or template variable, got: %s", argName, ctx.GetText())
+	}
+	return value.GetStringVal(), "", false, nil
+}
+
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
 		return errors.New("can not comparisons array fields directly")
@@ -478,7 +500,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 
 // VisitLike handles match operations.
 func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
-	left := ctx.Expr().Accept(v)
+	left := ctx.Expr(0).Accept(v)
 	if err := getError(left); err != nil {
 		return err
 	}
@@ -501,25 +523,32 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
-	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	pattern, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(1), "like pattern")
 	if err != nil {
 		return err
 	}
-
-	op, operand, err := translatePatternMatch(pattern)
-	if err != nil {
-		return err
+	op := planpb.OpType_Match
+	var value *planpb.GenericValue
+	if !isTemplate {
+		operand := ""
+		op, operand, err = translatePatternMatch(pattern)
+		if err != nil {
+			return err
+		}
+		value = NewString(operand)
 	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: column,
-					Op:         op,
-					Value:      NewString(operand),
+					ColumnInfo:           column,
+					Op:                   op,
+					Value:                value,
+					TemplateVariableName: placeholder,
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -542,9 +571,13 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		return fmt.Errorf("field \"%s\" does not enable match", identifier)
 	}
 
-	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match query")
 	if err != nil {
 		return err
+	}
+	var value *planpb.GenericValue
+	if !isTemplate {
+		value = NewString(queryText)
 	}
 
 	// Handle optional min_should_match parameter
@@ -565,12 +598,14 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:  columnInfo,
-					Op:          planpb.OpType_TextMatch,
-					Value:       NewString(queryText),
-					ExtraValues: extraValues,
+					ColumnInfo:           columnInfo,
+					Op:                   planpb.OpType_TextMatch,
+					Value:                value,
+					TemplateVariableName: placeholder,
+					ExtraValues:          extraValues,
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -611,24 +646,28 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		return fmt.Errorf("field \"%s\" does not enable match", identifier)
 	}
 
-	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(0), "phrase_match query")
 	if err != nil {
 		return err
 	}
+	var value *planpb.GenericValue
+	if !isTemplate {
+		value = NewString(queryText)
+	}
 	var slop int64 = 0
-	if ctx.Expr() != nil {
-		slopExpr := ctx.Expr().Accept(v)
+	if ctx.Expr(1) != nil {
+		slopExpr := ctx.Expr(1).Accept(v)
 		slopValueExpr := getValueExpr(slopExpr)
 		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
-			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr().GetText())
+			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr(1).GetText())
 		}
 		slop = slopValueExpr.GetValue().GetInt64Val()
 		if slop < 0 {
-			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr().GetText())
+			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr(1).GetText())
 		}
 
 		if slop > math.MaxUint32 {
-			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr().GetText())
+			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr(1).GetText())
 		}
 	}
 
@@ -636,12 +675,14 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:  toColumnInfo(column),
-					Op:          planpb.OpType_PhraseMatch,
-					Value:       NewString(queryText),
-					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
+					ColumnInfo:           toColumnInfo(column),
+					Op:                   planpb.OpType_PhraseMatch,
+					Value:                value,
+					TemplateVariableName: placeholder,
+					ExtraValues:          []*planpb.GenericValue{NewInt(slop)},
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -1721,234 +1762,68 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 	}
 }
 
-func (v *ParserVisitor) VisitSTEuqals(ctx *parser.STEuqalsContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+func (v *ParserVisitor) buildGISFunctionFilterExpr(identifier string, wktExpr parser.IExprContext, op planpb.GISFunctionFilterExpr_GISOp, opName string, text string) interface{} {
+	childExpr, err := v.translateIdentifier(identifier)
 	if err != nil {
 		return err
 	}
 	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STEuqals operation are only supported on geometry fields now, got: %s", ctx.GetText())
+	if columnInfo == nil || !typeutil.IsGeometryType(columnInfo.GetDataType()) {
+		return fmt.Errorf("%s operation are only supported on geometry fields now, got: %s", opName, text)
 	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
 
-	if err := checkValidWKT(wktString); err != nil {
+	wktString, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(wktExpr, "WKT string")
+	if err != nil {
 		return err
 	}
+	if isTemplate {
+		wktString = placeholder
+	} else if err := checkValidWKT(wktString); err != nil {
+		return err
+	}
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
 				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Equals,
+				Op:         op,
 			},
 		},
+		IsTemplate: isTemplate,
 	}
 	return &ExprWithType{
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+func (v *ParserVisitor) VisitSTEuqals(ctx *parser.STEuqalsContext) interface{} {
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Equals, "STEuqals", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTTouches(ctx *parser.STTouchesContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STTouches operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Touches,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Touches, "STTouches", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTOverlaps(ctx *parser.STOverlapsContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STOverlaps operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Overlaps,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Overlaps, "STOverlaps", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTCrosses(ctx *parser.STCrossesContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STCrosses operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Crosses,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Crosses, "STCrosses", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTContains(ctx *parser.STContainsContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STContains operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Contains,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Contains, "STContains", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTIntersects(ctx *parser.STIntersectsContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STIntersects operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Intersects,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Intersects, "STIntersects", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTWithin(ctx *parser.STWithinContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	if err != nil {
-		return err
-	}
-	columnInfo := toColumnInfo(childExpr)
-	if columnInfo == nil ||
-		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
-			"STWithin operation are only supported on geometry fields now, got: %s", ctx.GetText())
-	}
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err := checkValidWKT(wktString); err != nil {
-		return err
-	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_GisfunctionFilterExpr{
-			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
-				ColumnInfo: columnInfo,
-				WktString:  wktString,
-				Op:         planpb.GISFunctionFilterExpr_Within,
-			},
-		},
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	return v.buildGISFunctionFilterExpr(ctx.Identifier().GetText(), ctx.Expr(), planpb.GISFunctionFilterExpr_Within, "STWithin", ctx.GetText())
 }
 
 func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{} {
@@ -1964,16 +1839,18 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 			"ST_DWITHIN operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 
-	// Process the WKT string
-	element := ctx.StringLiteral().GetText()
-	wktString := element[1 : len(element)-1] // Remove surrounding quotes
-
-	if err = checkValidPoint(wktString); err != nil {
+	wktString, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(0), "WKT string")
+	if err != nil {
+		return err
+	}
+	if isTemplate {
+		wktString = placeholder
+	} else if err = checkValidPoint(wktString); err != nil {
 		return err
 	}
 
 	// Process the distance expression (can be int or float)
-	distanceExpr := ctx.Expr().Accept(v)
+	distanceExpr := ctx.Expr(1).Accept(v)
 	if err := getError(distanceExpr); err != nil {
 		return err
 	}
@@ -1981,13 +1858,13 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	// Extract distance value - must be a constant expression
 	distanceValueExpr := getValueExpr(distanceExpr)
 	if distanceValueExpr == nil {
-		return fmt.Errorf("distance parameter must be a constant numeric value, got: %s", ctx.Expr().GetText())
+		return fmt.Errorf("distance parameter must be a constant numeric value, got: %s", ctx.Expr(1).GetText())
 	}
 
 	var distance float64
 	genericValue := distanceValueExpr.GetValue()
 	if genericValue == nil {
-		return fmt.Errorf("invalid distance value: %s", ctx.Expr().GetText())
+		return fmt.Errorf("invalid distance value: %s", ctx.Expr(1).GetText())
 	}
 
 	// Handle both integer and floating point values using type assertion
@@ -1997,7 +1874,7 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	case *planpb.GenericValue_FloatVal:
 		distance = val.FloatVal
 	default:
-		return fmt.Errorf("distance parameter must be a numeric value (int or float), got: %s", ctx.Expr().GetText())
+		return fmt.Errorf("distance parameter must be a numeric value (int or float), got: %s", ctx.Expr(1).GetText())
 	}
 
 	if distance < 0 {
@@ -2014,6 +1891,7 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 				Distance:   distance, // Keep distance for reference
 			},
 		},
+		IsTemplate: isTemplate,
 	}
 
 	return &ExprWithType{

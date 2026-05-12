@@ -3504,9 +3504,20 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 varchar_value = row[ct.default_string_field_name]
                 if "0" in varchar_value:
                     exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+        if vachar_expression == perfix_expr:
+            template_params = {"pattern": "0%"}
+        elif vachar_expression == suffix_expr:
+            template_params = {"pattern": "%0"}
+        else:
+            template_params = {"pattern": "%0%"}
+        template_expression = f"{ct.default_string_field_name} like {{pattern}}"
         normal_res = self.query(client, collection_name, filter=vachar_expression,
                                 check_task=CheckTasks.check_query_results,
                                 check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
+        template_res = self.query(client, collection_name, filter=template_expression, filter_params=template_params,
+                                  check_task=CheckTasks.check_query_results,
+                                  check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
+        assert normal_res == template_res
         # 5. enable mmap and reload
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
@@ -5955,5 +5966,4 @@ class TestQueryCount(TestMilvusClientV2Base):
                                 "pk_name": "int64_1"})
         # clean up
         self.drop_collection(client, collection_name)
-
 
