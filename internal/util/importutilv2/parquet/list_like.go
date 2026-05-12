@@ -81,6 +81,11 @@ func (l *listLikeArray) FixedSize() (int32, bool) {
 	return l.fixedSize, l.fixedSize >= 0
 }
 
+func canBulkCopyUint8ListValues(listReader *listLikeArray, uint8Reader *array.Uint8) bool {
+	_, fixedSize := listReader.FixedSize()
+	return !fixedSize && uint8Reader.NullN() == 0
+}
+
 func getListLikeArrayData[T any](listReader *listLikeArray, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
 	_, fixedSize := listReader.FixedSize()
 	for i := 0; i < listReader.Len(); i++ {

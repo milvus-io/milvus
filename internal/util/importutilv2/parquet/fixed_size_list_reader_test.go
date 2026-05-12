@@ -176,6 +176,40 @@ func TestImportFixedSizeList_NonNullableNullRowRejected(t *testing.T) {
 	require.NotContains(t, err.Error(), "array element is not allowed to be null")
 }
 
+func TestCanBulkCopyUint8ListValues(t *testing.T) {
+	field := fixedSizeListFloat16VectorSchema(4, false).Fields[1]
+
+	list := uint8ListArray(t, [][]byte{
+		{1, 2, 3, 4},
+		{5, 6, 7, 8},
+	}, false)
+	defer list.Release()
+	listReader, err := newListLikeArray(list, field)
+	require.NoError(t, err)
+	uint8Reader := listReader.ListValues().(*array.Uint8)
+	require.True(t, canBulkCopyUint8ListValues(listReader, uint8Reader))
+
+	listWithNullElement := uint8ListArray(t, [][]byte{
+		{1, 2, 3, 4},
+		{5, 6, 7, 8},
+	}, true)
+	defer listWithNullElement.Release()
+	listReader, err = newListLikeArray(listWithNullElement, field)
+	require.NoError(t, err)
+	uint8Reader = listReader.ListValues().(*array.Uint8)
+	require.False(t, canBulkCopyUint8ListValues(listReader, uint8Reader))
+
+	fixedSizeList := fixedSizeUint8ListArray(t, 4, [][]byte{
+		{1, 2, 3, 4},
+		{5, 6, 7, 8},
+	})
+	defer fixedSizeList.Release()
+	listReader, err = newListLikeArray(fixedSizeList, field)
+	require.NoError(t, err)
+	uint8Reader = listReader.ListValues().(*array.Uint8)
+	require.False(t, canBulkCopyUint8ListValues(listReader, uint8Reader))
+}
+
 func readFixedSizeListParquet(t *testing.T, schema *schemapb.CollectionSchema, fixedSizeList arrow.Array) *storage.InsertData {
 	insertData, err := tryReadFixedSizeListParquet(t, schema, fixedSizeList)
 	require.NoError(t, err)
@@ -289,6 +323,18 @@ func fixedSizeListFloatVectorSchema(dim int, nullable bool) *schemapb.Collection
 	})
 }
 
+func fixedSizeListFloat16VectorSchema(dim int, nullable bool) *schemapb.CollectionSchema {
+	return fixedSizeListSchema(&schemapb.FieldSchema{
+		FieldID:  fixedSizeListDataFieldID,
+		Name:     "fsl_vector",
+		DataType: schemapb.DataType_Float16Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+		},
+		Nullable: nullable,
+	})
+}
+
 func fixedSizeListSchema(field *schemapb.FieldSchema) *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -310,6 +356,49 @@ func int64Array(t *testing.T, rows int) arrow.Array {
 	defer builder.Release()
 	for i := 0; i < rows; i++ {
 		builder.Append(int64(i + 1))
+	}
+	return builder.NewArray()
+}
+
+func uint8ListArray(t *testing.T, rows [][]byte, withNullElement bool) arrow.Array {
+	t.Helper()
+
+	builder := array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Uint8)
+	defer builder.Release()
+	valueBuilder := builder.ValueBuilder().(*array.Uint8Builder)
+	for _, row := range rows {
+		builder.Append(true)
+		for i, value := range row {
+			if withNullElement && i == 1 {
+				valueBuilder.AppendNull()
+				continue
+			}
+			valueBuilder.Append(value)
+		}
+	}
+	return builder.NewArray()
+}
+
+func fixedSizeUint8ListArray(t *testing.T, listSize int32, rows [][]byte) arrow.Array {
+	t.Helper()
+
+	builder := array.NewFixedSizeListBuilderWithField(memory.DefaultAllocator, listSize, arrow.Field{
+		Name:     "item",
+		Type:     arrow.PrimitiveTypes.Uint8,
+		Nullable: false,
+	})
+	defer builder.Release()
+	valueBuilder := builder.ValueBuilder().(*array.Uint8Builder)
+	validRows := make([]bool, len(rows))
+	for i := range validRows {
+		validRows[i] = true
+	}
+	builder.AppendValues(validRows)
+	for _, row := range rows {
+		require.Len(t, row, int(listSize))
+		for _, value := range row {
+			valueBuilder.Append(value)
+		}
 	}
 	return builder.NewArray()
 }

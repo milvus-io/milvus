@@ -409,6 +409,63 @@ func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {
 		s.NotEmpty(segment.GetStatslogs())
 		s.NoError(CheckLogID(segment.GetStatslogs()))
 	}
+
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(vectorDim, s.indexType, s.metricType),
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode(), createIndexStatus.GetReason())
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode(), loadStatus.GetReason())
+	s.WaitForLoad(ctx, collectionName)
+
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName:   collectionName,
+		Expr:             fmt.Sprintf("%s >= 0", integration.Int64Field),
+		OutputFields:     []string{arrayFieldName, integration.FloatVecField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(), queryResult.GetStatus().GetReason())
+
+	var arrayData []*schemapb.ScalarField
+	var vectorData []float32
+	for _, fieldData := range queryResult.GetFieldsData() {
+		switch fieldData.GetFieldName() {
+		case arrayFieldName:
+			arrayData = fieldData.GetScalars().GetArrayData().GetData()
+		case integration.FloatVecField:
+			vectorData = fieldData.GetVectors().GetFloatVector().GetData()
+		}
+	}
+	s.Len(arrayData, rowCount)
+	s.Len(vectorData, rowCount*vectorDim)
+
+	seenRows := make(map[int32]struct{}, rowCount)
+	for i, row := range arrayData {
+		values := row.GetIntData().GetData()
+		s.Len(values, arraySize)
+		expectedRow := values[0]
+		s.EqualValues([]int32{expectedRow, expectedRow + 1, expectedRow + 2}, values)
+		s.Equal(float32(int(expectedRow)*vectorDim), vectorData[i*vectorDim])
+		for col := 1; col < vectorDim; col++ {
+			s.Equal(vectorData[i*vectorDim]+float32(col), vectorData[i*vectorDim+col])
+		}
+		seenRows[expectedRow] = struct{}{}
+	}
+	s.Len(seenRows, rowCount)
+	for row := 0; row < rowCount; row++ {
+		_, ok := seenRows[int32(row)]
+		s.True(ok)
+	}
 }
 
 func (s *BulkInsertSuite) TestDiskQuotaExceeded() {

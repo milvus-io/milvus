@@ -878,6 +878,10 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			if !ok {
 				return nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
 			}
+			if canBulkCopyUint8ListValues(listReader, uint8Reader) {
+				data = append(data, uint8Reader.Uint8Values()...)
+				continue
+			}
 			for i := 0; i < listReader.Len(); i++ {
 				start, end := listReader.ValueOffsets(i)
 				for j := start; j < end; j++ {
@@ -935,6 +939,19 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
 				return nil, nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
+			}
+			if canBulkCopyUint8ListValues(listReader, uint8Reader) {
+				values := uint8Reader.Uint8Values()
+				for i := 0; i < rows; i++ {
+					if listReader.IsNull(i) {
+						validData = append(validData, false)
+					} else {
+						start, end := listReader.ValueOffsets(i)
+						data = append(data, values[int(start):int(end)]...)
+						validData = append(validData, true)
+					}
+				}
+				continue
 			}
 			for i := 0; i < rows; i++ {
 				if listReader.IsNull(i) {
