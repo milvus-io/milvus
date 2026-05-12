@@ -87,24 +87,20 @@ func (job *ReleaseCollectionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 
-		if job.targetObserver != nil {
-			job.targetObserver.ReleaseCollection(collectionID)
-		}
+		job.targetObserver.ReleaseCollection(collectionID)
 
-		if job.proxyManager != nil {
-			// try best discard cache
-			// shall not affect releasing if failed
-			job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
-				&proxypb.InvalidateCollMetaCacheRequest{
-					CollectionID: collectionID,
-				},
-				proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+		// try best discard cache
+		// shall not affect releasing if failed
+		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
+			&proxypb.InvalidateCollMetaCacheRequest{
+				CollectionID: collectionID,
+			},
+			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
 
-			// try best clean shard leader cache
-			job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
-				CollectionIDs: []int64{collectionID},
-			})
-		}
+		// try best clean shard leader cache
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{collectionID},
+		})
 	}
 
 	if err := WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
