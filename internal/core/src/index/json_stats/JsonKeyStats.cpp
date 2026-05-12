@@ -243,14 +243,14 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
 }
 
 std::map<JsonKey, KeyStatsInfo>
-JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
-                             bool nullable) {
+JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas) {
     std::map<JsonKey, KeyStatsInfo> infos;
     int64_t num_rows = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
+        auto check_valid = data->IsNullable();
         for (int i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if (check_valid && !data->is_valid(i)) {
                 continue;
             }
             auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
@@ -583,13 +583,13 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
 }
 
 void
-JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
-                            bool nullable) {
+JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas) {
     uint32_t row_id = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
+        auto check_valid = data->IsNullable();
         for (uint32_t i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if (check_valid && !data->is_valid(i)) {
                 BuildKeyStatsForNullRow();
             } else {
                 auto json_str =
@@ -601,10 +601,9 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 // should be handled as null row
                 if (strlen(json_str) == 0) {
                     BuildKeyStatsForNullRow();
-                    continue;
+                } else {
+                    BuildKeyStatsForRow(json_str, row_id);
                 }
-
-                BuildKeyStatsForRow(json_str, row_id);
             }
             row_id++;
         }
@@ -695,29 +694,10 @@ JsonKeyStats::Build(const Config& config) {
     if (is_built_)
         return;
     auto start_time = std::chrono::steady_clock::now();
-    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
+    auto field_datas =
+        storage::CacheRawDataAndFillMissing(mem_file_manager_, config);
 
-    auto lack_binlog_rows =
-        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value()) {
-        auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
-        auto default_value = [&]() -> std::optional<DefaultValueType> {
-            if (!field_schema.has_default_value()) {
-                return std::nullopt;
-            }
-            return field_schema.default_value();
-        }();
-        auto field_data = storage::CreateFieldData(
-            static_cast<DataType>(field_schema.data_type()),
-            DataType::NONE,
-            true,
-            1,
-            lack_binlog_rows.value());
-        field_data->FillFieldData(default_value, lack_binlog_rows.value());
-        field_datas.insert(field_datas.begin(), field_data);
-    }
-
-    BuildWithFieldData(field_datas, schema_.nullable());
+    BuildWithFieldData(field_datas);
     auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
@@ -735,10 +715,9 @@ JsonKeyStats::AddBucketName(const std::string& remote_prefix) {
 }
 
 void
-JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
-                                 bool nullable) {
+JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) {
     // collect key stats info and classify key type
-    auto infos = CollectKeyInfo(field_datas, nullable);
+    auto infos = CollectKeyInfo(field_datas);
     LOG_INFO("collect key infos: {} for segment {} for field {}",
              PrintKeyInfo(infos),
              segment_id_,
@@ -767,7 +746,7 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
     auto writer_context =
         ParquetWriterFactory::CreateContext(key_types_, remote_prefix);
     parquet_writer_->Init(std::move(writer_context));
-    BuildKeyStats(field_datas, nullable);
+    BuildKeyStats(field_datas);
     parquet_writer_->Close();
     bson_inverted_index_->BuildIndex();
 
