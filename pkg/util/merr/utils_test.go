@@ -22,6 +22,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 func TestIsNonRetryableErr(t *testing.T) {
@@ -73,6 +75,28 @@ func TestIsNonRetryableErr_WrappedErrors(t *testing.T) {
 
 	wrappedRetryable := fmt.Errorf("network issue: %w", ErrIoUnexpectEOF)
 	assert.False(t, IsNonRetryableErr(wrappedRetryable))
+}
+
+func TestIsRetryableErrWrapped(t *testing.T) {
+	err := errors.Wrap(ErrServiceUnavailable, "proxy task wrapper")
+	assert.True(t, IsRetryableErr(err))
+
+	nonRetryableErr := errors.Wrap(ErrParameterInvalid, "proxy task wrapper")
+	assert.False(t, IsRetryableErr(nonRetryableErr))
+}
+
+func TestChannelTSafeStalledStatus(t *testing.T) {
+	err := WrapErrChannelTSafeStalled("channel-1", "lag 3s")
+	assert.ErrorIs(t, err, ErrChannelTSafeStalled)
+	assert.True(t, IsRetryableErr(err))
+
+	status := Status(err)
+	assert.True(t, status.GetRetriable())
+	assert.Equal(t, commonpb.ErrorCode_TimeTickLongDelay, status.GetErrorCode())
+
+	roundTripErr := Error(status)
+	assert.ErrorIs(t, roundTripErr, ErrChannelTSafeStalled)
+	assert.True(t, IsRetryableErr(roundTripErr))
 }
 
 func TestIsMilvusError_WrappedChain(t *testing.T) {
