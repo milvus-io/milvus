@@ -127,6 +127,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#JSONContainsAny.
 	VisitJSONContainsAny(ctx *JSONContainsAnyContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#STIsValid.
+	VisitSTIsValid(ctx *STIsValidContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#BitXor.
 	VisitBitXor(ctx *BitXorContext) interface{}
 
