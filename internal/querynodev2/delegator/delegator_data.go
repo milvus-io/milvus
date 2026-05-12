@@ -1240,23 +1240,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
-	var avgdl float64
-	ok, err := sd.functionState.withFunctionRunner(req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
-		var runErr error
-		avgdl, runErr = sd.buildBM25IDFWithRunner(req, functionRunner)
-		return runErr
-	})
-	if err != nil {
-		return 0, err
-	}
-	if !ok {
-		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-	}
-	return avgdl, nil
-}
-
-func (sd *shardDelegator) buildBM25IDFWithRunner(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
 		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
@@ -1277,30 +1261,49 @@ func (sd *shardDelegator) buildBM25IDFWithRunner(req *internalpb.SearchRequest, 
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	datas := []any{texts}
-	if len(functionRunner.GetInputFields()) == 2 {
-		analyzerName := "default"
-		if name := req.GetAnalyzerName(); name != "" {
-			// use user provided analyzer name
-			analyzerName = name
+	var tfArray *schemapb.SparseFloatArray
+	schemaVersion := sd.collection.Schema().GetVersion()
+	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
+		if functionType != schemapb.FunctionType_BM25 {
+			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
-		analyzers := make([]string, len(texts))
-		for i := range texts {
-			analyzers[i] = analyzerName
-		}
-		datas = append(datas, analyzers)
-	}
+		datas := []any{texts}
+		if len(functionRunner.GetInputFields()) == 2 {
+			analyzerName := "default"
+			if name := req.GetAnalyzerName(); name != "" {
+				// use user provided analyzer name
+				analyzerName = name
+			}
 
-	// get search text term frequency
-	output, err := functionRunner.BatchRun(datas...)
+			analyzers := make([]string, len(texts))
+			for i := range texts {
+				analyzers[i] = analyzerName
+			}
+			datas = append(datas, analyzers)
+		}
+
+		// get search text term frequency
+		output, err := functionRunner.BatchRun(datas...)
+		if err != nil {
+			return err
+		}
+		if len(output) == 0 {
+			return errors.New("BM25 embedding failed: runner returned empty output")
+		}
+
+		var ok bool
+		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
+		if !ok {
+			return errors.New("functionRunner return unknown data")
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-
-	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return 0, errors.New("functionRunner return unknown data")
+		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1325,13 +1328,7 @@ func (sd *shardDelegator) buildBM25IDFWithRunner(req *internalpb.SearchRequest, 
 	return avgdl, nil
 }
 
-func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
-	return sd.functionState.withRequiredFunctionRunner(req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
-		return sd.parseMinHashWithRunner(req, functionRunner)
-	})
-}
-
-func (sd *shardDelegator) parseMinHashWithRunner(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) error {
+func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
 		return merr.WrapErrServiceInternal("failed to unmarshal MinHash placeholder group", err.Error())
@@ -1347,18 +1344,33 @@ func (sd *shardDelegator) parseMinHashWithRunner(req *internalpb.SearchRequest, 
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	datas := []any{texts}
-	output, err := functionRunner.BatchRun(datas...)
+	var fieldData *schemapb.FieldData
+	schemaVersion := sd.collection.Schema().GetVersion()
+	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
+		if functionType != schemapb.FunctionType_MinHash {
+			return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+		}
+
+		output, err := functionRunner.BatchRun(texts)
+		if err != nil {
+			return err
+		}
+		if len(output) == 0 {
+			return errors.New("MinHash embedding failed: runner returned empty output")
+		}
+
+		var ok bool
+		fieldData, ok = output[0].(*schemapb.FieldData)
+		if !ok {
+			return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if len(output) == 0 {
-		return errors.New("MinHash embedding failed: runner returned empty output")
-	}
-
-	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	vectorField := fieldData.GetVectors()
@@ -1397,7 +1409,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 		topks := req.GetTopks()
 		var results [][]*milvuspb.AnalyzerToken
 		var analyzeErr error
-		ok, err := sd.functionState.withAnalyzerRunner(task.GetFieldId(), func(analyzer function.Analyzer) error {
+		ok, err := sd.runWithAnalyzer(ctx, task.GetFieldId(), func(analyzer function.Analyzer) error {
 			if len(analyzer.GetInputFields()) == 1 {
 				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts())
 				return analyzeErr

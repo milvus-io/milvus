@@ -236,30 +236,24 @@ func (sd *shardDelegator) Stopped() bool {
 	return sd.NotStopped(sd.lifetime.GetState()) != nil
 }
 
-func (sd *shardDelegator) prepareSearchFunction(req *internalpb.SearchRequest) (float64, bool, error) {
+func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
-	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner, ok bool) error {
+	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
 			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 			}
-			if !ok {
-				return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-			}
 			var buildErr error
-			avgdl, buildErr = sd.buildBM25IDFWithRunner(req, functionRunner)
+			avgdl, buildErr = sd.buildBM25IDF(ctx, req)
 			return buildErr
 		case schemapb.FunctionType_MinHash:
 			if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
 			}
-			if !ok {
-				return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-			}
-			return sd.parseMinHashWithRunner(req, functionRunner)
+			return sd.parseMinHash(ctx, req)
 		default:
 			return nil
 		}
@@ -394,7 +388,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	avgdl, skipSearch, err := sd.prepareSearchFunction(req.GetReq())
+	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
 	if err != nil {
 		return nil, err
 	}
@@ -1508,6 +1502,40 @@ func (sd *shardDelegator) useGrowingSourceFlush() bool {
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }
 
+func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
+	schema := sd.collection.Schema()
+	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, schema.GetVersion(), fieldID, run)
+	if ok || err != nil {
+		return ok, err
+	}
+	if fieldHasBM25Analyzer(schema, fieldID) {
+		return false, nil
+	}
+
+	field := typeutil.GetField(schema, fieldID)
+	if field == nil || !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+		return false, nil
+	}
+
+	analyzer, err := function.NewAnalyzerRunner(field)
+	if err != nil {
+		return false, err
+	}
+	if runner, ok := analyzer.(function.FunctionRunner); ok {
+		defer runner.Close()
+	}
+	return true, run(analyzer)
+}
+
+func fieldHasBM25Analyzer(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, fn := range schema.GetFunctions() {
+		if fn.GetType() == schemapb.FunctionType_BM25 && slices.Contains(fn.GetInputFieldIds(), fieldID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	var result [][]*milvuspb.AnalyzerToken
 	var analyzeErr error
@@ -1515,7 +1543,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 		return string(bytes)
 	})
 
-	ok, err := sd.functionState.withAnalyzerRunner(req.GetFieldId(), func(analyzer function.Analyzer) error {
+	ok, err := sd.runWithAnalyzer(ctx, req.GetFieldId(), func(analyzer function.Analyzer) error {
 		if len(analyzer.GetInputFields()) == 1 {
 			result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
 			return analyzeErr

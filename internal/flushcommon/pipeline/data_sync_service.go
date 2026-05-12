@@ -297,21 +297,14 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	)
 	nodeList = append(nodeList, ddNode)
 
-	// 2.embeddingNode(maybe no function)
-	emNode, err := newEmbeddingNode(channelName, config.metacache)
-	if err != nil {
-		return nil, err
-	}
-	nodeList = append(nodeList, emNode)
-
-	// 3.writeNode
+	// 2.writeNode
 	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
 	nodeList = append(nodeList, writeNode)
 
-	// 4.ttNode
+	// 3.ttNode
 	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 
