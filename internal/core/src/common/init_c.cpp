@@ -78,6 +78,11 @@ SetDefaultOptimizeExprEnable(bool val) {
 }
 
 void
+SetDefaultJSONKeyStatsEnable(bool val) {
+    milvus::SetDefaultJSONKeyStatsEnable(val);
+}
+
+void
 SetDefaultGrowingJSONKeyStatsEnable(bool val) {
     milvus::SetDefaultGrowingJSONKeyStatsEnable(val);
 }

@@ -21,6 +21,8 @@
 #include <vector>
 
 #include "NamedType/underlying_functionalities.hpp"
+#include "common/Common.h"
+#include "common/Consts.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -1474,6 +1476,209 @@ TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesTextIndexes) {
     EXPECT_TRUE(str.find("101") != std::string::npos);
     EXPECT_TRUE(str.find("text_indexes_to_create") != std::string::npos);
     EXPECT_TRUE(str.find("102") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, ConvertJsonKeyStatsToLoadJsonKeyIndexInfo) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+    proto.set_priority(proto::common::LoadPriority::HIGH);
+
+    proto::segcore::JsonKeyStats json_stats;
+    json_stats.set_fieldid(102);
+    json_stats.set_version(3);
+    json_stats.set_buildid(5001);
+    json_stats.set_log_size(4096);
+    json_stats.set_memory_size(8192);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.set_base_path("/path/to/json_stats");
+    json_stats.add_files("meta.json");
+    json_stats.add_files("shared_key_index/file1");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto load_info = info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+        json_stats, FieldId(102));
+
+    EXPECT_NE(load_info, nullptr);
+    EXPECT_EQ(load_info->fieldid(), 102);
+    EXPECT_EQ(load_info->version(), 3);
+    EXPECT_EQ(load_info->buildid(), 5001);
+    EXPECT_EQ(load_info->stats_size(), 4096);
+    EXPECT_EQ(load_info->base_path(), "/path/to/json_stats");
+    EXPECT_EQ(load_info->files_size(), 2);
+    EXPECT_EQ(load_info->files(0), "meta.json");
+    EXPECT_EQ(load_info->files(1), "shared_key_index/file1");
+    EXPECT_EQ(load_info->collectionid(), 200);
+    EXPECT_EQ(load_info->partitionid(), 300);
+    EXPECT_EQ(load_info->load_priority(), proto::common::LoadPriority::HIGH);
+    EXPECT_TRUE(load_info->has_schema());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithJsonStats) {
+    LoadDiff diff;
+    EXPECT_FALSE(diff.HasChanges());
+
+    diff.json_stats_to_load[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    EXPECT_TRUE(diff.HasChanges());
+
+    diff.json_stats_to_load.clear();
+    diff.json_stats_to_replace[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    EXPECT_TRUE(diff.HasChanges());
+
+    diff.json_stats_to_replace.clear();
+    diff.json_stats_to_drop.insert(FieldId(102));
+    EXPECT_TRUE(diff.HasChanges());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesJsonStats) {
+    LoadDiff diff;
+    diff.json_stats_to_load[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    diff.json_stats_to_replace[FieldId(103)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    diff.json_stats_to_drop.insert(FieldId(104));
+
+    auto str = diff.ToString();
+    EXPECT_TRUE(str.find("json_stats_to_load") != std::string::npos);
+    EXPECT_TRUE(str.find("102") != std::string::npos);
+    EXPECT_TRUE(str.find("json_stats_to_replace") != std::string::npos);
+    EXPECT_TRUE(str.find("103") != std::string::npos);
+    EXPECT_TRUE(str.find("json_stats_to_drop") != std::string::npos);
+    EXPECT_TRUE(str.find("104") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffJsonStatsFromStats) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    auto& json_stats = (*proto.mutable_jsonkeystatslogs())[102];
+    json_stats.set_fieldid(102);
+    json_stats.set_version(1);
+    json_stats.set_buildid(5001);
+    json_stats.set_log_size(4096);
+    json_stats.set_memory_size(8192);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.set_base_path("/path/to/json_stats");
+    json_stats.add_files("meta.json");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_EQ(diff.json_stats_to_load.size(), 1);
+    EXPECT_TRUE(diff.json_stats_to_load.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
+    const auto current_format = std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_collectionid(200);
+    current_proto.set_partitionid(300);
+    current_proto.set_num_of_rows(1000);
+    auto& current_stats = (*current_proto.mutable_jsonkeystatslogs())[102];
+    current_stats.set_fieldid(102);
+    current_stats.set_version(1);
+    current_stats.set_buildid(5001);
+    current_stats.set_log_size(4096);
+    current_stats.set_memory_size(8192);
+    current_stats.set_json_key_stats_data_format(current_format);
+    current_stats.set_base_path("/path/to/json_stats");
+    current_stats.add_files("meta.json");
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_same_info(new_proto, schema_);
+    auto same_diff = current_info.ComputeDiff(new_same_info);
+    EXPECT_TRUE(same_diff.json_stats_to_load.empty());
+    EXPECT_TRUE(same_diff.json_stats_to_replace.empty());
+    EXPECT_TRUE(same_diff.json_stats_to_drop.empty());
+
+    auto& new_stats = (*new_proto.mutable_jsonkeystatslogs())[103];
+    new_stats.set_fieldid(103);
+    new_stats.set_version(1);
+    new_stats.set_buildid(5002);
+    new_stats.set_log_size(1024);
+    new_stats.set_memory_size(2048);
+    new_stats.set_json_key_stats_data_format(current_format);
+    new_stats.set_base_path("/path/to/new_json_stats");
+    new_stats.add_files("meta.json");
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto new_diff = current_info.ComputeDiff(new_info);
+    EXPECT_EQ(new_diff.json_stats_to_load.size(), 1);
+    EXPECT_TRUE(new_diff.json_stats_to_load.count(FieldId(103)) > 0);
+
+    (*new_proto.mutable_jsonkeystatslogs())[102].set_version(2);
+    SegmentLoadInfo replace_info(new_proto, schema_);
+    auto replace_diff = current_info.ComputeDiff(replace_info);
+    EXPECT_EQ(replace_diff.json_stats_to_replace.size(), 1);
+    EXPECT_TRUE(replace_diff.json_stats_to_replace.count(FieldId(102)) > 0);
+
+    proto::segcore::SegmentLoadInfo drop_proto;
+    drop_proto.set_segmentid(100);
+    drop_proto.set_collectionid(200);
+    drop_proto.set_partitionid(300);
+    drop_proto.set_num_of_rows(1000);
+    SegmentLoadInfo drop_info(drop_proto, schema_);
+    auto drop_diff = current_info.ComputeDiff(drop_info);
+    EXPECT_EQ(drop_diff.json_stats_to_drop.size(), 1);
+    EXPECT_TRUE(drop_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+
+    proto::segcore::SegmentLoadInfo invalid_proto;
+    invalid_proto.set_segmentid(100);
+    invalid_proto.set_collectionid(200);
+    invalid_proto.set_partitionid(300);
+    invalid_proto.set_num_of_rows(1000);
+    auto& invalid_stats = (*invalid_proto.mutable_jsonkeystatslogs())[102];
+    invalid_stats.CopyFrom(current_stats);
+    invalid_stats.set_json_key_stats_data_format(current_format - 1);
+    SegmentLoadInfo invalid_info(invalid_proto, schema_);
+    auto invalid_diff = current_info.ComputeDiff(invalid_info);
+    EXPECT_TRUE(invalid_diff.json_stats_to_load.empty());
+    EXPECT_TRUE(invalid_diff.json_stats_to_replace.empty());
+    EXPECT_EQ(invalid_diff.json_stats_to_drop.size(), 1);
+    EXPECT_TRUE(invalid_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsDisabled) {
+    SetDefaultJSONKeyStatsEnable(false);
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_collectionid(200);
+    current_proto.set_partitionid(300);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto& json_stats = (*new_proto.mutable_jsonkeystatslogs())[102];
+    json_stats.set_fieldid(102);
+    json_stats.set_version(1);
+    json_stats.set_buildid(5001);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.add_files("meta.json");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.json_stats_to_load.empty());
+    EXPECT_TRUE(diff.json_stats_to_replace.empty());
+    EXPECT_TRUE(diff.json_stats_to_drop.empty());
+    SetDefaultJSONKeyStatsEnable(true);
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexMultipleFields) {

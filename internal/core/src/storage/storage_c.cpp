@@ -127,6 +127,10 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.json_stats_enable_mmap =
+            c_mmap_config.json_stats_enable_mmap;
+        mmap_config.json_stats_mmap_path =
+            std::string(c_mmap_config.json_stats_mmap_path);
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
