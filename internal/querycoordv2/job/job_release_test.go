@@ -22,13 +22,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -128,12 +133,34 @@ func newReleaseCollectionJobMeta(t *testing.T, collectionID, replicaID int64, no
 	return m, catalog
 }
 
+func newReleaseJobDeps(t *testing.T, m *meta.Meta, dist *meta.DistributionManager) (*observers.TargetObserver, *checkers.CheckerController, proxyutil.ProxyClientManagerInterface) {
+	t.Helper()
+
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	targetMgr.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{}).Maybe()
+	targetMgr.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil).Maybe()
+	targetMgr.EXPECT().RemoveCollection(mock.Anything, mock.Anything).Return().Maybe()
+	nodeMgr := session.NewNodeManager()
+
+	targetObserver := observers.NewTargetObserver(m, targetMgr, dist, nil, nil, nodeMgr)
+	targetObserver.Start()
+	t.Cleanup(targetObserver.Stop)
+
+	assign.InitGlobalAssignPolicyFactory(nil, nodeMgr, dist, m, targetMgr)
+	checkerController := checkers.NewCheckerController(m, dist, targetMgr, nodeMgr, nil, nil)
+	proxyManager := proxyutil.NewProxyClientManager(nil)
+	return targetObserver, checkerController, proxyManager
+}
+
 func TestReleaseCollectionJobRemovesReplicaAfterDistributionReleased(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(1000)
 	replicaID := int64(10)
 	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, 1)
 	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
 
 	releaseJob := NewReleaseCollectionJob(
 		ctx,
@@ -142,9 +169,9 @@ func TestReleaseCollectionJobRemovesReplicaAfterDistributionReleased(t *testing.
 		m,
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
 	)
 
 	require.NoError(t, releaseJob.Execute())
@@ -164,6 +191,7 @@ func TestReleaseCollectionJobKeepsReplicaWhenDistributionStillExists(t *testing.
 	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, nodeID)
 	dist := meta.NewDistributionManager(session.NewNodeManager())
 	dist.ChannelDistManager.Update(nodeID, utils.CreateTestChannel(collectionID, nodeID, 1, "channel-1"))
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
 
 	releaseJob := NewReleaseCollectionJob(
 		ctx,
@@ -172,9 +200,9 @@ func TestReleaseCollectionJobKeepsReplicaWhenDistributionStillExists(t *testing.
 		m,
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
 	)
 
 	err := releaseJob.Execute()
@@ -193,6 +221,7 @@ func TestReleaseCollectionJobFinalizesReplicaCleanupOnRetry(t *testing.T) {
 	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, 1)
 	require.NoError(t, m.CollectionManager.RemoveCollection(ctx, collectionID))
 	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
 
 	releaseJob := NewReleaseCollectionJob(
 		ctx,
@@ -201,9 +230,9 @@ func TestReleaseCollectionJobFinalizesReplicaCleanupOnRetry(t *testing.T) {
 		m,
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
 	)
 
 	require.NoError(t, releaseJob.Execute())
