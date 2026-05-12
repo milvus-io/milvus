@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -49,4 +50,25 @@ func TestRequestV2_GetCollectionName(t *testing.T) {
 			assert.Equal(t, tt.want, tt.req.GetCollectionName())
 		})
 	}
+}
+
+func TestBuildFieldPartialUpdateOps(t *testing.T) {
+	ops, err := buildFieldPartialUpdateOps([]FieldPartialUpdateOpReq{
+		{FieldName: "tags", Op: "ARRAY_APPEND"},
+		{FieldName: "scores", Op: "ARRAY_REMOVE"},
+	})
+	assert.NoError(t, err)
+	assert.Len(t, ops, 2)
+	assert.Equal(t, "tags", ops[0].GetFieldName())
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_APPEND, ops[0].GetOp())
+	assert.Equal(t, "scores", ops[1].GetFieldName())
+	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, ops[1].GetOp())
+}
+
+func TestBuildFieldPartialUpdateOps_RejectsUnknownOp(t *testing.T) {
+	_, err := buildFieldPartialUpdateOps([]FieldPartialUpdateOpReq{
+		{FieldName: "tags", Op: "ARRAY_EXTEND"},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported partial update op")
 }
