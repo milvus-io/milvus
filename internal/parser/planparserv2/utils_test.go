@@ -1029,6 +1029,12 @@ func Test_checkValidPoint(t *testing.T) {
 		err := checkValidPoint("POINT( 1  2 )")
 		assert.NoError(t, err)
 	})
+
+	t.Run("valid non-point WKT", func(t *testing.T) {
+		err := checkValidPoint("POLYGON((0 0, 1 0, 1 1, 0 0))")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only supports POINT geometry")
+	})
 }
 
 // Test_convertHanToASCII_FastPath tests the Chinese character to Unicode escape conversion
