@@ -40,6 +40,8 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
 		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+	case *planpb.Expr_GisfunctionFilterExpr:
+		return FillGISFunctionFilterExpressionValue(e.GisfunctionFilterExpr, templateValues)
 	case *planpb.Expr_ElementFilterExpr:
 		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
 			return err
@@ -84,10 +86,35 @@ func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*p
 	return nil
 }
 
+func isLikeMatchOp(op planpb.OpType) bool {
+	switch op {
+	case planpb.OpType_Match, planpb.OpType_PrefixMatch, planpb.OpType_PostfixMatch, planpb.OpType_InnerMatch:
+		return true
+	default:
+		return false
+	}
+}
+
 func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues map[string]*planpb.GenericValue) error {
 	value, ok := templateValues[expr.GetTemplateVariableName()]
 	if !ok {
 		return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
+	}
+	if value == nil {
+		return fmt.Errorf("the value of expression template variable {%s} is nil", expr.GetTemplateVariableName())
+	}
+
+	if isLikeMatchOp(expr.GetOp()) {
+		if !IsString(value) {
+			return fmt.Errorf("the value of like expression template variable {%s} is not string", expr.GetTemplateVariableName())
+		}
+		op, operand, err := translatePatternMatch(value.GetStringVal())
+		if err != nil {
+			return err
+		}
+		expr.Op = op
+		expr.Value = NewString(operand)
+		return nil
 	}
 
 	dataType := expr.GetColumnInfo().GetDataType()
@@ -103,6 +130,30 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 		return err
 	}
 	expr.Value = castedValue
+	return nil
+}
+
+func FillGISFunctionFilterExpressionValue(expr *planpb.GISFunctionFilterExpr, templateValues map[string]*planpb.GenericValue) error {
+	templateVariableName := expr.GetWktString()
+	value, ok := templateValues[templateVariableName]
+	if !ok {
+		return fmt.Errorf("the value of expression template variable name {%s} is not found", templateVariableName)
+	}
+	if value == nil || !IsString(value) {
+		return fmt.Errorf("the value of GIS WKT template variable {%s} is not string", templateVariableName)
+	}
+
+	wktString := value.GetStringVal()
+	if expr.GetOp() == planpb.GISFunctionFilterExpr_DWithin {
+		if err := checkValidPoint(wktString); err != nil {
+			return err
+		}
+	} else {
+		if err := checkValidWKT(wktString); err != nil {
+			return err
+		}
+	}
+	expr.WktString = wktString
 	return nil
 }
 
