@@ -4502,9 +4502,16 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
+@pytest.mark.xdist_group(name="snapshot_rbac_serial")
 class TestMilvusClientSnapshotRbac(TestMilvusClientSnapshotBase):
     """
     Test RBAC v2 privilege enforcement for snapshot operations.
+
+    Pinned to a single xdist worker via ``xdist_group`` because the
+    teardown does a global ``list_users()`` / ``list_roles()`` and drops
+    everything non-default. Under ``-n>1`` that cross-deletes objects
+    owned by other workers and causes cascading "role not found" /
+    "role has privileges" failures (same root cause as #49699).
     """
 
     user_pre = "snap_user"

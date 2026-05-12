@@ -10,6 +10,14 @@ from pymilvus import DataType
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
+# RBAC test classes share teardown logic that lists and drops every user,
+# role, privilege group, and database on the server. Under pytest-xdist `-n`
+# this cross-deletes objects owned by sibling workers. Pin the whole module
+# to a single xdist worker (loadgroup) so tests run serially without
+# starving other test files of parallelism.
+pytestmark = pytest.mark.xdist_group(name="rbac_serial")
+
+
 prefix = "client_rbac"
 
 
