@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -159,9 +160,14 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		}
 		// add all partitions id into the collection info.
 		currentPartition[common.AllPartitionsID] = struct{}{}
+		var latestSchema *streamingpb.CollectionSchemaOfVChannel
+		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
+			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
+		}
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
+			Schema:       latestSchema,
 		}
 	}
 	return collectionInfoMap
@@ -187,6 +193,7 @@ type shardManagerImpl struct {
 type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
+	Schema       *streamingpb.CollectionSchemaOfVChannel
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {
