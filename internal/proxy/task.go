@@ -698,7 +698,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	// User-added fields must be nullable so that old segments without this field can return
 	// NULL rather than causing a schema inconsistency at query time.
 	if !t.fieldSchema.GetNullable() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName())
 	}
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
@@ -935,7 +935,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		return merr.WrapErrParameterInvalidMsg("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 	if fieldList.Contain(newFieldSchema.GetName()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("duplicated field name %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("duplicated field name %s", newFieldSchema.GetName())
 	}
 
 	// --- new field property constraints ---
@@ -962,13 +962,13 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		return err
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetIsPrimaryKey() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add pk field, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("not support to add pk field, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetAutoID() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", newFieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg("only primary field can speficy AutoID with true, field name = %s", newFieldSchema.GetName())
 	}
 	if newFieldSchema.GetIsPartitionKey() {
 		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", newFieldSchema.GetName())
@@ -981,7 +981,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		}
 		for _, f := range schema.GetFields() {
 			if f.GetIsClusteringKey() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clustering key field, field name: %s", newFieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("already has another clustering key field, field name: %s", newFieldSchema.GetName())
 			}
 		}
 	}
@@ -1007,7 +1007,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 			newFieldSchema.DataType == schemapb.DataType_BinaryVector ||
 			newFieldSchema.DataType == schemapb.DataType_Int8Vector {
 			if len(newFieldSchema.TypeParams) == 0 {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", newFieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("vector field must have dimension specified, field name = %s", newFieldSchema.GetName())
 			}
 		}
 	}

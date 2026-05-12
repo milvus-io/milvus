@@ -248,7 +248,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
 	if err != nil {
 		log.Error("get primary field data failed", zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name))
+		return merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name)
 	}
 
 	upsertIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
@@ -397,7 +397,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
 			idx, ok := existPKToIndex[oldPK]
 			if !ok {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("upsert pk %v not found in query result", oldPK))
+				return merr.WrapErrParameterInvalidMsg("upsert pk %v not found in query result", oldPK)
 			}
 			existIndices[i] = int64(idx)
 		}
@@ -735,7 +735,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -743,7 +743,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 		return nil
 
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	return nil
@@ -1041,7 +1041,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		}, nil
 
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.DataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
 	}
 }
 
