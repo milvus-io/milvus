@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,42 @@ type gcCmd struct {
 	ticket       string
 	done         chan error
 	timeout      <-chan struct{}
+}
+
+const (
+	gcTaskDroppedSegments  = "dropped-segments"
+	gcTaskChannelCP        = "channel-cp"
+	gcTaskUnusedIndexes    = "unused-indexes"
+	gcTaskUnusedSegIndexes = "unused-seg-indexes"
+	gcTaskAnalyzeFiles     = "analyze-files"
+	gcTaskTextIndexFiles   = "text-index-files"
+	gcTaskJSONIndexFiles   = "json-index-files"
+	gcTaskJSONStatsFiles   = "json-stats-files"
+	gcTaskSnapshots        = "snapshots"
+	gcTaskOrphan           = "orphan"
+	gcTaskLOB              = "lob"
+)
+
+var (
+	gcPausableTaskNames = []string{
+		gcTaskDroppedSegments,
+		gcTaskChannelCP,
+		gcTaskUnusedIndexes,
+		gcTaskUnusedSegIndexes,
+		gcTaskAnalyzeFiles,
+		gcTaskTextIndexFiles,
+		gcTaskJSONIndexFiles,
+		gcTaskJSONStatsFiles,
+		gcTaskSnapshots,
+	}
+
+	gcControlledTaskNames = append(slices.Clone(gcPausableTaskNames), gcTaskOrphan, gcTaskLOB)
+)
+
+type recycleTask struct {
+	name     string
+	interval time.Duration
+	run      func(context.Context, <-chan gcCmd)
 }
 
 type gcPauseRecord struct {
@@ -222,14 +259,9 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		zap.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	ctx, cancel := context.WithCancel(context.Background())
-	metaSignal := make(chan gcCmd)
-	orphanSignal := make(chan gcCmd)
-	lobSignal := make(chan gcCmd)
-	// control signal channels
-	controlChannels := map[string]chan gcCmd{
-		"meta":   metaSignal,
-		"orphan": orphanSignal,
-		"lob":    lobSignal,
+	controlChannels := make(map[string]chan gcCmd, len(gcControlledTaskNames))
+	for _, taskName := range gcControlledTaskNames {
+		controlChannels[taskName] = make(chan gcCmd)
 	}
 	return &garbageCollector{
 		ctx:                   ctx,
@@ -324,42 +356,50 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, tick
 	}
 }
 
+func (gc *garbageCollector) recycleTasks() []recycleTask {
+	lobCheckInterval := Params.DataCoordCfg.GCLOBCheckInterval.GetAsDuration(time.Second)
+	return []recycleTask{
+		{name: gcTaskDroppedSegments, interval: gc.option.checkInterval, run: gc.recycleDroppedSegments},
+		{name: gcTaskChannelCP, interval: gc.option.checkInterval, run: gc.recycleChannelCPMeta},
+		{name: gcTaskUnusedIndexes, interval: gc.option.checkInterval, run: gc.recycleUnusedIndexes},
+		{name: gcTaskUnusedSegIndexes, interval: gc.option.checkInterval, run: gc.recycleUnusedSegIndexes},
+		{name: gcTaskAnalyzeFiles, interval: gc.option.checkInterval, run: gc.recycleUnusedAnalyzeFiles},
+		{name: gcTaskTextIndexFiles, interval: gc.option.checkInterval, run: gc.recycleUnusedTextIndexFiles},
+		{name: gcTaskJSONIndexFiles, interval: gc.option.checkInterval, run: gc.recycleUnusedJSONIndexFiles},
+		{name: gcTaskJSONStatsFiles, interval: gc.option.checkInterval, run: gc.recycleUnusedJSONStatsFiles},
+		{name: gcTaskSnapshots, interval: gc.option.checkInterval, run: gc.recycleSnapshots},
+		{
+			name:     gcTaskOrphan,
+			interval: gc.option.scanInterval,
+			run: func(ctx context.Context, signal <-chan gcCmd) {
+				// orphan file not controlled by collection level pause for now
+				gc.recycleUnusedBinlogFiles(ctx)
+				gc.recycleUnusedIndexFilesV0(ctx)
+				gc.recycleUnusedIndexFilesV1(ctx)
+			},
+		},
+		{
+			name:     gcTaskLOB,
+			interval: lobCheckInterval,
+			run: func(ctx context.Context, signal <-chan gcCmd) {
+				gc.recycleUnusedLOBFiles(ctx)
+			},
+		},
+	}
+}
+
 // work contains actual looping check logic
 func (gc *garbageCollector) work(ctx context.Context) {
 	// TODO: fast cancel for gc when closing.
-	// Run gc tasks in parallel.
-	gc.wg.Add(4)
-	go func() {
-		defer gc.wg.Done()
-		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
-			gc.recycleDroppedSegments(ctx, signal)
-			gc.recycleChannelCPMeta(ctx, signal)
-			gc.recycleUnusedIndexes(ctx, signal)
-			gc.recycleUnusedSegIndexes(ctx, signal)
-			gc.recycleUnusedAnalyzeFiles(ctx, signal)
-			gc.recycleUnusedTextIndexFiles(ctx, signal)
-			gc.recycleUnusedJSONIndexFiles(ctx, signal)
-			gc.recycleUnusedJSONStatsFiles(ctx, signal)
-			gc.recycleSnapshots(ctx, signal)
-		})
-	}()
-	go func() {
-		defer gc.wg.Done()
-		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context, signal <-chan gcCmd) {
-			// orphan file not controlled by collection level pause for now
-			gc.recycleUnusedBinlogFiles(ctx)
-			gc.recycleUnusedIndexFilesV0(ctx)
-			gc.recycleUnusedIndexFilesV1(ctx)
-		})
-	}()
-	go func() {
-		defer gc.wg.Done()
-		// LOB (TEXT column) file GC runs on its own interval
-		lobCheckInterval := Params.DataCoordCfg.GCLOBCheckInterval.GetAsDuration(time.Second)
-		gc.runRecycleTaskWithPauser(ctx, "lob", lobCheckInterval, func(ctx context.Context, signal <-chan gcCmd) {
-			gc.recycleUnusedLOBFiles(ctx)
-		})
-	}()
+	tasks := gc.recycleTasks()
+	gc.wg.Add(len(tasks) + 1)
+	for _, task := range tasks {
+		task := task
+		go func() {
+			defer gc.wg.Done()
+			gc.runRecycleTaskWithPauser(ctx, task.name, task.interval, task.run)
+		}()
+	}
 	go func() {
 		defer gc.wg.Done()
 		gc.startControlLoop(ctx)
@@ -425,19 +465,53 @@ func (gc *garbageCollector) pause(cmd gcCmd) error {
 	if err != nil {
 		return err
 	}
-	signalCh := gc.controlChannels["meta"]
-	// send signal to worker
-	// make sure worker ack the pause command before returning
-	signal := gcCmd{
-		done:    make(chan error),
-		timeout: cmd.timeout,
-	}
-	select {
-	case signalCh <- signal:
-		<-signal.done
-	case <-cmd.timeout:
-		// timeout, resume the pause
+	if err := gc.pauseWorkers(cmd); err != nil {
 		gc.resume(cmd)
+		return err
+	}
+	return nil
+}
+
+func (gc *garbageCollector) pauseWorkers(cmd gcCmd) error {
+	// Send pause notifications to every pausable worker in parallel so a slow
+	// worker does not delay the others. Each notification is independent; the
+	// pauseUntil state has already been committed by pause() before this runs.
+	// Failed task names are collected so the caller has actionable telemetry.
+	var wg sync.WaitGroup
+	failedCh := make(chan string, len(gcPausableTaskNames))
+	for _, taskName := range gcPausableTaskNames {
+		signalCh, ok := gc.controlChannels[taskName]
+		if !ok {
+			continue
+		}
+		taskName := taskName
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			signal := gcCmd{
+				done:    make(chan error),
+				timeout: cmd.timeout,
+			}
+			select {
+			case signalCh <- signal:
+				select {
+				case <-signal.done:
+				case <-cmd.timeout:
+					failedCh <- taskName
+				}
+			case <-cmd.timeout:
+				failedCh <- taskName
+			}
+		}()
+	}
+	wg.Wait()
+	close(failedCh)
+	var failedTasks []string
+	for name := range failedCh {
+		failedTasks = append(failedTasks, name)
+	}
+	if len(failedTasks) > 0 {
+		return errors.Newf("pause garbage collection timeout for tasks: %v", failedTasks)
 	}
 	return nil
 }
@@ -780,6 +854,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	}
 
 	log.Info("start to GC segments", zap.Int("drop_num", len(drops)))
+	maxConcurrentSegments := Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt()
+	if maxConcurrentSegments < 1 {
+		maxConcurrentSegments = 1
+	}
+	segmentSlots := make(chan struct{}, maxConcurrentSegments)
+	var wg sync.WaitGroup
+	defer gc.waitDroppedSegmentTasks(signal, &wg)
+
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
 			// process canceled, stop.
@@ -818,69 +900,198 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		cloned := segment.Clone()
-
-		// V3 segment: delete entire basePath recursively
-		if cloned.GetStorageVersion() == storage.StorageV3 {
-			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
-			if err != nil {
-				log.Warn("GC V3 segment failed to parse manifest path",
-					zap.String("manifestPath", cloned.GetManifestPath()),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment start, removing basePath...",
-				zap.String("basePath", basePath))
-			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
-				log.Warn("GC V3 segment remove basePath failed",
-					zap.String("basePath", basePath),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment done")
-			cloned = nil
-			continue
+		if !gc.acquireDroppedSegmentSlot(ctx, signal, segmentSlots) {
+			return
 		}
-
-		// V1/V2 segment: delete individual log files
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-
-		logs := getLogs(cloned)
-		for key := range getTextLogs(cloned) {
-			logs[key] = struct{}{}
-		}
-
-		for key := range getJSONKeyLogs(cloned, gc) {
-			logs[key] = struct{}{}
-		}
-
-		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
-			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
-			zap.Int("stats_logs", len(cloned.GetStatslogs())),
-			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
-			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
-		if err := gc.removeObjectFiles(ctx, logs); err != nil {
-			log.Warn("GC segment remove logs failed", zap.Error(err))
-			cloned = nil
-			continue
-		}
-
-		if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-			cloned = nil
-			continue
-		}
-		log.Info("GC segment meta drop segment done")
-		cloned = nil // release memory
+		wg.Add(1)
+		go func(segmentID int64, segment *SegmentInfo) {
+			defer wg.Done()
+			defer func() { <-segmentSlots }()
+			gc.recycleDroppedSegment(ctx, segmentID, segment)
+		}(segmentID, segment)
 	}
+}
+
+func (gc *garbageCollector) acquireDroppedSegmentSlot(ctx context.Context, signal <-chan gcCmd, segmentSlots chan struct{}) bool {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case segmentSlots <- struct{}{}:
+			return true
+		case <-ticker.C:
+			gc.ackSignal(signal)
+		case <-ctx.Done():
+			// Drain any pending pause cmd so the requester is not left waiting
+			// on cmd.timeout when the gc is being shut down.
+			gc.ackSignal(signal)
+			return false
+		}
+	}
+}
+
+func (gc *garbageCollector) waitDroppedSegmentTasks(signal <-chan gcCmd, wg *sync.WaitGroup) {
+	// Ensure a final drain runs even if wg.Wait() returns before the first
+	// ticker fire (e.g. no goroutines were ever spawned, or all finished
+	// before this function starts).
+	defer gc.ackSignal(signal)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			gc.ackSignal(signal)
+		}
+	}
+}
+
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+	log := log.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segmentID)
+	if indexSnapshotBlocked {
+		log.Info("skip GC segment since segment index is protected by snapshot",
+			zap.Int("segmentIndexes", len(segIndexes)))
+		return
+	}
+
+	cloned := segment.Clone()
+	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
+		log.Warn("GC segment remove files failed", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.removeDroppedSegmentIndexMeta(ctx, segIndexes); err != nil {
+		log.Warn("GC segment index meta failed, wait to retry", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+		log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+		return
+	}
+	log.Info("GC segment meta drop segment done", zap.Int("segmentIndexes", len(segIndexes)))
+}
+
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
+	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
+	if len(segIndexes) == 0 {
+		return nil, nil, false
+	}
+	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+		for _, segIdx := range segIndexes {
+			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+				return segIndexes, nil, true
+			}
+		}
+	}
+	indexFiles := make(map[string]struct{}, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		for key := range gc.getAllIndexFilesOfIndex(segIdx) {
+			indexFiles[key] = struct{}{}
+		}
+	}
+	return segIndexes, indexFiles, false
+}
+
+func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
+	if gc.meta == nil || gc.meta.indexMeta == nil {
+		return nil
+	}
+	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
+}
+
+func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
+	log := log.With(zap.Int64("segmentID", cloned.GetID()))
+
+	// V3 segment data lives under the manifest base path. Segment index files still
+	// live under index file prefixes and must be deleted from recorded file keys.
+	if cloned.GetStorageVersion() == storage.StorageV3 {
+		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
+		if err != nil {
+			log.Warn("GC V3 segment failed to parse manifest path",
+				zap.String("manifestPath", cloned.GetManifestPath()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment start, removing basePath...",
+			zap.String("basePath", basePath),
+			zap.Int("indexFiles", len(indexFiles)))
+		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+			log.Warn("GC V3 segment remove basePath failed",
+				zap.String("basePath", basePath),
+				zap.Error(err))
+			return err
+		}
+		if len(indexFiles) == 0 {
+			log.Info("GC V3 segment files done")
+			return nil
+		}
+		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			log.Warn("GC V3 segment remove index files failed", zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment files done")
+		return nil
+	}
+
+	binlog.DecompressBinLogs(cloned.SegmentInfo)
+	logs := getLogs(cloned)
+	for key := range getTextLogs(cloned) {
+		logs[key] = struct{}{}
+	}
+	for key := range getJSONKeyLogs(cloned, gc) {
+		logs[key] = struct{}{}
+	}
+	for key := range indexFiles {
+		logs[key] = struct{}{}
+	}
+
+	log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
+		zap.Int("delta_logs", len(cloned.GetDeltalogs())),
+		zap.Int("stats_logs", len(cloned.GetStatslogs())),
+		zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+		zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
+		zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+		zap.Int("index_files", len(indexFiles)))
+	if err := gc.removeObjectFiles(ctx, logs); err != nil {
+		log.Warn("GC segment remove logs failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+	if len(segIndexes) == 0 {
+		return nil
+	}
+	for _, segIdx := range segIndexes {
+		if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {

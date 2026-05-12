@@ -866,6 +866,23 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.getSegmentIndexes(collectionID, segID)
 }
 
+func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
+	if m.segmentIndexes == nil {
+		return nil
+	}
+	segIndexInfos, ok := m.segmentIndexes.Get(segID)
+	if !ok || segIndexInfos.Len() == 0 {
+		return nil
+	}
+
+	segIndexes := segIndexInfos.Values()
+	ret := make([]*model.SegmentIndex, 0, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		ret = append(ret, model.CloneSegmentIndex(segIdx))
+	}
+	return ret
+}
+
 // Note: thread-unsafe, don't call it outside indexMeta
 func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
