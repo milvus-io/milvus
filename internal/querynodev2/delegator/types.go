@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,9 +50,9 @@ type TSafeUpdater interface {
 }
 
 // ErrTsLagTooLarge serviceable and guarantee lag too large.
-var ErrTsLagTooLarge = errors.New("Timestamp lag too large")
+var ErrTsLagTooLarge = merr.ErrChannelTSafeStalled
 
 // WrapErrTsLagTooLarge wraps ErrTsLagTooLarge with lag and max value.
-func WrapErrTsLagTooLarge(duration time.Duration, maxLag time.Duration) error {
-	return fmt.Errorf("%w lag(%s) max(%s)", ErrTsLagTooLarge, duration, maxLag)
+func WrapErrTsLagTooLarge(channel string, duration time.Duration, maxLag time.Duration) error {
+	return merr.WrapErrChannelTSafeStalled(channel, fmt.Sprintf("lag(%s) max(%s)", duration, maxLag))
 }
