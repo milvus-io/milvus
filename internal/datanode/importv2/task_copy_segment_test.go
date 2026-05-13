@@ -609,6 +609,7 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 
 	t.Run("copy with vector/scalar index files", func(t *testing.T) {
 		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
+		mockCM.EXPECT().RootPath().Return("files").Times(2)
 
 		req := &datapb.CopySegmentRequest{
 			JobID:  100,
