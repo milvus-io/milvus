@@ -244,8 +244,26 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
 		if len(shardLeaders) > 0 && requestExcludedNodes.Len() >= len(shardLeaders) {
-			log.Warn("all replicas are request-level excluded, clear it and retry")
-			requestExcludedNodes.Clear()
+			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
+			if err != nil {
+				log.Warn("failed to refresh shard leaders", zap.Error(err))
+				if lastErr != nil {
+					return true, lastErr
+				}
+				return true, err
+			}
+
+			allReplicaExcluded := len(shardLeaders) > 0
+			for _, node := range shardLeaders {
+				if !requestExcludedNodes.Contain(node.NodeID) {
+					allReplicaExcluded = false
+					break
+				}
+			}
+			if allReplicaExcluded {
+				log.Warn("all replicas are request-level excluded after refresh, clear it and retry")
+				requestExcludedNodes.Clear()
+			}
 		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
