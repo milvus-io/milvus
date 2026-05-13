@@ -488,7 +488,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 }
 
 func assertFieldNotExists(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	for _, field := range coll.Fields {
 		if field.Name == fieldName {
@@ -498,7 +498,7 @@ func assertFieldNotExists(t *testing.T, ctx context.Context, core *Core, dbName 
 }
 
 func assertMaxFieldIDProperty(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedMaxFieldID int64) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	for _, kv := range coll.Properties {
 		if kv.Key == common.MaxFieldIDKey {

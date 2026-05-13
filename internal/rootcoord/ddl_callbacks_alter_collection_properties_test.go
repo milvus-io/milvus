@@ -463,7 +463,7 @@ func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
 	// The re-enabled $meta field should have a new FieldID (102, not 101).
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	dynamicField := coll.Fields[len(coll.Fields)-1]
 	require.True(t, dynamicField.IsDynamic)

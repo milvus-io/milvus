@@ -229,7 +229,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 	defer broadcaster.Close()
 
-	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
