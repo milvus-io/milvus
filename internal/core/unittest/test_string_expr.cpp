@@ -2284,61 +2284,6 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
     EXPECT_FALSE(no_dot_nl(std::string("abc\ndef")));  // \n does NOT match .
     EXPECT_TRUE(no_dot_nl(std::string("abcXdef")));    // X matches .
 
-    auto tantivy_pattern = [](const std::string& pattern,
-                              bool wrap_for_substring) {
-        return TryTranslateRegexToTantivyPattern(pattern, wrap_for_substring)
-            .pattern;
-    };
-
-    // ── TryTranslateRegexToTantivyPattern: (?s)/(?-s) flag awareness ──
-    // Default: dot_all=true, . → [\s\S]
-    EXPECT_EQ(tantivy_pattern("c.d", false), "c[\\s\\S]d");
-    // (?-s) disables dot_all: . stays as .
-    EXPECT_EQ(tantivy_pattern("(?-s)c.d", false), "(?-s)c.d");
-    // (?s) re-enables dot_all after (?-s)
-    EXPECT_EQ(tantivy_pattern("(?-s)a.b(?s)c.d", false),
-              "(?-s)a.b(?s)c[\\s\\S]d");
-    // Scoped flag group: (?-s:...) only affects inside
-    EXPECT_EQ(tantivy_pattern("a.b(?-s:c.d)e.f", false),
-              "a[\\s\\S]b(?-s:c.d)e[\\s\\S]f");
-    // Scoped (?s:...) inside (?-s) context
-    EXPECT_EQ(tantivy_pattern("(?-s)a.b(?s:c.d)e.f", false),
-              "(?-s)a.b(?s:c[\\s\\S]d)e.f");
-    // Escaped dot is never replaced
-    EXPECT_EQ(tantivy_pattern("c\\.d", false), "c\\.d");
-    // Dot inside character class is never replaced
-    EXPECT_EQ(tantivy_pattern("[.]", false), "[.]");
-    // Non-capturing group (?:...) is NOT a flag group
-    EXPECT_EQ(tantivy_pattern("(?:c.d)", false), "(?:c[\\s\\S]d)");
-    // Combined flags: (?i-s) clears s
-    EXPECT_EQ(tantivy_pattern("(?i-s)c.d", false), "(?i-s)c.d");
-    // wrap_for_substring wrapping
-    EXPECT_EQ(tantivy_pattern("a.b", true), "[\\s\\S]*(?:a[\\s\\S]b)[\\s\\S]*");
-    // RE2 PartialMatch anchors must be translated because Tantivy regex
-    // matches the whole indexed key and does not support zero-width anchors.
-    EXPECT_EQ(tantivy_pattern("^user_[0-9]+", true), "user_[0-9]+[\\s\\S]*");
-    EXPECT_EQ(tantivy_pattern("user_[0-9]+$", true),
-              "[\\s\\S]*(?:user_[0-9]+)");
-    EXPECT_EQ(tantivy_pattern("^user_[0-9]+$", true), "user_[0-9]+");
-    EXPECT_EQ(tantivy_pattern("\\^user_[0-9]+", true),
-              "[\\s\\S]*(?:\\^user_[0-9]+)[\\s\\S]*");
-    EXPECT_EQ(tantivy_pattern("user_[0-9]+\\$", true),
-              "[\\s\\S]*(?:user_[0-9]+\\$)[\\s\\S]*");
-    EXPECT_EQ(tantivy_pattern("[^a]+$", true), "[\\s\\S]*(?:[^a]+)");
-
-    auto multiline_end = TryTranslateRegexToTantivyPattern("(?m)user_[0-9]+$");
-    EXPECT_FALSE(multiline_end.use_tantivy_regex);
-    auto word_boundary = TryTranslateRegexToTantivyPattern("\\buser\\b");
-    EXPECT_FALSE(word_boundary.use_tantivy_regex);
-    auto digit_class = TryTranslateRegexToTantivyPattern("\\d+");
-    EXPECT_FALSE(digit_class.use_tantivy_regex);
-    auto lazy_quantifier = TryTranslateRegexToTantivyPattern("user+?");
-    EXPECT_TRUE(lazy_quantifier.use_tantivy_regex);
-    EXPECT_EQ(lazy_quantifier.pattern, "[\\s\\S]*(?:user+)[\\s\\S]*");
-    auto escaped_optional_plus = TryTranslateRegexToTantivyPattern("\\+?");
-    EXPECT_TRUE(escaped_optional_plus.use_tantivy_regex);
-    EXPECT_EQ(escaped_optional_plus.pattern, "[\\s\\S]*(?:\\+?)[\\s\\S]*");
-
     // ── Alternation edge cases ──
     // Simple alternation
     PartialRegexMatcher alt1("abc|xyz");

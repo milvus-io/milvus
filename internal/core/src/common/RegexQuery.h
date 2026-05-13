@@ -20,8 +20,6 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "common/TantivyRegexUtil.h"
-
 namespace milvus {
 bool
 is_special(char c);
