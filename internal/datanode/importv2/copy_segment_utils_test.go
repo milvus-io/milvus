@@ -609,7 +609,7 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 		assert.Contains(t, copiedSrc, cm.RootPath()+"/index_files/1002/1/222/333/index1")
 		assert.Contains(t, copiedDst, cm.RootPath()+"/index_files/1002/1/555/666/index1")
 		assert.Equal(t, "index_files/1002/1/555/666/index1", result.IndexInfos[1002].IndexFilePaths[0])
-		assert.Contains(t, copiedFiles, "index_files/1002/1/555/666/index1")
+		assert.Contains(t, copiedFiles, cm.RootPath()+"/index_files/1002/1/555/666/index1")
 	})
 
 	t.Run("copy failure", func(t *testing.T) {

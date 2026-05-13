@@ -640,6 +640,9 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    if (!wrapper_) {
+        InitForBuildIndex();
+    }
     if (schema_.nullable()) {
         int64_t total = 0;
         for (const auto& data : field_datas) {

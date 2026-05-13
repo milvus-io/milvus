@@ -410,7 +410,7 @@ func CopySegmentAndIndexFiles(
 			log.Warn("failed to copy file", fields...)
 			return nil, copiedFiles, fmt.Errorf("failed to copy file from %s to %s: %w", copySrc, copyDst, err)
 		}
-		copiedFiles = append(copiedFiles, dst)
+		copiedFiles = append(copiedFiles, copyDst)
 	}
 
 	log.Info("all files copied successfully",
