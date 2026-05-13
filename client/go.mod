@@ -121,4 +121,7 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/milvus-io/milvus/pkg/v3 => ../pkg
+replace (
+	github.com/milvus-io/milvus-proto/go-api/v3 => /home/spadea/working/milvus-proto/go-api
+	github.com/milvus-io/milvus/pkg/v3 => ../pkg
+)
