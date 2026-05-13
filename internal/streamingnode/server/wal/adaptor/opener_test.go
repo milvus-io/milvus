@@ -5,15 +5,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
@@ -92,4 +98,83 @@ func TestDetermineLastConfirmedMessageID(t *testing.T) {
 	}, 4)
 	lastConfirmedMessageID = determineLastConfirmedMessageID(rmq.NewRmqID(5), txnBuffer)
 	assert.Equal(t, rmq.NewRmqID(1), lastConfirmedMessageID)
+}
+
+func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
+	channel := types.PChannelInfo{
+		Name:       "alter-wal-flushing-test",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}
+	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog.EXPECT().
+		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.MatchedBy(func(checkpoint *streamingpb.WALCheckpoint) bool {
+			return checkpoint.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+		})).
+		Return(nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+
+	roWAL := adaptImplsToROWAL(&firstTimeTickWALImpls{
+		channel: channel,
+		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return rmq.NewRmqID(1), nil
+		},
+	}, func() {})
+	rateLimitComponent := roWAL.WALRateLimitComponent
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().
+		GetFlusherCheckpointByTimeTick(mock.Anything).
+		Return(&recovery.WALCheckpoint{
+			MessageID: rmq.NewRmqID(2),
+			TimeTick:  100,
+		})
+	rs.EXPECT().Close().Return()
+
+	snapshot := &recovery.RecoverySnapshot{
+		Checkpoint: &recovery.WALCheckpoint{
+			MessageID: rmq.NewRmqID(1),
+			TimeTick:  10,
+			AlterWalState: &streamingpb.AlterWALState{
+				TargetWalName: commonpb.WALName_Test,
+				TimeTick:      100,
+				Stage:         streamingpb.AlterWALStage_FLUSHING,
+			},
+		},
+		AlterWALInfo: &recovery.AlterWALInfo{
+			FoundAlterWALMsg: true,
+			TargetWALName:    commonpb.WALName_Test,
+			AlterWALTs:       100,
+		},
+	}
+
+	var capturedParam *flusherimpl.RecoverWALFlusherParam
+	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
+		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
+			capturedParam = param
+			return &flusherimpl.WALFlusherImpl{}
+		}).
+		Build()
+	defer mockRecoverFlusher.UnPatch()
+
+	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).Return().Build()
+	defer mockFlusherClose.UnPatch()
+
+	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
+		context.Background(),
+		&wal.OpenOption{Channel: channel},
+		roWAL,
+		&interceptors.InterceptorBuildParam{},
+		rs,
+		snapshot,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedParam)
+	assert.Same(t, rateLimitComponent, capturedParam.RateLimitComponent)
+	assert.Same(t, roWAL, capturedParam.WAL.Get())
+	assert.Same(t, rs, capturedParam.RecoveryStorage)
+	assert.Equal(t, channel, capturedParam.ChannelInfo)
+	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
+	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
 }

@@ -319,10 +319,11 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		f.Set(roWAL)
 		roWAL.ForceRecovery(true)
 		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:              f,
-			RecoveryStorage:  rs,
-			ChannelInfo:      roWAL.Channel(),
-			RecoverySnapshot: snapshot,
+			WAL:                f,
+			RecoveryStorage:    rs,
+			ChannelInfo:        roWAL.Channel(),
+			RecoverySnapshot:   snapshot,
+			RateLimitComponent: roWAL.WALRateLimitComponent,
 		})
 	}
 
