@@ -304,7 +304,7 @@ TEST_F(DiskAnnFileManagerTest, ReadFullRelativeIndexPathWithStream) {
     boost::filesystem::remove_all(conf.root_path);
 }
 
-TEST_F(DiskAnnFileManagerTest, ResolveLogicalIndexPathForLoad) {
+TEST_F(DiskAnnFileManagerTest, ToIndexPathForLoad) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
     storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
@@ -312,13 +312,11 @@ TEST_F(DiskAnnFileManagerTest, ResolveLogicalIndexPathForLoad) {
     auto file_manager = std::make_shared<DiskFileManagerImpl>(context);
     std::string logical_path = "index_v1/1/2/3/1000/1/index_file";
 
-    EXPECT_EQ(file_manager->ResolveLogicalIndexFilePathForArrowFileSystem(
-                  logical_path),
+    EXPECT_EQ(file_manager->ToArrowFileSystemIndexPath(logical_path),
               logical_path);
 
     auto chunk_manager_paths =
-        file_manager->ResolveLogicalIndexFilePathsForChunkManager(
-            {logical_path});
+        file_manager->ToChunkManagerIndexPaths({logical_path});
     ASSERT_EQ(chunk_manager_paths.size(), 1);
     EXPECT_EQ(chunk_manager_paths[0],
               NormalizePath(boost::filesystem::path(cm_->GetRootPath()) /

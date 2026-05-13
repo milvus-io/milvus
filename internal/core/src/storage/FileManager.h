@@ -188,8 +188,7 @@ class FileManagerImpl : public milvus::FileManager {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         std::string remote_file_path;
         if (is_index_file) {
-            remote_file_path =
-                ResolveLogicalIndexFilePathForArrowFileSystem(filename);
+            remote_file_path = ToArrowFileSystemIndexPath(filename);
         } else {
             auto local_file_name = GetFileName(filename);
             remote_file_path = GetRemoteTextLogPrefix();
@@ -318,8 +317,8 @@ class FileManagerImpl : public milvus::FileManager {
         return boost::filesystem::path(filepath).filename().string();
     }
 
-    // Resolves a logical Milvus index path to the path expected by Arrow FS.
-    // Example logical path:
+    // Converts a logical Milvus index path to the path opened by Arrow FS.
+    // Logical input:
     //   index_v1/1/20/2/30/40/index_data
     // Remote Arrow FS with rootPath=files opens:
     //   files/index_v1/1/20/2/30/40/index_data
@@ -327,8 +326,7 @@ class FileManagerImpl : public milvus::FileManager {
     //   index_v1/1/20/2/30/40/index_data
     // because the local Arrow FS is already mounted at localStorage.path.
     std::string
-    ResolveLogicalIndexFilePathForArrowFileSystem(
-        const std::string& logical_path) const {
+    ToArrowFileSystemIndexPath(const std::string& logical_path) const {
         // Local FS is rooted at localStorage.path; remote FS needs rootPath.
         if (milvus_storage::IsLocalFileSystem(fs_)) {
             return NormalizePath(logical_path);
@@ -337,20 +335,19 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     std::string
-    ResolveLogicalIndexFilePathForChunkManager(
-        const std::string& logical_path) const {
+    ToChunkManagerIndexPath(const std::string& logical_path) const {
         return NormalizePath(GetStorageRootPath() / logical_path);
     }
 
-    // Resolves logical Milvus index paths to ChunkManager read paths.
-    // Example logical path:
+    // Converts logical Milvus index paths to ChunkManager read paths.
+    // Logical input:
     //   index_v1/1/20/2/30/40/index_data
     // Remote ChunkManager with rootPath=files reads:
     //   files/index_v1/1/20/2/30/40/index_data
     // Local ChunkManager with rootPath=/var/lib/milvus/data reads:
     //   /var/lib/milvus/data/index_v1/1/20/2/30/40/index_data
     std::vector<std::string>
-    ResolveLogicalIndexFilePathsForChunkManager(
+    ToChunkManagerIndexPaths(
         const std::vector<std::string>& logical_paths) const {
         std::vector<std::string> resolved_paths;
         resolved_paths.reserve(logical_paths.size());
