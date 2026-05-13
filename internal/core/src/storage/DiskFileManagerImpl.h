@@ -84,6 +84,23 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalJsonKeyIndexPrefix();
 
+    // Temp build paths (avoid cross-field conflicts)
+    std::string
+    GetLocalTempTextIndexPrefix();
+
+    std::string
+    GetLocalTempJsonKeyIndexPrefix();
+
+    // Cleanup methods
+    void
+    RemoveIndexFiles();
+
+    void
+    RemoveTextLogFiles();
+
+    void
+    RemoveJsonKeyIndexFiles();
+
     // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
     GetRemoteJsonKeyLogPrefix();

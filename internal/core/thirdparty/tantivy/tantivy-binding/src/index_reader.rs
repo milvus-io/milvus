@@ -10,7 +10,7 @@ use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
 use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
-use crate::util::make_bounds;
+use crate::util::{load_fs_index_into_ram_directory, make_bounds};
 use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
@@ -25,10 +25,15 @@ pub(crate) struct IndexReaderWrapper {
 }
 
 impl IndexReaderWrapper {
-    pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+    pub fn load(path: &str, load_in_mmap: bool, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         init_log();
 
-        let index = Index::open_in_dir(path)?;
+        let index = if load_in_mmap {
+            Index::open_in_dir(path)?
+        } else {
+            let ram_dir = load_fs_index_into_ram_directory(path)?;
+            Index::open(ram_dir)?
+        };
 
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }

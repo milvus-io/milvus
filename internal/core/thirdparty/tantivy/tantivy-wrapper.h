@@ -1,3 +1,4 @@
+#include <boost/filesystem.hpp>
 #include <assert.h>
 #include <sstream>
 #include <fmt/format.h>
@@ -13,6 +14,7 @@
 #include "rust-array.h"
 #include "rust-hashmap.h"
 #include "index/Utils.h"
+#include "log/Log.h"
 
 namespace milvus::tantivy {
 using Map = std::map<std::string, std::string>;
@@ -109,9 +111,10 @@ struct TantivyIndexWrapper {
     }
 
     // load index. create index reader.
-    explicit TantivyIndexWrapper(const char* path, SetBitsetFn set_bitset) {
+    explicit TantivyIndexWrapper(const char* path, bool load_in_mmap, SetBitsetFn set_bitset)
+        : load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
-        auto res = RustResultWrapper(tantivy_load_index(path, set_bitset));
+        auto res = RustResultWrapper(tantivy_load_index(path, load_in_mmap_, set_bitset));
         AssertInfo(res.result_->success,
                    "failed to load index: {}",
                    res.result_->error);
@@ -155,7 +158,7 @@ struct TantivyIndexWrapper {
         } else if (!path_.empty()) {
             assert(tantivy_index_exist(path_.c_str()));
             auto res = RustResultWrapper(
-                tantivy_load_index(path_.c_str(), set_bitset));
+                tantivy_load_index(path_.c_str(), load_in_mmap_, set_bitset));
             AssertInfo(res.result_->success,
                        "failed to load index: {}",
                        res.result_->error);
@@ -861,6 +864,14 @@ struct TantivyIndexWrapper {
     }
 
     void
+    remove_index_files() {
+        if (!path_.empty()) {
+            boost::filesystem::remove_all(path_);
+            LOG_INFO("removed tantivy index files: {}", path_);
+        }
+    }
+
+    void
     free() {
         if (writer_ != nullptr) {
             tantivy_free_index_writer(writer_);
@@ -881,6 +892,7 @@ struct TantivyIndexWrapper {
 
  private:
     bool finished_ = false;
+    bool load_in_mmap_ = false;
     IndexWriter writer_ = nullptr;
     IndexReader reader_ = nullptr;
     std::string path_;

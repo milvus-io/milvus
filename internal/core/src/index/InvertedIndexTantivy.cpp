@@ -180,8 +180,13 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     disk_file_manager_->CacheIndexToDisk(inverted_index_files);
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     path_ = prefix;
+    auto enable_mmap = GetValueFromConfig<bool>(config, "enable_mmap");
+    bool load_in_mmap = enable_mmap.has_value() && enable_mmap.value();
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    if (!load_in_mmap) {
+        disk_file_manager_->RemoveIndexFiles();
+    }
 }
 
 template <typename T>

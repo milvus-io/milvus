@@ -18,7 +18,7 @@
 #include "index/Utils.h"
 
 namespace milvus::index {
-constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
+// TMP_TEXT_LOG_PREFIX removed - now using DiskFileManager::GetLocalTempTextIndexPrefix()
 
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
@@ -55,8 +55,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    auto prefix = disk_file_manager_->GetTextIndexIdentifier();
-    path_ = std::string(TMP_TEXT_LOG_PREFIX) + prefix;
+    path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
     boost::filesystem::create_directories(path_);
     d_type_ = TantivyDataType::Text;
@@ -149,8 +148,13 @@ TextMatchIndex::Load(const Config& config) {
     disk_file_manager_->CacheTextLogToDisk(files_value);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
+    auto enable_mmap = GetValueFromConfig<bool>(config, "enable_mmap");
+    bool load_in_mmap = enable_mmap.has_value() && enable_mmap.value();
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), milvus::index::SetBitsetSealed);
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    if (!load_in_mmap) {
+        disk_file_manager_->RemoveTextLogFiles();
+    }
 }
 
 void
