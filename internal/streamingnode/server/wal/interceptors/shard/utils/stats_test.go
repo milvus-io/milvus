@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestStatsConvention(t *testing.T) {
@@ -61,6 +63,18 @@ func TestStatsConvention(t *testing.T) {
 
 	stat4 := NewSegmentStatFromProto(nil)
 	assert.Nil(t, stat4)
+}
+
+func TestNewSegmentStatFromProtoPreservesCreateSegmentTimeTick(t *testing.T) {
+	pb := &streamingpb.SegmentAssignmentStat{
+		CreateSegmentTimeTick: 10086,
+	}
+
+	stat := NewSegmentStatFromProto(pb)
+	assert.Equal(t, uint64(10086), stat.CreateSegmentTimeTick)
+
+	roundTrip := NewProtoFromSegmentStat(stat)
+	assert.Equal(t, uint64(10086), roundTrip.GetCreateSegmentTimeTick())
 }
 
 func TestSegmentStats(t *testing.T) {

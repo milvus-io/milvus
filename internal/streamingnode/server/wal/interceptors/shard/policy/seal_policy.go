@@ -17,6 +17,7 @@ var (
 	PolicyNameIdle                   PolicyName = "idle"
 	PolicyNameGrowingSegmentBytesHWM PolicyName = "growing_bytes_hwm"
 	PolicyNameNodeMemory             PolicyName = "node_memory"
+	PolicyNameBlockingL0             PolicyName = "blocking_l0"
 )
 
 // PolicyPartitionNotFound returns a SealPolicy for partition not found.
@@ -103,6 +104,19 @@ func PolicyNodeMemory(usedRatio float64) SealPolicy {
 	}
 }
 
+// PolicyBlockingL0 returns a SealPolicy for blocking l0.
+func PolicyBlockingL0(blockingRows, blockingBytes uint64, rowLimit, sizeLimit int64) SealPolicy {
+	return SealPolicy{
+		Policy: PolicyNameBlockingL0,
+		Extra: sealByBlockingL0ExtraInfo{
+			BlockingRows:  blockingRows,
+			BlockingBytes: blockingBytes,
+			RowLimit:      rowLimit,
+			SizeLimit:     sizeLimit,
+		},
+	}
+}
+
 // PolicyRecover returns a SealPolicy for recover.
 type SealPolicy struct {
 	Policy PolicyName
@@ -131,6 +145,13 @@ type sealByGrowingSegmentBytesHWM struct {
 // nodeMemory is the extra info of the seal by node memory policy.
 type nodeMemory struct {
 	UsedRatio float64
+}
+
+type sealByBlockingL0ExtraInfo struct {
+	BlockingRows  uint64
+	BlockingBytes uint64
+	RowLimit      int64
+	SizeLimit     int64
 }
 
 // sealByIdleTimeExtraInfo is the extra info of the seal by idle time policy.
