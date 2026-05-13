@@ -716,6 +716,17 @@ template class FieldDataVectorImpl<bfloat16, false>;
 template class FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
                                    true>;
 
+namespace {
+
+template <typename T>
+FieldDataPtr
+InitScalarFieldDataWithLengthImpl(const DataType& type, int64_t length) {
+    FixedVector<T> values(length);
+    return std::make_shared<FieldData<T>>(type, false, std::move(values));
+}
+
+}  // namespace
+
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
     switch (type) {
@@ -754,6 +765,38 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         default:
             ThrowInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type {}",
+                      GetDataTypeName(type));
+    }
+}
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
+    switch (type) {
+        case DataType::BOOL:
+            return InitScalarFieldDataWithLengthImpl<bool>(type, length);
+        case DataType::INT8:
+            return InitScalarFieldDataWithLengthImpl<int8_t>(type, length);
+        case DataType::INT16:
+            return InitScalarFieldDataWithLengthImpl<int16_t>(type, length);
+        case DataType::INT32:
+            return InitScalarFieldDataWithLengthImpl<int32_t>(type, length);
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return InitScalarFieldDataWithLengthImpl<int64_t>(type, length);
+        case DataType::FLOAT:
+            return InitScalarFieldDataWithLengthImpl<float>(type, length);
+        case DataType::DOUBLE:
+            return InitScalarFieldDataWithLengthImpl<double>(type, length);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::GEOMETRY:
+            return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
+        case DataType::JSON:
+            return InitScalarFieldDataWithLengthImpl<Json>(type, length);
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "InitScalarFieldDataWithLength not support data type {}",
                       GetDataTypeName(type));
     }
 }

@@ -1554,8 +1554,8 @@ class TestIndexInvalid(TestcaseBase):
     @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
     def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
         """
-        target: index creation for unsupported ratio parameter
-        method: indexing of unsupported ratio parameters
+        target: index creation for unsupported sparse inverted index algo parameter
+        method: indexing with unsupported inverted_index_algo
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
@@ -1566,8 +1566,7 @@ class TestIndexInvalid(TestcaseBase):
         params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
-            f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]",
+            ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported",
         }
         index, _ = self.index_wrap.init_index(
             collection_w.collection,

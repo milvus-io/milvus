@@ -1837,7 +1837,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         ranker = RRFRanker(k)
         # TODO: #29867, the error msg is not good enough, but as it is for now.
         err_msg = {"err_code": 65535,
-                   "err_msg": "The rank params k should be in range (0, 16384)"}
+                   "err_msg": "rank params k should be in range (0, 16384)"}
         self.hybrid_search(client, self.collection_name,
                            reqs=req_list,
                            ranker=ranker,

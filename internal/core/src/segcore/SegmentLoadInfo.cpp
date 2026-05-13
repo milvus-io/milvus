@@ -14,10 +14,12 @@
 #include <iterator>
 #include <memory>
 
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "index/Meta.h"
+#include "log/Log.h"
 #include "common/resource_c.h"
 #include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
@@ -63,6 +65,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     // Extract field ID
     auto field_id = FieldId(field_index_info->fieldid());
     load_index_info.field_id = field_id.get();
+    load_index_info.collection_id = GetCollectionID();
     load_index_info.partition_id = GetPartitionID();
 
     // Get field type from schema
@@ -193,6 +196,44 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     // Propagate base_path for unified (basePath + relativeFiles) model
     if (!text_index_stats.base_path().empty()) {
         info->set_base_path(text_index_stats.base_path());
+    }
+
+    return info;
+}
+
+std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
+SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+    const proto::segcore::JsonKeyStats& json_key_stats,
+    FieldId field_id) const {
+    auto info = std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+
+    info->set_fieldid(json_key_stats.fieldid());
+    info->set_version(json_key_stats.version());
+    info->set_buildid(json_key_stats.buildid());
+    for (const auto& f : json_key_stats.files()) {
+        info->add_files(f);
+    }
+
+    const auto& field_meta = schema_->operator[](field_id);
+    *info->mutable_schema() = field_meta.ToProto();
+
+    info->set_collectionid(GetCollectionID());
+    info->set_partitionid(GetPartitionID());
+    info->set_load_priority(GetPriority());
+    info->set_stats_size(json_key_stats.log_size());
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
+    info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    if (field_has_warmup) {
+        info->set_warmup_policy(field_warmup_policy);
+    }
+
+    if (!json_key_stats.base_path().empty()) {
+        info->set_base_path(json_key_stats.base_path());
     }
 
     return info;
@@ -630,6 +671,41 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
     }
 }
 
+namespace {
+
+int64_t
+CurrentJsonStatsDataFormatVersion() {
+    return std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
+}
+
+bool
+JsonStatsFilesEqual(const proto::segcore::JsonKeyStats& lhs,
+                    const proto::segcore::JsonKeyStats& rhs) {
+    if (lhs.files_size() != rhs.files_size()) {
+        return false;
+    }
+    for (int i = 0; i < lhs.files_size(); ++i) {
+        if (lhs.files(i) != rhs.files(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
+                           const proto::segcore::JsonKeyStats& rhs) {
+    return lhs.version() == rhs.version() && lhs.buildid() == rhs.buildid() &&
+           lhs.json_key_stats_data_format() ==
+               rhs.json_key_stats_data_format() &&
+           lhs.base_path() == rhs.base_path() &&
+           lhs.log_size() == rhs.log_size() &&
+           lhs.memory_size() == rhs.memory_size() &&
+           JsonStatsFilesEqual(lhs, rhs);
+}
+
+}  // namespace
+
 void
 SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
                                         SegmentLoadInfo& new_info) {
@@ -684,6 +760,92 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     }
 }
 
+void
+SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
+                                         SegmentLoadInfo& new_info) {
+    if (!JSON_KEY_STATS_ENABLED.load()) {
+        auto stats_count = GetJsonKeyStatsLogs().size() +
+                           new_info.GetJsonKeyStatsLogs().size();
+        if (stats_count > 0) {
+            LOG_WARN(
+                "skip json key stats diff because json key stats is disabled, "
+                "segment:{}, json_stats_count:{}",
+                new_info.GetSegmentID(),
+                stats_count);
+        }
+        return;
+    }
+
+    const auto expected_format = CurrentJsonStatsDataFormatVersion();
+    std::set<FieldId> current_fields;
+    for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
+        current_fields.insert(FieldId(field_id));
+    }
+
+    std::set<FieldId> new_fields;
+    for (const auto& [field_id, stats] : new_info.GetJsonKeyStatsLogs()) {
+        auto fid = FieldId(field_id);
+        new_fields.insert(fid);
+        auto current_stats = GetJsonKeyStatsLog(field_id);
+        if (stats.json_key_stats_data_format() != expected_format) {
+            LOG_WARN(
+                "skip json key stats diff because data format is invalid, "
+                "segment:{}, field:{}, build:{}, version:{}, format:{}, "
+                "expected_format:{}, file_count:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version(),
+                stats.json_key_stats_data_format(),
+                expected_format,
+                stats.files_size());
+            if (current_stats != nullptr) {
+                diff.json_stats_to_drop.insert(fid);
+                LOG_INFO(
+                    "json key stats diff drop invalid format, segment:{}, "
+                    "field:{}",
+                    new_info.GetSegmentID(),
+                    field_id);
+            }
+            continue;
+        }
+
+        if (current_stats == nullptr) {
+            diff.json_stats_to_load[fid] =
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+            LOG_INFO(
+                "json key stats diff load, segment:{}, field:{}, build:{}, "
+                "version:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version());
+            continue;
+        }
+
+        if (!JsonStatsLoadIdentityEqual(*current_stats, stats)) {
+            diff.json_stats_to_replace[fid] =
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+            LOG_INFO(
+                "json key stats diff replace, segment:{}, field:{}, build:{}, "
+                "version:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version());
+        }
+    }
+
+    for (const auto& field_id : current_fields) {
+        if (new_fields.find(field_id) == new_fields.end()) {
+            diff.json_stats_to_drop.insert(field_id);
+            LOG_INFO("json key stats diff drop, segment:{}, field:{}",
+                     new_info.GetSegmentID(),
+                     field_id.get());
+        }
+    }
+}
+
 // std::unique_ptr<typename Tp>
 
 LoadDiff
@@ -698,6 +860,9 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
 
     // Compute text index changes
     ComputeDiffTextIndexes(diff, new_info);
+
+    // Compute JSON key stats changes
+    ComputeDiffJsonKeyStats(diff, new_info);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:
@@ -743,6 +908,9 @@ SegmentLoadInfo::GetLoadDiff() {
 
     // Handle text index changes
     empty_info.ComputeDiffTextIndexes(diff, *this);
+
+    // Handle JSON key stats changes
+    empty_info.ComputeDiffJsonKeyStats(diff, *this);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:

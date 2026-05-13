@@ -35,6 +35,16 @@ service IndexCoord {
     }
 }
 
+// Path format version for index files on object storage.
+// Enum values are wire-compatible with the previous int32 encoding:
+// 0 remains BUILD_ROOTED (legacy), 1 remains COLLECTION_ROOTED (new).
+enum IndexStorePathVersion {
+    // legacy: index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
+    INDEX_STORE_PATH_VERSION_BUILD_ROOTED = 0;
+    // new: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED = 1;
+}
+
 message IndexInfo {
     int64 collectionID = 1;
     int64 fieldID = 2;
@@ -85,6 +95,10 @@ message SegmentIndex {
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;
     string index_type = 21;
+    // Path format version for index files on object storage.
+    // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
+    // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    IndexStorePathVersion index_store_path_version = 22;
 }
 
 message RegisterNodeRequest {
@@ -172,6 +186,7 @@ message IndexFilePathInfo {
     int32 current_index_version = 11;
     uint64 mem_size = 12;
     int32 current_scalar_index_version = 13;
+    IndexStorePathVersion index_store_path_version = 14;
 }
 
 message SegmentInfo {

@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -2007,6 +2008,8 @@ func TestHandleSessionEvent(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
+		svr.indexEngineVersionManager = newIndexEngineVersionManager()
+
 		// None event
 		evt := &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionNoneEvent,
@@ -2037,20 +2040,52 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.nodeManager.GetClientIDs()
 		assert.EqualValues(t, 1, len(dataNodes))
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
-			EventType: sessionutil.SessionDelEvent,
+			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   101,
-					ServerName: "DN101",
-					Address:    "DN127.0.0.101",
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
 					Exclusive:  false,
 				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionUpdateEvent,
+			Session: &sessionutil.Session{
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
+					Exclusive:  false,
+				},
+			},
+		}
+		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session: &sessionutil.Session{
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
+					Exclusive:  false,
+				},
+			},
+		}
+		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 		_ = svr.nodeManager.GetClientIDs()
 	})
 
@@ -2446,6 +2481,7 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
 func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
@@ -2495,6 +2531,46 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 	err := server.rewatchDataNodes(sessions)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster startup failed")
+}
+
+func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVersionGate(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.BindIndexNodeMode.Key, "true")
+	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeID.Key, "10001")
+	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeAddress.Key, "localhost:10001")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.BindIndexNodeMode.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeID.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeAddress.Key)
+
+	mockSession := sessionutil.NewMockSession(t)
+	mockSession.EXPECT().
+		GetSessionsWithVersionRange(typeutil.DataNodeRole, mock.Anything).
+		Return(map[string]*sessionutil.Session{}, int64(10), nil)
+	mockSession.EXPECT().
+		GetSessions(mock.Anything, typeutil.QueryNodeRole).
+		Return(map[string]*sessionutil.Session{
+			"qn1": {
+				Version: common.Version,
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID: 1,
+				},
+			},
+		}, int64(20), nil)
+	mockSession.EXPECT().
+		WatchServicesWithVersionRange(typeutil.QueryNodeRole, mock.Anything, int64(21), mock.Anything).
+		Return(sessionutil.EmptySessionWatcher())
+
+	server := &Server{
+		ctx:                       context.Background(),
+		session:                   mockSession,
+		indexEngineVersionManager: newIndexEngineVersionManager(),
+	}
+	server.nodeManager = session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		return nil, nil
+	})
+
+	err := server.initServiceDiscovery()
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
 func Test_CheckHealth(t *testing.T) {

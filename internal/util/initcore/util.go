@@ -75,6 +75,10 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
+func UpdateDefaultJSONKeyStatsEnable(enable bool) {
+	C.SetDefaultJSONKeyStatsEnable(C.bool(enable))
+}
+
 func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }

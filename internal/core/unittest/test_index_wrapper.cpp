@@ -54,7 +54,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-using namespace milvus::proto;
 
 using Param = std::pair<knowhere::IndexType, knowhere::MetricType>;
 

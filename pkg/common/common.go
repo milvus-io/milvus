@@ -156,8 +156,11 @@ const (
 	// SegmentStatslogPath storage path const for segment stats log.
 	SegmentStatslogPath = `stats_log`
 
-	// SegmentIndexPath storage path const for segment index files.
-	SegmentIndexPath = `index_files`
+	// SegmentIndexV0Path storage path const for legacy build-rooted segment index files.
+	SegmentIndexV0Path = `index_files`
+
+	// SegmentIndexV1Path storage path const for collection-rooted segment index files.
+	SegmentIndexV1Path = `index_files_v1`
 
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`

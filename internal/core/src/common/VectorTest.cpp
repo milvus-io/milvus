@@ -188,6 +188,26 @@ TEST(ColumnVectorTest, AllTrueBoundaryConditions) {
     }
 }
 
+TEST(FieldDataTest, InitScalarFieldDataWithLengthSetsLength) {
+    auto field_data = InitScalarFieldDataWithLength(DataType::INT64, 3);
+    EXPECT_EQ(field_data->Length(), 3);
+    EXPECT_EQ(field_data->get_num_rows(), 3);
+    EXPECT_FALSE(field_data->IsNullable());
+}
+
+TEST(ColumnVectorTest, FieldDataBackedConstructorRejectsInvalidNullCount) {
+    EXPECT_THROW(
+        {
+            FixedVector<int64_t> values(3);
+            auto field_data = std::make_shared<FieldData<int64_t>>(
+                DataType::INT64, false, std::move(values));
+            TargetBitmap valid(3, true);
+            auto vec = std::make_shared<ColumnVector>(
+                std::move(field_data), std::move(valid), 4);
+        },
+        std::runtime_error);
+}
+
 TEST(ColumnVectorTest, AllMethodsOnNonBitmapThrows) {
     // AllTrue and AllFalse should only work on bitmap ColumnVectors
     // Create a non-bitmap ColumnVector (regular scalar vector)

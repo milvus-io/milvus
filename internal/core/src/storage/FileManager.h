@@ -191,10 +191,15 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<InputStream>
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
-        auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
-                                              : GetRemoteTextLogPrefix();
-        remote_file_path += "/" + local_file_name;
+        std::string remote_file_path;
+        if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
+            remote_file_path = NormalizePath(filename);
+        } else {
+            auto local_file_name = GetFileName(filename);
+            remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                             : GetRemoteTextLogPrefix();
+            remote_file_path += "/" + local_file_name;
+        }
         auto remote_file = fs_->OpenInputFile(remote_file_path);
         AssertInfo(remote_file.ok(),
                    "failed to open remote file, reason: {}",
@@ -277,6 +282,11 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
+        // Prefer the DataCoord-built prefix when present. The fallback is only
+        // for v0 basename-only index file inputs.
+        if (!index_meta_.index_store_path.empty()) {
+            return NormalizePath(index_meta_.index_store_path);
+        }
         boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
@@ -311,6 +321,23 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
+    }
+
+    bool
+    ShouldOpenIndexFileDirectly(const std::string& filename,
+                                bool is_index_file) const {
+        if (!is_index_file || filename.find('/') == std::string::npos) {
+            return false;
+        }
+
+        // Absolute local paths are legacy caller inputs, not object keys.
+        // Local Arrow FS already applies its own root path.
+        if (milvus_storage::IsLocalFileSystem(fs_) &&
+            boost::filesystem::path(filename).is_absolute()) {
+            return false;
+        }
+
+        return true;
     }
 
     std::string

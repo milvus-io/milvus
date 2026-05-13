@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -696,6 +697,16 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto info_proto =
             std::make_unique<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>();
         info_proto->ParseFromArray(serialized_load_json_key_index_info, len);
+        if (!milvus::JSON_KEY_STATS_ENABLED.load()) {
+            LOG_WARN(
+                "skip load json stats because json key stats is disabled, "
+                "segment:{}, field:{}, build:{}, version:{}",
+                segment->get_segment_id(),
+                info_proto->fieldid(),
+                info_proto->buildid(),
+                info_proto->version());
+            return milvus::SuccessCStatus();
+        }
 
         milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
                                                   info_proto->partitionid(),

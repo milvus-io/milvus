@@ -89,6 +89,7 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
+    std::string index_store_path;
 };
 
 struct StorageConfig {
@@ -146,6 +147,8 @@ struct MmapConfig {
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
     bool mmap_populate;
+    bool json_stats_enable_mmap;
+    std::string json_stats_mmap_path;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -191,6 +194,16 @@ struct MmapConfig {
         return mmap_populate;
     }
 
+    [[nodiscard]] bool
+    GetJsonStatsEnableMmap() const {
+        return json_stats_enable_mmap;
+    }
+
+    [[nodiscard]] const std::string&
+    GetJsonStatsMmapPath() const {
+        return json_stats_mmap_path;
+    }
+
     std::string
     GetMmapPath() {
         return mmap_path;
@@ -210,7 +223,10 @@ struct MmapConfig {
            << ", vector_index_enable_mmap=" << std::boolalpha
            << vector_index_enable_mmap
            << ", vector_field_enable_mmap=" << std::boolalpha
-           << vector_field_enable_mmap << "]";
+           << vector_field_enable_mmap
+           << ", json_stats_enable_mmap=" << std::boolalpha
+           << json_stats_enable_mmap
+           << ", json_stats_mmap_path=" << json_stats_mmap_path << "]";
         return ss.str();
     }
 };
