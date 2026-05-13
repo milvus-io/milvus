@@ -146,7 +146,7 @@ func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int
 	if !paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.GetAsBool() {
 		return false
 	}
-	if effectiveSegmentNum < paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt() && req.GetReq().GetTopk() < paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64() {
+	if effectiveSegmentNum < paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt() || req.GetReq().GetTopk() < paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64() {
 		return false
 	}
 	return req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
