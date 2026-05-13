@@ -403,10 +403,9 @@ void
 DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& logical_paths,
     milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        ToChunkManagerIndexPaths(logical_paths),
-        GetLocalIndexObjectPrefix(),
-        priority);
+    return CacheIndexToDiskInternal(ToChunkManagerIndexPaths(logical_paths),
+                                    GetLocalIndexObjectPrefix(),
+                                    priority);
 }
 
 void

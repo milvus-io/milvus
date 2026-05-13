@@ -133,8 +133,7 @@ MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& logical_paths,
     milvus::proto::common::LoadPriority priority) {
     std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
-    auto object_files =
-        ToChunkManagerIndexPaths(logical_paths);
+    auto object_files = ToChunkManagerIndexPaths(logical_paths);
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
