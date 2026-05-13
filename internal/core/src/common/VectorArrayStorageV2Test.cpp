@@ -478,7 +478,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     {
         auto load_conf = generate_load_conf(
             knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::MAX_SIM_IP, 0);
-        load_conf["index_files"] = index_files;
+        load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         load_conf["mmap_filepath"] = TestLocalPath + "mmap/test_emb_list_index";
         load_conf["emb_list_meta_file_path"] =
             TestLocalPath + "mmap/test_index_meta";

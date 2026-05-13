@@ -28,6 +28,7 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
@@ -1669,6 +1670,29 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     return field_data;
 }
 
+inline std::vector<std::string>
+ToLogicalIndexFilesForLoad(const std::vector<std::string>& index_files) {
+    auto root_path = milvus::index::kOverrideRootPathForUT;
+    if (root_path.empty()) {
+        return index_files;
+    }
+    if (root_path.back() != '/') {
+        root_path += "/";
+    }
+
+    std::vector<std::string> logical_index_files;
+    logical_index_files.reserve(index_files.size());
+    for (const auto& index_file : index_files) {
+        if (boost::algorithm::starts_with(index_file, root_path)) {
+            logical_index_files.emplace_back(
+                index_file.substr(root_path.size()));
+            continue;
+        }
+        logical_index_files.emplace_back(index_file);
+    }
+    return logical_index_files;
+}
+
 inline std::unique_ptr<milvus::index::VectorIndex>
 GenVecIndexing(int64_t N,
                int64_t dim,
@@ -1700,7 +1724,7 @@ GenVecIndexing(int64_t N,
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
+    conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage
@@ -1740,7 +1764,7 @@ GenVecIndexingFloat16(int64_t N,
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
+    conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
@@ -1778,7 +1802,7 @@ GenVecIndexingBFloat16(int64_t N,
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
+    conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
@@ -1816,7 +1840,7 @@ GenVecIndexingInt8(int64_t N,
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
+    conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
@@ -1854,7 +1878,7 @@ GenVecIndexingBinary(int64_t N,
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
+    conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     indexing->Load(milvus::tracer::TraceContext{}, conf);
     return indexing;
