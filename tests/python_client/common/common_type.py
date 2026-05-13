@@ -341,7 +341,7 @@ all_index_types = [
 
 all_dense_float_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"]
 
-inverted_index_algo = ["TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE", "BLOCK_MAX_MAXSCORE", "BLOCK_MAX_WAND", "SINDI"]
+inverted_index_algo = ["TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE"]
 
 int8_vector_index = ["HNSW"]
 
