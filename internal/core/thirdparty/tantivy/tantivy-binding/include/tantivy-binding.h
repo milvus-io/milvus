@@ -91,6 +91,8 @@ struct RustResult {
   const char *error;
 };
 
+using TantivyRegexMatchFn = bool(*)(void *ctx, const uint8_t *term, uintptr_t term_len);
+
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
 
 struct TantivyToken {
@@ -243,8 +245,8 @@ RustResult tantivy_regex_query(void *ptr,
                                void *bitset);
 
 RustResult tantivy_regex_match_query(void *ptr,
-                                     const uint8_t *pattern,
-                                     uintptr_t pattern_len,
+                                     void *matcher_ctx,
+                                     TantivyRegexMatchFn matcher,
                                      void *bitset);
 
 RustResult tantivy_json_term_query_i64(void *ptr,

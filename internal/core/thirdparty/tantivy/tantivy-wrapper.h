@@ -994,12 +994,11 @@ struct TantivyIndexWrapper {
     }
 
     void
-    regex_match_query(const std::string& pattern, void* bitset) {
-        auto array = tantivy_regex_match_query(
-            reader_,
-            reinterpret_cast<const uint8_t*>(pattern.data()),
-            pattern.size(),
-            bitset);
+    regex_match_query(void* matcher_ctx,
+                      TantivyRegexMatchFn matcher,
+                      void* bitset) {
+        auto array =
+            tantivy_regex_match_query(reader_, matcher_ctx, matcher, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.regex_match_query: {}",

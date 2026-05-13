@@ -21,6 +21,27 @@ struct TantivyRegexPattern {
     std::string pattern;
 };
 
+// Try to translate the subset of Milvus regex semantics that can be safely
+// expressed as a Tantivy RegexQuery pattern.
+//
+// Milvus evaluates RegexMatch as RE2::PartialMatch with dot_nl=true. Tantivy's
+// RegexQuery matches the entire term and has different support/semantics for a
+// few constructs. This helper therefore does only conservative rewrites:
+//   * rewrite unescaped `.` to `[\s\S]` while dot-all is active, preserving
+//     Milvus' dot_nl=true behavior;
+//   * track inline `s` and `m` flags, including scoped groups like `(?-s:...)`;
+//   * wrap unanchored patterns with `[\s\S]*(?:...)[\s\S]*` so Tantivy's
+//     full-term regex behaves like RE2 PartialMatch;
+//   * strip only safe outer `^`/`$` anchors before wrapping;
+//   * normalize lazy quantifiers (`*?`, `+?`, `??`, `{m,n}?`) by dropping the
+//     laziness marker, because greedy and lazy forms accept the same language.
+//
+// It is deliberately not a general RE2-to-Tantivy transpiler. Constructs whose
+// semantics depend on RE2-specific zero-width assertions or character-class
+// definitions are marked unsafe and must use the RE2 fallback path instead.
+// This includes `^`/`$` anchors in non-outer or multiline-sensitive positions,
+// word/text boundaries, and shorthand character classes like `\d`, `\w`, and
+// `\s`, whose Unicode/ASCII behavior can differ between RE2 and Tantivy.
 inline TantivyRegexPattern
 TryTranslateRegexToTantivyPattern(const std::string& pattern,
                                   bool wrap_for_substring = true) {
@@ -41,28 +62,81 @@ TryTranslateRegexToTantivyPattern(const std::string& pattern,
     };
     std::vector<FlagScope> flag_stack;
     int group_depth = 0;
+    bool previous_token_is_quantifier = false;
+
+    auto is_regex_shorthand_or_boundary = [](char escaped) {
+        switch (escaped) {
+            case 'b':
+            case 'B':
+            case 'A':
+            case 'z':
+            case 'Z':
+            case 'd':
+            case 'D':
+            case 's':
+            case 'S':
+            case 'w':
+            case 'W':
+            case 'p':
+            case 'P':
+                return true;
+            default:
+                return false;
+        }
+    };
+
+    auto parse_quantifier_end = [&](size_t pos) -> size_t {
+        if (pos >= pattern.size() || pattern[pos] != '{') {
+            return std::string::npos;
+        }
+        size_t j = pos + 1;
+        bool has_min = false;
+        while (j < pattern.size() && pattern[j] >= '0' && pattern[j] <= '9') {
+            has_min = true;
+            ++j;
+        }
+        if (!has_min || j >= pattern.size()) {
+            return std::string::npos;
+        }
+        if (pattern[j] == '}') {
+            return j;
+        }
+        if (pattern[j] != ',') {
+            return std::string::npos;
+        }
+        ++j;
+        while (j < pattern.size() && pattern[j] >= '0' && pattern[j] <= '9') {
+            ++j;
+        }
+        if (j < pattern.size() && pattern[j] == '}') {
+            return j;
+        }
+        return std::string::npos;
+    };
 
     for (size_t i = 0; i < pattern.size(); ++i) {
         char c = pattern[i];
 
         if (c == '\\' && i + 1 < pattern.size()) {
             char escaped = pattern[i + 1];
-            if (!in_char_class &&
-                (escaped == 'b' || escaped == 'B' || escaped == 'A' ||
-                 escaped == 'z' || escaped == 'Z')) {
+            if (!in_char_class && is_regex_shorthand_or_boundary(escaped)) {
                 unsupported_zero_width = true;
             }
             result += c;
             result += escaped;
             ++i;
+            previous_token_is_quantifier = false;
         } else if (c == '[') {
             in_char_class = true;
             result += c;
+            previous_token_is_quantifier = false;
         } else if (c == ']' && in_char_class) {
             in_char_class = false;
             result += c;
+            previous_token_is_quantifier = false;
         } else if (in_char_class) {
             result += c;
+            previous_token_is_quantifier = false;
         } else if (c == '(' && i + 1 < pattern.size() &&
                    pattern[i + 1] == '?') {
             size_t j = i + 2;
@@ -130,13 +204,16 @@ TryTranslateRegexToTantivyPattern(const std::string& pattern,
                 }
                 result.append(pattern, i, j - i + 1);
                 i = j;
+                previous_token_is_quantifier = false;
             } else {
                 ++group_depth;
                 result += c;
+                previous_token_is_quantifier = false;
             }
         } else if (c == '(') {
             ++group_depth;
             result += c;
+            previous_token_is_quantifier = false;
         } else if (c == ')') {
             if (!flag_stack.empty() && flag_stack.back().depth == group_depth) {
                 dot_all = flag_stack.back().prev_dot_all;
@@ -147,25 +224,41 @@ TryTranslateRegexToTantivyPattern(const std::string& pattern,
                 --group_depth;
             }
             result += c;
+            previous_token_is_quantifier = false;
         } else if (c == '.') {
             if (dot_all) {
                 result += "[\\s\\S]";
             } else {
                 result += '.';
             }
+            previous_token_is_quantifier = false;
         } else if ((c == '^' || c == '$') &&
                    !(wrap_for_substring && c == '^' && i == 0 && !multiline) &&
                    !(wrap_for_substring && c == '$' &&
                      i + 1 == pattern.size() && !multiline)) {
             unsupported_zero_width = true;
             result += c;
-        } else if (c == '?' && i > 0 &&
-                   (pattern[i - 1] == '*' || pattern[i - 1] == '+' ||
-                    pattern[i - 1] == '?' || pattern[i - 1] == '}')) {
+            previous_token_is_quantifier = false;
+        } else if (c == '?' && previous_token_is_quantifier) {
             // Tantivy does not support lazy quantifiers. Dropping laziness is
             // safe because greedy and lazy quantifiers accept the same language.
+            previous_token_is_quantifier = false;
+        } else if (c == '*' || c == '+' || c == '?') {
+            result += c;
+            previous_token_is_quantifier = true;
+        } else if (c == '{') {
+            auto quantifier_end = parse_quantifier_end(i);
+            if (quantifier_end != std::string::npos) {
+                result.append(pattern, i, quantifier_end - i + 1);
+                i = quantifier_end;
+                previous_token_is_quantifier = true;
+            } else {
+                result += c;
+                previous_token_is_quantifier = false;
+            }
         } else {
             result += c;
+            previous_token_is_quantifier = false;
         }
     }
 
@@ -200,13 +293,6 @@ TryTranslateRegexToTantivyPattern(const std::string& pattern,
         return {!unsupported_zero_width, "[\\s\\S]*(?:" + result + ")"};
     }
     return {!unsupported_zero_width, "[\\s\\S]*(?:" + result + ")[\\s\\S]*"};
-}
-
-inline std::string
-regex_to_tantivy_pattern(const std::string& pattern,
-                         bool wrap_for_substring = true) {
-    return TryTranslateRegexToTantivyPattern(pattern, wrap_for_substring)
-        .pattern;
 }
 
 }  // namespace milvus

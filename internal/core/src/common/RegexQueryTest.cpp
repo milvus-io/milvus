@@ -580,6 +580,20 @@ TEST_F(SealedSegmentRegexQueryTest,
     ASSERT_FALSE(lazy_quantifier[4]);
 }
 
+TEST(InvertedIndexRegexQueryTest, RegexFallbackUsesRe2CharacterClassSemantics) {
+    std::vector<std::string> raw_str = {
+        "123",
+        "\xD9\xA3",
+    };
+
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    index->BuildWithRawDataForUT(raw_str.size(), raw_str.data());
+
+    auto bitset = index->PatternMatch("^\\d+$", OpType::RegexMatch);
+    ASSERT_TRUE(bitset[0]);
+    ASSERT_FALSE(bitset[1]);
+}
+
 TEST_F(SealedSegmentRegexQueryTest, PostfixMatchOnInvertedIndexStringField) {
     std::string operand = "a";
     const auto& str_meta = schema->operator[](FieldName("str"));
