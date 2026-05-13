@@ -2718,6 +2718,34 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewBinlogForDroppedField) {
     EXPECT_TRUE(diff.binlogs_to_replace.empty());
 }
 
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffFiltersDroppedChildFromMixedBinlogGroup) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* mixed_binlog = new_proto.add_binlog_paths();
+    mixed_binlog->set_fieldid(104);
+    mixed_binlog->add_child_fields(105);
+    mixed_binlog->add_child_fields(106);
+    auto* log = mixed_binlog->add_binlogs();
+    log->set_log_path("/path/to/mixed_binlog");
+    log->set_entries_num(1000);
+
+    auto latest_schema = MakeSchemaWithFieldIds({100, 105});
+    SegmentLoadInfo current_info(current_proto, latest_schema);
+    SegmentLoadInfo new_info(new_proto, latest_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewManifestColumnForDroppedField) {
     auto latest_schema = MakeSchemaWithFieldIds({100, 101});
     SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"),

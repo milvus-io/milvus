@@ -5009,17 +5009,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
-        // when child fields specified, field id is group id, child field ids are actual id values here
-        if (field_binlog.child_fields_size() > 0) {
-            field_ids.reserve(field_binlog.child_fields_size());
-            for (auto field_id : field_binlog.child_fields()) {
-                field_ids.emplace_back(field_id);
-            }
-        } else {
-            field_ids.emplace_back(field_binlog.fieldid());
-        }
-        AssertInfo(!field_ids.empty(), "load field data with empty field list");
-        for (const auto& field_id : field_ids) {
+        auto fields_to_load = field_ids;
+        AssertInfo(!fields_to_load.empty(),
+                   "load field data with empty field list");
+        for (const auto& field_id : fields_to_load) {
             AssertInfo(field_exists_in_schema(schema_, field_id),
                        "field {} not found in schema when loading field data",
                        field_id.get());
@@ -5032,7 +5025,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 
         bool has_warmup_setting = false;
         std::string aggregated_warmup_policy = "disable";
-        for (const auto& child_field_id : field_ids) {
+        for (const auto& child_field_id : fields_to_load) {
             auto& field_meta = schema_->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
                 is_vector = true;
