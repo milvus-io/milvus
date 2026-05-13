@@ -185,7 +185,7 @@ func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string)
 
 // WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
 func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
-	if b.channelMetaManager.IsWALBasedDDLEnabled() {
+	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion265) {
 		return nil
 	}
 	if err := b.channelMetaManager.WaitUntilStreamingEnabled(ctx); err != nil {
@@ -194,13 +194,22 @@ func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
 	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, versionChecker265); err != nil {
 		return err
 	}
-	return b.channelMetaManager.MarkWALBasedDDLEnabled(ctx)
+	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion265)
 }
 
 // WaitUntilSchemaDropReady waits until every Proxy can attach schema version
 // to insert messages, so schema-drop DDL cannot race with legacy writes.
 func (b *balancerImpl) WaitUntilSchemaDropReady(ctx context.Context) error {
-	return b.blockUntilRoleGreaterThanVersion(ctx, typeutil.ProxyRole, versionChecker300)
+	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion300) {
+		return nil
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return err
+	}
+	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.ProxyRole, versionChecker300); err != nil {
+		return err
+	}
+	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion300)
 }
 
 // WatchChannelAssignments watches the balance result.
@@ -486,7 +495,7 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 	}
 }
 
-// blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
+// blockUntilRoleGreaterThanVersion blocks until every session of the role is outside versionChecker.
 func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
 	doneErr := errors.New("done")
 	logger := b.Logger().With(zap.String("role", role))

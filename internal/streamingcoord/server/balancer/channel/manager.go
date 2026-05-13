@@ -26,6 +26,7 @@ import (
 const (
 	StreamingVersion260 = 1 // streaming version that since 2.6.0, the streaming based WAL is available.
 	StreamingVersion265 = 2 // streaming version that since 2.6.5, the WAL based DDL is available.
+	StreamingVersion300 = 3 // streaming version that since 3.0.0, schema-drop DDL is available.
 )
 
 var ErrChannelNotExist = errors.New("channel not exist")
@@ -251,12 +252,12 @@ func (cm *ChannelManager) WaitUntilStreamingEnabled(ctx context.Context) error {
 	return nil
 }
 
-// IsWALBasedDDLEnabled returns true if the WAL based DDL is enabled.
-func (cm *ChannelManager) IsWALBasedDDLEnabled() bool {
+// IsStreamingVersionAtLeast returns true if the persisted streaming version is at least version.
+func (cm *ChannelManager) IsStreamingVersionAtLeast(version int64) bool {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	return cm.streamingVersion != nil && cm.streamingVersion.Version >= StreamingVersion265
+	return cm.streamingVersion != nil && cm.streamingVersion.Version >= version
 }
 
 // ReplicateRole returns the replicate role of the channel manager.
@@ -356,17 +357,18 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	return nil
 }
 
-func (cm *ChannelManager) MarkWALBasedDDLEnabled(ctx context.Context) error {
+// MarkStreamingVersion persists the streaming version after the related cluster-version gate passes.
+func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int64) error {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
 	if cm.streamingVersion == nil {
-		return errors.New("streaming service is not enabled, cannot mark WAL based DDL enabled")
+		return errors.New("streaming service is not enabled, cannot mark streaming version")
 	}
-	if cm.streamingVersion.Version >= StreamingVersion265 {
+	if cm.streamingVersion.Version >= version {
 		return nil
 	}
-	cm.streamingVersion.Version = StreamingVersion265
+	cm.streamingVersion.Version = version
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
 		cm.Logger().Error("failed to save streaming version", zap.Error(err))
 		return err
