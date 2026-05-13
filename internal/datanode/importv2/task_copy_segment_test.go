@@ -778,6 +778,7 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 		mockCM := mocks.NewChunkManager(t)
 		// Insert + Stats + Delta + BM25 + Index + Text + JsonKey = 7 files
 		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(7)
+		mockCM.EXPECT().RootPath().Return("files").Times(2)
 
 		req := &datapb.CopySegmentRequest{
 			JobID:  100,

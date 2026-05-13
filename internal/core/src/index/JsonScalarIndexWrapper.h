@@ -339,6 +339,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
     std::enable_if_t<std::is_base_of_v<InvertedIndexTantivy<T>, B>>
     BuildInvertedWithJsonFieldData(
         const std::vector<FieldDataPtr>& field_datas) {
+        if (!this->wrapper_) {
+            this->InitForBuildIndex();
+        }
+
         int64_t total_rows = 0;
         for (const auto& data : field_datas) {
             total_rows += data->get_num_rows();
