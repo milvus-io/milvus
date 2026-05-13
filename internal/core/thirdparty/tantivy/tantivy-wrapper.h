@@ -995,7 +995,7 @@ struct TantivyIndexWrapper {
 
     void
     regex_match_query(void* matcher_ctx,
-                      TantivyRegexMatchFn matcher,
+                      bool (*matcher)(void*, const uint8_t*, uintptr_t),
                       void* bitset) {
         auto array =
             tantivy_regex_match_query(reader_, matcher_ctx, matcher, bitset);
