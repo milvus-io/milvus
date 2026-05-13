@@ -164,6 +164,25 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
     return bitset[pos];
 }
 
+static inline bool
+field_exists_in_schema(const SchemaPtr& schema, FieldId field_id) {
+    return field_id.get() < START_USER_FIELDID ||
+           schema->get_fields().find(field_id) != schema->get_fields().end();
+}
+
+static inline bool
+has_bit_position(const BitsetType& bitset, FieldId field_id) {
+    auto pos = field_id.get() - START_USER_FIELDID;
+    return pos >= 0 && static_cast<size_t>(pos) < bitset.size();
+}
+
+static inline void
+clear_bit_if_present(BitsetType& bitset, FieldId field_id) {
+    if (has_bit_position(bitset, field_id)) {
+        set_bit(bitset, field_id, false);
+    }
+}
+
 static inline void
 cancel_warmup(const index::CacheIndexBasePtr& index) {
     if (index) {
@@ -1796,29 +1815,27 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
                "Dropping system field is not supported, field id: {}",
                field_id.get());
     std::unique_lock<std::shared_mutex> lck(mutex_);
-    if (get_bit(field_data_ready_bitset_, field_id)) {
-        auto column = get_column(field_id);
-        // PK field: skip drop because insert record reload depends on PK data
-        if (schema_->get_primary_field_id().has_value() &&
-            schema_->get_primary_field_id().value() == field_id) {
-            LOG_INFO(
-                "Skip dropping pk field {} in segment {}", field_id.get(), id_);
-            // Still drop binlog index if present
-            if (get_bit(binlog_index_bitset_, field_id)) {
-                set_bit(binlog_index_bitset_, field_id, false);
-                vector_indexings_.drop_field_indexing(field_id);
-            }
-            return;
+    auto schema_has_field = field_exists_in_schema(schema_, field_id);
+    auto column = get_column(field_id);
+    if (schema_has_field && schema_->get_primary_field_id().has_value() &&
+        schema_->get_primary_field_id().value() == field_id) {
+        LOG_INFO(
+            "Skip dropping pk field {} in segment {}", field_id.get(), id_);
+        if (has_bit_position(binlog_index_bitset_, field_id) &&
+            get_bit(binlog_index_bitset_, field_id)) {
+            clear_bit_if_present(binlog_index_bitset_, field_id);
+            vector_indexings_.drop_field_indexing(field_id);
         }
-        // Single-field column: fully erase + clear bitset
-        if (column) {
-            column->CancelWarmup();
-        }
-        fields_.wlock()->erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
+        return;
     }
-    if (get_bit(binlog_index_bitset_, field_id)) {
-        set_bit(binlog_index_bitset_, field_id, false);
+    if (column) {
+        column->CancelWarmup();
+        fields_.wlock()->erase(field_id);
+    }
+    clear_bit_if_present(field_data_ready_bitset_, field_id);
+    if (has_bit_position(binlog_index_bitset_, field_id) &&
+        get_bit(binlog_index_bitset_, field_id)) {
+        clear_bit_if_present(binlog_index_bitset_, field_id);
         vector_indexings_.drop_field_indexing(field_id);
     }
 }
@@ -1828,16 +1845,19 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Field id:" + std::to_string(field_id.get()) +
                    " isn't one of system type when drop index");
-    auto& field_meta = schema_->operator[](field_id);
-    AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
+    if (field_exists_in_schema(schema_, field_id)) {
+        auto& field_meta = schema_->operator[](field_id);
+        AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
+    }
 
     std::unique_lock lck(mutex_);
     auto [scalar_indexings, ngram_fields] =
         lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
     cancel_and_erase_scalar_index(*scalar_indexings, field_id);
     ngram_fields->erase(field_id);
+    vector_indexings_.drop_field_indexing(field_id);
 
-    set_bit(index_ready_bitset_, field_id, false);
+    clear_bit_if_present(index_ready_bitset_, field_id);
 }
 
 void
@@ -3110,6 +3130,9 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
         std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
         infos) {
     for (const auto& [field_id, info_proto] : infos) {
+        AssertInfo(field_exists_in_schema(schema_, field_id),
+                   "field {} not found in schema when loading json stats",
+                   field_id.get());
         LoadJsonKeyIndex(op_ctx, info_proto);
     }
 }
@@ -4724,8 +4747,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_replace) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
+    AssertInfo(!milvus_field_ids.empty(),
+               "load column group with empty field list");
     auto column_group = column_groups->at(index);
     auto load_info = std::atomic_load(&segment_load_info_);
+
+    for (const auto& field_id : milvus_field_ids) {
+        AssertInfo(field_exists_in_schema(schema_, field_id),
+                   "field {} not found in schema when loading column group",
+                   field_id.get());
+    }
 
     auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
@@ -4896,6 +4927,9 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
 
     load_index_futures.reserve(text_indexes_to_load.size());
     for (auto& [field_id, load_text_index_info] : text_indexes_to_load) {
+        AssertInfo(field_exists_in_schema(schema_, field_id),
+                   "field {} not found in schema when loading text index",
+                   field_id.get());
         auto future = pool.Submit(
             [this, op_ctx, info = std::move(load_text_index_info)]() mutable
             -> void { LoadTextIndex(op_ctx, std::move(info)); });
@@ -4918,6 +4952,9 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
 
     for (auto& pair : field_id_to_index_info) {
         auto field_id = pair.first;
+        AssertInfo(field_exists_in_schema(schema_, field_id),
+                   "field {} not found in schema when loading index",
+                   field_id.get());
         auto& index_infos = pair.second;
         for (auto& load_index_info : index_infos) {
             auto* load_index_info_ptr = &load_index_info;
@@ -4980,6 +5017,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             }
         } else {
             field_ids.emplace_back(field_binlog.fieldid());
+        }
+        AssertInfo(!field_ids.empty(), "load field data with empty field list");
+        for (const auto& field_id : field_ids) {
+            AssertInfo(field_exists_in_schema(schema_, field_id),
+                       "field {} not found in schema when loading field data",
+                       field_id.get());
         }
 
         bool index_has_raw_data = true;
@@ -5117,7 +5160,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto num_rows = snapshot->GetNumOfRows();
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
-    SegmentLoadInfo mutable_copy(*snapshot);
+    SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
     auto diff = mutable_copy.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
     ApplyLoadDiff(op_ctx, mutable_copy, diff);

@@ -564,6 +564,13 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    [[nodiscard]] bool
+    HasFieldInSchema(FieldId field_id) const {
+        return field_id.get() < START_USER_FIELDID ||
+               schema_->get_fields().find(field_id) !=
+                   schema_->get_fields().end();
+    }
+
     [[nodiscard]] int64_t
     GetEstimatedBytesPerRow() const {
         return info_.estimated_bytes_per_row();
@@ -1043,10 +1050,13 @@ class SegmentLoadInfo {
             if (index_info.index_file_paths_size() == 0) {
                 continue;
             }
+            auto field_id = FieldId(index_info.fieldid());
+            if (!HasFieldInSchema(field_id)) {
+                continue;
+            }
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
             converted_index_infos_.push_back(load_index_info);
-            auto field_id = FieldId(index_info.fieldid());
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {
                 field_index_has_raw_data_.insert(field_id);
