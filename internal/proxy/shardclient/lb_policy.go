@@ -316,8 +316,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		log.Warn("failed to get shard leaders", zap.Error(err))
 		return err
 	}
-	// The extra attempt preserves selectNode's all-excluded fallback, which may re-probe after every cached leader fails.
-	retryTimes := max(lb.retryOnReplica, len(shardLeaders)+1)
+	// Sweep all shard leaders once, then allow configured request-level retries after every leader returns a retriable error.
+	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
 	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
 	if err != nil {
 		log.Warn("failed to execute",
