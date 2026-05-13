@@ -4,7 +4,6 @@ import json
 import os
 import random
 import re
-import threading
 import time
 
 import numpy as np
@@ -15,11 +14,6 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.external_table_common import (
-    _PLACEHOLDER_NEW_SOURCE,
-    _PLACEHOLDER_NEW_SPEC,
-    _PLACEHOLDER_SPEC,
-    _PLACEHOLDER_SRC,
-    ALLOWED_EXTERNAL_SOURCE_SCHEMES,
     BASIC_FORMAT_IDS,
     BASIC_FORMATS,
     FORMAT_NUM_FILES,
@@ -32,27 +26,10 @@ from common.external_table_common import (
     _full_matrix_arrow_columns,
     _full_matrix_assert_basic,
     _iceberg_full_matrix_assert,
-    _schema_missing_external_field,
-    _schema_with_auto_id,
-    _schema_with_duplicate_external_field,
-    _schema_with_dynamic,
-    _schema_with_partition_key,
-    _schema_with_sparse_float_vector,
-    _schema_with_user_pk,
-    assert_basic_format_rows,
-    assert_external_spec_persisted,
-    build_all_scalar_schema,
-    build_basic_format_schema,
-    build_basic_schema,
     build_external_source,
     build_external_spec,
-    build_external_spec_for_scheme,
     build_full_matrix_schema,
     build_iceberg_full_matrix_schema,
-    build_multi_vector_schema,
-    build_typed_schema,
-    build_validation_source_for_scheme,
-    build_vector_variant_schema,
     cleanup_minio_prefix,
     create_full_matrix_indexes,
     create_iceberg_full_matrix_indexes,
@@ -76,7 +53,57 @@ from common.external_table_common import (
     write_basic_format_dataset,
 )
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
+from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.util_log import test_log as log
+
+REFRESH_POLL_INTERVAL_SECONDS = 2
+
+ALLOWED_EXTERNAL_SOURCE_SCHEMES = (pytest.param("minio", id="minio"),)
+_PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
+_PLACEHOLDER_SPEC = build_external_spec()
+_PLACEHOLDER_NEW_SOURCE = "minio://localhost:9000/milvus-bucket/new/"
+_PLACEHOLDER_NEW_SPEC = build_external_spec()
+
+
+def assert_external_spec_persisted(actual_spec, expected_spec, context):
+    actual = json.loads(actual_spec or "{}")
+    expected = json.loads(expected_spec or "{}")
+    assert actual.get("format") == expected.get("format"), f"{context}: format mismatch: {actual}"
+
+    actual_extfs = actual.get("extfs") or {}
+    expected_extfs = expected.get("extfs") or {}
+    for key in ("cloud_provider", "region", "use_ssl"):
+        assert actual_extfs.get(key) == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
+
+    for key in ("access_key_id", "access_key_value"):
+        value = actual_extfs.get(key)
+        assert value, f"{context}: extfs.{key} missing: {actual_extfs}"
+        assert value == "***" or value == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
+
+
+def _build_basic_schema(self, client, ext_path, dim=ct.default_dim, ext_spec=None):
+    schema = self.create_schema(client, external_source=ext_path, external_spec=ext_spec or build_external_spec())[0]
+    self.add_field(schema, "id", DataType.INT64, external_field="id")
+    self.add_field(schema, "value", DataType.FLOAT, external_field="value")
+    self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
+    return schema
+
+
+def _assert_basic_format_rows(self, client, coll, fmt, batches, dim=ct.default_dim):
+    total = sum(num_rows for _start_id, num_rows in batches)
+    assert self.query_count(client, coll) == total
+    for start_id, num_rows in batches:
+        if num_rows == 0:
+            continue
+        rows = self.query(client, coll, filter=f"id == {start_id}", output_fields=["id", "value", "embedding"])[0]
+        assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
+        assert abs(rows[0]["value"] - start_id * 1.5) < 1e-3
+        vec = rows[0]["embedding"]
+        assert len(vec) == dim
+        for j, v in enumerate(vec):
+            expected = float(start_id) * 0.1 + j
+            assert abs(v - expected) < 1e-2, f"[{fmt}] vec[{j}] for id={start_id} = {v}"
+
 
 # ============================================================
 # Fixtures
@@ -104,18 +131,47 @@ def external_prefix(minio_env, request):
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", request.node.name)
     key = f"external-e2e-core/{safe}-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
     yield {"key": key, "url": build_external_source(cfg, key)}
-    try:
-        cleanup_minio_prefix(mc, cfg["bucket"], f"{key}/")
-    except Exception as exc:
-        log.warning(f"cleanup_minio_prefix({key}) failed: {exc}")
+    cleanup_minio_prefix(mc, cfg["bucket"], f"{key}/")
 
 
 class ExternalTableTestBase(TestMilvusClientV2Base):
     """Shared base for external table MilvusClient wrapper tests."""
 
-    @staticmethod
-    def error_items(err_msg, err_code=1100):
-        return {ct.err_code: err_code, ct.err_msg: err_msg}
+    def query_count(self, client, collection_name):
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        return res[0]["count(*)"]
+
+    def wait_until(self, probe, is_done, timeout, description, interval=REFRESH_POLL_INTERVAL_SECONDS):
+        last = None
+
+        def _probe_once():
+            nonlocal last
+            last = probe()
+            return is_done(last)
+
+        completed = Retrying(
+            stop=stop_after_delay(timeout),
+            wait=wait_fixed(interval),
+            retry=retry_if_result(lambda done: not done),
+            retry_error_callback=lambda _retry_state: False,
+        )(_probe_once)
+        assert completed, f"{description} did not finish in {timeout}s, last={last}"
+        return last
+
+    def wait_refresh_progress(
+        self,
+        client,
+        job_id,
+        timeout=REFRESH_TIMEOUT,
+        terminal_states=("RefreshCompleted", "RefreshFailed"),
+        return_on_reason=False,
+    ):
+        return self.wait_until(
+            lambda: self.get_refresh_external_collection_progress(client, job_id=job_id)[0],
+            lambda progress: progress.state in terminal_states or (return_on_reason and bool(progress.reason)),
+            timeout=timeout,
+            description=f"refresh job {job_id}",
+        )
 
     def refresh_and_wait(
         self,
@@ -132,15 +188,10 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
             kwargs["external_spec"] = external_spec
 
         job_id = self.refresh_external_collection(client, **kwargs)[0]
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            if progress.state == "RefreshCompleted":
-                return job_id
-            if progress.state == "RefreshFailed":
-                raise AssertionError(f"refresh failed: job_id={job_id}, reason={progress.reason}")
-            time.sleep(2)
-        raise TimeoutError(f"refresh did not complete in {timeout}s, job_id={job_id}")
+        progress = self.wait_refresh_progress(client, job_id, timeout=timeout)
+        assert progress.state != "RefreshFailed", f"refresh failed: job_id={job_id}, reason={progress.reason}"
+        assert progress.state == "RefreshCompleted", f"refresh job {job_id} ended in {progress.state}"
+        return job_id
 
     def refresh_and_poll_terminal(
         self,
@@ -149,6 +200,7 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
         timeout=60,
         external_source=None,
         external_spec=None,
+        return_on_reason=False,
     ):
         kwargs = {"collection_name": collection_name}
         if external_source is not None:
@@ -157,14 +209,13 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
             kwargs["external_spec"] = external_spec
 
         job_id = self.refresh_external_collection(client, **kwargs)[0]
-        deadline = time.time() + timeout
-        progress = None
-        while time.time() < deadline:
-            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                return job_id, progress
-            time.sleep(2)
-        raise TimeoutError(f"refresh did not reach terminal state in {timeout}s, job_id={job_id}, last={progress}")
+        progress = self.wait_refresh_progress(
+            client,
+            job_id,
+            timeout=timeout,
+            return_on_reason=return_on_reason,
+        )
+        return job_id, progress
 
     def refresh_and_expect_failed(
         self,
@@ -207,39 +258,12 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
         self.add_vector_index(client, collection_name, vec_field=vec_field, metric_type=metric_type)
         self.load_collection(client, collection_name)
 
-    def query_count(self, client, collection_name):
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        return res[0]["count(*)"]
-
     # Basic parquet collection lifecycle helpers. These intentionally cover
     # only the common happy path; specialized cases keep their setup inline.
     def create_basic_external_collection(self, client, collection_name, external_source, ext_spec=None):
-        schema = build_basic_schema(client, external_source, ext_spec=ext_spec)
+        schema = _build_basic_schema(self, client, external_source, ext_spec=ext_spec)
         self.create_collection(client, collection_name=collection_name, schema=schema)
         return schema
-
-    @staticmethod
-    def _basic_external_io(minio_env, external_prefix):
-        minio_client, cfg = minio_env
-        return minio_client, cfg, external_prefix["url"], external_prefix["key"]
-
-    def _upload_basic_dataset(
-        self,
-        minio_env,
-        external_prefix,
-        num_rows=ct.default_nb,
-        start_id=0,
-        filename="data.parquet",
-    ):
-        minio_client, cfg, _external_source, external_key = self._basic_external_io(minio_env, external_prefix)
-        upload_basic_data(
-            minio_client,
-            cfg,
-            external_key,
-            num_rows=num_rows,
-            start_id=start_id,
-            filename=filename,
-        )
 
     def prepare_refreshed_basic_collection(
         self,
@@ -253,10 +277,12 @@ class ExternalTableTestBase(TestMilvusClientV2Base):
         ext_spec=None,
     ):
         external_source = external_prefix["url"]
+        minio_client, cfg = minio_env
         coll = collection_name or cf.gen_collection_name_by_testcase_name()
-        self._upload_basic_dataset(
-            minio_env,
-            external_prefix,
+        upload_basic_data(
+            minio_client,
+            cfg,
+            external_prefix["key"],
             num_rows=num_rows,
             start_id=start_id,
             filename=filename,
@@ -347,15 +373,83 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "case_name,schema_builder,err_hint",
+        "case_name,schema_kwargs,fields,err_hint,err_stage",
         [
-            ("user_primary_key", lambda c: _schema_with_user_pk(c), "primary key"),
-            ("auto_id_on_user_field", lambda c: _schema_with_auto_id(c), "auto_id"),
-            ("dynamic_field_enabled", lambda c: _schema_with_dynamic(c), "dynamic field"),
-            ("partition_key", lambda c: _schema_with_partition_key(c), "partition key"),
-            ("missing_external_field", lambda c: _schema_missing_external_field(c), "external_field"),
-            ("sparse_float_vector", lambda c: _schema_with_sparse_float_vector(c), "SparseFloatVector"),
-            ("duplicate_external_field", lambda c: _schema_with_duplicate_external_field(c), "external_field"),
+            (
+                "user_primary_key",
+                {},
+                [
+                    ("pk", DataType.INT64, {"is_primary": True, "external_field": "pk"}),
+                    ("vec", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "vec"}),
+                ],
+                "primary key",
+                "create_collection",
+            ),
+            (
+                "auto_id_on_user_field",
+                {},
+                [
+                    ("id", DataType.INT64, {"auto_id": True, "external_field": "id"}),
+                    ("vec", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "vec"}),
+                ],
+                "auto_id",
+                "add_field",
+            ),
+            (
+                "dynamic_field_enabled",
+                {"enable_dynamic_field": True},
+                [
+                    ("id", DataType.INT64, {"external_field": "id"}),
+                    ("vec", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "vec"}),
+                ],
+                "dynamic field",
+                "create_collection",
+            ),
+            (
+                "partition_key",
+                {},
+                [
+                    (
+                        "cat",
+                        DataType.VARCHAR,
+                        {"max_length": 64, "is_partition_key": True, "external_field": "cat"},
+                    ),
+                    ("vec", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "vec"}),
+                ],
+                "partition key",
+                "create_collection",
+            ),
+            (
+                "missing_external_field",
+                {},
+                [
+                    ("plain_field", DataType.INT64, {}),
+                    ("vec", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "vec"}),
+                ],
+                "external_field",
+                "create_collection",
+            ),
+            (
+                "sparse_float_vector",
+                {},
+                [
+                    ("id", DataType.INT64, {"external_field": "id"}),
+                    ("sv", DataType.SPARSE_FLOAT_VECTOR, {"external_field": "sv"}),
+                ],
+                "SparseFloatVector",
+                "create_collection",
+            ),
+            (
+                "duplicate_external_field",
+                {},
+                [
+                    ("id", DataType.INT64, {"external_field": "same_col"}),
+                    ("value", DataType.FLOAT, {"external_field": "same_col"}),
+                    ("embedding", DataType.FLOAT_VECTOR, {"dim": ct.default_dim, "external_field": "embedding"}),
+                ],
+                "external_field",
+                "create_collection",
+            ),
         ],
         ids=[
             "user_primary_key",
@@ -367,22 +461,43 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             "duplicate_external_field",
         ],
     )
-    def test_milvus_client_external_table_schema_reject_invalid_definition(self, case_name, schema_builder, err_hint):
+    def test_milvus_client_external_table_schema_reject_invalid_definition(
+        self, case_name, schema_kwargs, fields, err_hint, err_stage
+    ):
         """
         target: test MilvusClient external table schema reject invalid definition
-        method: Forbidden or invalid external schema shapes must be rejected at create_collection time
+        method: Forbidden or invalid external schema shapes must be rejected while building or creating schema
         expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
 
-        schema = schema_builder(client)
+        schema = self.create_schema(
+            client,
+            external_source=_PLACEHOLDER_SRC,
+            external_spec=_PLACEHOLDER_SPEC,
+            **schema_kwargs,
+        )[0]
+        if err_stage == "add_field":
+            field_name, dtype, field_kwargs = fields[0]
+            self.add_field(
+                schema,
+                field_name,
+                dtype,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: err_hint},
+                **field_kwargs,
+            )
+            log.info(f"[{case_name}] correctly rejected by add_field with {err_hint!r}")
+            return
+        for field_name, dtype, field_kwargs in fields:
+            self.add_field(schema, field_name, dtype, **field_kwargs)
         self.create_collection(
             client,
             collection_name=coll,
             schema=schema,
             check_task=CheckTasks.err_res,
-            check_items=self.error_items(err_hint),
+            check_items={ct.err_code: 1100, ct.err_msg: err_hint},
         )
         log.info(f"[{case_name}] correctly rejected with {err_hint!r}")
 
@@ -397,14 +512,14 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         _minio_client, cfg = minio_env
-        source = build_validation_source_for_scheme(scheme, cfg)
+        source = f"{scheme}://{cfg['address']}/{cfg['bucket']}/prefix/"
         schema = self.create_schema(
             client,
             external_source=source,
-            external_spec=build_external_spec_for_scheme(scheme, cfg=cfg),
+            external_spec=build_external_spec(cfg=cfg, cloud_provider=scheme),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         assert self.has_collection(client, coll)[0]
 
@@ -434,18 +549,18 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "case_name,source,err_terms",
+        "case_name,source",
         [
-            ("relative_path_no_scheme", "my-data/parquet/", ("explicit scheme", "external_source")),
-            ("http", "http://169.254.169.254/metadata", ("not allowed", "not support")),
-            ("ftp", "ftp://example.com/data", ("not allowed", "not support")),
-            ("unknown", "xyz://bucket/prefix", ("not allowed", "not support")),
-            ("file", "file:///tmp/data", ("not allowed", "not support")),
-            ("userinfo", "s3://ak:sk@bucket/prefix", ("credentials",)),
+            ("relative_path_no_scheme", "my-data/parquet/"),
+            ("http", "http://169.254.169.254/metadata"),
+            ("ftp", "ftp://example.com/data"),
+            ("unknown", "xyz://bucket/prefix"),
+            ("file", "file:///tmp/data"),
+            ("userinfo", "s3://ak:sk@bucket/prefix"),
         ],
         ids=["relative_path_no_scheme", "http", "ftp", "unknown", "file", "userinfo"],
     )
-    def test_milvus_client_external_table_external_source_rejected(self, case_name, source, err_terms):
+    def test_milvus_client_external_table_external_source_rejected(self, case_name, source):
         """
         target: test MilvusClient external table external source rejected
         method: Invalid source forms and schemes outside the allowlist must be rejected
@@ -458,17 +573,16 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             external_source=source,
             external_spec=_PLACEHOLDER_SPEC,
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-        create_res, created = self.create_collection(
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.create_collection(
             client,
             collection_name=coll,
             schema=schema,
-            check_task=CheckTasks.check_nothing,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "external_source"},
         )
-        assert not created, f"[{case_name}] {source} should be rejected for external_source"
-        msg = str(create_res).lower()
-        assert any(term in msg for term in err_terms), f"[{case_name}] unexpected error: {create_res}"
+        log.info(f"[{case_name}] {source} correctly rejected for external_source")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_user_fields_force_nullable(self):
@@ -485,16 +599,17 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             external_spec=_PLACEHOLDER_SPEC,
         )[0]
         # Intentionally do NOT pass nullable on any user field.
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("v", DataType.VARCHAR, max_length=64, external_field="v")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "v", DataType.VARCHAR, max_length=64, external_field="v")
+        self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         info = self.describe_collection(client, coll)[0]
         by_name = {f["name"]: f for f in info["fields"]}
-        for field in ("id", "v", "vec"):
+        for field in ("id", "v"):
             assert by_name[field].get("nullable") is True, (
                 f"user field '{field}' should be force-nullable, got {by_name[field]}"
             )
+        assert by_name["vec"].get("type") == DataType.FLOAT_VECTOR, f"vec field should exist, got {by_name['vec']}"
         vpk = by_name.get("__virtual_pk__")
         assert vpk is not None and vpk.get("is_primary") is True, "__virtual_pk__ should still be the primary key"
 
@@ -527,26 +642,21 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             external_source=build_external_source(cfg, "old"),
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         before = self.describe_collection(client, coll)[0]
-        with pytest.raises(Exception) as exc_info:
-            client.alter_collection_properties(
-                coll,
-                properties=properties,
-            )
-        msg = str(exc_info.value).lower()
-        assert (
-            "refreshexternalcollection" in msg.replace(" ", "")
-            or "external_source" in msg
-            or "external_spec" in msg
-            or "invalid parameter" in msg
-        ), f"unexpected error: {exc_info.value}"
+        self.alter_collection_properties(
+            client,
+            collection_name=coll,
+            properties=properties,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "external"},
+        )
         after = self.describe_collection(client, coll)[0]
         assert after.get("external_source") == before.get("external_source")
         assert after.get("external_spec") == before.get("external_spec")
-        log.info(f"alter via property correctly rejected: {exc_info.value}")
+        log.info("alter via property correctly rejected")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -583,15 +693,15 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             client,
         )[0]
         for name, dtype, kwargs in fields:
-            schema.add_field(name, dtype, **kwargs)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim)
+            self.add_field(schema, name, dtype, **kwargs)
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim)
 
         self.create_collection(
             client,
             collection_name=coll,
             schema=schema,
             check_task=CheckTasks.err_res,
-            check_items=self.error_items("__virtual_pk__"),
+            check_items={ct.err_code: 1100, ct.err_msg: "__virtual_pk__"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -611,13 +721,14 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = build_basic_schema(client, external_prefix["url"])
+        schema = _build_basic_schema(self, client, external_prefix["url"])
         self.create_collection(client, collection_name=coll, schema=schema)
-        with pytest.raises(Exception) as exc_info:
-            client.refresh_external_collection(collection_name=coll, **kwargs)
-        msg = str(exc_info.value).lower()
-        assert "both" in msg or "external_source" in msg or "external_spec" in msg or "invalid" in msg, (
-            f"unexpected error: {exc_info.value}"
+        self.refresh_external_collection(
+            client,
+            collection_name=coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "both provided or both omitted"},
+            **kwargs,
         )
 
 
@@ -664,7 +775,10 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
         data = gen_parquet_bytes(ct.default_nb, 0, scalar_name, arrow_type, value_fn)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = build_typed_schema(client, ext_url, scalar_name, dtype, **extra)
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, scalar_name, dtype, external_field=scalar_name, **extra)
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -721,9 +835,9 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
         schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field(arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra)
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
@@ -755,7 +869,18 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             gen_all_scalar_parquet_bytes(nb, 0),
         )
 
-        schema = build_all_scalar_schema(client, ext_url)
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "val_bool", DataType.BOOL, external_field="val_bool")
+        self.add_field(schema, "val_int8", DataType.INT8, external_field="val_int8")
+        self.add_field(schema, "val_int16", DataType.INT16, external_field="val_int16")
+        self.add_field(schema, "val_int32", DataType.INT32, external_field="val_int32")
+        self.add_field(schema, "val_int64", DataType.INT64, external_field="val_int64")
+        self.add_field(schema, "val_float", DataType.FLOAT, external_field="val_float")
+        self.add_field(schema, "val_double", DataType.DOUBLE, external_field="val_double")
+        self.add_field(schema, "val_varchar", DataType.VARCHAR, max_length=64, external_field="val_varchar")
+        self.add_field(schema, "val_json", DataType.JSON, external_field="val_json")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -825,9 +950,9 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "geo", DataType.GEOMETRY, external_field="geo")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -1063,62 +1188,56 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field(bad_field, milvus_dtype, external_field=bad_field, **field_kwargs)
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, bad_field, milvus_dtype, external_field=bad_field, **field_kwargs)
         if include_embedding:
-            schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+            self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
-        create_res, created = self.create_collection(
+        self.create_collection(
             client,
             collection_name=coll,
             schema=schema,
-            check_task=CheckTasks.check_nothing,
         )
-        if not created:
-            log.info(f"[{case_name}] create_collection rejected mismatch: {create_res}")
-            return
 
-        job_id, progress = self.refresh_and_poll_terminal(client, coll, timeout=60)
-        if progress.state == "RefreshFailed":
+        job_id, progress = self.refresh_and_poll_terminal(client, coll, timeout=60, return_on_reason=True)
+        if progress.state == "RefreshFailed" or progress.reason:
             assert progress.reason, f"[{case_name}] refresh job {job_id} failed without a reason"
             log.info(f"[{case_name}] refresh rejected mismatch: job={job_id}, reason={progress.reason}")
             return
 
         assert progress.state == "RefreshCompleted", f"[{case_name}] unexpected refresh state: {progress.state}"
 
-        try:
-            if include_embedding:
-                self.add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-                client.load_collection(coll, timeout=30)
-                accepted_result = client.query(
-                    coll,
-                    filter="id >= 0",
-                    output_fields=["id", bad_field],
-                    limit=1,
-                )
-            else:
-                self.add_vector_index(client, coll, bad_field, "AUTOINDEX", "L2")
-                client.load_collection(coll, timeout=30)
-                accepted_result = client.query(
-                    coll,
-                    filter="id >= 0",
-                    output_fields=["id", bad_field],
-                    limit=1,
-                )
-                accepted_hits = client.search(
-                    coll,
-                    data=[[0.0] * ct.default_dim],
-                    limit=1,
-                    anns_field=bad_field,
-                    output_fields=["id"],
-                )
-                accepted_result = {
-                    "query": accepted_result,
-                    "search": accepted_hits,
-                }
-        except Exception as exc:
-            log.info(f"[{case_name}] load/query rejected mismatch: {exc}")
-            return
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name="embedding" if include_embedding else bad_field,
+            index_type="AUTOINDEX",
+            metric_type="L2",
+        )
+        self.create_index(client, coll, index_params)
+
+        self.load_collection(client, coll, timeout=30)
+
+        accepted_result = self.query(
+            client,
+            coll,
+            filter="id >= 0",
+            output_fields=["id", bad_field],
+            limit=1,
+        )[0]
+
+        if not include_embedding:
+            search_res = self.search(
+                client,
+                coll,
+                data=[[0.0] * ct.default_dim],
+                limit=1,
+                anns_field=bad_field,
+                output_fields=["id"],
+            )[0]
+            accepted_result = {
+                "query": accepted_result,
+                "search": search_res,
+            }
 
         if known_acceptance:
             pytest.xfail(
@@ -1169,7 +1288,7 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             gen_basic_parquet_bytes(20, 0, dim=external_dim),
         )
 
-        schema = build_basic_schema(client, ext_url, dim=ct.default_dim, ext_spec=build_external_spec(cfg))
+        schema = _build_basic_schema(self, client, ext_url, dim=ct.default_dim, ext_spec=build_external_spec(cfg))
         self.create_collection(client, collection_name=coll, schema=schema)
         _job_id, progress = self.refresh_and_expect_failed(client, coll, timeout=60)
         log.info(f"[{case_name}] refresh rejected vector dim mismatch: {progress.reason}")
@@ -1202,15 +1321,10 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
         data = gen_vector_variant_parquet_bytes(ct.default_nb, 0, vec_field, vec_dtype, dim)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = build_vector_variant_schema(client, ext_url, vec_field, vec_dtype, dim)
-        create_res, created = self.create_collection(
-            client,
-            collection_name=coll,
-            schema=schema,
-            check_task=CheckTasks.check_nothing,
-        )
-        if not created:
-            pytest.skip(f"[{vec_kind}] create_collection rejected on this build: {create_res}")
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, vec_field, vec_dtype, dim=dim, external_field=vec_field)
+        self.create_collection(client, collection_name=coll, schema=schema)
 
         self.refresh_and_wait(client, coll)
         self.add_vector_index(client, coll, vec_field, "AUTOINDEX", metric)
@@ -1263,13 +1377,9 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
         )
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = build_vector_variant_schema(
-            client,
-            ext_url,
-            "bin_vec",
-            DataType.BINARY_VECTOR,
-            ct.default_dim,
-        )
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "bin_vec", DataType.BINARY_VECTOR, dim=ct.default_dim, external_field="bin_vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.add_vector_index(client, coll, "bin_vec", "BIN_FLAT", "HAMMING")
@@ -1308,7 +1418,11 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             f"{ext_key}/data.parquet",
             gen_multi_vector_parquet_bytes(ct.default_nb, 0),
         )
-        schema = build_multi_vector_schema(client, ext_url)
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "value", DataType.FLOAT, external_field="value")
+        self.add_field(schema, "dense_vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="dense_vec")
+        self.add_field(schema, "bin_vec", DataType.BINARY_VECTOR, dim=ct.default_dim, external_field="bin_vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
 
@@ -1372,9 +1486,9 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("ts", DataType.TIMESTAMPTZ, external_field="ts")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "ts", DataType.TIMESTAMPTZ, external_field="ts")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -1403,8 +1517,8 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field(
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema,
             "vecs",
             DataType._ARRAY_OF_VECTOR,
             element_type=DataType.FLOAT_VECTOR,
@@ -1412,16 +1526,14 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             max_capacity=4,
             external_field="vecs",
         )
-        create_res, created = self.create_collection(
+        self.create_collection(
             client,
             collection_name=coll,
             schema=schema,
-            check_task=CheckTasks.check_nothing,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "array"},
         )
-        assert not created, "array-of-vector top-level external field should be rejected"
-        msg = str(create_res)
-        assert "struct" in msg.lower() or "array of vector" in msg.lower(), msg
-        log.info(f"[array_of_vector] rejected as expected: {msg}")
+        log.info("[array_of_vector] rejected as expected")
 
 
 # ============================================================
@@ -1458,12 +1570,12 @@ class TestMilvusClientExternalTableNullableScenarios(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("n_int", DataType.INT32, external_field="n_int")
-        schema.add_field("n_float", DataType.FLOAT, external_field="n_float")
-        schema.add_field("n_varchar", DataType.VARCHAR, max_length=64, external_field="n_varchar")
-        schema.add_field("n_json", DataType.JSON, external_field="n_json")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "n_int", DataType.INT32, external_field="n_int")
+        self.add_field(schema, "n_float", DataType.FLOAT, external_field="n_float")
+        self.add_field(schema, "n_varchar", DataType.VARCHAR, max_length=64, external_field="n_varchar")
+        self.add_field(schema, "n_json", DataType.JSON, external_field="n_json")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
@@ -1533,7 +1645,7 @@ class TestMilvusClientExternalTableLargeFile(ExternalTableTestBase):
             gen_large_parquet_with_row_groups(num_rows, 0, row_group_size),
         )
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -1592,19 +1704,14 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
         """
         client = self._client()
         coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
-        try:
-            self.add_vector_index(
-                client,
-                coll,
-                "embedding",
-                index_type=index_type,
-                metric_type=metric_type,
-                **({"params": params} if params else {}),
-            )
-        except Exception as e:
-            if index_type == "DISKANN":
-                pytest.skip(f"DISKANN not available on this deployment: {e}")
-            raise
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name="embedding",
+            index_type=index_type,
+            metric_type=metric_type,
+            **({"params": params} if params else {}),
+        )
+        self.create_index(client, coll, index_params)
         self.load_collection(client, coll)
 
         hits = self.search(
@@ -1648,14 +1755,12 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
         )
 
         # Alter mmap=True before load
-        try:
-            client.alter_index_properties(
-                collection_name=coll,
-                index_name="embedding",
-                properties={"mmap.enabled": True},
-            )
-        except Exception as e:
-            pytest.skip(f"alter_index_properties not supported: {e}")
+        self.alter_index_properties(
+            client,
+            collection_name=coll,
+            index_name="embedding",
+            properties={"mmap.enabled": True},
+        )
 
         info = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
         log.info(f"[{index_type}] index info after mmap=True: {info}")
@@ -1704,13 +1809,11 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
         client = self._client()
         coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
 
-        try:
-            client.alter_collection_properties(
-                collection_name=coll,
-                properties={"mmap.enabled": True},
-            )
-        except Exception as e:
-            pytest.skip(f"alter_collection_properties mmap not supported: {e}")
+        self.alter_collection_properties(
+            client,
+            collection_name=coll,
+            properties={"mmap.enabled": True},
+        )
 
         desc = self.describe_collection(client, coll)[0]
         props = desc.get("properties") or {}
@@ -1760,7 +1863,9 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
             f"{ext_key}/data.parquet",
             gen_vector_variant_parquet_bytes(ct.default_nb, 0, "bin_vec", DataType.BINARY_VECTOR, ct.default_dim),
         )
-        schema = build_vector_variant_schema(client, ext_url, "bin_vec", DataType.BINARY_VECTOR, ct.default_dim)
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "bin_vec", DataType.BINARY_VECTOR, dim=ct.default_dim, external_field="bin_vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         params = {"nlist": 16} if index_type == "BIN_IVF_FLAT" else {}
@@ -1784,7 +1889,7 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
         [
             ("INVERTED", "value"),
             ("STL_SORT", "value"),
-            ("BITMAP", "value"),
+            ("BITMAP", "id"),
         ],
     )
     def test_milvus_client_external_table_scalar_index(self, scalar_index_type, field_name, minio_env, external_prefix):
@@ -1800,17 +1905,19 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
             client,
         )[0]
         index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
-        try:
-            index_params.add_index(field_name=field_name, index_type=scalar_index_type)
-            client.create_index(coll, index_params)
-        except Exception as e:
-            pytest.skip(f"{scalar_index_type} on {field_name} not supported: {e}")
+        index_params.add_index(field_name=field_name, index_type=scalar_index_type)
+        self.create_index(client, coll, index_params)
 
         self.load_collection(client, coll)
         assert self.query_count(client, coll) == ct.default_nb
 
         idx_list = self.list_indexes(client, collection_name=coll)[0]
         log.info(f"[{scalar_index_type}] list_indexes: {idx_list}")
+        field_indexes = self.list_indexes(client, collection_name=coll, field_name=field_name)[0]
+        assert field_indexes, f"{scalar_index_type} index missing for field {field_name}: {idx_list}"
+        index_info = self.describe_index(client, collection_name=coll, index_name=str(field_indexes[0]))[0]
+        assert index_info.get("field_name") == field_name, f"unexpected scalar index field: {index_info}"
+        assert index_info.get("index_type") == scalar_index_type, f"unexpected scalar index type: {index_info}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_drop_and_recreate_index(self, minio_env, external_prefix):
@@ -1826,15 +1933,9 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
 
         self.release_collection(client, coll)
         # Drop index by name (Milvus auto-assigns or uses field name)
-        try:
-            client.drop_index(collection_name=coll, index_name="embedding")
-        except Exception:
-            # Some SDKs / builds require the actual auto-generated name
-            idx_list = client.list_indexes(collection_name=coll)
-            target = next((n for n in idx_list if "embedding" in str(n)), None)
-            if target is None:
-                pytest.skip("Unable to locate index to drop")
-            client.drop_index(collection_name=coll, index_name=str(target))
+        idx_list = self.list_indexes(client, collection_name=coll)[0]
+        target = next((n for n in idx_list if "embedding" in str(n)), "embedding")
+        self.drop_index(client, collection_name=coll, index_name=str(target))
 
         # Recreate with HNSW
         self.add_vector_index(client, coll, "embedding", "HNSW", "IP", params={"M": 16})
@@ -1878,23 +1979,19 @@ class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
 class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
     """All DML + partition/field DDL should be rejected on external collections."""
 
-    def _prepared_collection(self, client, minio_env, external_prefix):
-        """Create a refreshed, loaded external collection and return its name."""
-        return self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "op_name,err_terms",
+        "op_name,err_msg",
         [
-            ("insert", ("external", "not support", "virtual_pk", "datanotmatch", "missed an field")),
-            ("upsert", ("external", "not support", "virtual_pk", "datanotmatch", "missed an field")),
-            ("delete", ("external", "not support")),
-            ("flush", ("external", "not support")),
-            ("create_partition", ("external", "not support")),
-            ("drop_partition", ("external", "not support", "default")),
-            ("compact", ("external", "not support", "not allowed")),
-            ("add_collection_field", ("external", "not support", "not allowed")),
-            ("truncate_collection", ("external", "not support", "not allowed")),
+            ("insert", "not supported for external collection"),
+            ("upsert", "not supported for external collection"),
+            ("delete", "not supported for external collection"),
+            ("flush", "not supported for external collection"),
+            ("create_partition", "not supported for external collection"),
+            ("drop_partition", "not supported for external collection"),
+            ("compact", "not supported for external collection"),
+            ("add_collection_field", "not supported for external collection"),
+            ("truncate_collection", "not supported on external collections"),
         ],
         ids=[
             "insert",
@@ -1908,61 +2005,84 @@ class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
             "truncate_collection",
         ],
     )
-    def test_milvus_client_external_table_write_operation_rejected(
-        self, op_name, err_terms, minio_env, external_prefix
-    ):
+    def test_milvus_client_external_table_write_operation_rejected(self, op_name, err_msg, minio_env, external_prefix):
         """
         target: test MilvusClient external table write operation rejected
         method: DML, partition, and DDL operations are blocked on external collections
         expected: behavior matches the case assertion.
         """
         client = self._client()
-        coll = self._prepared_collection(client, minio_env, external_prefix)
-        with pytest.raises(Exception) as exc_info:
-            if op_name == "insert":
-                client.insert(
-                    collection_name=coll,
-                    data=[
-                        {
-                            "id": 99999,
-                            "value": 1.0,
-                            "embedding": [0.0] * ct.default_dim,
-                        }
-                    ],
-                )
-            elif op_name == "upsert":
-                client.upsert(
-                    collection_name=coll,
-                    data=[
-                        {
-                            "id": 0,
-                            "value": 0.0,
-                            "embedding": [0.0] * ct.default_dim,
-                        }
-                    ],
-                )
-            elif op_name == "delete":
-                client.delete(collection_name=coll, filter="id >= 0")
-            elif op_name == "flush":
-                client.flush(collection_name=coll)
-            elif op_name == "create_partition":
-                client.create_partition(collection_name=coll, partition_name="p1")
-            elif op_name == "drop_partition":
-                client.drop_partition(collection_name=coll, partition_name="_default")
-            elif op_name == "compact":
-                client.compact(collection_name=coll)
-            elif op_name == "add_collection_field":
-                client.add_collection_field(
-                    collection_name=coll,
-                    field_name="new_field",
-                    data_type=DataType.INT64,
-                    nullable=True,
-                )
-            elif op_name == "truncate_collection":
-                client.truncate_collection(collection_name=coll)
-        msg = str(exc_info.value).lower()
-        assert any(term in msg for term in err_terms), f"[{op_name}] unexpected error: {exc_info.value}"
-        log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
+        check_items = {ct.err_code: 1100, ct.err_msg: err_msg}
+        if op_name == "insert":
+            self.insert(
+                client,
+                collection_name=coll,
+                data=[
+                    {
+                        "id": 99999,
+                        "value": 1.0,
+                        "embedding": [0.0] * ct.default_dim,
+                    }
+                ],
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        elif op_name == "upsert":
+            self.upsert(
+                client,
+                collection_name=coll,
+                data=[
+                    {
+                        "__virtual_pk__": 0,
+                        "id": 0,
+                        "value": 0.0,
+                        "embedding": [0.0] * ct.default_dim,
+                    }
+                ],
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        elif op_name == "delete":
+            self.delete(client, collection_name=coll, filter="id >= 0", check_task=CheckTasks.err_res, check_items=check_items)
+        elif op_name == "flush":
+            self.flush(client, collection_name=coll, check_task=CheckTasks.err_res, check_items=check_items)
+        elif op_name == "create_partition":
+            self.create_partition(
+                client,
+                collection_name=coll,
+                partition_name="p1",
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        elif op_name == "drop_partition":
+            self.drop_partition(
+                client,
+                collection_name=coll,
+                partition_name="_default",
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        elif op_name == "compact":
+            self.compact(client, collection_name=coll, check_task=CheckTasks.err_res, check_items=check_items)
+        elif op_name == "add_collection_field":
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name="new_field",
+                data_type=DataType.INT64,
+                nullable=True,
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        elif op_name == "truncate_collection":
+            self.truncate_collection(
+                client,
+                collection_name=coll,
+                check_task=CheckTasks.err_res,
+                check_items=check_items,
+            )
+        log.info(f"[{op_name}] correctly rejected")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_truncate_collection_rejected_keeps_external_source(
@@ -1974,13 +2094,13 @@ class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
         expected: behavior matches the case assertion.
         """
         client = self._client()
-        coll = self._prepared_collection(client, minio_env, external_prefix)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
         before = self.describe_collection(client, coll)[0]
-        with pytest.raises(Exception) as exc_info:
-            client.truncate_collection(collection_name=coll)
-        msg = str(exc_info.value).lower()
-        assert "external" in msg or "not support" in msg or "forbidden" in msg or "1100" in msg, (
-            f"truncate_collection should be rejected as an external collection write op: {exc_info.value}"
+        self.truncate_collection(
+            client,
+            collection_name=coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "external"},
         )
         after = self.describe_collection(client, coll)[0]
         assert after.get("external_source") == before.get("external_source")
@@ -2046,7 +2166,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
                 minio_client, cfg["bucket"], f"{ext_key}/data_{idx}.parquet", gen_basic_parquet_bytes(500, start)
             )
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2082,7 +2202,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         upload_parquet(minio_client, cfg["bucket"], f"{key_b}/data.parquet", gen_basic_parquet_bytes(100, 5000))
 
         expected_spec = build_external_spec(cfg)
-        schema = build_basic_schema(client, url_a, ext_spec=expected_spec)
+        schema = _build_basic_schema(self, client, url_a, ext_spec=expected_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2136,7 +2256,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         expected_spec = build_external_spec(cfg)
         upload_basic_data(minio_client, cfg, good_key, num_rows=100, start_id=0)
 
-        schema = build_basic_schema(client, good_url, ext_spec=expected_spec)
+        schema = _build_basic_schema(self, client, good_url, ext_spec=expected_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2147,22 +2267,14 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         self.release_collection(client, coll)
         missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
         bad_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
-        try:
-            self.refresh_and_expect_failed(
-                client,
-                coll,
-                timeout=60,
-                external_source=bad_url,
-                external_spec=expected_spec,
-                reason_terms=("bucket", "nosuchbucket", "no_such_bucket"),
-            )
-        except AssertionError:
-            raise
-        except Exception as exc:
-            msg = str(exc).lower()
-            assert "bucket" in msg or "nosuchbucket" in msg or "external" in msg, (
-                f"failed override rejected with unexpected error: {exc}"
-            )
+        self.refresh_and_expect_failed(
+            client,
+            coll,
+            timeout=60,
+            external_source=bad_url,
+            external_spec=expected_spec,
+            reason_terms=("bucket", "nosuchbucket", "no_such_bucket"),
+        )
 
         info = self.describe_collection(client, coll)[0]
         assert info.get("external_source") == good_url, (
@@ -2194,35 +2306,17 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             gen_large_parquet_with_row_groups(20_000, 0, row_group_size=500),
         )
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         job_first = self.refresh_external_collection(client, collection_name=coll)[0]
-        try:
-            job_second = client.refresh_external_collection(collection_name=coll)
-            log.info(f"second refresh accepted job_id={job_second}")
-            assert job_second == job_first, (
-                f"duplicate refresh returned a different positive job_id: first={job_first}, second={job_second}"
-            )
-        except Exception as exc:
-            msg = str(exc).lower()
-            assert (
-                "already" in msg
-                or "duplicate" in msg
-                or "in progress" in msg
-                or "precondition" in msg
-                or "exist" in msg
-            ), f"second refresh was rejected with an unexpected error: {exc}"
-            log.info(f"second refresh rejected at RPC: {exc}")
-
-        deadline = time.time() + REFRESH_TIMEOUT
-        first_state = None
-        while time.time() < deadline:
-            p = self.get_refresh_external_collection_progress(client, job_id=job_first)[0]
-            first_state = p.state
-            if first_state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        assert first_state == "RefreshCompleted"
+        self.refresh_external_collection(
+            client,
+            collection_name=coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "in progress"},
+        )
+        first_progress = self.wait_refresh_progress(client, job_first)
+        assert first_progress.state == "RefreshCompleted"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_list_refresh_jobs(self, minio_env, external_prefix):
@@ -2237,7 +2331,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(100, 0))
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         job_id = self.refresh_and_wait(client, coll)
         jobs = self.list_refresh_external_collection_jobs(client, collection_name=coll)[0]
@@ -2278,7 +2372,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
                 gen_basic_parquet_bytes(rows_per_file, idx * rows_per_file),
             )
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2316,11 +2410,16 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             schema = self.create_schema(
                 client,
             )[0]
-            schema.add_field("id", DataType.INT64, is_primary=True)
-            schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+            self.add_field(schema, "id", DataType.INT64, is_primary=True)
+            self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=4)
             self.create_collection(client, collection_name=coll, schema=schema)
-        with pytest.raises(Exception):
-            client.refresh_external_collection(collection_name=coll)
+        err_hint = "collection" if case_name == "non_existent_collection" else "external"
+        self.refresh_external_collection(
+            client,
+            collection_name=coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: err_hint},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_refresh_empty_source_behavior(self, external_prefix):
@@ -2332,26 +2431,14 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url = external_prefix["url"]
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
-        try:
-            job_id = client.refresh_external_collection(collection_name=coll)
-        except Exception as e:
-            log.info(f"empty-source refresh rejected at submit: {e}")
-            return
-
-        deadline = time.time() + 60
-        state = None
-        while time.time() < deadline:
-            p = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            state = p.state
-            if state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        assert state in ("RefreshCompleted", "RefreshFailed"), (
-            f"empty-source refresh stuck in {state} (expected terminal state)"
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
+        progress = self.wait_refresh_progress(client, job_id, timeout=60)
+        assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
+            f"empty-source refresh stuck in {progress.state} (expected terminal state)"
         )
-        log.info(f"empty-source refresh terminal state={state}")
+        log.info(f"empty-source refresh terminal state={progress.state}")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_refresh_empty_external_source_rejected_or_failed(self, external_prefix):
@@ -2362,34 +2449,16 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = build_basic_schema(client, external_prefix["url"])
+        schema = _build_basic_schema(self, client, external_prefix["url"])
         self.create_collection(client, collection_name=coll, schema=schema)
-        try:
-            job_id, progress = self.refresh_and_poll_terminal(
-                client,
-                coll,
-                timeout=60,
-                external_source="",
-                external_spec=build_external_spec(),
-            )
-        except Exception as exc:
-            msg = str(exc).lower()
-            assert (
-                "external_source" in msg
-                or "external source" in msg
-                or "empty" in msg
-                or "invalid" in msg
-                or "no files found" in msg
-            ), f"empty external_source rejected with unexpected error: {exc}"
-            log.info(f"empty external_source refresh rejected at RPC: {exc}")
-            return
-
-        assert progress.state == "RefreshFailed", (
-            f"empty external_source refresh job {job_id} should fail terminally, got {progress.state}"
+        self.refresh_external_collection(
+            client,
+            coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "both provided or both omitted"},
+            external_source="",
+            external_spec=build_external_spec(),
         )
-        assert progress.reason, "empty external_source refresh failed without a reason"
-        reason = progress.reason.lower()
-        assert "external" in reason or "source" in reason or "empty" in reason, progress.reason
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -2416,18 +2485,11 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             ext_key,
             batches=[(0, 0)],
         )
-        schema = build_basic_format_schema(client, fmt, source, ext_spec)
+        schema = _build_basic_schema(self, client, source, ext_spec=ext_spec)
 
         self.create_collection(client, collection_name=coll, schema=schema)
         job_id = self.refresh_external_collection(client, collection_name=coll)[0]
-        deadline = time.time() + 60
-        progress = None
-        while time.time() < deadline:
-            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        assert progress is not None
+        progress = self.wait_refresh_progress(client, job_id, timeout=60)
         assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
             f"[{fmt}] zero-row refresh stuck in {progress.state}"
         )
@@ -2451,20 +2513,15 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
         ext_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
 
-        schema = build_basic_schema(client, ext_url, ext_spec=build_external_spec(cfg))
+        schema = _build_basic_schema(self, client, ext_url, ext_spec=build_external_spec(cfg))
         self.create_collection(client, collection_name=coll, schema=schema)
-        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
-        deadline = time.time() + 60
-        progress = None
-        while time.time() < deadline:
-            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        assert progress is not None
+        job_id, progress = self.refresh_and_expect_failed(
+            client,
+            coll,
+            timeout=60,
+            reason_terms=("bucket", "no_such_bucket", "nosuchbucket"),
+        )
         assert progress.state == "RefreshFailed", f"NoSuchBucket refresh should fail terminally, got {progress.state}"
-        reason = (progress.reason or "").lower()
-        assert "bucket" in reason or "no_such_bucket" in reason or "nosuchbucket" in reason, progress.reason
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_refresh_schema_mismatch_caught_eventually(self, minio_env, external_prefix):
@@ -2482,47 +2539,31 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         # Mismatched mappings — parquet has columns id/value/embedding;
         # the schema points at wrong_col_a/wrong_col_b.
         schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
-        schema.add_field("x", DataType.INT64, external_field="wrong_col_a")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="wrong_col_b")
+        self.add_field(schema, "x", DataType.INT64, external_field="wrong_col_a")
+        self.add_field(schema, "vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="wrong_col_b")
 
-        create_res, created = self.create_collection(
-            client,
-            collection_name=coll,
-            schema=schema,
-            check_task=CheckTasks.check_nothing,
-        )
-        if not created:
-            log.info(f"create_collection caught the mismatch: {create_res}")
-            return
+        self.create_collection(client, collection_name=coll, schema=schema)
 
-        try:
-            job_id = client.refresh_external_collection(collection_name=coll)
-        except Exception as e:
-            log.info(f"refresh submit caught the mismatch: {e}")
-            return
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
 
-        deadline = time.time() + 60
-        state = None
-        while time.time() < deadline:
-            p = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            state = p.state
-            if state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        if state == "RefreshFailed":
-            log.info(f"refresh caught the mismatch: state={state}")
+        progress = self.wait_refresh_progress(client, job_id, timeout=60, return_on_reason=True)
+        if progress.state == "RefreshFailed" or progress.reason:
+            log.info(f"refresh caught the mismatch: state={progress.state}, reason={progress.reason}")
             return
 
         # Refresh accepted; the mismatch must surface at create_index/load/query.
-        try:
-            idx = client.prepare_index_params()
-            idx.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
-            client.create_index(coll, idx)
-            client.load_collection(coll, timeout=60)
-            client.query(coll, filter="x == 0", output_fields=["x"])
-            pytest.fail("schema mismatch was not detected at any stage")
-        except Exception as e:
-            log.info(f"index/load/query caught the mismatch: {e}")
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        self.create_index(client, coll, idx)
+        self.load_collection(client, coll, timeout=60)
+        self.query(
+            client,
+            coll,
+            filter="x == 0",
+            output_fields=["x"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "wrong_col"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_case_mismatched_external_fields_rejected(self, minio_env, external_prefix):
@@ -2542,35 +2583,27 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
         )[0]
-        schema.add_field("id", DataType.INT64, external_field="ID")
-        schema.add_field("value", DataType.FLOAT, external_field="Value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="Embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="ID")
+        self.add_field(schema, "value", DataType.FLOAT, external_field="Value")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="Embedding")
 
-        create_res, created = self.create_collection(
-            client,
-            collection_name=coll,
-            schema=schema,
-            check_task=CheckTasks.check_nothing,
-        )
-        if not created:
-            log.info(f"case mismatch rejected at create_collection: {create_res}")
-            return
+        self.create_collection(client, collection_name=coll, schema=schema)
 
         job_id = self.refresh_external_collection(client, collection_name=coll)[0]
-        deadline = time.time() + 60
-        progress = None
-        while time.time() < deadline:
-            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
-            if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                break
-            time.sleep(2)
-        assert progress is not None
+        progress = self.wait_refresh_progress(client, job_id, timeout=60)
         if progress.state == "RefreshFailed":
             return
         assert progress.state == "RefreshCompleted", f"case-mismatch refresh stuck in {progress.state}"
 
-        with pytest.raises(Exception):
-            self.index_and_load(client, coll)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
+        self.create_index(client, coll, index_params)
+        self.load_collection(
+            client,
+            coll,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "Embedding"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_schemaless_reader_extra_columns_ignored(self, minio_env, external_prefix):
@@ -2596,9 +2629,9 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         # Project only id, val_int32, embedding — the other 7 scalar columns
         # exist in the file but are not declared in the schema.
         schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "val_int32", DataType.INT32, external_field="val_int32")
+        self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2638,7 +2671,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         for rel, nrows, start_id in nested_files:
             upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{rel}", gen_basic_parquet_bytes(nrows, start_id))
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -2766,7 +2799,11 @@ class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
             minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_multi_vector_parquet_bytes(ct.default_nb, 0)
         )
 
-        schema = build_multi_vector_schema(client, ext_url)
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "value", DataType.FLOAT, external_field="value")
+        self.add_field(schema, "dense_vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="dense_vec")
+        self.add_field(schema, "bin_vec", DataType.BINARY_VECTOR, dim=ct.default_dim, external_field="bin_vec")
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         idx = self.prepare_index_params(
@@ -2926,8 +2963,8 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
 
         url_a = build_external_source(cfg, f"{ext_key}/a")
         url_b = build_external_source(cfg, f"{ext_key}/b")
-        schema_a = build_basic_schema(client, url_a)
-        schema_b = build_basic_schema(client, url_b)
+        schema_a = _build_basic_schema(self, client, url_a)
+        schema_b = _build_basic_schema(self, client, url_b)
         self.create_collection(client, collection_name=coll_a, schema=schema_a)
         self.create_collection(client, collection_name=coll_b, schema=schema_b)
 
@@ -2947,8 +2984,15 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         assert all(r["id"] >= 10000 for r in via_alias_b)
 
         self.drop_alias(client, alias=alias)
-        with pytest.raises(Exception):
-            client.query(alias, filter="id >= 0", output_fields=["id"], limit=1)
+        self.query(
+            client,
+            alias,
+            filter="id >= 0",
+            output_fields=["id"],
+            limit=1,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "collection"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_refresh_requires_release_to_see_new_data(self, minio_env, external_prefix):
@@ -3000,45 +3044,22 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         ext_key = external_prefix["key"]
         assert self.query_count(client, coll) == 500
 
-        stop = threading.Event()
-        ok = {"n": 0}
-        fail = {"n": 0}
-        last = {"v": 500}
-
-        def query_loop():
-            while not stop.is_set():
-                try:
-                    last["v"] = self.query_count(client, coll)
-                    ok["n"] += 1
-                except Exception:
-                    fail["n"] += 1
-                time.sleep(0.2)
-
-        t = threading.Thread(target=query_loop, daemon=True)
-        t.start()
-        time.sleep(1)
-        _ = fail  # silences linter on unused-but-tracked counter
-
-        # Upload a new file and run the refresh+release+load cycle while the
-        # query thread keeps polling.
+        # Upload a new file and submit refresh while the old loaded snapshot is still queryable.
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(300, 500))
-        self.refresh_and_wait(client, coll)
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
+        assert self.query_count(client, coll) == 500, "loaded snapshot should remain stable during refresh"
+        progress = self.wait_refresh_progress(client, job_id)
+        assert progress.state == "RefreshCompleted", f"refresh job {job_id} did not complete: {progress}"
         self.release_collection(client, coll)
-        time.sleep(1)
         self.load_collection(client, coll)
-        time.sleep(2)
-
-        stop.set()
-        t.join(timeout=10)
-        log.info(f"concurrent: ok={ok['n']} fail={fail['n']} last={last['v']}")
-        assert last["v"] == 800, f"expected 800 rows after refresh+reload, got {last['v']}"
+        assert self.query_count(client, coll) == 800, "release+load should publish refreshed snapshot"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_file_deleted_then_reload(self, minio_env, external_prefix):
         """
         target: test MilvusClient external table file deleted then reload
         method: Delete a source parquet file (without a refresh), then release+load
-        expected: behavior matches the case assertion.
+        expected: reload fails because the published refresh metadata still references the deleted file.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3047,7 +3068,7 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet", gen_basic_parquet_bytes(100, 0))
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(100, 100))
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -3058,15 +3079,13 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         log.info("deleted data1.parquet without a follow-up refresh")
 
         self.release_collection(client, coll)
-        try:
-            client.load_collection(coll, timeout=60)
-            count_after = self.query_count(client, coll)
-            log.info(f"reload-after-deletion served {count_after} rows")
-            assert count_after in (100, 200), f"unexpected row count after deletion+reload: {count_after}"
-        except Exception as e:
-            # Acceptable: load fails because the manifest references a
-            # missing file. The test passes as long as it surfaces cleanly.
-            log.info(f"reload-after-deletion failed as expected: {e}")
+        self.load_collection(
+            client,
+            coll,
+            timeout=10,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "wait for loading collection timeout"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_drop_and_recreate_same_name(self, minio_env, external_prefix):
@@ -3083,7 +3102,7 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         self.drop_collection(client, coll)
         assert not self.has_collection(client, coll)[0]
 
-        schema2 = build_basic_schema(client, ext_url)
+        schema2 = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema2)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -3114,27 +3133,26 @@ class TestMilvusClientExternalTableCrossBucket(ExternalTableTestBase):
         coll = cf.gen_collection_name_by_testcase_name()
         key_prefix = f"external-e2e-cross/{coll}"
         nb = 500
-        try:
-            for i in range(2):
-                upload_parquet(
-                    minio_client,
-                    cross_bucket,
-                    f"{key_prefix}/data{i}.parquet",
-                    gen_basic_parquet_bytes(nb, i * nb),
-                )
-            external_source = f"s3://{cfg['address']}/{cross_bucket}/{key_prefix}/"
-            schema = build_basic_schema(
-                client,
-                external_source,
-                ext_spec=build_external_spec(cfg),
+        for i in range(2):
+            upload_parquet(
+                minio_client,
+                cross_bucket,
+                f"{key_prefix}/data{i}.parquet",
+                gen_basic_parquet_bytes(nb, i * nb),
             )
-            self.create_collection(client, collection_name=coll, schema=schema)
-            self.refresh_and_wait(client, coll)
-            self.index_and_load(client, coll)
-            assert self.query_count(client, coll) == nb * 2
-            log.info(f"cross-bucket: {nb * 2} rows loaded from {cross_bucket} while milvus uses {cfg['bucket']}")
-        finally:
-            cleanup_minio_prefix(minio_client, cross_bucket, f"{key_prefix}/")
+        external_source = f"s3://{cfg['address']}/{cross_bucket}/{key_prefix}/"
+        schema = _build_basic_schema(
+            self,
+            client,
+            external_source,
+            ext_spec=build_external_spec(cfg),
+        )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb * 2
+        log.info(f"cross-bucket: {nb * 2} rows loaded from {cross_bucket} while milvus uses {cfg['bucket']}")
+        cleanup_minio_prefix(minio_client, cross_bucket, f"{key_prefix}/")
 
 
 # ============================================================
@@ -3167,13 +3185,10 @@ class TestMilvusClientExternalTableParquetCodecs(ExternalTableTestBase):
         nb = 256
         # pyarrow accepts 'NONE' (uppercase) for uncompressed; lowercase 'none' fails.
         pq_codec = "NONE" if codec == "none" else codec
-        try:
-            data = gen_parquet_bytes_with_codec(nb, 0, pq_codec)
-        except Exception as e:
-            pytest.skip(f"pyarrow build cannot write codec={codec}: {e}")
+        data = gen_parquet_bytes_with_codec(nb, 0, pq_codec)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = build_basic_schema(client, ext_url)
+        schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
@@ -3191,9 +3206,6 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
     """Operations normal collections support that should also work on
     external collections: stats, state, partitions, segments, rename,
     refresh_load, property alter/drop, database scoping."""
-
-    def _prepared_collection(self, client, minio_env, external_prefix, num_rows=ct.default_nb):
-        return self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=num_rows)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -3220,7 +3232,7 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
         expected: behavior matches the case assertion.
         """
         client = self._client()
-        coll = self._prepared_collection(client, minio_env, external_prefix)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix)
 
         if op_name == "list_partitions":
             parts = self.list_partitions(client, collection_name=coll)[0]
@@ -3233,30 +3245,16 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
             row_count = int(stats.get("row_count", 0))
             assert row_count == ct.default_nb, f"expected row_count={ct.default_nb}, got {row_count}"
         elif op_name == "get_partition_stats":
-            try:
-                stats = client.get_partition_stats(collection_name=coll, partition_name="_default")
-            except Exception as e:
-                pytest.skip(f"get_partition_stats not supported: {e}")
+            stats = self.get_partition_stats(client, collection_name=coll, partition_name="_default")[0]
             log.info(f"partition stats: {stats}")
             row_count = int(stats.get("row_count", 0))
             assert row_count == ct.default_nb
         elif op_name == "list_segments":
-            try:
-                persistent = client.list_persistent_segments(collection_name=coll)
-            except Exception as e:
-                pytest.skip(f"list_persistent_segments not supported: {e}")
+            persistent = self.list_persistent_segments(client, collection_name=coll)[0]
             assert persistent is not None
             log.info(f"persistent segments (len={len(list(persistent))}): {persistent}")
-            try:
-                loaded = client.list_loaded_segments(collection_name=coll)
-                log.info(f"loaded segments: {loaded}")
-            except Exception as e:
-                log.info(f"list_loaded_segments not available on this build: {e}")
         elif op_name == "refresh_load":
-            try:
-                client.refresh_load(collection_name=coll)
-            except Exception as e:
-                pytest.skip(f"refresh_load not supported: {e}")
+            self.refresh_load(client, collection_name=coll)
             assert self.query_count(client, coll) == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3311,12 +3309,9 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
         expected: behavior matches the case assertion.
         """
         client = self._client()
-        coll = self._prepared_collection(client, minio_env, external_prefix, num_rows=50)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
         new_name = coll + "_renamed"
-        try:
-            client.rename_collection(old_name=coll, new_name=new_name)
-        except Exception as e:
-            pytest.skip(f"rename_collection not supported: {e}")
+        self.rename_collection(client, old_name=coll, new_name=new_name)
 
         assert not self.has_collection(client, coll)[0]
         assert self.has_collection(client, new_name)[0]
@@ -3326,30 +3321,36 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
     def test_milvus_client_external_table_alter_and_drop_collection_description(self, minio_env, external_prefix):
         """
         target: test MilvusClient external table alter and drop collection description
-        method: alter_collection_properties(description=...) surfaces via describe; drop_collection_properties removes it again
+        method: alter_collection_properties(description=...) surfaces via describe; drop_collection_properties removes the property key
         expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=20)
-        try:
-            client.alter_collection_properties(
-                collection_name=coll,
-                properties={"collection.description": "ext-table description"},
-            )
-        except Exception as e:
-            pytest.skip(f"alter_collection_properties(description) not supported: {e}")
+        self.alter_collection_properties(
+            client,
+            collection_name=coll,
+            properties={"collection.description": "ext-table description"},
+        )
 
         desc = self.describe_collection(client, coll)[0]
         props = desc.get("properties") or {}
         log.info(f"after alter: properties={props}, description={desc.get('description')}")
+        desc_value = desc.get("description") or props.get("collection.description")
+        assert desc_value == "ext-table description", f"description was not updated: {desc}"
 
-        try:
-            client.drop_collection_properties(
-                collection_name=coll,
-                property_keys=["collection.description"],
-            )
-        except Exception as e:
-            log.info(f"drop_collection_properties not supported: {e}")
+        self.drop_collection_properties(
+            client,
+            collection_name=coll,
+            property_keys=["collection.description"],
+        )
+        desc_after_drop = self.describe_collection(client, coll)[0]
+        props_after_drop = desc_after_drop.get("properties") or {}
+        assert desc_after_drop.get("description") == "ext-table description", (
+            f"description should remain top-level collection metadata: {desc_after_drop}"
+        )
+        assert "collection.description" not in props_after_drop, (
+            f"collection.description property should not be persisted in properties: {desc_after_drop}"
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_drop_index_property(self, minio_env, external_prefix):
@@ -3359,28 +3360,24 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
         expected: behavior matches the case assertion.
         """
         client = self._client()
-        coll = self._prepared_collection(client, minio_env, external_prefix)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix)
         self.release_collection(client, coll)
-        try:
-            client.alter_index_properties(
-                collection_name=coll,
-                index_name="embedding",
-                properties={"mmap.enabled": True},
-            )
-        except Exception as e:
-            pytest.skip(f"alter_index_properties not supported: {e}")
+        self.alter_index_properties(
+            client,
+            collection_name=coll,
+            index_name="embedding",
+            properties={"mmap.enabled": True},
+        )
 
         info = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
         assert str(info.get("mmap.enabled", "")).lower() == "true"
 
-        try:
-            client.drop_index_properties(
-                collection_name=coll,
-                index_name="embedding",
-                property_keys=["mmap.enabled"],
-            )
-        except Exception as e:
-            pytest.skip(f"drop_index_properties not supported: {e}")
+        self.drop_index_properties(
+            client,
+            collection_name=coll,
+            index_name="embedding",
+            property_keys=["mmap.enabled"],
+        )
 
         info2 = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
         log.info(f"after drop mmap property: {info2}")
@@ -3397,13 +3394,7 @@ class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
         client = self._client()
         db_name = f"ext_db_{random.randint(10000, 99999)}"
 
-        create_db_res, db_created = self.create_database(
-            client,
-            db_name=db_name,
-            check_task=CheckTasks.check_nothing,
-        )
-        if not db_created:
-            pytest.skip(f"create_database not supported: {create_db_res}")
+        self.create_database(client, db_name=db_name)
 
         coll = cf.gen_collection_name_by_testcase_name()
         self.use_database(client, db_name=db_name)
@@ -3456,11 +3447,11 @@ class TestMilvusClientExternalTableFormats(ExternalTableTestBase):
             ext_key,
             batches,
         )
-        schema = build_basic_format_schema(client, fmt, source, ext_spec)
+        schema = _build_basic_schema(self, client, source, ext_spec=ext_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
-        assert_basic_format_rows(client, coll, fmt, batches)
+        _assert_basic_format_rows(self, client, coll, fmt, batches)
 
         hits = self.search(
             client,
@@ -3490,11 +3481,11 @@ class TestMilvusClientExternalTableFormats(ExternalTableTestBase):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         batches = [(0, ct.default_nb), (ct.default_nb, ct.default_nb)]
         source, ext_spec = write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches)
-        schema = build_basic_format_schema(client, fmt, source, ext_spec)
+        schema = _build_basic_schema(self, client, source, ext_spec=ext_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
         self.index_and_load(client, coll)
-        assert_basic_format_rows(client, coll, fmt, batches)
+        _assert_basic_format_rows(self, client, coll, fmt, batches)
         self.release_collection(client, coll)
         self.load_collection(client, coll)
         assert self.query_count(client, coll) == ct.default_nb * 2
@@ -3530,12 +3521,12 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
             f"{ext_key}/data.parquet",
             gen_full_matrix_parquet_bytes(FULL_MATRIX_NB, 0),
         )
-        schema = build_full_matrix_schema(client, ext_url)
+        schema = build_full_matrix_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        create_full_matrix_indexes(client, coll)
+        create_full_matrix_indexes(self, client, coll)
         self.load_collection(client, coll)
-        _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
+        _full_matrix_assert_basic(self, client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_full_matrix_lance(self, minio_env, external_prefix):
@@ -3544,7 +3535,6 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
         method: Lance × full DataType × full Index matrix
         expected: behavior matches the case assertion.
         """
-        import shutil
         import tempfile
 
         import lance
@@ -3557,9 +3547,8 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
         columns = _full_matrix_arrow_columns(FULL_MATRIX_NB, 0)
         table = pa.table(columns)
 
-        tmpdir = tempfile.mkdtemp(prefix="ext_lance_fm_")
-        local_path = os.path.join(tmpdir, "dataset.lance")
-        try:
+        with tempfile.TemporaryDirectory(prefix="ext_lance_fm_") as tmpdir:
+            local_path = os.path.join(tmpdir, "dataset.lance")
             lance.write_dataset(table, local_path)
             for root, _dirs, files in os.walk(local_path):
                 for fname in files:
@@ -3570,19 +3559,18 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
                         f"{ext_key}/{relative}",
                         absolute,
                     )
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
 
         schema = build_full_matrix_schema(
+            self,
             client,
             ext_url,
             ext_spec=build_external_spec(cfg, fmt="lance-table"),
         )
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        create_full_matrix_indexes(client, coll)
+        create_full_matrix_indexes(self, client, coll)
         self.load_collection(client, coll)
-        _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
+        _full_matrix_assert_basic(self, client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="vortex-data requires Python >= 3.11")
@@ -3615,9 +3603,9 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
             fmt="iceberg-table",
             snapshot_id=int(snapshot_id),
         )
-        schema = build_iceberg_full_matrix_schema(client, ext_url, ext_spec)
+        schema = build_iceberg_full_matrix_schema(self, client, ext_url, ext_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        create_iceberg_full_matrix_indexes(client, coll)
+        create_iceberg_full_matrix_indexes(self, client, coll)
         self.load_collection(client, coll)
-        _iceberg_full_matrix_assert(client, coll, FULL_MATRIX_NB)
+        _iceberg_full_matrix_assert(self, client, coll, FULL_MATRIX_NB)

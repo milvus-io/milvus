@@ -17,7 +17,6 @@ from common.common_type import CaseLabel
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.external_table_common import (
     REFRESH_TIMEOUT,
-    build_basic_schema,
     build_external_source,
     build_external_spec,
     cleanup_minio_prefix,
@@ -27,7 +26,7 @@ from common.external_table_common import (
     write_basic_format_dataset,
 )
 from common.milvus_sys import MilvusSys
-from pymilvus import MilvusClient, connections
+from pymilvus import DataType, MilvusClient, connections
 from utils.util_common import gen_experiment_config, update_key_name, update_key_value
 from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get_pod_list, get_svc_ip, wait_pods_ready
 from utils.util_log import test_log as log
@@ -45,6 +44,14 @@ _REFRESH_SUBMIT_TIMEOUT_SECONDS = _MINIO_PARTITION_WINDOW_SECONDS + 60
 _MINIO_IO_LATENCY_DELAY = "100ms"
 _POST_REFRESH_RECOVERY_TIMEOUT = 180
 _IN_PROGRESS_REFRESH_JOB_RE = re.compile(r"refresh job (\d+) is already in progress")
+
+
+def _build_basic_schema(client, external_source, external_spec):
+    schema = client.create_schema(external_source=external_source, external_spec=external_spec)
+    schema.add_field("id", DataType.INT64, external_field="id")
+    schema.add_field("value", DataType.FLOAT, external_field="value")
+    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+    return schema
 
 
 @pytest.fixture(scope="function", params=_CHAOS_FORMATS, ids=_CHAOS_FORMAT_IDS)
@@ -209,7 +216,7 @@ def _replace_source_address(source, old_address, new_address):
 
 
 def _create_external_collection(client, collection_name, external_source, external_spec):
-    schema = build_basic_schema(client, external_source, ext_spec=external_spec)
+    schema = _build_basic_schema(client, external_source, external_spec)
     client.create_collection(
         collection_name=collection_name,
         schema=schema,

@@ -7,12 +7,10 @@ import os
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
-from minio import Minio
-from pymilvus import DataType
-
 from common import common_func as cf
 from common import common_type as ct
+from minio import Minio
+from pymilvus import DataType
 
 # ============================================================
 # Constants & Configuration
@@ -27,16 +25,8 @@ FORMAT_NUM_FILES = 3
 FORMAT_ROWS_PER_FILE = 3000
 FORMAT_TOTAL_ROWS = FORMAT_NUM_FILES * FORMAT_ROWS_PER_FILE
 
-SCHEME_PROVIDER_CASES = {"minio": "minio"}
-ALLOWED_EXTERNAL_SOURCE_SCHEMES = (pytest.param("minio", id="minio"),)
-
-FORMAT_CASES = {
-    "parquet": {"id": "parquet", "has_value": True},
-    "lance-table": {"id": "lance", "has_value": True},
-    "iceberg-table": {"id": "iceberg", "has_value": True},
-}
-BASIC_FORMATS = tuple(FORMAT_CASES)
-BASIC_FORMAT_IDS = [FORMAT_CASES[fmt]["id"] for fmt in BASIC_FORMATS]
+BASIC_FORMATS = ("parquet", "lance-table", "iceberg-table")
+BASIC_FORMAT_IDS = ("parquet", "lance", "iceberg")
 
 
 def _minio_address(minio_host):
@@ -66,14 +56,7 @@ def build_external_source(cfg, key_prefix):
     return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
 
 
-def build_validation_source_for_scheme(scheme, cfg, key_prefix="prefix"):
-    """Build a create-time validation source for the CI allowlisted scheme."""
-    if scheme == "minio":
-        return f"minio://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
-    raise ValueError(f"unexpected external source scheme for CI: {scheme}")
-
-
-def minio_endpoint_url(cfg):
+def _minio_endpoint_url(cfg):
     scheme = "https" if cfg["secure"] else "http"
     return f"{scheme}://{cfg['address']}"
 
@@ -99,28 +82,6 @@ def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra
     }
     spec.update(extra)
     return json.dumps(spec, separators=(",", ":"))
-
-
-def assert_external_spec_persisted(actual_spec, expected_spec, context):
-    actual = json.loads(actual_spec or "{}")
-    expected = json.loads(expected_spec or "{}")
-    assert actual.get("format") == expected.get("format"), f"{context}: format mismatch: {actual}"
-
-    actual_extfs = actual.get("extfs") or {}
-    expected_extfs = expected.get("extfs") or {}
-    for key in ("cloud_provider", "region", "use_ssl"):
-        assert actual_extfs.get(key) == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
-
-    for key in ("access_key_id", "access_key_value"):
-        value = actual_extfs.get(key)
-        assert value, f"{context}: extfs.{key} missing: {actual_extfs}"
-        assert value == "***" or value == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
-
-
-def build_external_spec_for_scheme(scheme, cfg=None, fmt="parquet"):
-    """Build a validation-only spec whose cloud_provider matches the URI scheme."""
-    provider = SCHEME_PROVIDER_CASES[scheme]
-    return build_external_spec(cfg=cfg, fmt=fmt, cloud_provider=provider)
 
 
 def new_minio_client(cfg):
@@ -644,111 +605,45 @@ def cleanup_minio_prefix(minio_client, bucket, prefix):
 
 
 # ============================================================
-# Schema / Refresh / Load Helpers
+# Full-Matrix Schema Helpers
 # ============================================================
 
 
-def build_basic_schema(client, ext_path, dim=ct.default_dim, ext_spec=None):
-    """Minimal external schema: id(Int64) + value(Float) + embedding(FloatVector)."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_typed_schema(client, ext_path, scalar_name, scalar_dtype, dim=ct.default_dim, ext_spec=None, **extra):
-    """External schema with id + one scalar field of the given type + FloatVector."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field(scalar_name, scalar_dtype, external_field=scalar_name, **extra)
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_vector_variant_schema(client, ext_path, vec_field, vec_dtype, dim, ext_spec=None):
-    """External schema with id + one vector field of the given dtype."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field(vec_field, vec_dtype, dim=dim, external_field=vec_field)
-    return schema
-
-
-def build_all_scalar_schema(client, ext_path, dim=ct.default_dim, ext_spec=None):
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("val_bool", DataType.BOOL, external_field="val_bool")
-    schema.add_field("val_int8", DataType.INT8, external_field="val_int8")
-    schema.add_field("val_int16", DataType.INT16, external_field="val_int16")
-    schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
-    schema.add_field("val_int64", DataType.INT64, external_field="val_int64")
-    schema.add_field("val_float", DataType.FLOAT, external_field="val_float")
-    schema.add_field("val_double", DataType.DOUBLE, external_field="val_double")
-    schema.add_field("val_varchar", DataType.VARCHAR, max_length=64, external_field="val_varchar")
-    schema.add_field("val_json", DataType.JSON, external_field="val_json")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_multi_vector_schema(client, ext_path, float_dim=ct.default_dim, bin_dim=ct.default_dim, ext_spec=None):
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("dense_vec", DataType.FLOAT_VECTOR, dim=float_dim, external_field="dense_vec")
-    schema.add_field("bin_vec", DataType.BINARY_VECTOR, dim=bin_dim, external_field="bin_vec")
-    return schema
-
-
 def build_full_matrix_schema(
-    client, ext_path, ext_spec=None, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
+    ops, client, ext_path, ext_spec=None, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
 ):
     """Schema covering every supported DataType, with same-dtype duplicates
     wired to different index types. See FULL_MATRIX_SCALAR_FIELDS /
     FULL_MATRIX_VECTOR_FIELDS for the full layout.
     """
-    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
-    schema.add_field("id", DataType.INT64, external_field="id")
+    schema = ops.create_schema(client, external_source=ext_path, external_spec=ext_spec or build_external_spec())[0]
+    ops.add_field(schema, "id", DataType.INT64, external_field="id")
     excluded = set(excluded_fields)
 
     for name, dtype, _arrow, extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS:
         if name in excluded:
             continue
-        schema.add_field(name, dtype, external_field=name, **extra)
+        ops.add_field(schema, name, dtype, external_field=name, **extra)
 
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
     if arr_name not in excluded:
-        schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
+        ops.add_field(schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
 
     if "geo" not in excluded:
-        schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
+        ops.add_field(schema, "geo", DataType.GEOMETRY, external_field="geo")
 
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         if name in excluded:
             continue
-        schema.add_field(name, vtype, dim=vdim, external_field=name)
+        ops.add_field(schema, name, vtype, dim=vdim, external_field=name)
     return schema
 
 
-def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
+def create_full_matrix_indexes(ops, client, collection_name, excluded_fields=()):
     """Build every scalar + vector index per FULL_MATRIX configuration in
     a single create_index call.
     """
-    index_params = client.prepare_index_params()
+    index_params = ops.prepare_index_params(client)[0]
     excluded = set(excluded_fields)
 
     # Scalar indexes
@@ -773,7 +668,7 @@ def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
             kwargs["params"] = params
         index_params.add_index(**kwargs)
 
-    client.create_index(collection_name, index_params)
+    ops.create_index(client, collection_name, index_params)
 
 
 def query_count(client, collection_name):
@@ -828,99 +723,6 @@ def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches
         return iceberg_url, build_external_spec(cfg, fmt=fmt, snapshot_id=int(snapshot_id))
 
     raise AssertionError(f"unsupported format: {fmt}")
-
-
-def build_basic_format_schema(client, fmt, ext_url, ext_spec, dim=ct.default_dim):
-    schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
-    schema.add_field("id", DataType.INT64, external_field="id")
-    if FORMAT_CASES[fmt]["has_value"]:
-        schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def assert_basic_format_rows(client, coll, fmt, batches, dim=ct.default_dim):
-    total = sum(num_rows for _start_id, num_rows in batches)
-    assert query_count(client, coll) == total
-    for start_id, num_rows in batches:
-        if num_rows == 0:
-            continue
-        rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "embedding"])
-        assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
-        vec = rows[0]["embedding"]
-        assert len(vec) == dim
-        if fmt == "iceberg-table":
-            for j, v in enumerate(vec):
-                expected = float(start_id) + j * 0.1
-                assert abs(v - expected) < 1e-2, f"[{fmt}] vec[{j}] for id={start_id} = {v}"
-        if FORMAT_CASES[fmt]["has_value"]:
-            rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "value"])
-            assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
-            assert abs(rows[0]["value"] - start_id * 1.5) < 1e-3
-
-
-# ============================================================
-# Schema builders for validation tests (module-level, reused across classes)
-# ============================================================
-
-_PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
-_PLACEHOLDER_SPEC = build_external_spec()
-_PLACEHOLDER_NEW_SOURCE = "minio://localhost:9000/milvus-bucket/new/"
-_PLACEHOLDER_NEW_SPEC = build_external_spec()
-
-
-def _schema_with_user_pk(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("pk", DataType.INT64, is_primary=True, external_field="pk")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-    return schema
-
-
-def _schema_with_auto_id(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("id", DataType.INT64, auto_id=True, external_field="id")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-    return schema
-
-
-def _schema_with_dynamic(client):
-    schema = client.create_schema(
-        external_source=_PLACEHOLDER_SRC,
-        external_spec=_PLACEHOLDER_SPEC,
-        enable_dynamic_field=True,
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-    return schema
-
-
-def _schema_with_partition_key(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("cat", DataType.VARCHAR, max_length=64, is_partition_key=True, external_field="cat")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-    return schema
-
-
-def _schema_missing_external_field(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("plain_field", DataType.INT64)  # missing external_field
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
-    return schema
-
-
-def _schema_with_sparse_float_vector(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("sv", DataType.SPARSE_FLOAT_VECTOR, external_field="sv")
-    return schema
-
-
-def _schema_with_duplicate_external_field(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("id", DataType.INT64, external_field="same_col")
-    schema.add_field("value", DataType.FLOAT, external_field="same_col")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
-    return schema
 
 
 # ============================================================
@@ -1003,7 +805,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
             **{
                 "uri": f"sqlite:///{tmp}/cat.db",
                 "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": minio_endpoint_url(cfg),
+                "s3.endpoint": _minio_endpoint_url(cfg),
                 "s3.access-key-id": cfg["access_key"],
                 "s3.secret-access-key": cfg["secret_key"],
                 "s3.region": "us-east-1",
@@ -1028,7 +830,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):
 
         for start_id, num_rows in batches:
             ids = list(range(start_id, start_id + num_rows))
-            vec_bytes = [struct.pack(f"<{dim}f", *[float(i + j * 0.1) for j in range(dim)]) for i in ids]
+            vec_bytes = [struct.pack(f"<{dim}f", *[float(i) * 0.1 + j for j in range(dim)]) for i in ids]
             arrow_table = pa.table(
                 {
                     "id": pa.array(ids, type=pa.int64()),
@@ -1203,7 +1005,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
             **{
                 "uri": f"sqlite:///{tmp}/cat.db",
                 "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": minio_endpoint_url(cfg),
+                "s3.endpoint": _minio_endpoint_url(cfg),
                 "s3.access-key-id": cfg["access_key"],
                 "s3.secret-access-key": cfg["secret_key"],
                 "s3.region": "us-east-1",
@@ -1225,27 +1027,27 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def build_iceberg_full_matrix_schema(client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
+def build_iceberg_full_matrix_schema(ops, client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
     """Milvus schema for the iceberg full-matrix dataset. Matches
     ICEBERG_FULL_MATRIX_SCALAR_FIELDS for scalars and FULL_MATRIX_VECTOR_FIELDS
     for vectors (vectors are stored as iceberg binary blobs but exposed as
     Milvus vector types; NormalizeExternalArrow reinterprets the bytes)."""
-    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
-    schema.add_field("id", DataType.INT64, external_field="id")
+    schema = ops.create_schema(client, external_source=ext_path, external_spec=ext_spec or build_external_spec())[0]
+    ops.add_field(schema, "id", DataType.INT64, external_field="id")
     for name, dtype, _ibg, _arrow, extra, _value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
-        schema.add_field(name, dtype, external_field=name, **extra)
+        ops.add_field(schema, name, dtype, external_field=name, **extra)
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
-    schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
-    schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
+    ops.add_field(schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
+    ops.add_field(schema, "geo", DataType.GEOMETRY, external_field="geo")
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        schema.add_field(name, vtype, dim=vdim, external_field=name)
+        ops.add_field(schema, name, vtype, dim=vdim, external_field=name)
     return schema
 
 
-def create_iceberg_full_matrix_indexes(client, collection_name):
+def create_iceberg_full_matrix_indexes(ops, client, collection_name):
     """Wire the iceberg-subset scalar indexes + the same 9 vector indexes
     used by parquet/lance full-matrix."""
-    index_params = client.prepare_index_params()
+    index_params = ops.prepare_index_params(client)[0]
     for field, idx_type in ICEBERG_FULL_MATRIX_SCALAR_INDEXES.items():
         index_params.add_index(field_name=field, index_type=idx_type)
     for name, _vtype, _vdim, idx_type, metric, params in FULL_MATRIX_VECTOR_FIELDS:
@@ -1253,17 +1055,17 @@ def create_iceberg_full_matrix_indexes(client, collection_name):
         if params:
             kwargs["params"] = params
         index_params.add_index(**kwargs)
-    client.create_index(collection_name, index_params)
+    ops.create_index(client, collection_name, index_params)
 
 
-def _iceberg_full_matrix_assert(client, coll, expected_count):
+def _iceberg_full_matrix_assert(ops, client, coll, expected_count):
     """Iceberg-specific subset of _full_matrix_assert_basic: scalar set is
     smaller (no Int8/Int16/Bitmap)."""
-    assert query_count(client, coll) == expected_count
+    assert ops.query_count(client, coll) == expected_count
 
     output_fields = ["id"] + [f for f, _, _, _, _, _ in ICEBERG_FULL_MATRIX_SCALAR_FIELDS]
     output_fields += [FULL_MATRIX_ARRAY_FIELD[0], "geo"]
-    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
+    rows = ops.query(client, coll, filter="id == 42", output_fields=output_fields)[0]
     assert len(rows) == 1, f"id=42 missing: {rows}"
     r = rows[0]
     assert r["id"] == 42
@@ -1283,14 +1085,15 @@ def _iceberg_full_matrix_assert(client, coll, expected_count):
 
     for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         query_vec = _full_matrix_query_vec(name, vdim)
-        hits = client.search(
+        hits = ops.search(
+            client,
             coll,
             data=query_vec,
             limit=3,
             anns_field=name,
             output_fields=["id"],
             search_params={"metric_type": metric},
-        )[0]
+        )[0][0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
 
 
@@ -1318,10 +1121,10 @@ def _full_matrix_query_vec(vec_field, dim):
     raise KeyError(vec_field)
 
 
-def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
+def _full_matrix_assert_basic(ops, client, coll, expected_count, excluded_fields=()):
     """Shared assertions: count + per-type spot-checks + search hits per
     vector field. Used by every full-matrix format test."""
-    assert query_count(client, coll) == expected_count
+    assert ops.query_count(client, coll) == expected_count
     excluded = set(excluded_fields)
 
     # Spot-check id=42: every scalar field round-trips with the expected
@@ -1332,7 +1135,7 @@ def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
         output_fields.append(arr_name)
     if "geo" not in excluded:
         output_fields.append("geo")
-    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
+    rows = ops.query(client, coll, filter="id == 42", output_fields=output_fields)[0]
     assert len(rows) == 1, f"id=42 missing: {rows}"
     r = rows[0]
     assert r["id"] == 42
@@ -1362,12 +1165,13 @@ def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
         if name in excluded:
             continue
         query_vec = _full_matrix_query_vec(name, vdim)
-        hits = client.search(
+        hits = ops.search(
+            client,
             coll,
             data=query_vec,
             limit=3,
             anns_field=name,
             output_fields=["id"],
             search_params={"metric_type": metric},
-        )[0]
+        )[0][0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
