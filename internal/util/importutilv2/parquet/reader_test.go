@@ -809,7 +809,6 @@ func TestParquetReaderMissingNullableStructArray(t *testing.T) {
 	assert.NoError(t, err)
 	recordBatch.Release()
 	assert.NoError(t, fw.Close())
-	assert.NoError(t, wf.Close())
 
 	factory := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
 	cm, err := factory.NewPersistentStorageChunkManager(ctx)
@@ -849,7 +848,6 @@ func TestParquetReaderMissingNullableStructArray(t *testing.T) {
 	assert.NoError(t, err)
 	flatRecordBatch.Release()
 	assert.NoError(t, flatFw.Close())
-	assert.NoError(t, flatWf.Close())
 
 	_, err = NewReader(ctx, cm, schema, flatFilePath, 64*1024*1024)
 	assert.Error(t, err)

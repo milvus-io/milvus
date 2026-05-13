@@ -88,8 +88,8 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 	return nil
 }
 
-// ValidateStorageV1WritableSchema validates schema constraints required by the V1 storage format.
-func ValidateStorageV1WritableSchema(schema *schemapb.CollectionSchema) error {
+// ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
+func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		if isNullableArrayOfVectorField(field) {
 			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())

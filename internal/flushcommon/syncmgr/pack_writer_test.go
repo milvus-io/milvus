@@ -169,7 +169,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	}
 }
 
-func TestNewBulkPackWriterRejectsNullableArrayOfVector(t *testing.T) {
+func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 	arrayOfVectorField := func(nullable bool) *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{
 			FieldID:     101,
@@ -263,15 +263,13 @@ func TestNewBulkPackWriterRejectsNullableArrayOfVector(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			writer, err := NewBulkPackWriter(nil, test.schema, nil, nil)
+			err := storage.ValidateStorageV1InsertWritableSchema(test.schema)
 			if test.wantError {
 				require.Error(t, err)
-				assert.Nil(t, writer)
 				assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
 				return
 			}
 			require.NoError(t, err)
-			assert.NotNil(t, writer)
 		})
 	}
 }

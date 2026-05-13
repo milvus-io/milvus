@@ -58,9 +58,6 @@ func NewBulkPackWriter(metaCache metacache.MetaCache,
 	chunkManager storage.ChunkManager,
 	allocator allocator.Interface, writeRetryOpts ...retry.Option,
 ) (*BulkPackWriter, error) {
-	if err := storage.ValidateStorageV1WritableSchema(schema); err != nil {
-		return nil, err
-	}
 	return &BulkPackWriter{
 		metaCache:      metaCache,
 		schema:         schema,

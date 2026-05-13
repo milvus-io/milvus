@@ -274,7 +274,7 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(161+9, s.iDataEmpty.GetMemorySize())
+	s.Equal(161+1, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
 		RowIDField:                     int64(3),

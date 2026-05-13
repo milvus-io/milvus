@@ -87,8 +87,9 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	// Build field schema lookup map (fieldID → *FieldSchema).
 	var fieldSchemaMap map[int64]*schemapb.FieldSchema
 	if schema != nil {
-		fieldSchemaMap = make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-		for _, f := range schema.GetFields() {
+		allFields := typeutil.GetAllFieldSchemas(schema)
+		fieldSchemaMap = make(map[int64]*schemapb.FieldSchema, len(allFields))
+		for _, f := range allFields {
 			fieldSchemaMap[f.GetFieldID()] = f
 		}
 	}
@@ -521,7 +522,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 				case *schemapb.VectorField_SparseFloatVector:
 					dataType = schemapb.DataType_SparseFloatVector
 				case *schemapb.VectorField_VectorArray:
-					dataType = schemapb.DataType_Array
+					dataType = schemapb.DataType_ArrayOfVector
 				}
 				break
 			}
@@ -660,37 +661,46 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 		}
 		newVf.Dim = maxDim
 
-	default:
-		// VectorArray or unknown — scan for first non-nil VectorArray to get metadata.
+	case schemapb.DataType_ArrayOfVector:
+		elementType := schemapb.DataType_None
+		if fieldSchema != nil {
+			elementType = fieldSchema.GetElementType()
+		}
+		data := make([]*schemapb.VectorField, 0, len(selectedRows))
 		for _, ref := range selectedRows {
 			va := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
 			if va != nil {
-				data := make([]*schemapb.VectorField, 0, len(selectedRows))
-				for _, ref2 := range selectedRows {
-					di := getVecDataIdx(compactIdx, ref2)
-					if di < 0 {
-						continue
-					}
-					va2 := results[ref2.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
-					if va2 == nil || di >= len(va2.GetData()) {
-						fd := results[ref2.resultIdx].GetFieldsData()[fieldIdx]
-						return nil, fmt.Errorf(
-							"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
-								"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
-							fd.GetFieldId(), fd.GetFieldName(), ref2.resultIdx,
-							di, len(va2.GetData()), typeutil.GetSizeOfIDs(results[ref2.resultIdx].GetIds()))
-					}
-					data = append(data, va2.GetData()[di])
+				if dim == 0 {
+					dim = va.GetDim()
 				}
-				newVf.Data = &schemapb.VectorField_VectorArray{
-					VectorArray: &schemapb.VectorArray{
-						Dim:         va.GetDim(),
-						Data:        data,
-						ElementType: va.GetElementType(),
-					},
+				if elementType == schemapb.DataType_None {
+					elementType = va.GetElementType()
 				}
 				break
 			}
+		}
+		for _, ref := range selectedRows {
+			di := getVecDataIdx(compactIdx, ref)
+			if di < 0 {
+				continue
+			}
+			va := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
+			if va == nil || di >= len(va.GetData()) {
+				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
+				return nil, fmt.Errorf(
+					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
+						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
+					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
+					di, len(va.GetData()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+			}
+			data = append(data, va.GetData()[di])
+		}
+		newVf.Data = &schemapb.VectorField_VectorArray{
+			VectorArray: &schemapb.VectorArray{
+				Dim:         dim,
+				Data:        data,
+				ElementType: elementType,
+			},
 		}
 	}
 

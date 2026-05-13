@@ -381,7 +381,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		return nil, err
 	}
 	if rwOptions.version == StorageV1 {
-		if err := ValidateStorageV1WritableSchema(schema); err != nil {
+		if err := ValidateStorageV1InsertWritableSchema(schema); err != nil {
 			return nil, err
 		}
 	}

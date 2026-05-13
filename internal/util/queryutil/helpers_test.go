@@ -908,6 +908,53 @@ func TestBuildMergedVectorField_VectorArray(t *testing.T) {
 	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[1].GetFloatVector().GetData())
 }
 
+func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+				}},
+				ValidData: []bool{false},
+			},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "struct_field",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     fieldID,
+						Name:        "struct_field[vec_array]",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						Nullable:    true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "dim", Value: "2"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{result}, []rowRef{{resultIdx: 0, rowIdx: 0}}, schema)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.NotNil(t, va)
+	assert.Equal(t, dim, va.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, va.GetElementType())
+	assert.Empty(t, va.GetData())
+}
+
 // =========================================================================
 // sliceVectorField & rangeSliceVectorField: VectorArray branch
 // =========================================================================
@@ -1466,13 +1513,6 @@ func TestBuildMergedVectorField_Int8Vector_TruncatedData(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "truncated data")
 }
-
-// Note: VectorArray `di < 0` branch (default case with compact mode) is architecturally
-// unreachable. To get compact mode, fieldSchema must be non-nil (nullable=true). But non-nil
-// fieldSchema provides a concrete DataType that matches one of the explicit switch cases
-// (FloatVector, BinaryVector, etc.), so the default/VectorArray branch is only entered via
-// nil-schema fallback where isNullable=false and compact indices are nil.
-// This leaves 1 line (VectorArray di<0) permanently uncovered — accepted as dead code.
 
 func TestBuildMergedVectorField_VectorArray_TruncatedData(t *testing.T) {
 	dim := int64(2)
