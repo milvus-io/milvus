@@ -534,7 +534,7 @@ TEST_F(SealedSegmentRegexQueryTest,
 }
 
 TEST_F(SealedSegmentRegexQueryTest,
-       RegexQueryWithUnsupportedTantivyRegexFallsBackToPartialMatch) {
+       RegexQueryOnInvertedIndexUsesRe2PartialMatchSemantics) {
     auto run_regex = [&](const std::string& operand) {
         const auto& str_meta = schema->operator[](FieldName("str"));
         auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
@@ -580,7 +580,7 @@ TEST_F(SealedSegmentRegexQueryTest,
     ASSERT_FALSE(lazy_quantifier[4]);
 }
 
-TEST(InvertedIndexRegexQueryTest, RegexFallbackUsesRe2CharacterClassSemantics) {
+TEST(InvertedIndexRegexQueryTest, RegexQueryUsesRe2CharacterClassSemantics) {
     std::vector<std::string> raw_str = {
         "123",
         "\xD9\xA3",
