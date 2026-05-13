@@ -255,26 +255,19 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return PatternQuery(pattern);
             }
             case proto::plan::OpType::RegexMatch: {
-                auto tantivy_pattern =
-                    TryTranslateRegexToTantivyPattern(pattern);
                 TargetBitmap bitset(Count());
-                if (tantivy_pattern.use_tantivy_regex) {
-                    wrapper_->regex_query(tantivy_pattern.pattern, &bitset);
-                } else {
-                    PartialRegexMatcher matcher(pattern);
-                    wrapper_->regex_match_query(
-                        &matcher,
-                        [](void* ctx,
-                           const uint8_t* term,
-                           uintptr_t term_len) -> bool {
-                            auto* matcher =
-                                static_cast<PartialRegexMatcher*>(ctx);
-                            std::string_view term_view(
-                                reinterpret_cast<const char*>(term), term_len);
-                            return (*matcher)(term_view);
-                        },
-                        &bitset);
-                }
+                PartialRegexMatcher matcher(pattern);
+                wrapper_->regex_match_query(
+                    &matcher,
+                    [](void* ctx,
+                       const uint8_t* term,
+                       uintptr_t term_len) -> bool {
+                        auto* matcher = static_cast<PartialRegexMatcher*>(ctx);
+                        std::string_view term_view(
+                            reinterpret_cast<const char*>(term), term_len);
+                        return (*matcher)(term_view);
+                    },
+                    &bitset);
                 return bitset;
             }
             default:
