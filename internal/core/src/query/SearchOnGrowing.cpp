@@ -182,11 +182,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto vec_ptr = record.get_data_base(vecfield_id);
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
 
-        TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
         if (offset_mapping.IsEnabled()) {
-            transformed_bitset = TransformBitset(bitset, offset_mapping);
-            search_bitset = BitsetView(transformed_bitset);
+            search_bitset = KeepBitsetAlive(
+                search_result, TransformBitset(bitset, offset_mapping));
         }
 
         auto active_count = offset_mapping.IsEnabled()

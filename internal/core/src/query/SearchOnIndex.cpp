@@ -46,11 +46,10 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     dataset->SetIsSparse(is_sparse);
 
     const auto& offset_mapping = indexing.GetOffsetMapping();
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitset, offset_mapping);
-        search_bitset = BitsetView(transformed_bitset);
+        search_bitset = KeepBitsetAlive(
+            search_result, TransformBitset(bitset, offset_mapping));
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * search_conf.topk_;

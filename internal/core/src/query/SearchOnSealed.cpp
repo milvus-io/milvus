@@ -96,11 +96,10 @@ SearchOnSealedIndex(const Schema& schema,
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
     const auto& offset_mapping = vec_index->GetOffsetMapping();
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitset, offset_mapping);
-        search_bitset = BitsetView(transformed_bitset);
+        search_bitset = KeepBitsetAlive(
+            search_result, TransformBitset(bitset, offset_mapping));
         if (offset_mapping.GetValidCount() == 0) {
             auto total_num = num_queries * topK;
             search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
@@ -181,14 +180,13 @@ SearchOnSealedColumn(const Schema& schema,
 
     // Check for nullable vector field with all null values - must be done before creating iterators
     const auto& offset_mapping = column->GetOffsetMapping();
-    TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     if (offset_mapping.IsEnabled()) {
         for (int64_t c = 0; c < column->num_chunks(); ++c) {
             column->EnsureChunkOffsetMapping(c, op_context);
         }
-        transformed_bitset = TransformBitset(bitview, offset_mapping);
-        search_bitview = BitsetView(transformed_bitset);
+        search_bitview =
+            KeepBitsetAlive(result, TransformBitset(bitview, offset_mapping));
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * search_info.topk_;

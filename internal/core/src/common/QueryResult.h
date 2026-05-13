@@ -322,6 +322,7 @@ struct SearchResult {
         element_iterators_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
+    std::vector<std::shared_ptr<TargetBitmap>> bitset_buffers_{};
 
     bool
     HasIterators() const {

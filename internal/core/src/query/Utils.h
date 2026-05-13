@@ -12,6 +12,7 @@
 #pragma once
 
 #include <limits>
+#include <memory>
 #include <string>
 
 #include <utility>
@@ -66,6 +67,14 @@ TransformBitset(const BitsetView& bitset,
         }
     }
     return result;
+}
+
+inline BitsetView
+KeepBitsetAlive(SearchResult& result, TargetBitmap&& bitset) {
+    auto owned_bitset = std::make_shared<TargetBitmap>(std::move(bitset));
+    BitsetView view(*owned_bitset);
+    result.bitset_buffers_.emplace_back(std::move(owned_bitset));
+    return view;
 }
 
 inline void
