@@ -449,7 +449,7 @@ class ArrayChunk : public Chunk {
 
 // A VectorArrayChunk is similar to an ArrayChunk but is specialized for storing arrays of vectors.
 // Key differences and characteristics:
-// - No Nullability: VectorArrayChunk does not support null values. Unlike ArrayChunk, it does not have a null bitmap.
+// - Nullable fields use a null bitmap plus compact payload for valid rows.
 // - Fixed Vector Dimensions: All vectors within a VectorArrayChunk have the same, fixed dimension, specified at creation.
 //   However, each row (array of vectors) can contain a variable number of these fixed-dimension vectors.
 //
@@ -469,16 +469,32 @@ class VectorArrayChunk : public Chunk {
                      char* data,
                      uint64_t size,
                      milvus::DataType element_type,
-                     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, false, chunk_mmap_guard),
+                     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
+                     bool nullable)
+        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
           dim_(dim),
           element_type_(element_type) {
-        offsets_lens_ = reinterpret_cast<uint32_t*>(data);
+        if (nullable_) {
+            logical_to_physical_.reserve(row_nums_);
+            for (int64_t i = 0; i < row_nums_; i++) {
+                if (valid_[i]) {
+                    logical_to_physical_.push_back(physical_row_nums_++);
+                } else {
+                    logical_to_physical_.push_back(-1);
+                }
+            }
+        } else {
+            physical_row_nums_ = row_nums_;
+        }
+
+        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+        offsets_lens_ =
+            reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
 
         auto offset = 0;
-        offsets_.reserve(row_nums_ + 1);
+        offsets_.reserve(physical_row_nums_ + 1);
         offsets_.push_back(offset);
-        for (int64_t i = 0; i < row_nums_; i++) {
+        for (int64_t i = 0; i < physical_row_nums_; i++) {
             offset += offsets_lens_[i * 2 + 1];
             offsets_.push_back(offset);
         }
@@ -486,6 +502,11 @@ class VectorArrayChunk : public Chunk {
 
     VectorArrayView
     View(int64_t idx) const {
+        AssertInfo(idx >= 0 && idx < physical_row_nums_,
+                   "VectorArrayChunk::View offset {} out of range, "
+                   "physical rows {}",
+                   idx,
+                   physical_row_nums_);
         int idx_off = 2 * idx;
         auto offset = offsets_lens_[idx_off];
         auto len = offsets_lens_[idx_off + 1];
@@ -527,9 +548,21 @@ class VectorArrayChunk : public Chunk {
         views.reserve(len);
         auto end_offset = start_offset + len;
         for (int64_t i = start_offset; i < end_offset; i++) {
-            views.emplace_back(View(i));
+            if (nullable_) {
+                if (valid_[i]) {
+                    views.emplace_back(View(logical_to_physical_[i]));
+                } else {
+                    views.emplace_back();
+                }
+            } else {
+                views.emplace_back(View(i));
+            }
         }
-        // vector array does not support null, so just return {}.
+        if (nullable_) {
+            FixedVector<bool> res_valid(valid_.begin() + start_offset,
+                                        valid_.begin() + end_offset);
+            return {std::move(views), std::move(res_valid)};
+        }
         return {std::move(views), {}};
     }
 
@@ -553,7 +586,9 @@ class VectorArrayChunk : public Chunk {
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;
+    int64_t physical_row_nums_ = 0;
     std::vector<size_t> offsets_;
+    std::vector<int64_t> logical_to_physical_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

@@ -695,7 +695,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "[StorageV2] BulkVectorArrayAt only supported for "
                       "ChunkedVectorArrayColumn");
         }
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            field_meta_.is_nullable()
+                ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);

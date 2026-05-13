@@ -695,7 +695,9 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
                       std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,
                       int64_t count) const override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                      : ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
             auto array =

@@ -142,7 +142,8 @@ class Schema {
     AddDebugVectorArrayField(const std::string& name,
                              DataType element_type,
                              int64_t dim,
-                             std::optional<knowhere::MetricType> metric_type) {
+                             std::optional<knowhere::MetricType> metric_type,
+                             bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -150,7 +151,8 @@ class Schema {
                                     DataType::VECTOR_ARRAY,
                                     element_type,
                                     dim,
-                                    metric_type);
+                                    metric_type,
+                                    nullable);
         this->AddField(std::move(field_meta));
         return field_id;
     }

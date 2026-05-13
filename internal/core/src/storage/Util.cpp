@@ -772,7 +772,10 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable) {
     AssertInfo(data_type == DataType::VECTOR_ARRAY,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
@@ -782,8 +785,8 @@ CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
-    // VECTOR_ARRAY is not nullable
-    auto field = arrow::field("val", value_type, false)->WithMetadata(metadata);
+    auto field =
+        arrow::field("val", value_type, nullable)->WithMetadata(metadata);
     return arrow::schema({field});
 }
 
@@ -1568,7 +1571,8 @@ GetFieldDatasFromManifest(
             if (data_type.value() == DataType::VECTOR_ARRAY) {
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
-                                                 element_type.value());
+                                                 element_type.value(),
+                                                 nullable);
             } else if (IsSparseFloatVectorDataType(data_type.value())) {
                 arrow_schema = CreateArrowSchema(data_type.value(), nullable);
             } else {
@@ -2674,7 +2678,7 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        AssertInfo(list_arr->null_count() == 0,
+        AssertInfo(field_meta.is_nullable() || list_arr->null_count() == 0,
                    "VECTOR_ARRAY does not support null rows");
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
@@ -2689,12 +2693,14 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
                                                    element_type,
                                                    static_cast<int>(dim),
                                                    field_meta);
-        auto rebuilt =
-            arrow::ListArray::FromArrays(*list_arr->offsets(), *normalized[0]);
-        AssertInfo(rebuilt.ok(),
-                   "Failed to rebuild ListArray for VectorArray: {}",
-                   rebuilt.status().ToString());
-        result.push_back(*rebuilt);
+        auto rebuilt_data = arrow::ArrayData::Make(
+            arrow::list(normalized[0]->type()),
+            list_arr->length(),
+            {list_arr->null_bitmap(), list_arr->value_offsets()},
+            {normalized[0]->data()},
+            list_arr->null_count(),
+            list_arr->offset());
+        result.push_back(arrow::MakeArray(rebuilt_data));
     }
     return result;
 }

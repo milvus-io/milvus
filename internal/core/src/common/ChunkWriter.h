@@ -296,8 +296,10 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
 class VectorArrayChunkWriter : public ChunkWriterBase {
  public:
-    VectorArrayChunkWriter(int64_t dim, const milvus::DataType element_type)
-        : ChunkWriterBase(false), element_type_(element_type) {
+    VectorArrayChunkWriter(int64_t dim,
+                           const milvus::DataType element_type,
+                           bool nullable)
+        : ChunkWriterBase(nullable), element_type_(element_type) {
     }
 
     std::pair<size_t, size_t>
@@ -309,6 +311,7 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
 
  private:
     const milvus::DataType element_type_;
+    size_t valid_row_nums_ = 0;
 };
 
 class SparseFloatVectorChunkWriter : public ChunkWriterBase {
