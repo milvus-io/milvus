@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SegmentLoaderSuite struct {
@@ -590,6 +591,314 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.Error(err)
+}
+
+func (suite *SegmentLoaderSuite) TestEnsureSortedSegmentPKLoadedForLazySegment() {
+	// Sorted sealed lazy segment should preload PK field before applying delta logs.
+	ctx := context.Background()
+
+	pkField := GetPkField(suite.schema)
+	pkFieldID := pkField.GetFieldID()
+	pkBinlog := &datapb.FieldBinlog{
+		FieldID: pkFieldID,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-pk-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+	tsBinlog := &datapb.FieldBinlog{
+		FieldID: common.TimeStampField,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-ts-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   []*datapb.FieldBinlog{tsBinlog, pkBinlog},
+		NumOfRows:     10,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		IsSorted:      true,
+	}
+
+	localSeg := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:  suite.manager.Collection.Get(suite.collectionID),
+			loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+			segmentType: SegmentTypeSealed,
+			isLazyLoad:  true,
+		},
+		fieldDataInfoAdded: atomic.NewBool(false),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+	}
+
+	addInfoCalled := false
+	loadedFieldIDs := make([]int64, 0, 2)
+	originAddInfo := addSegmentFieldDataInfoFn
+	originLoad := loadSegmentFieldDataFn
+	addSegmentFieldDataInfoFn = func(ctx context.Context, segment *LocalSegment, rowCount int64, fields []*datapb.FieldBinlog) error {
+		addInfoCalled = true
+		suite.Equal(localSeg, segment)
+		suite.Equal(loadInfo.GetNumOfRows(), rowCount)
+		suite.Equal(loadInfo.GetBinlogPaths(), fields)
+		segment.fieldDataInfoAdded.Store(true)
+		return nil
+	}
+	loadSegmentFieldDataFn = func(ctx context.Context, segment *LocalSegment, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+		loadedFieldIDs = append(loadedFieldIDs, fieldID)
+		suite.Equal(localSeg, segment)
+		suite.Equal(loadInfo.GetNumOfRows(), rowCount)
+		switch fieldID {
+		case pkFieldID:
+			suite.Equal(pkBinlog, field)
+		case common.TimeStampField:
+			suite.Equal(tsBinlog, field)
+		default:
+			suite.FailNow("unexpected field loaded", fmt.Sprintf("fieldID=%d", fieldID))
+		}
+		return nil
+	}
+	defer func() {
+		addSegmentFieldDataInfoFn = originAddInfo
+		loadSegmentFieldDataFn = originLoad
+	}()
+
+	err := ensureSortedSegmentPKLoaded(ctx, localSeg)
+	suite.NoError(err)
+	suite.True(addInfoCalled)
+	suite.ElementsMatch([]int64{pkFieldID, common.TimeStampField}, loadedFieldIDs)
+}
+
+func (suite *SegmentLoaderSuite) TestEnsureSortedSegmentPKLoadedSkipForUnsortedSegment() {
+	// Unsorted segment does not require sorted PK lookup path and should skip preload.
+	ctx := context.Background()
+
+	pkField := GetPkField(suite.schema)
+	pkFieldID := pkField.GetFieldID()
+	pkBinlog := &datapb.FieldBinlog{
+		FieldID: pkFieldID,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-pk-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+	tsBinlog := &datapb.FieldBinlog{
+		FieldID: common.TimeStampField,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-ts-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   []*datapb.FieldBinlog{tsBinlog, pkBinlog},
+		NumOfRows:     10,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		IsSorted:      false,
+	}
+
+	localSeg := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:  suite.manager.Collection.Get(suite.collectionID),
+			loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+			segmentType: SegmentTypeSealed,
+			isLazyLoad:  true,
+		},
+		fieldDataInfoAdded: atomic.NewBool(false),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+	}
+
+	addInfoCalled := false
+	loadCalled := false
+	originAddInfo := addSegmentFieldDataInfoFn
+	originLoad := loadSegmentFieldDataFn
+	addSegmentFieldDataInfoFn = func(ctx context.Context, segment *LocalSegment, rowCount int64, fields []*datapb.FieldBinlog) error {
+		addInfoCalled = true
+		return nil
+	}
+	loadSegmentFieldDataFn = func(ctx context.Context, segment *LocalSegment, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+		loadCalled = true
+		return nil
+	}
+	defer func() {
+		addSegmentFieldDataInfoFn = originAddInfo
+		loadSegmentFieldDataFn = originLoad
+	}()
+
+	err := ensureSortedSegmentPKLoaded(ctx, localSeg)
+	suite.NoError(err)
+	suite.False(addInfoCalled)
+	suite.False(loadCalled)
+}
+
+func (suite *SegmentLoaderSuite) TestEnsureSortedSegmentPKLoadedSkipWhenPKAlreadyLoaded() {
+	ctx := context.Background()
+
+	pkField := GetPkField(suite.schema)
+	pkFieldID := pkField.GetFieldID()
+	pkBinlog := &datapb.FieldBinlog{
+		FieldID: pkFieldID,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-pk-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+	tsBinlog := &datapb.FieldBinlog{
+		FieldID: common.TimeStampField,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-ts-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   []*datapb.FieldBinlog{tsBinlog, pkBinlog},
+		NumOfRows:     10,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		IsSorted:      true,
+	}
+
+	localSeg := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:  suite.manager.Collection.Get(suite.collectionID),
+			loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+			segmentType: SegmentTypeSealed,
+			isLazyLoad:  true,
+		},
+		fieldDataInfoAdded: atomic.NewBool(true),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+	}
+	localSeg.fields.Insert(pkFieldID, &FieldInfo{
+		FieldBinlog: pkBinlog,
+		RowCount:    loadInfo.GetNumOfRows(),
+		Loaded:      *atomic.NewBool(true),
+	})
+	localSeg.fields.Insert(common.TimeStampField, &FieldInfo{
+		FieldBinlog: tsBinlog,
+		RowCount:    loadInfo.GetNumOfRows(),
+		Loaded:      *atomic.NewBool(true),
+	})
+
+	addInfoCalled := false
+	loadCalled := false
+	originAddInfo := addSegmentFieldDataInfoFn
+	originLoad := loadSegmentFieldDataFn
+	addSegmentFieldDataInfoFn = func(ctx context.Context, segment *LocalSegment, rowCount int64, fields []*datapb.FieldBinlog) error {
+		addInfoCalled = true
+		return nil
+	}
+	loadSegmentFieldDataFn = func(ctx context.Context, segment *LocalSegment, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+		loadCalled = true
+		return nil
+	}
+	defer func() {
+		addSegmentFieldDataInfoFn = originAddInfo
+		loadSegmentFieldDataFn = originLoad
+	}()
+
+	err := ensureSortedSegmentPKLoaded(ctx, localSeg)
+	suite.NoError(err)
+	suite.False(addInfoCalled)
+	suite.False(loadCalled)
+}
+
+func (suite *SegmentLoaderSuite) TestEnsureSortedSegmentPKLoadedLoadsTimestampWhenOnlyPKLoaded() {
+	ctx := context.Background()
+
+	pkField := GetPkField(suite.schema)
+	pkFieldID := pkField.GetFieldID()
+	pkBinlog := &datapb.FieldBinlog{
+		FieldID: pkFieldID,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-pk-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+	tsBinlog := &datapb.FieldBinlog{
+		FieldID: common.TimeStampField,
+		Binlogs: []*datapb.Binlog{{
+			LogPath:    "mock-ts-binlog-path",
+			EntriesNum: 10,
+			LogSize:    10,
+			MemorySize: 10,
+		}},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   []*datapb.FieldBinlog{tsBinlog, pkBinlog},
+		NumOfRows:     10,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		IsSorted:      true,
+	}
+
+	localSeg := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:  suite.manager.Collection.Get(suite.collectionID),
+			loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+			segmentType: SegmentTypeSealed,
+			isLazyLoad:  true,
+		},
+		fieldDataInfoAdded: atomic.NewBool(true),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+	}
+	localSeg.fields.Insert(pkFieldID, &FieldInfo{
+		FieldBinlog: pkBinlog,
+		RowCount:    loadInfo.GetNumOfRows(),
+		Loaded:      *atomic.NewBool(true),
+	})
+	localSeg.fields.Insert(common.TimeStampField, &FieldInfo{
+		FieldBinlog: tsBinlog,
+		RowCount:    loadInfo.GetNumOfRows(),
+		Loaded:      *atomic.NewBool(false),
+	})
+
+	addInfoCalled := false
+	loadCalls := make([]int64, 0, 2)
+	originAddInfo := addSegmentFieldDataInfoFn
+	originLoad := loadSegmentFieldDataFn
+	addSegmentFieldDataInfoFn = func(ctx context.Context, segment *LocalSegment, rowCount int64, fields []*datapb.FieldBinlog) error {
+		addInfoCalled = true
+		return nil
+	}
+	loadSegmentFieldDataFn = func(ctx context.Context, segment *LocalSegment, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+		loadCalls = append(loadCalls, fieldID)
+		return nil
+	}
+	defer func() {
+		addSegmentFieldDataInfoFn = originAddInfo
+		loadSegmentFieldDataFn = originLoad
+	}()
+
+	err := ensureSortedSegmentPKLoaded(ctx, localSeg)
+	suite.NoError(err)
+	suite.False(addInfoCalled)
+	suite.Equal([]int64{common.TimeStampField}, loadCalls)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {

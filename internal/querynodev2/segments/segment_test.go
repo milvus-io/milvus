@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -197,6 +198,27 @@ func (suite *SegmentSuite) TestHasRawData() {
 	suite.True(has)
 	has = suite.sealed.HasRawData(mock_segcore.SimpleFloatVecField.ID)
 	suite.True(has)
+}
+
+func (suite *SegmentSuite) TestLoadDeltaDataPreloadsSortedSegmentPK() {
+	localSeg := suite.sealed.(*LocalSegment)
+	pks := storage.NewInt64PrimaryKeys(1)
+	pks.AppendRaw(1)
+	deltaData, err := storage.NewDeltaDataWithData(pks, []uint64{1000})
+	suite.Require().NoError(err)
+
+	expected := errors.New("preload pk")
+	originEnsure := ensureSortedSegmentPKLoadedFn
+	ensureSortedSegmentPKLoadedFn = func(ctx context.Context, segment Segment) error {
+		suite.Equal(localSeg, segment)
+		return expected
+	}
+	defer func() {
+		ensureSortedSegmentPKLoadedFn = originEnsure
+	}()
+
+	err = localSeg.LoadDeltaData(context.Background(), deltaData)
+	suite.ErrorIs(err, expected)
 }
 
 func (suite *SegmentSuite) TestCASVersion() {

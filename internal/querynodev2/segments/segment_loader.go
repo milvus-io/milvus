@@ -1325,6 +1325,12 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		}
 	}
 
+	// Sorted segments need PK raw data for delete application.
+	// In lazy-load mode, field data may not be loaded yet when delta-only sync happens.
+	if err := ensureSortedSegmentPKLoaded(ctx, segment); err != nil {
+		return err
+	}
+
 	err = segment.LoadDeltaData(ctx, deltaData)
 	if err != nil {
 		return err

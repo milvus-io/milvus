@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -42,6 +43,14 @@ import (
 )
 
 var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
+
+var addSegmentFieldDataInfoFn = func(ctx context.Context, segment *LocalSegment, rowCount int64, fields []*datapb.FieldBinlog) error {
+	return segment.AddFieldDataInfo(ctx, rowCount, fields)
+}
+
+var loadSegmentFieldDataFn = func(ctx context.Context, segment *LocalSegment, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+	return segment.LoadFieldData(ctx, fieldID, rowCount, field)
+}
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
@@ -260,6 +269,78 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 		}
 	}
 	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+}
+
+// ensureSortedSegmentPKLoaded guarantees the prerequisite field data is available
+// before applying delta logs on sorted sealed lazy segments. Sorted delete replay
+// needs both PK field data and system timestamps to resolve delete offsets.
+func ensureSortedSegmentPKLoaded(ctx context.Context, segment Segment) error {
+	if !segment.IsSorted() {
+		return nil
+	}
+	if segment.Type() != SegmentTypeSealed {
+		return nil
+	}
+	if !segment.IsLazyLoad() {
+		return nil
+	}
+
+	localSegment, ok := segment.(*LocalSegment)
+	if !ok {
+		return nil
+	}
+
+	pkField := GetPkField(localSegment.collection.Schema())
+	if pkField == nil {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("segment(%d) pk field not found", segment.ID()))
+	}
+	pkFieldID := pkField.GetFieldID()
+
+	loadInfo := segment.LoadInfo()
+	if loadInfo == nil {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("segment(%d) load info is nil", segment.ID()))
+	}
+	localSegment.fieldDataInfoMu.Lock()
+	defer localSegment.fieldDataInfoMu.Unlock()
+	if localSegment.fieldDataInfoAdded == nil || !localSegment.fieldDataInfoAdded.Load() {
+		if err := addSegmentFieldDataInfoFn(ctx, localSegment, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+			return err
+		}
+	}
+
+	fieldBinlogs := lo.SliceToMap(loadInfo.GetBinlogPaths(), func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+		return fieldBinlog.GetFieldID(), fieldBinlog
+	})
+
+	// Serialize sorted lazy prerequisite loads per segment so concurrent delete
+	// replay requests do not race through the Loaded check and trigger duplicate
+	// PK/timestamp loads.
+	ensureFieldLoaded := func(fieldID int64, fieldName string) error {
+		if fieldInfo, ok := localSegment.fields.Get(fieldID); ok && fieldInfo.Loaded.Load() {
+			return nil
+		}
+		fieldBinlog, ok := fieldBinlogs[fieldID]
+		if !ok {
+			return merr.WrapErrServiceInternal(fmt.Sprintf("segment(%d) lacks %s(%d) binlog for sorted delta load", segment.ID(), fieldName, fieldID))
+		}
+		log.Ctx(ctx).Info("load field for sorted segment before delta load",
+			zap.Int64("collectionID", segment.Collection()),
+			zap.Int64("segmentID", segment.ID()),
+			zap.Int64("fieldID", fieldID),
+			zap.String("fieldName", fieldName),
+		)
+		return loadSegmentFieldDataFn(ctx, localSegment, fieldID, loadInfo.GetNumOfRows(), fieldBinlog)
+	}
+
+	if err := ensureFieldLoaded(pkFieldID, "pk"); err != nil {
+		return err
+	}
+
+	if err := ensureFieldLoaded(common.TimeStampField, common.TimeStampFieldName); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {

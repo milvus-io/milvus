@@ -277,6 +277,16 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         auto system_field_type =
             SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
+            {
+                std::unique_lock lck(mutex_);
+                if (timestamp_field_ready_.load()) {
+                    lck.unlock();
+                    std::shared_ptr<milvus::ArrowDataWrapper> r;
+                    while (data.arrow_reader_channel->pop(r)) {
+                    }
+                    return;
+                }
+            }
             std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
             FieldMeta field_meta(
@@ -309,6 +319,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
             // use special index
             std::unique_lock lck(mutex_);
+            if (timestamp_field_ready_.load()) {
+                return;
+            }
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
             insert_record_.timestamps_.set_data_raw(
                 0, timestamps.data(), timestamps.size());
@@ -316,16 +329,31 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
             stats_.mem_size += sizeof(Timestamp) * data.row_count;
+            timestamp_field_ready_.store(true);
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
+            {
+                std::unique_lock lck(mutex_);
+                if (rowid_field_ready_.load()) {
+                    lck.unlock();
+                    std::shared_ptr<milvus::ArrowDataWrapper> r;
+                    while (data.arrow_reader_channel->pop(r)) {
+                    }
+                    return;
+                }
+            }
             // Consume rowid field data but not really load it
             // storage::CollectFieldDataChannel(data.arrow_reader_channel);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
             }
+            std::unique_lock lck(mutex_);
+            if (rowid_field_ready_.load()) {
+                return;
+            }
+            rowid_field_ready_.store(true);
         }
-        ++system_ready_count_;
     } else {
         // prepare data
         auto& field_meta = (*schema_)[field_id];
@@ -1098,9 +1126,11 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
             SystemProperty::Instance().GetSystemFieldType(field_id);
 
         std::unique_lock lck(mutex_);
-        --system_ready_count_;
         if (system_field_type == SystemFieldType::Timestamp) {
+            timestamp_field_ready_.store(false);
             insert_record_.timestamps_.clear();
+        } else {
+            rowid_field_ready_.store(false);
         }
         lck.unlock();
     } else {
@@ -1463,7 +1493,8 @@ ChunkedSegmentSealedImpl::ClearData() {
         field_data_ready_bitset_.reset();
         index_ready_bitset_.reset();
         binlog_index_bitset_.reset();
-        system_ready_count_ = 0;
+        timestamp_field_ready_.store(false);
+        rowid_field_ready_.store(false);
         num_rows_ = std::nullopt;
         scalar_indexings_.clear();
         vector_indexings_.clear();
@@ -1854,7 +1885,12 @@ bool
 ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     if (SystemProperty::Instance().IsSystem(field_id)) {
-        return is_system_field_ready();
+        auto system_field_type =
+            SystemProperty::Instance().GetSystemFieldType(field_id);
+        if (system_field_type == SystemFieldType::Timestamp) {
+            return timestamp_field_ready_.load();
+        }
+        return rowid_field_ready_.load();
     } else {
         return get_bit(field_data_ready_bitset_, field_id);
     }

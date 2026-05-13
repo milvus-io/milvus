@@ -77,6 +77,8 @@ const (
 
 var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 
+var ensureSortedSegmentPKLoadedFn = ensureSortedSegmentPKLoaded
+
 // IndexedFieldInfo contains binlog info of vector field
 type IndexedFieldInfo struct {
 	FieldBinlog *datapb.FieldBinlog
@@ -298,6 +300,7 @@ func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 type FieldInfo struct {
 	*datapb.FieldBinlog
 	RowCount int64
+	Loaded   atomic.Bool
 }
 
 var _ Segment = (*LocalSegment)(nil)
@@ -317,6 +320,8 @@ type LocalSegment struct {
 
 	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
+	fieldDataInfoAdded *atomic.Bool
+	fieldDataInfoMu    sync.Mutex
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	warmupDispatcher   *AsyncWarmupDispatcher
@@ -385,6 +390,7 @@ func NewSegment(ctx context.Context,
 		ptr:                C.CSegmentInterface(csegment.RawPointer()),
 		csegment:           csegment,
 		lastDeltaTimestamp: atomic.NewUint64(0),
+		fieldDataInfoAdded: atomic.NewBool(false),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
@@ -424,6 +430,7 @@ func (s *LocalSegment) initializeSegment() error {
 			s.fields.Insert(fieldID, &FieldInfo{
 				FieldBinlog: info.FieldBinlog,
 				RowCount:    loadInfo.GetNumOfRows(),
+				Loaded:      *atomic.NewBool(false),
 			})
 		}
 	}
@@ -432,6 +439,7 @@ func (s *LocalSegment) initializeSegment() error {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
 			FieldBinlog: binlogs,
 			RowCount:    loadInfo.GetNumOfRows(),
+			Loaded:      *atomic.NewBool(false),
 		})
 	}
 
@@ -739,6 +747,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 	defer s.ptrLock.Unpin()
 
+	if err := ensureSortedSegmentPKLoadedFn(ctx, s); err != nil {
+		return err
+	}
+
 	s.deltaMut.Lock()
 	defer s.deltaMut.Unlock()
 
@@ -876,6 +888,15 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		log.Warn("LoadFieldData failed", zap.Error(err))
 		return err
 	}
+	if info, ok := s.fields.Get(fieldID); ok {
+		info.Loaded.Store(true)
+	} else {
+		s.fields.Insert(fieldID, &FieldInfo{
+			FieldBinlog: field,
+			RowCount:    rowCount,
+			Loaded:      *atomic.NewBool(true),
+		})
+	}
 	log.Info("load field done")
 	return nil
 }
@@ -913,11 +934,16 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		log.Warn("AddFieldDataInfo failed", zap.Error(err))
 		return err
 	}
+	s.fieldDataInfoAdded.Store(true)
 	log.Info("add field data info done")
 	return nil
 }
 
 func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
+	if err := ensureSortedSegmentPKLoadedFn(ctx, s); err != nil {
+		return err
+	}
+
 	pks, tss := deltaData.DeletePks(), deltaData.DeleteTimestamps()
 	rowNum := deltaData.DeleteRowCount()
 
