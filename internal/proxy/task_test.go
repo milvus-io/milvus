@@ -6101,7 +6101,7 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.MaxCapacityKey,
-						Value: "20",
+						Value: "50",
 					},
 				},
 			},
@@ -6117,7 +6117,7 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 					},
 					{
 						Key:   common.MaxCapacityKey,
-						Value: "5",
+						Value: "50",
 					},
 				},
 			},
@@ -6244,6 +6244,12 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 							Name:        "field_name", // Duplicate name
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.MaxCapacityKey,
+									Value: "100",
+								},
+							},
 						},
 						{
 							FieldID:     1022,
@@ -6253,6 +6259,10 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 							TypeParams: []*commonpb.KeyValuePair{
 								{
 									Key:   common.MaxLengthKey,
+									Value: "100",
+								},
+								{
+									Key:   common.MaxCapacityKey,
 									Value: "100",
 								},
 							},
@@ -6269,12 +6279,24 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 							Name:        "field_name", // Same name as struct1's field
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Float,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.MaxCapacityKey,
+									Value: "100",
+								},
+							},
 						},
 						{
 							FieldID:     1032,
 							Name:        "common_field", // Same name as struct1's field
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Bool,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.MaxCapacityKey,
+									Value: "100",
+								},
+							},
 						},
 					},
 				},

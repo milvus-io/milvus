@@ -287,6 +287,7 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
                                  element_type,
                                  dim,
                                  std::nullopt,
+                                 nullable,
                                  external_field);
     }
     if (milvus::IsVectorDataType(data_type)) {
@@ -309,13 +310,14 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
                                  external_field);
     }
     if (milvus::IsArrayDataType(data_type)) {
-        return milvus::FieldMeta(name,
-                                 field_id,
-                                 data_type,
-                                 element_type,
-                                 nullable,
-                                 std::nullopt,
-                                 external_field);
+        return milvus::FieldMeta(
+            name,
+            field_id,
+            data_type,
+            element_type,
+            nullable,
+            std::optional<milvus::DefaultValueType>{std::nullopt},
+            external_field);
     }
     return milvus::FieldMeta(
         name, field_id, data_type, nullable, std::nullopt, external_field);

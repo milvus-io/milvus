@@ -21,6 +21,7 @@
 #include <arrow/type.h>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -502,7 +503,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
-                               std::nullopt,
+                               std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
     schema->set_primary_field_id(info.int64_id);
@@ -1984,6 +1985,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          element_type,
                          dim,
                          std::nullopt,
+                         nullable,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -2011,7 +2013,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
-                         std::nullopt,
+                         std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }
     return FieldMeta(
