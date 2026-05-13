@@ -130,6 +130,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.factory = dependency.NewMockFactory(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, suite.T().TempDir())
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, suite.rootPath)
 	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
 	suite.chunkManagerFactory = storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -178,6 +179,7 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.node.Stop()
 	suite.etcdClient.Close()
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	paramtable.Get().Reset(paramtable.Get().MinioCfg.RootPath.Key)
 }
 
 func (suite *ServiceSuite) TestGetComponentStatesNormal() {
