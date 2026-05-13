@@ -6165,15 +6165,25 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail "
-        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
-    )
     @pytest.mark.parametrize(
         "match_type,match_expr,predicate",
         [
-            ("ANY", 'match_any(structA, $[color] == "Red")', lambda sa: any(e["color"] == "Red" for e in sa)),
-            ("ALL", "match_all(structA, $[int_val] >= 0)", lambda sa: all(e["int_val"] >= 0 for e in sa)),
+            pytest.param(
+                "ANY",
+                'match_any(structA, $[color] == "Red")',
+                lambda sa: any(e["color"] == "Red" for e in sa),
+                marks=pytest.mark.skip(
+                    reason="milvus-io/milvus#49755: query_iterator + match_any can trigger ASan abort"
+                ),
+            ),
+            pytest.param(
+                "ALL",
+                "match_all(structA, $[int_val] >= 0)",
+                lambda sa: all(e["int_val"] >= 0 for e in sa),
+                marks=pytest.mark.skip(
+                    reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail"
+                ),
+            ),
         ],
     )
     def test_query_iterator_with_match_family(self, match_type, match_expr, predicate):
@@ -6188,7 +6198,7 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
 
         self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
 
-    @pytest.mark.xfail(
+    @pytest.mark.skip(
         reason="milvus-io/milvus#49693: full StructArray output fails after release/load "
         "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
     )
