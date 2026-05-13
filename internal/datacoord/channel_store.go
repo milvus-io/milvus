@@ -83,10 +83,10 @@ type RWChannelStore interface {
 var ChannelOpTypeNames = []string{"Add", "Delete", "Watch", "Release"}
 
 const (
-	bufferID            = math.MinInt64
-	delimiter           = "/"
-	maxOperationsPerTxn = 64
-	maxBytesPerTxn      = 1024 * 1024
+	bufferID              = math.MinInt64
+	delimiter             = "/"
+	maxOperationsPerTxn   = 64
+	defaultMaxBytesPerTxn = 1024 * 1024
 )
 
 var errUnknownOpType = errors.New("unknown operation type")
@@ -431,8 +431,11 @@ func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
 	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
 	perChOps := opSet.SplitByChannel()
 
-	// Execute a txn for every 64 operations.
+	maxBytesPerTxn := Params.DataCoordCfg.ChannelStoreMaxBytesPerTxn.GetAsInt()
+
+	// Execute a txn with both operations-count and total-bytes limit.
 	count := 0
+	bytes := 0
 	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
 	for _, opset := range perChOps {
 		if !c.sanityCheckPerChannelOpSet(opset) {
@@ -444,14 +447,27 @@ func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
 				zap.Any("opset size", opset.Len()),
 				zap.Int("limit", maxOperationsPerTxn))
 		}
-		if count+opset.Len() > maxOperationsPerTxn {
+		opBytes, err := estimateOpSetBytes(opset)
+		if err != nil {
+			return err
+		}
+		if opBytes > maxBytesPerTxn {
+			log.Error("Operations for one channel exceeds maxBytesPerTxn",
+				zap.Int("bytes", opBytes),
+				zap.Int("limit", maxBytesPerTxn),
+				zap.Any("opset", opset))
+			return errors.Newf("channel opset bytes exceeds limit, bytes=%d limit=%d", opBytes, maxBytesPerTxn)
+		}
+		if count > 0 && (count+opset.Len() > maxOperationsPerTxn || bytes+opBytes > maxBytesPerTxn) {
 			if err := c.updateMeta(NewChannelOpSet(operations...)); err != nil {
 				return err
 			}
 			count = 0
+			bytes = 0
 			operations = make([]*ChannelOp, 0, maxOperationsPerTxn)
 		}
 		count += opset.Len()
+		bytes += opBytes
 		operations = append(operations, opset.Collect()...)
 	}
 	if count == 0 {
@@ -459,6 +475,39 @@ func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
 	}
 
 	return c.updateMeta(NewChannelOpSet(operations...))
+}
+
+func estimateOpSetBytes(opSet *ChannelOpSet) (int, error) {
+	total := 0
+	for _, op := range opSet.Collect() {
+		bs, err := estimateOpBytes(op)
+		if err != nil {
+			return 0, err
+		}
+		total += bs
+	}
+	return total, nil
+}
+
+func estimateOpBytes(op *ChannelOp) (int, error) {
+	total := 0
+	for _, ch := range op.Channels {
+		k := buildNodeChannelKey(op.NodeID, ch.GetName())
+		total += len(k)
+		switch op.Type {
+		case Add, Watch, Release:
+			tmpWatchInfo := proto.Clone(ch.GetWatchInfo()).(*datapb.ChannelWatchInfo)
+			tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
+			// Keep consistent with persisted data: schema is cleared before saving.
+			tmpWatchInfo.Schema = nil
+			total += proto.Size(tmpWatchInfo)
+		case Delete:
+			// key already counted.
+		default:
+			return 0, errUnknownOpType
+		}
+	}
+	return total, nil
 }
 
 // remove from the assignments
