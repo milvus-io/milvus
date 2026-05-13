@@ -18,6 +18,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -46,6 +48,8 @@ type releaseJobCatalog struct {
 	replicas               map[int64]*querypb.Replica
 	releaseCollectionCalls int
 	releaseReplicasCalls   int
+	releaseCollectionErr   error
+	releaseReplicasErr     error
 }
 
 func newReleaseJobCatalog() *releaseJobCatalog {
@@ -80,6 +84,9 @@ func (c *releaseJobCatalog) ReleaseReplicas(ctx context.Context, collectionID in
 	defer c.mu.Unlock()
 
 	c.releaseReplicasCalls++
+	if c.releaseReplicasErr != nil {
+		return c.releaseReplicasErr
+	}
 	for replicaID, replica := range c.replicas {
 		if replica.GetCollectionID() == collectionID {
 			delete(c.replicas, replicaID)
@@ -93,7 +100,7 @@ func (c *releaseJobCatalog) ReleaseCollection(ctx context.Context, collectionID 
 	defer c.mu.Unlock()
 
 	c.releaseCollectionCalls++
-	return nil
+	return c.releaseCollectionErr
 }
 
 func buildReleaseCollectionResult(collectionID int64) message.BroadcastResultDropLoadConfigMessageV2 {
@@ -238,5 +245,132 @@ func TestReleaseCollectionJobFinalizesReplicaCleanupOnRetry(t *testing.T) {
 	require.NoError(t, releaseJob.Execute())
 	require.Nil(t, m.GetCollection(ctx, collectionID))
 	require.Empty(t, m.GetByCollection(ctx, collectionID))
+	require.Equal(t, 1, catalog.releaseReplicasCalls)
+}
+
+func TestReleaseCollectionJobIgnoresMissingCollectionAndReplica(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1003)
+	m := meta.NewMeta(func() (int64, error) { return 0, nil }, newReleaseJobCatalog(), session.NewNodeManager())
+	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
+
+	releaseJob := NewReleaseCollectionJob(
+		ctx,
+		buildReleaseCollectionResult(collectionID),
+		dist,
+		m,
+		nil,
+		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
+	)
+
+	require.NoError(t, releaseJob.Execute())
+	require.Nil(t, m.GetCollection(ctx, collectionID))
+	require.Empty(t, m.GetByCollection(ctx, collectionID))
+}
+
+func TestReleaseCollectionJobReturnsCollectionRemovalError(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1004)
+	replicaID := int64(14)
+	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, 1)
+	catalog.releaseCollectionErr = errors.New("release collection failed")
+	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
+
+	releaseJob := NewReleaseCollectionJob(
+		ctx,
+		buildReleaseCollectionResult(collectionID),
+		dist,
+		m,
+		nil,
+		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
+	)
+
+	err := releaseJob.Execute()
+	require.ErrorContains(t, err, "failed to remove collection")
+	require.NotNil(t, m.GetCollection(ctx, collectionID))
+	require.Len(t, m.GetByCollection(ctx, collectionID), 1)
+	require.Equal(t, 1, catalog.releaseCollectionCalls)
+	require.Equal(t, 0, catalog.releaseReplicasCalls)
+}
+
+func TestReleaseCollectionJobContinuesWhenCacheInvalidationFails(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1005)
+	replicaID := int64(15)
+	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, 1)
+	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, _ := newReleaseJobDeps(t, m, dist)
+	proxyManager := proxyutil.NewMockProxyClientManager(t)
+	proxyManager.EXPECT().
+		InvalidateCollectionMetaCache(
+			mock.Anything,
+			mock.MatchedBy(func(req *proxypb.InvalidateCollMetaCacheRequest) bool {
+				return req.GetCollectionID() == collectionID
+			}),
+			mock.Anything,
+		).
+		Return(errors.New("invalidate collection cache failed"))
+	proxyManager.EXPECT().
+		InvalidateShardLeaderCache(
+			mock.Anything,
+			mock.MatchedBy(func(req *proxypb.InvalidateShardLeaderCacheRequest) bool {
+				return len(req.GetCollectionIDs()) == 1 && req.GetCollectionIDs()[0] == collectionID
+			}),
+		).
+		Return(errors.New("invalidate shard leader cache failed"))
+
+	releaseJob := NewReleaseCollectionJob(
+		ctx,
+		buildReleaseCollectionResult(collectionID),
+		dist,
+		m,
+		nil,
+		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
+	)
+
+	require.NoError(t, releaseJob.Execute())
+	require.Nil(t, m.GetCollection(ctx, collectionID))
+	require.Empty(t, m.GetByCollection(ctx, collectionID))
+	require.Equal(t, 1, catalog.releaseCollectionCalls)
+	require.Equal(t, 1, catalog.releaseReplicasCalls)
+}
+
+func TestReleaseCollectionJobReturnsReplicaRemovalError(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1006)
+	replicaID := int64(16)
+	m, catalog := newReleaseCollectionJobMeta(t, collectionID, replicaID, 1)
+	catalog.releaseReplicasErr = errors.New("release replicas failed")
+	dist := meta.NewDistributionManager(session.NewNodeManager())
+	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
+
+	releaseJob := NewReleaseCollectionJob(
+		ctx,
+		buildReleaseCollectionResult(collectionID),
+		dist,
+		m,
+		nil,
+		nil,
+		targetObserver,
+		checkerController,
+		proxyManager,
+	)
+
+	err := releaseJob.Execute()
+	require.ErrorContains(t, err, "failed to remove replicas")
+	require.Nil(t, m.GetCollection(ctx, collectionID))
+	require.Len(t, m.GetByCollection(ctx, collectionID), 1)
+	require.Equal(t, 1, catalog.releaseCollectionCalls)
 	require.Equal(t, 1, catalog.releaseReplicasCalls)
 }
