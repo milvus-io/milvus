@@ -523,56 +523,76 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return nil
 	}
 
-	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
-	})
+	return sd.withPostLoadLimit(ctx, func() error {
+		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
+		})
 
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
-	if err != nil {
-		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-		return err
-	}
-
-	// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
-	err = sd.loadBM25Stats(ctx, infos, req)
-	if err != nil {
-		log.Warn("failed to load BM25 stats", zap.Error(err))
-		return err
-	}
-
-	// Build a map from segmentID to BloomFilterSet
-	bfMap := make(map[int64]pkoracle.Candidate)
-	for _, candidate := range candidates {
-		log.Info("loaded bloom filter set for sealed segment",
-			zap.Int64("segmentID", candidate.ID()),
-		)
-		bfMap[candidate.ID()] = candidate
-	}
-
-	// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
-	entries := make([]SegmentEntry, 0, len(infos))
-	for _, info := range infos {
-		entry := SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
-			Level:       info.GetLevel(),
-			Candidate:   bfMap[info.GetSegmentID()],
+		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
+		if err != nil {
+			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			return err
 		}
-		entries = append(entries, entry)
+
+		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
+		err = sd.loadBM25Stats(ctx, infos, req)
+		if err != nil {
+			log.Warn("failed to load BM25 stats", zap.Error(err))
+			return err
+		}
+
+		// Build a map from segmentID to BloomFilterSet
+		bfMap := make(map[int64]pkoracle.Candidate)
+		for _, candidate := range candidates {
+			log.Info("loaded bloom filter set for sealed segment",
+				zap.Int64("segmentID", candidate.ID()),
+			)
+			bfMap[candidate.ID()] = candidate
+		}
+
+		// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
+		entries := make([]SegmentEntry, 0, len(infos))
+		for _, info := range infos {
+			entries = append(entries, SegmentEntry{
+				SegmentID:   info.GetSegmentID(),
+				PartitionID: info.GetPartitionID(),
+				NodeID:      req.GetDstNodeID(),
+				Version:     req.GetVersion(),
+				Level:       info.GetLevel(),
+				Candidate:   bfMap[info.GetSegmentID()],
+			})
+		}
+
+		log.Debug("load delete...")
+		// loadStreamDelete now handles distribution add atomically in Phase 3
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
+			entries, req.GetLoadMeta().GetSchemaVersion())
+		if err != nil {
+			log.Warn("load stream delete failed", zap.Error(err))
+			return err
+		}
+
+		return nil
+	})
+}
+
+func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error) error {
+	if sd.postLoadSem == nil {
+		return fn()
 	}
 
-	log.Debug("load delete...")
-	// loadStreamDelete now handles distribution add atomically in Phase 3
-	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-		entries, req.GetLoadMeta().GetSchemaVersion())
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
+	start := time.Now()
+	if err := sd.postLoadSem.Acquire(ctx); err != nil {
 		return err
 	}
+	defer sd.postLoadSem.Release()
 
-	return nil
+	log.Ctx(ctx).Debug("delegator acquired post-load slot",
+		zap.Duration("wait", time.Since(start)),
+		zap.Int("capacity", sd.postLoadSem.Cap()),
+		zap.Int("current", sd.postLoadSem.Current()))
+
+	return fn()
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
