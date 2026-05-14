@@ -23,8 +23,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==3.1.0rc5
-pymilvus[bulk_writer]==3.1.0rc5
+pymilvus==2.7.0rc219
+pymilvus[bulk_writer]==2.7.0rc219
 # for protobuf
 protobuf>=5.29.5
 
