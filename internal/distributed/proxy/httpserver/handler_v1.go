@@ -832,6 +832,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		httpReq.CollectionName = singleUpsertReq.CollectionName
 		httpReq.Data = []map[string]interface{}{singleUpsertReq.Data}
 		httpReq.PartialUpdate = singleUpsertReq.PartialUpdate
+		httpReq.FieldOps = singleUpsertReq.FieldOps
 	}
 	if httpReq.CollectionName == "" || httpReq.Data == nil {
 		log.Warn("high level restful api, upsert require parameter: [collectionName, data], but miss")
@@ -847,6 +848,15 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		NumRows:        uint32(len(httpReq.Data)),
 		PartialUpdate:  httpReq.PartialUpdate,
 	}
+	fieldOps, err := buildFieldPartialUpdateOps(httpReq.FieldOps)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return
+	}
+	req.FieldOps = fieldOps
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
