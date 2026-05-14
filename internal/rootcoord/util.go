@@ -507,6 +507,9 @@ func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema
 			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s in struct array field %s must be an integer",
 				common.MaxCapacityKey, field.GetName(), structName)
 		}
+		if maxCapacity > defaultMaxArrayCapacity || maxCapacity <= 0 {
+			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+		}
 		return maxCapacity, nil
 	}
 	return 0, merr.WrapErrParameterInvalidMsg("type param(%s) should be specified for field %s in struct array field %s",

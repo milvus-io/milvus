@@ -977,7 +977,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	// Prevent concurrent schema-change requests (AddCollectionField / AlterCollectionSchema)
+	// Prevent concurrent schema-change requests (AddCollectionField / AddCollectionStructField / AlterCollectionSchema)
 	// on the same collection from racing past the schema version consistency gate.
 	collKey := request.GetDbName() + "/" + request.GetCollectionName()
 	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
@@ -1005,6 +1005,89 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	}
 
 	method := "AddCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+// AddCollectionStructField add a struct field to collection
+func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
+	}
+
+	collKey := request.GetDbName() + "/" + request.GetCollectionName()
+	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"another schema-change request is already in progress for collection %s", request.GetCollectionName())), nil
+	}
+	defer node.alterSchemaInFlight.Delete(collKey)
+
+	if err := retry.Handle(ctx, func() (bool, error) {
+		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
+		return merr.IsRetryableErr(err), err
+	}); err != nil {
+		return merr.Status(err), nil
+	}
+
+	task := &addCollectionStructFieldTask{
+		ctx:                             ctx,
+		Condition:                       NewTaskCondition(ctx),
+		AddCollectionStructFieldRequest: request,
+		mixCoord:                        node.mixCoord,
+		oldSchema:                       dresp.GetSchema(),
+	}
+
+	method := "AddCollectionStructField"
 	tr := timerecord.NewTimeRecorder(method)
 
 	log := log.Ctx(ctx).With(

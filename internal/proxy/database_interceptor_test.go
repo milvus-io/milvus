@@ -102,6 +102,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
 			&milvuspb.AddCollectionFieldRequest{},
+			&milvuspb.AddCollectionStructFieldRequest{},
 			&milvuspb.AlterCollectionSchemaRequest{},
 			&milvuspb.RunAnalyzerRequest{},
 			&milvuspb.RefreshExternalCollectionRequest{},

@@ -2197,12 +2197,12 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 	return nil
 }
 
-// GetTotalFieldsNum get total fields number
-// We exclude StructArrayField itself as it does not contain data directly.
+// GetTotalFieldsNum get total fields number, including StructArrayField itself.
 func GetTotalFieldsNum(schema *schemapb.CollectionSchema) int {
 	num := len(schema.GetFields())
 	for _, structArrayField := range schema.GetStructArrayFields() {
-		num += len(structArrayField.GetFields())
+		// +1 for the StructArrayField itself
+		num += len(structArrayField.GetFields()) + 1
 	}
 	return num
 }

@@ -220,6 +220,10 @@ func (m *mockMixCoord) AddCollectionField(ctx context.Context, req *milvuspb.Add
 	panic("implement me")
 }
 
+func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	panic("implement me")
 }

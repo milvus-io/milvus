@@ -49,6 +49,15 @@ service RootCoord {
      */
     rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
 
+    /**
+     * @brief This method is used to add collection struct field.
+     *
+     * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+     *
+     * @return Status
+     */
+    rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
+
 
      /**
      * @brief This method is used to add/drop collection field/function.

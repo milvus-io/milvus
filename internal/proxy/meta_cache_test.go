@@ -261,6 +261,10 @@ func (c *MockMixCoordClientInterface) AddCollectionField(ctx context.Context, in
 	panic("implement me")
 }
 
+func (c *MockMixCoordClientInterface) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 // describeCollectionInternal return collection info
 func (c *MockMixCoordClientInterface) describeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	panic("implement me")

@@ -50,6 +50,7 @@
 #include "index/VectorDiskIndex.h"
 #include "index/VectorMemIndex.h"
 #include "knowhere/comp/knowhere_check.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/expected.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/operands.h"
@@ -256,6 +257,9 @@ IndexFactory::VecIndexLoadResource(
                     index_type, index_version, config);
             break;
         case milvus::DataType::VECTOR_ARRAY: {
+            auto metric_type = milvus::index::GetMetricTypeFromConfig(config);
+            auto is_emb_list_metric =
+                knowhere::get_el_metric_type(metric_type).has_value();
             switch (element_type) {
                 case milvus::DataType::VECTOR_FLOAT:
                     resource = knowhere::IndexStaticFaced<knowhere::fp32>::
@@ -325,6 +329,11 @@ IndexFactory::VecIndexLoadResource(
                         field_type,
                         element_type);
                     return LoadResourceRequest{0, 0, 0, 0, true};
+            }
+            // Non-emb-list VECTOR_ARRAY indexes do not keep embedding-list
+            // offsets, so they cannot reconstruct row-level embedding lists.
+            if (!is_emb_list_metric) {
+                has_raw_data = false;
             }
             break;
         }
