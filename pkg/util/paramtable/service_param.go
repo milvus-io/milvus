@@ -1125,7 +1125,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webport",
 		Version:      "2.0.0",
 		DefaultValue: "80",
-		Doc:          "Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.",
+		Doc:          "Web port of Pulsar service. If you connect direcly without proxy, should use 8080.",
 		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)
