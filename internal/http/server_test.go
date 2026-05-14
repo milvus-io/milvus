@@ -323,8 +323,11 @@ func TestRegisterWebUIHandler(t *testing.T) {
 		RegisterWebUIHandler()
 	}()
 
-	// Create a test server
-	ts := httptest.NewServer(http.DefaultServeMux)
+	// Register() now always uses a private ServeMux instead of opportunistically
+	// falling back to http.DefaultServeMux when pprof is enabled, so the test
+	// server must be backed by the package-level metricsServer that
+	// RegisterWebUIHandler populates.
+	ts := httptest.NewServer(metricsServer)
 	defer ts.Close()
 
 	// Test cases

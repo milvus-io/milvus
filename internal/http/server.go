@@ -21,6 +21,7 @@ import (
 	"embed"
 	"fmt"
 	"net/http"
+	netpprof "net/http/pprof"
 	"os"
 	"runtime"
 	"strconv"
@@ -153,6 +154,53 @@ func registerDefaults() {
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
 		RegisterWebUIHandler()
 	}
+
+	if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
+		registerPprof()
+	}
+}
+
+// registerPprof attaches the standard net/http/pprof handlers explicitly,
+// gated by adminAuthEnabled. Previously they were attached via a blank import
+// of net/http/pprof in pkg/metrics, which relied on package-init registration
+// to http.DefaultServeMux and Register() opportunistically using that mux.
+// That arrangement made the auth posture invisible at registration sites and
+// allowed any third-party init-time registration to slip onto port 9091.
+//
+// Pprof endpoints expose process internals (heap dumps, goroutine stacks,
+// CPU profiles) that can reveal cached credentials and query data; they are
+// gated by AuthByAdminFlag so deployments with adminAuthEnabled=true require
+// root credentials.
+func registerPprof() {
+	// /debug/pprof/ is the index page; the standard pprof.Index handler also
+	// dispatches /debug/pprof/heap, /goroutine, /allocs, /threadcreate,
+	// /block, /mutex via path inspection — so we only need to register the
+	// prefix entry plus the four endpoints that have dedicated handlers.
+	Register(&Handler{
+		Path:        "/debug/pprof/",
+		HandlerFunc: netpprof.Index,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/cmdline",
+		HandlerFunc: netpprof.Cmdline,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/profile",
+		HandlerFunc: netpprof.Profile,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/symbol",
+		HandlerFunc: netpprof.Symbol,
+		AuthPolicy:  AuthByAdminFlag,
+	})
+	Register(&Handler{
+		Path:        "/debug/pprof/trace",
+		HandlerFunc: netpprof.Trace,
+		AuthPolicy:  AuthByAdminFlag,
+	})
 }
 
 func RegisterStopComponent(triggerComponentStop func(role string) error) {
