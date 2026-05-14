@@ -88,11 +88,40 @@ func TestBuildSearchAggregationContextDefaultsOmittedSizeToOne(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, ctx.Levels, 2)
 	require.Equal(t, int64(1), ctx.Levels[0].Size)
+	require.Equal(t, int64(1), ctx.Levels[0].SearchSize)
 	require.Equal(t, int64(1), ctx.Levels[1].Size)
+	require.Equal(t, int64(1), ctx.Levels[1].SearchSize)
 	require.NotNil(t, ctx.Levels[1].TopHits)
 	require.Equal(t, int64(1), ctx.Levels[1].TopHits.Size)
 	require.Equal(t, int64(1), ctx.DerivedTopK)
 	require.Equal(t, int64(1), ctx.DerivedGroupSize)
+}
+
+func TestBuildSearchAggregationContextUsesSearchSizeForDerivedTopK(t *testing.T) {
+	schema := testCollectionSchema()
+	spec := &commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       2,
+		SearchSize: 5,
+		SubAggregation: &commonpb.SearchAggregationSpec{
+			Fields:     []string{"category"},
+			Size:       3,
+			SearchSize: 4,
+			TopHits: &commonpb.TopHitsSpec{
+				Size: 2,
+			},
+		},
+	}
+
+	ctx, err := BuildSearchAggregationContext(spec, schema, 1)
+	require.NoError(t, err)
+	require.Len(t, ctx.Levels, 2)
+	require.Equal(t, int64(2), ctx.Levels[0].Size)
+	require.Equal(t, int64(5), ctx.Levels[0].SearchSize)
+	require.Equal(t, int64(3), ctx.Levels[1].Size)
+	require.Equal(t, int64(4), ctx.Levels[1].SearchSize)
+	require.Equal(t, int64(20), ctx.DerivedTopK)
+	require.Equal(t, int64(2), ctx.DerivedGroupSize)
 }
 
 func TestBuildSearchAggregationContextRejectsNegativeSize(t *testing.T) {
@@ -105,6 +134,26 @@ func TestBuildSearchAggregationContextRejectsNegativeSize(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "search_aggregation size must be non-negative")
+}
+
+func TestBuildSearchAggregationContextRejectsInvalidSearchSize(t *testing.T) {
+	schema := testCollectionSchema()
+
+	_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       3,
+		SearchSize: -1,
+	}, schema, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "search_aggregation search_size must be non-negative")
+
+	_, err = BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields:     []string{"brand"},
+		Size:       3,
+		SearchSize: 2,
+	}, schema, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "search_aggregation search_size must be greater than or equal to size")
 }
 
 func TestBuildSearchAggregationContextRejectsNegativeTopHitsSize(t *testing.T) {
@@ -129,6 +178,16 @@ func TestDeriveTopKAndGroupSizeDefaultsZeroSizesToOne(t *testing.T) {
 
 	require.Equal(t, int64(3), topK)
 	require.Equal(t, int64(1), groupSize)
+}
+
+func TestDeriveTopKAndGroupSizeUsesSearchSize(t *testing.T) {
+	topK, groupSize := deriveTopKAndGroupSize([]LevelContext{
+		{Size: 2, SearchSize: 5},
+		{Size: 3, SearchSize: 4, TopHits: &TopHitsConfig{Size: 2}},
+	})
+
+	require.Equal(t, int64(20), topK)
+	require.Equal(t, int64(2), groupSize)
 }
 
 func TestNewContextReturnsMetricCompileError(t *testing.T) {

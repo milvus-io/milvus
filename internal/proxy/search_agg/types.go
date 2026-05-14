@@ -21,8 +21,7 @@ type SearchAggregationContext struct {
 	UserOutputFieldIDs map[int64]struct{}
 
 	// DerivedTopK is the number of distinct composite keys each NQ retains
-	// downstream, equal to the product of every level's Size (empty / zero
-	// levels treated as 1). Mirrors ES `terms.size` nested product.
+	// downstream, equal to the product of every level's SearchSize.
 	DerivedTopK int64
 
 	// DerivedGroupSize is the per-composite-key doc retention budget. Equal to
@@ -76,6 +75,7 @@ type LevelContext struct {
 	TopHits     *TopHitsConfig
 	Order       []OrderCriterion
 	Size        int64
+	SearchSize  int64
 }
 
 type MetricSpec struct {
