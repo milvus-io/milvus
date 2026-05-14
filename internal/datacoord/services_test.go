@@ -3276,9 +3276,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
+		fakeBroker := &struct{ broker.Broker }{}
+		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).Return(true, nil).Build()
+		defer mockHasCollection.UnPatch()
+
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
+			broker:          fakeBroker,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3292,6 +3297,127 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 		assert.Contains(t, resp.GetReason(), "etcd decode failure")
 		assert.Equal(t, 2, callCount, "GetSnapshot should be invoked twice (pre-lock + post-lock)")
+	})
+
+	t.Run("collection_dropped_after_lock_acquisition", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &struct{ Handler }{}
+		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+			&collectionInfo{
+				ID:           100,
+				DatabaseName: "default",
+				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Broadcast).To(
+			func(_ *struct{ broadcaster.BroadcastAPI }, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		hasCollectionCalled := false
+		fakeBroker := &struct{ broker.Broker }{}
+		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).To(
+			func(_ *struct{ broker.Broker }, _ context.Context, collectionID int64) (bool, error) {
+				hasCollectionCalled = true
+				assert.Equal(t, int64(100), collectionID)
+				return false, nil
+			}).Build()
+		defer mockHasCollection.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "race_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrCollectionNotFound))
+		assert.True(t, hasCollectionCalled, "collection availability must be checked under the resource lock")
+		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast after DropCollection wins the lock race")
+	})
+
+	t.Run("collection_recheck_error_after_lock", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &struct{ Handler }{}
+		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+			&collectionInfo{
+				ID:           100,
+				DatabaseName: "default",
+				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Broadcast).To(
+			func(_ *struct{ broadcaster.BroadcastAPI }, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		fakeBroker := &struct{ broker.Broker }{}
+		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).Return(
+			false, errors.New("rootcoord unavailable"),
+		).Build()
+		defer mockHasCollection.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "race_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
+		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
 	})
 }
 
