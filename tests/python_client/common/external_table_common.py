@@ -627,7 +627,9 @@ def build_full_matrix_schema(
 
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
     if arr_name not in excluded:
-        ops.add_field(schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
+        ops.add_field(
+            schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name
+        )
 
     if "geo" not in excluded:
         ops.add_field(schema, "geo", DataType.GEOMETRY, external_field="geo")
@@ -1027,7 +1029,9 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def build_iceberg_full_matrix_schema(ops, client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
+def build_iceberg_full_matrix_schema(
+    ops, client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM
+):
     """Milvus schema for the iceberg full-matrix dataset. Matches
     ICEBERG_FULL_MATRIX_SCALAR_FIELDS for scalars and FULL_MATRIX_VECTOR_FIELDS
     for vectors (vectors are stored as iceberg binary blobs but exposed as
@@ -1037,7 +1041,9 @@ def build_iceberg_full_matrix_schema(ops, client, ext_path, ext_spec, dim=FULL_M
     for name, dtype, _ibg, _arrow, extra, _value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
         ops.add_field(schema, name, dtype, external_field=name, **extra)
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
-    ops.add_field(schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
+    ops.add_field(
+        schema, arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name
+    )
     ops.add_field(schema, "geo", DataType.GEOMETRY, external_field="geo")
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         ops.add_field(schema, name, vtype, dim=vdim, external_field=name)

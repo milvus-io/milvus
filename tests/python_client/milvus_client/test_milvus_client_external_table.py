@@ -836,7 +836,9 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
 
         schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
         self.add_field(schema, "id", DataType.INT64, external_field="id")
-        self.add_field(schema, arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra)
+        self.add_field(
+            schema, arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra
+        )
         self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
         self.create_collection(client, collection_name=coll, schema=schema)
@@ -1518,7 +1520,8 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             external_spec=build_external_spec(),
         )[0]
         self.add_field(schema, "id", DataType.INT64, external_field="id")
-        self.add_field(schema,
+        self.add_field(
+            schema,
             "vecs",
             DataType._ARRAY_OF_VECTOR,
             element_type=DataType.FLOAT_VECTOR,
@@ -2044,7 +2047,9 @@ class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
                 check_items=check_items,
             )
         elif op_name == "delete":
-            self.delete(client, collection_name=coll, filter="id >= 0", check_task=CheckTasks.err_res, check_items=check_items)
+            self.delete(
+                client, collection_name=coll, filter="id >= 0", check_task=CheckTasks.err_res, check_items=check_items
+            )
         elif op_name == "flush":
             self.flush(client, collection_name=coll, check_task=CheckTasks.err_res, check_items=check_items)
         elif op_name == "create_partition":

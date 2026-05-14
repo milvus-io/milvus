@@ -124,7 +124,9 @@ def _assert_refresh_terminal(progress, context):
 
 def _assert_refresh_completed(progress, context):
     state = _progress_state(progress)
-    assert state == "RefreshCompleted", f"{context}: expected RefreshCompleted, got {state}, reason={_progress_reason(progress)}"
+    assert state == "RefreshCompleted", (
+        f"{context}: expected RefreshCompleted, got {state}, reason={_progress_reason(progress)}"
+    )
 
 
 def _create_milvus_client():
@@ -503,7 +505,9 @@ class TestExternalTableFaultInjection:
 
     def _milvus_component_selector(self, component):
         component_key = "app.kubernetes.io/component" if self.deploy_by == "milvus-operator" else "component"
-        return f"app.kubernetes.io/instance={self.release_name},app.kubernetes.io/name=milvus,{component_key}={component}"
+        return (
+            f"app.kubernetes.io/instance={self.release_name},app.kubernetes.io/name=milvus,{component_key}={component}"
+        )
 
     def _skip_if_component_absent(self, component):
         pods = get_pod_list(self.milvus_ns, self._milvus_component_selector(component))
@@ -790,9 +794,7 @@ class TestExternalTableFaultInjection:
             job_id, submit_error = self._submit_refresh_while_minio_unavailable(client, collection_name)
             if submit_error is not None:
                 assert str(submit_error) or repr(submit_error), "refresh submit failed without useful error text"
-                _refresh_after_recovery_or_wait_existing(
-                    client, collection_name, "minio unavailable recovery refresh"
-                )
+                _refresh_after_recovery_or_wait_existing(client, collection_name, "minio unavailable recovery refresh")
             else:
                 assert job_id is not None, "refresh submit returned neither job id nor error"
                 progress = _poll_refresh_terminal(client, job_id, timeout=_POD_KILL_REFRESH_TIMEOUT)

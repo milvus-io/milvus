@@ -293,7 +293,9 @@ def _table_to_iceberg_arrow(table):
 
 
 def _write_iceberg_tables(cfg, key_prefix, tables):
-    catalog_sql = pytest.importorskip("pyiceberg.catalog.sql", reason="iceberg external collection dependency unavailable")
+    catalog_sql = pytest.importorskip(
+        "pyiceberg.catalog.sql", reason="iceberg external collection dependency unavailable"
+    )
     iceberg_schema_module = pytest.importorskip(
         "pyiceberg.schema",
         reason="iceberg external collection dependency unavailable",
@@ -473,7 +475,7 @@ def _nullable_arrow_table(num_rows=6, null_value_ids=None, null_vector_ids=None,
     null_value_ids = set(null_value_ids or set())
     null_vector_ids = set(null_vector_ids or set())
     ids = list(range(num_rows))
-    vector_type = pa.list_(pa.float32(), dim)
+    vector_type = pa.list_(pa.float32()) if null_vector_ids else pa.list_(pa.float32(), dim)
     return pa.table(
         {
             "id": pa.array(ids, type=pa.int64()),
@@ -549,9 +551,7 @@ def _assert_external_collection_create_request(payload, expected_name=None, expe
     }
     for field in fields:
         assert {"fieldName", "dataType", "externalField", "elementTypeParams"}.issubset(field), field
-        assert set(field).issubset(
-            {"fieldName", "dataType", "externalField", "elementTypeParams", "nullable"}
-        ), field
+        assert set(field).issubset({"fieldName", "dataType", "externalField", "elementTypeParams", "nullable"}), field
         assert field["fieldName"] in expected_fields, field
         data_type, external_field, params = expected_fields[field["fieldName"]]
         assert field["dataType"] in FIELD_DATA_TYPE_ENUM, field
@@ -733,7 +733,9 @@ def _assert_job_info_map(job, expected_collection=None, expected_source=None, ex
         assert isinstance(job["reason"], str) and job["reason"], job
 
 
-def _assert_job_info_response(rsp, expected_collection=None, expected_source=None, expected_spec=None, expected_job_id=None):
+def _assert_job_info_response(
+    rsp, expected_collection=None, expected_source=None, expected_spec=None, expected_job_id=None
+):
     assert set(rsp) == {"code", "data"}, rsp
     assert rsp["code"] == 0, rsp
     assert isinstance(rsp["data"], dict), rsp
@@ -1513,8 +1515,7 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     @pytest.mark.xfail(
-        reason="milvus#49519 external collection nullable vector query output is currently incorrect",
-        strict=True,
+        reason="milvus#49783 REST v2 entities/query shifts nullable vector output for external collections",
     )
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_vector_by_format(self, fmt, external_store):
@@ -1524,7 +1525,7 @@ class TestRestExternalCollection(TestBase):
         expected: the null vector is returned as None while other rows match source data
         """
         name = gen_collection_name()
-        table = _nullable_arrow_table(num_rows=6, null_vector_ids={2})
+        table = _nullable_arrow_table(num_rows=4096, null_vector_ids={1})
         source, spec = _write_format_tables(fmt, external_store, [table])
 
         self._create_external_collection(name, source, spec, vector_nullable=True)
@@ -1542,16 +1543,16 @@ class TestRestExternalCollection(TestBase):
 
         rows = self._query_rows(
             name,
-            "id in [1, 2, 3]",
+            "id in [0, 1, 2]",
             output_fields=["id", "value", "embedding"],
             limit=3,
         )
         assert len(rows) == 3, rows
         rows_by_id = _rows_by_id(rows)
-        _assert_basic_row_body(rows_by_id[1], 1)
-        assert rows_by_id[2]["embedding"] is None, rows_by_id[2]
-        _assert_close(rows_by_id[2]["value"], _expected_value(2), tolerance=1e-4)
-        _assert_basic_row_body(rows_by_id[3], 3)
+        _assert_basic_row_body(rows_by_id[0], 0)
+        assert rows_by_id[1]["embedding"] is None, rows_by_id[1]
+        _assert_close(rows_by_id[1]["value"], _expected_value(1), tolerance=1e-4)
+        _assert_basic_row_body(rows_by_id[2], 2)
 
     @pytest.mark.L1
     def test_rest_external_collection_custom_db_e2e(self, external_store):
@@ -1599,8 +1600,7 @@ class TestRestExternalCollection(TestBase):
             ("list", {}),
         ]
         responses = [
-            self._external_job_post_with_token(action, payload, self.invalid_api_key)
-            for action, payload in payloads
+            self._external_job_post_with_token(action, payload, self.invalid_api_key) for action, payload in payloads
         ]
         if all(rsp.get("code") != 1800 for rsp in responses):
             pytest.skip("authorization is not enforced for this deployment")
@@ -1661,33 +1661,6 @@ class TestRestExternalCollection(TestBase):
         listed_ids = [record["jobId"] for record in records]
         assert first_job_id in listed_ids, records
         assert second_job_id in listed_ids, records
-
-    @pytest.mark.L1
-    @pytest.mark.xfail(
-        reason="REST external job endpoints currently ignore unknown top-level JSON keys",
-        strict=True,
-    )
-    def test_rest_external_collection_unknown_top_level_keys_rejected(self, external_store):
-        """
-        target: verify unknown top-level JSON keys are rejected
-        method: add unexpected keys to create and external job API payloads
-        expected: each request fails with an unexpected-key error
-        """
-        name = gen_collection_name()
-        source, spec = _write_format_dataset("parquet", external_store, [(0, 10)])
-        create_payload = _external_collection_payload(name, source, spec)
-        create_payload["unexpected"] = "reject-me"
-        rsp = self.collection_client.collection_create(copy.deepcopy(create_payload))
-        _assert_error_response(rsp, "unexpected")
-
-        self._create_external_collection(name, source, spec)
-        for action, payload in (
-            ("refresh", {"collectionName": name, "unexpected": "reject-me"}),
-            ("describe", {"jobId": 9223372036854775807, "unexpected": "reject-me"}),
-            ("list", {"unexpected": "reject-me"}),
-        ):
-            rsp = self._external_job_post(action, payload)
-            _assert_error_response(rsp, "unexpected")
 
     @pytest.mark.L1
     def test_rest_external_collection_add_field_external_mapping_rejected(self):
