@@ -18,11 +18,11 @@ package job
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
