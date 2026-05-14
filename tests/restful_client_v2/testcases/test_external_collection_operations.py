@@ -3,11 +3,9 @@ import io
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,10 +14,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import requests
-from minio import Minio
-
 from base.testbase import TestBase
-from utils.util_log import test_log as logger
+from minio import Minio
+from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.utils import gen_collection_name
 
 DIM = 8
@@ -54,6 +51,7 @@ EXTFS_ALLOWED_KEYS = {
 EXTFS_BOOL_KEYS = {"use_iam", "anonymous", "use_ssl", "use_virtual_host"}
 REFRESH_TIMEOUT = 180
 LOAD_TIMEOUT = 180
+POLL_INTERVAL_SECONDS = 2
 
 
 def _minio_config(minio_host, bucket_name):
@@ -245,14 +243,10 @@ def _write_parquet_tables(minio_client, cfg, key_prefix, tables):
 
 
 def _write_lance_tables(minio_client, cfg, key_prefix, tables):
-    try:
-        import lance
-    except ImportError as exc:
-        pytest.skip(f"lance external collection dependency unavailable: {exc}")
+    lance = pytest.importorskip("lance", reason="lance external collection dependency unavailable")
 
-    tmpdir = tempfile.mkdtemp(prefix="rest_ext_lance_")
-    local_path = os.path.join(tmpdir, "dataset.lance")
-    try:
+    with tempfile.TemporaryDirectory(prefix="rest_ext_lance_") as tmpdir:
+        local_path = os.path.join(tmpdir, "dataset.lance")
         for idx, table in enumerate(tables):
             mode = "create" if idx == 0 else "append"
             lance.write_dataset(table, local_path, mode=mode)
@@ -261,8 +255,6 @@ def _write_lance_tables(minio_client, cfg, key_prefix, tables):
                 absolute = os.path.join(root, filename)
                 relative = os.path.relpath(absolute, local_path)
                 minio_client.fput_object(cfg["bucket"], f"{key_prefix}/{relative}", absolute)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _write_lance_dataset(minio_client, cfg, key_prefix, batches):
@@ -301,15 +293,20 @@ def _table_to_iceberg_arrow(table):
 
 
 def _write_iceberg_tables(cfg, key_prefix, tables):
-    try:
-        from pyiceberg.catalog.sql import SqlCatalog
-        from pyiceberg.schema import Schema as IcebergSchema
-        from pyiceberg.types import FixedType, FloatType, LongType, NestedField
-    except ImportError as exc:
-        pytest.skip(f"iceberg external collection dependency unavailable: {exc}")
+    catalog_sql = pytest.importorskip("pyiceberg.catalog.sql", reason="iceberg external collection dependency unavailable")
+    iceberg_schema_module = pytest.importorskip(
+        "pyiceberg.schema",
+        reason="iceberg external collection dependency unavailable",
+    )
+    iceberg_types = pytest.importorskip("pyiceberg.types", reason="iceberg external collection dependency unavailable")
+    SqlCatalog = catalog_sql.SqlCatalog
+    IcebergSchema = iceberg_schema_module.Schema
+    FixedType = iceberg_types.FixedType
+    FloatType = iceberg_types.FloatType
+    LongType = iceberg_types.LongType
+    NestedField = iceberg_types.NestedField
 
-    tmpdir = tempfile.mkdtemp(prefix="rest_ext_iceberg_")
-    try:
+    with tempfile.TemporaryDirectory(prefix="rest_ext_iceberg_") as tmpdir:
         catalog = SqlCatalog(
             "milvus_rest_test",
             **{
@@ -338,8 +335,6 @@ def _write_iceberg_tables(cfg, key_prefix, tables):
         assert metadata_location.startswith("s3://"), metadata_location
         bucket_and_key = metadata_location.removeprefix("s3://")
         return f"s3://{cfg['address']}/{bucket_and_key}", snapshot_id
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _write_iceberg_dataset(cfg, key_prefix, batches):
@@ -407,6 +402,24 @@ def _cleanup_prefix(minio_client, bucket, key_prefix):
         minio_client.remove_object(bucket, obj.object_name)
 
 
+def _wait_until(probe, is_done, timeout, description, interval=POLL_INTERVAL_SECONDS):
+    last = None
+
+    def _probe_once():
+        nonlocal last
+        last = probe()
+        return is_done(last)
+
+    completed = Retrying(
+        stop=stop_after_delay(timeout),
+        wait=wait_fixed(interval),
+        retry=retry_if_result(lambda done: not done),
+        retry_error_callback=lambda _retry_state: False,
+    )(_probe_once)
+    assert completed, f"{description} did not finish in {timeout}s, last={last}"
+    return last
+
+
 @pytest.fixture(scope="function")
 def external_store(request, minio_host, bucket_name):
     cfg = _minio_config(minio_host, bucket_name)
@@ -426,10 +439,7 @@ def external_store(request, minio_host, bucket_name):
         "key": key,
         "source": _external_source(cfg, key),
     }
-    try:
-        _cleanup_prefix(minio_client, cfg["bucket"], key)
-    except Exception as exc:
-        logger.warning(f"cleanup external prefix {key} failed: {exc}")
+    _cleanup_prefix(minio_client, cfg["bucket"], key)
 
 
 def _write_format_dataset(fmt, external_store, batches):
@@ -686,8 +696,17 @@ def _assert_refresh_response(rsp):
     return job_id
 
 
-def _assert_job_info_map(job, expected_collection=None, expected_source=None, expected_job_id=None):
-    required = {"jobId", "collectionName", "state", "progress", "externalSource", "startTime", "endTime"}
+def _assert_job_info_map(job, expected_collection=None, expected_source=None, expected_spec=None, expected_job_id=None):
+    required = {
+        "jobId",
+        "collectionName",
+        "state",
+        "progress",
+        "externalSource",
+        "externalSpec",
+        "startTime",
+        "endTime",
+    }
     assert required.issubset(job), job
     assert set(job).issubset(required | {"reason"}), job
     assert isinstance(job["jobId"], int) and job["jobId"] > 0, job
@@ -701,6 +720,10 @@ def _assert_job_info_map(job, expected_collection=None, expected_source=None, ex
     assert isinstance(job["externalSource"], str), job
     if expected_source is not None:
         assert job["externalSource"] == expected_source
+    assert isinstance(job["externalSpec"], str), job
+    _assert_external_spec_shape(job["externalSpec"])
+    if expected_spec is not None:
+        _assert_external_spec(job["externalSpec"], expected_spec)
     assert isinstance(job["startTime"], int) and job["startTime"] >= 0, job
     assert isinstance(job["endTime"], int) and job["endTime"] >= 0, job
     if job["state"] == "RefreshCompleted":
@@ -710,7 +733,7 @@ def _assert_job_info_map(job, expected_collection=None, expected_source=None, ex
         assert isinstance(job["reason"], str) and job["reason"], job
 
 
-def _assert_job_info_response(rsp, expected_collection=None, expected_source=None, expected_job_id=None):
+def _assert_job_info_response(rsp, expected_collection=None, expected_source=None, expected_spec=None, expected_job_id=None):
     assert set(rsp) == {"code", "data"}, rsp
     assert rsp["code"] == 0, rsp
     assert isinstance(rsp["data"], dict), rsp
@@ -718,6 +741,7 @@ def _assert_job_info_response(rsp, expected_collection=None, expected_source=Non
         rsp["data"],
         expected_collection=expected_collection,
         expected_source=expected_source,
+        expected_spec=expected_spec,
         expected_job_id=expected_job_id,
     )
 
@@ -948,20 +972,14 @@ class TestRestExternalCollection(TestBase):
     def _list_external_collection_jobs(self, payload=None, db_name="default"):
         return self._external_job_post("list", self._with_db_name(payload or {}, db_name=db_name))
 
-    def _wait_refresh_completed(self, job_id, db_name="default", timeout=REFRESH_TIMEOUT, interval=2):
-        t0 = time.time()
-        last_rsp = None
-        while time.time() - t0 < timeout:
-            last_rsp = self._describe_external_collection_job(job_id, db_name=db_name)
-            if last_rsp.get("code") != 0:
-                return last_rsp, False
-            state = last_rsp.get("data", {}).get("state")
-            if state == "RefreshCompleted":
-                return last_rsp, True
-            if state == "RefreshFailed":
-                return last_rsp, False
-            time.sleep(interval)
-        return last_rsp, False
+    def _wait_refresh_completed(self, job_id, db_name="default", timeout=REFRESH_TIMEOUT):
+        response = _wait_until(
+            lambda: self._describe_external_collection_job(job_id, db_name=db_name),
+            lambda rsp: rsp.get("code") != 0 or rsp.get("data", {}).get("state") in TERMINAL_JOB_STATES,
+            timeout=timeout,
+            description=f"external collection refresh job {job_id}",
+        )
+        return response, response.get("code") == 0 and response.get("data", {}).get("state") == "RefreshCompleted"
 
     def _refresh_and_wait(self, collection_name, source=None, spec=None, db_name="default"):
         payload = {"collectionName": collection_name}
@@ -984,6 +1002,7 @@ class TestRestExternalCollection(TestBase):
             progress,
             expected_collection=collection_name,
             expected_source=source,
+            expected_spec=spec,
             expected_job_id=job_id,
         )
         assert progress["data"]["state"] in TERMINAL_JOB_STATES, progress
@@ -1029,20 +1048,23 @@ class TestRestExternalCollection(TestBase):
         _assert_load_or_release_request(payload, collection_name, db_name=db_name)
         rsp = self.collection_client.collection_load(collection_name=collection_name, db_name=db_name)
         _assert_success_default_response(rsp)
-        deadline = time.time() + LOAD_TIMEOUT
-        last_rsp = None
-        while time.time() < deadline:
-            last_rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
-            if last_rsp.get("code") == 0:
+
+        def _describe_loaded_collection():
+            describe_rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
+            if describe_rsp.get("code") == 0:
                 _assert_describe_external_collection_response(
-                    last_rsp,
+                    describe_rsp,
                     collection_name,
                     expected_vector_nullable=expected_vector_nullable,
                 )
-            if last_rsp.get("data", {}).get("load") == "LoadStateLoaded":
-                return
-            time.sleep(2)
-        assert False, f"collection {collection_name} did not load: {last_rsp}"
+            return describe_rsp
+
+        _wait_until(
+            _describe_loaded_collection,
+            lambda describe_rsp: describe_rsp.get("data", {}).get("load") == "LoadStateLoaded",
+            timeout=LOAD_TIMEOUT,
+            description=f"external collection {collection_name} load",
+        )
 
     def _query_count(self, collection_name, filter_expr=" ", db_name="default"):
         payload = {
@@ -1101,6 +1123,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L0
     def test_rest_external_collection_create_describe_metadata_parquet(self, external_store):
+        """
+        target: verify REST v2 external collection metadata for parquet
+        method: create an external collection and describe it
+        expected: external source/spec and external field mappings are persisted
+        """
         name = gen_collection_name()
         batches = [(0, 10)]
         source, spec = _write_format_dataset("parquet", external_store, batches)
@@ -1118,6 +1145,11 @@ class TestRestExternalCollection(TestBase):
     @pytest.mark.L1
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_refresh_query_by_format(self, fmt, external_store):
+        """
+        target: verify REST v2 external collection read path across supported formats
+        method: refresh, index, load, query, and search one collection per format
+        expected: count, row values, vectors, search hits, and job list are correct
+        """
         name = gen_collection_name()
         batches = [(0, 12), (1000, 8)]
         total_rows = sum(num_rows for _start_id, num_rows in batches)
@@ -1157,6 +1189,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_refresh_override_persists_and_reuses(self, external_store):
+        """
+        target: verify refresh override source/spec semantics
+        method: refresh from source A, override to source B, then refresh again without override
+        expected: source B is persisted and reused by later refreshes
+        """
         name = gen_collection_name()
         cfg = external_store["cfg"]
         minio_client = external_store["client"]
@@ -1196,6 +1233,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_create_rejections(self, external_store):
+        """
+        target: verify REST v2 create-time external collection validation
+        method: submit invalid schema/source/spec/params combinations
+        expected: each invalid create request returns a concrete error
+        """
         source = external_store["source"]
         cfg = external_store["cfg"]
         spec = _external_spec(external_store["cfg"])
@@ -1304,6 +1346,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_refresh_rejections(self, external_store):
+        """
+        target: verify REST v2 external refresh/job API validation
+        method: submit invalid refresh, list, and describe job payloads
+        expected: invalid requests fail with explicit errors and empty job lists stay empty
+        """
         source = external_store["source"]
         spec = _external_spec(external_store["cfg"])
         external_name = gen_collection_name()
@@ -1392,6 +1439,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_raw_request_body_validation(self):
+        """
+        target: verify REST v2 external job raw body validation
+        method: send empty, malformed, and wrong-shaped JSON bodies
+        expected: each raw request is rejected before job execution
+        """
         cases = [
             ("describe", "", "request body"),
             ("describe", "{", "json format request"),
@@ -1404,6 +1456,11 @@ class TestRestExternalCollection(TestBase):
     @pytest.mark.L1
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_zero_row_refresh_boundary_by_format(self, fmt, external_store):
+        """
+        target: verify zero-row external dataset handling across supported formats
+        method: refresh a zero-row collection and inspect terminal job state
+        expected: completed jobs load with count 0; failed jobs expose a reason
+        """
         name = gen_collection_name()
         source, spec = _write_format_dataset(fmt, external_store, [(0, 0)])
 
@@ -1428,6 +1485,11 @@ class TestRestExternalCollection(TestBase):
     @pytest.mark.L1
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_scalar_by_format(self, fmt, external_store):
+        """
+        target: verify nullable scalar output across supported formats
+        method: refresh and query a dataset with one null scalar value
+        expected: the null scalar remains None and non-null rows match source data
+        """
         name = gen_collection_name()
         table = _nullable_arrow_table(num_rows=6, null_value_ids={1})
         source, spec = _write_format_tables(fmt, external_store, [table])
@@ -1456,6 +1518,11 @@ class TestRestExternalCollection(TestBase):
     )
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_vector_by_format(self, fmt, external_store):
+        """
+        target: verify nullable vector output across supported formats
+        method: create a nullable vector external collection and query null/non-null rows
+        expected: the null vector is returned as None while other rows match source data
+        """
         name = gen_collection_name()
         table = _nullable_arrow_table(num_rows=6, null_vector_ids={2})
         source, spec = _write_format_tables(fmt, external_store, [table])
@@ -1488,6 +1555,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_custom_db_e2e(self, external_store):
+        """
+        target: verify REST v2 external collection lifecycle in a custom database
+        method: create database, create/refresh/index/load external collection, then query
+        expected: custom database requests return the expected row count and row body
+        """
         db_name = f"db_{uuid4().hex[:8]}"
         rsp = self.database_client.database_create({"dbName": db_name})
         _assert_success_default_response(rsp)
@@ -1516,6 +1588,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_job_api_invalid_token(self):
+        """
+        target: verify external job APIs reject invalid tokens when auth is enforced
+        method: call refresh, describe, and list with an invalid token
+        expected: each enforced endpoint returns code 1800 and a non-empty message
+        """
         payloads = [
             ("refresh", {"collectionName": "missing_external_collection"}),
             ("describe", {"jobId": 9223372036854775807}),
@@ -1533,6 +1610,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_duplicate_refresh_rejected_or_reuses_job(self, external_store):
+        """
+        target: verify duplicate refresh behavior while a job is in progress
+        method: submit two refresh requests for the same large external dataset
+        expected: the second request either reuses the first job id or is rejected as duplicate/in-progress
+        """
         name = gen_collection_name()
         source, spec = _write_format_dataset("parquet", external_store, [(0, 20_000)])
 
@@ -1560,6 +1642,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_job_list_includes_multiple_refreshes(self, external_store):
+        """
+        target: verify REST v2 external job list includes multiple refresh jobs
+        method: run two refreshes and list jobs by collection
+        expected: both job ids appear in the listed records
+        """
         name = gen_collection_name()
         source, spec = _write_format_dataset("parquet", external_store, [(0, 100)])
 
@@ -1581,6 +1668,11 @@ class TestRestExternalCollection(TestBase):
         strict=True,
     )
     def test_rest_external_collection_unknown_top_level_keys_rejected(self, external_store):
+        """
+        target: verify unknown top-level JSON keys are rejected
+        method: add unexpected keys to create and external job API payloads
+        expected: each request fails with an unexpected-key error
+        """
         name = gen_collection_name()
         source, spec = _write_format_dataset("parquet", external_store, [(0, 10)])
         create_payload = _external_collection_payload(name, source, spec)
@@ -1599,6 +1691,11 @@ class TestRestExternalCollection(TestBase):
 
     @pytest.mark.L1
     def test_rest_external_collection_add_field_external_mapping_rejected(self):
+        """
+        target: verify external field mappings cannot be added to regular collections
+        method: create a regular collection and add a field with externalField
+        expected: add field is rejected with an external field mapping error
+        """
         name = gen_collection_name()
         rsp = self.collection_client.collection_create({"collectionName": name, "dimension": DIM})
         _assert_success_default_response(rsp)
