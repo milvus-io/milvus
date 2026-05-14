@@ -40,6 +40,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
+#include "folly/ScopeGuard.h"
 #include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
@@ -731,6 +732,7 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
                    O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
                    S_IRUSR | S_IWUSR | S_IXUSR);
     AssertInfo(fd != -1, "open file failed: {}", file);
+    auto close_fd = folly::makeGuard([fd]() { close(fd); });
 
     // Immediately unlink the file so it will be deleted when fd is closed,
     // even if an exception occurs or the process crashes
@@ -741,8 +743,6 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     auto size = get_file_size(fd);
     lseek(fd, 0, SEEK_SET);
     writer->WriteEntry(MARISA_TRIE_INDEX, fd, size);
-
-    close(fd);
 
     // Write str_ids
     auto str_ids_len = str_ids_.size() * sizeof(size_t);

@@ -300,7 +300,7 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
         cur_output_offset += plain_len;
 
         futures.push_back(
-            pool.Submit([this, &slice, dest, this_output_offset, plain_len]() {
+            pool.Submit([this, slice, dest, this_output_offset, plain_len]() {
                 std::vector<uint8_t> cipher(slice.size);
                 size_t n = input_->ReadAt(cipher.data(),
                                           MILVUS_V3_MAGIC_SIZE + slice.offset,
