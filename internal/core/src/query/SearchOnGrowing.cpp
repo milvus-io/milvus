@@ -160,7 +160,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         BitsetView search_bitset = bitset;
         if (offset_mapping.IsEnabled()) {
             transformed_bitset = TransformBitset(bitset, offset_mapping);
-            search_bitset = BitsetView(transformed_bitset);
         }
 
         auto active_count = offset_mapping.IsEnabled()
@@ -177,6 +176,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.total_nq_ = num_queries;
             search_result.unity_topK_ = info.topk_;
             return;
+        }
+        if (offset_mapping.IsEnabled()) {
+            search_bitset =
+                search_result.PinBitset(std::move(transformed_bitset));
         }
 
         if (info.iterator_v2_info_.has_value()) {
