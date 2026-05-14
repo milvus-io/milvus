@@ -623,6 +623,13 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				callCount++
+				if callCount == 2 {
+					optimizedPlan := &planpb.PlanNode{}
+					err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), optimizedPlan)
+					s.Require().NoError(err)
+					s.NotNil(optimizedPlan.GetVectorAnns().GetPredicates(),
+						"second-stage search must keep predicates in the serialized plan")
+				}
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{5000},
 		}, nil)

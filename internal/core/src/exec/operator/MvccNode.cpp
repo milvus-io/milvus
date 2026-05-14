@@ -82,7 +82,9 @@ PhyMvccNode::GetOutput() {
                                                TargetBitmap(active_count_),
                                                TargetBitmap(active_count_))
                                          : GetColumnVector(input_);
-        query_context->set_all_rows_visible(true);
+        if (is_source_node_) {
+            query_context->set_all_rows_visible(true);
+        }
         is_finished_ = true;
         return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
     }
