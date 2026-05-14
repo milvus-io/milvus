@@ -272,6 +272,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -883,6 +884,28 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "2.6.16",
+		DefaultValue: "false",
+		Doc: `Whether to require HTTP Basic Auth with root credentials for
+/management/* endpoints and /debug/pprof/* on the metrics port (default 9091).
+When false (default), these endpoints are unauthenticated, matching the
+historical behavior; this assumes the metrics port is reachable only from
+trusted networks.
+When true, requests must provide the milvus root user's credentials via HTTP
+Basic Auth. The auth check is independent of common.security.authorizationEnabled,
+so deployments may run with the data-plane (gRPC, /api/v1/*) authenticated
+while leaving the management plane open, or vice versa.
+
+Recommended: true for any deployment where the metrics port is reachable from
+untrusted networks. This is Immutable to prevent an attacker with stolen root
+credentials from disabling the gate via /management/config/alter.`,
+		Export:    true,
+		Immutable: true,
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",

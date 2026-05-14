@@ -13,12 +13,14 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
@@ -183,6 +185,13 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	// Register a password verifier for /management/* HTTP basic-auth. Mix coord
+	// processes do not host the proxy package (where the verifier is normally
+	// registered), so without this the auth wrapper returns
+	// "password verification is not available on this node" when adminAuthEnabled=true.
+	// We bind directly to rootcoord's credential RPC to avoid an extra cache layer.
+	internalhttp.RegisterPasswordVerifyFunc(s.verifyRootCredential)
+
 	// DataCoord and QueryCoord are independent of each other;
 	// both only depend on RootCoord being ready. Initialize and start them in parallel.
 	g, _ := errgroup.WithContext(s.ctx)
@@ -250,6 +259,38 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 	return s.queryCoordServer.ServerExist(serverID) || s.datacoordServer.ServerExist(serverID)
+}
+
+// verifyRootCredential validates the given username/password pair against the
+// credential metadata owned by the rootcoord embedded in this mix coord.
+// Used to back the /management/* HTTP basic-auth wrapper on coord-only nodes
+// (where the proxy package's verifier is not registered).
+//
+// Only the root user is permitted: the management endpoints are administrative
+// and should not be reachable by non-root users even if their credentials are
+// valid. The username==root check is also enforced in checkBasicRootAuth, so
+// this is defense-in-depth.
+func (s *mixCoordImpl) verifyRootCredential(ctx context.Context, username, password string) bool {
+	if username != util.UserRoot {
+		return false
+	}
+	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+		Username: username,
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn("verifyRootCredential: GetCredential failed", zap.Error(err))
+		return false
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		log.Ctx(ctx).Warn("verifyRootCredential: GetCredential returned error", zap.Error(err))
+		return false
+	}
+	if bcrypt.CompareHashAndPassword([]byte(resp.GetPassword()), []byte(password)) != nil {
+		// Don't log the failure here; the caller logs at the wrapper level
+		// with the request path, which is more useful for triage.
+		return false
+	}
+	return true
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {

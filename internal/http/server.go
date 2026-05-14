@@ -74,6 +74,14 @@ type Handler struct {
 	Path        string
 	HandlerFunc http.HandlerFunc
 	Handler     http.Handler
+	// AuthPolicy, when set, gates this handler behind an HTTP Basic Auth check
+	// for the milvus root user. A nil AuthPolicy (the default) leaves the
+	// handler unauthenticated — appropriate for /healthz, /metrics, k8s probes,
+	// and other endpoints that must remain reachable without credentials.
+	//
+	// See AuthAlways (e.g. /expr) and AuthByAdminFlag (e.g. /management/*)
+	// in auth.go for the predefined policies.
+	AuthPolicy AuthPolicy
 }
 
 func registerDefaults() {
@@ -164,6 +172,10 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
+		// /management/stop can DoS a running component, so it is gated by
+		// adminAuthEnabled. /management/check/ready below stays open because
+		// k8s probes cannot present credentials.
+		AuthPolicy: AuthByAdminFlag,
 	})
 }
 
@@ -269,19 +281,24 @@ func acceptsHTML(r *http.Request) bool {
 
 func Register(h *Handler) {
 	if metricsServer == nil {
-		if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
-			metricsServer = http.DefaultServeMux
-		} else {
-			metricsServer = http.NewServeMux()
-		}
+		// Always use a dedicated mux. We no longer fall back to
+		// http.DefaultServeMux when pprof is enabled — pprof endpoints are
+		// now registered explicitly (see registerPprof) so that third-party
+		// init() hooks cannot smuggle extra routes onto the metrics port.
+		metricsServer = http.NewServeMux()
 	}
+
+	var handler http.Handler = h.Handler
 	if h.HandlerFunc != nil {
-		metricsServer.HandleFunc(h.Path, h.HandlerFunc)
+		handler = http.HandlerFunc(h.HandlerFunc)
+	}
+	if handler == nil {
 		return
 	}
-	if h.Handler != nil {
-		metricsServer.Handle(h.Path, h.Handler)
+	if h.AuthPolicy != nil {
+		handler = wrapBasicRootAuth(handler, h.AuthPolicy)
 	}
+	metricsServer.Handle(h.Path, handler)
 }
 
 func ServeHTTP() {

@@ -61,11 +61,14 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.ReplicaLoadConfigCompliancePath, s.HandleReplicaLoadConfigCompliance},
 		}
 
-		// Loop through the slice and register each route.
+		// All /management/* routes are gated by common.security.adminAuthEnabled.
+		// When the flag is true, requests must present HTTP Basic Auth with the
+		// milvus root user's credentials.
 		for _, route := range routes {
 			management.Register(&management.Handler{
 				Path:        route.path,
 				HandlerFunc: route.handler,
+				AuthPolicy:  management.AuthByAdminFlag,
 			})
 		}
 	})
