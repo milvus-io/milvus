@@ -214,7 +214,6 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 }
 
 func (t *ImportTask) importFile(reader importutilv2.Reader) error {
-	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -256,12 +255,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
+		err = conc.AwaitAll(fs...)
+		if err != nil {
+			return err
+		}
 		syncTasks = append(syncTasks, sts...)
-	}
-	err := conc.AwaitAll(syncFutures...)
-	if err != nil {
-		return err
 	}
 	for _, syncTask := range syncTasks {
 		segmentInfo, err := NewImportSegmentInfo(syncTask, t.metaCaches)
