@@ -151,7 +151,8 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 	var capturedParam *flusherimpl.RecoverWALFlusherParam
 	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
 		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
-			capturedParam = param
+			captured := *param
+			capturedParam = &captured
 			return &flusherimpl.WALFlusherImpl{}
 		}).
 		Build()
@@ -171,6 +172,8 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, capturedParam)
+	require.NotNil(t, capturedParam.RateLimitComponent)
+	require.NotNil(t, capturedParam.WAL)
 	assert.Same(t, rateLimitComponent, capturedParam.RateLimitComponent)
 	assert.Same(t, roWAL, capturedParam.WAL.Get())
 	assert.Same(t, rs, capturedParam.RecoveryStorage)
