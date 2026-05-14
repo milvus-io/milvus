@@ -19,6 +19,9 @@ jieba==0.42.1
 pyarrow==21.0.0
 # for external collection formats
 pylance==3.0.1
+lance-namespace==0.6.0
+vortex-data==0.56.0
+substrait==0.26.0
 pyiceberg[sql-sqlite]==0.8.1
 # for geometry data type
 shapely>=2.0.0

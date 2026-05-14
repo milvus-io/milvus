@@ -51,12 +51,14 @@ from common.external_table_common import (
     upload_basic_data,
     upload_parquet,
     write_basic_format_dataset,
+    write_vortex_table,
 )
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
 from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.util_log import test_log as log
 
 REFRESH_POLL_INTERVAL_SECONDS = 2
+VORTEX_FULL_MATRIX_EXCLUDED_FIELDS = ("vc_trie", "j", "f16v", "bf16v", "binv_flat", "binv_ivf")
 
 ALLOWED_EXTERNAL_SOURCE_SCHEMES = (pytest.param("minio", id="minio"),)
 _PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
@@ -1261,10 +1263,6 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             ("external_dim_smaller_than_schema", ct.default_dim // 2),
         ],
         ids=["external_dim_larger_than_schema", "external_dim_smaller_than_schema"],
-    )
-    @pytest.mark.xfail(
-        reason="milvus#49388: vector dim mismatch is not rejected during refresh yet",
-        raises=AssertionError,
     )
     def test_milvus_client_external_table_float_vector_external_dim_mismatch_rejected(
         self,
@@ -3578,13 +3576,40 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
         _full_matrix_assert_basic(self, client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="vortex-data requires Python >= 3.11")
-    def test_milvus_client_external_table_full_matrix_vortex(self):
+    def test_milvus_client_external_table_full_matrix_vortex(self, minio_env, external_prefix):
         """
         target: test MilvusClient external table full matrix vortex
         method: Vortex × full DataType × full Index matrix
         expected: behavior matches the case assertion.
         """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        table = pa.table(
+            _full_matrix_arrow_columns(
+                FULL_MATRIX_NB,
+                0,
+                excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS,
+                vortex_compatible=True,
+            )
+        )
+        write_vortex_table(minio_client, cfg["bucket"], f"{ext_key}/data.vortex", table)
+        schema = build_full_matrix_schema(
+            self,
+            client,
+            ext_url,
+            ext_spec=build_external_spec(cfg, fmt="vortex"),
+            excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS,
+        )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        create_full_matrix_indexes(self, client, coll, excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS)
+        self.load_collection(client, coll)
+        _full_matrix_assert_basic(
+            self, client, coll, FULL_MATRIX_NB, excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_full_matrix_iceberg(self, minio_env, external_prefix):

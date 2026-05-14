@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import tempfile
 
 import numpy as np
 import pyarrow as pa
@@ -25,8 +26,8 @@ FORMAT_NUM_FILES = 3
 FORMAT_ROWS_PER_FILE = 3000
 FORMAT_TOTAL_ROWS = FORMAT_NUM_FILES * FORMAT_ROWS_PER_FILE
 
-BASIC_FORMATS = ("parquet", "lance-table", "iceberg-table")
-BASIC_FORMAT_IDS = ("parquet", "lance", "iceberg")
+BASIC_FORMATS = ("parquet", "lance-table", "iceberg-table", "vortex")
+BASIC_FORMAT_IDS = ("parquet", "lance", "iceberg", "vortex")
 
 
 def _minio_address(minio_host):
@@ -159,6 +160,11 @@ def _fixed_size_binary_vector_array(raw_rows, byte_width):
         [np.ascontiguousarray(row).tobytes() for row in raw_rows],
         type=pa.binary(byte_width),
     )
+
+
+def _fixed_size_uint8_vector_array(raw_rows, byte_width):
+    raw = b"".join(np.ascontiguousarray(row).tobytes() for row in raw_rows)
+    return pa.FixedSizeListArray.from_arrays(pa.array(raw, type=pa.uint8()), list_size=byte_width)
 
 
 def gen_parquet_bytes(num_rows, start_id, scalar_name, arrow_type, value_fn, dim=ct.default_dim):
@@ -505,7 +511,7 @@ FULL_MATRIX_VECTOR_FIELDS = [
 
 
 def _full_matrix_arrow_columns(
-    num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
+    num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=(), vortex_compatible=False
 ):
     """Build a dict {column_name -> pyarrow.Array} that fits both parquet and
     Lance. Column layout matches FULL_MATRIX_SCALAR_FIELDS / VECTOR_FIELDS;
@@ -536,6 +542,8 @@ def _full_matrix_arrow_columns(
     # Vectors. Layout per type:
     #   FloatVector / Int8Vector        -> FixedSizeList<element, dim>
     #   Float16/BFloat16/BinaryVector   -> fixed_size_binary raw bytes
+    # Vortex 0.56 cannot write FixedSizeBinary, so Vortex data uses
+    # FixedSizeList<UInt8> with the same byte payload.
     fv_arr = _float_vectors(ids, dim).flatten()
     f16_arr = _float16_vectors(ids, dim)
     bf16_arr = _bfloat16_vectors(ids, dim)
@@ -551,14 +559,18 @@ def _full_matrix_arrow_columns(
                 list_size=vdim,
             )
         elif vtype == DataType.FLOAT16_VECTOR:
-            columns[name] = _fixed_size_binary_vector_array(
-                f16_arr,
-                _vector_byte_width(vtype, vdim),
+            byte_width = _vector_byte_width(vtype, vdim)
+            columns[name] = (
+                _fixed_size_uint8_vector_array(f16_arr, byte_width)
+                if vortex_compatible
+                else _fixed_size_binary_vector_array(f16_arr, byte_width)
             )
         elif vtype == DataType.BFLOAT16_VECTOR:
-            columns[name] = _fixed_size_binary_vector_array(
-                bf16_arr,
-                _vector_byte_width(vtype, vdim),
+            byte_width = _vector_byte_width(vtype, vdim)
+            columns[name] = (
+                _fixed_size_uint8_vector_array(bf16_arr, byte_width)
+                if vortex_compatible
+                else _fixed_size_binary_vector_array(bf16_arr, byte_width)
             )
         elif vtype == DataType.INT8_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
@@ -566,9 +578,11 @@ def _full_matrix_arrow_columns(
                 list_size=vdim,
             )
         elif vtype == DataType.BINARY_VECTOR:
-            columns[name] = _fixed_size_binary_vector_array(
-                bin_arr,
-                _vector_byte_width(vtype, vdim),
+            byte_width = _vector_byte_width(vtype, vdim)
+            columns[name] = (
+                _fixed_size_uint8_vector_array(bin_arr, byte_width)
+                if vortex_compatible
+                else _fixed_size_binary_vector_array(bin_arr, byte_width)
             )
         else:
             raise ValueError(f"unsupported vector dtype {vtype}")
@@ -697,6 +711,8 @@ def require_format_dependencies(fmt):
         import lance  # noqa: F401
     elif fmt == "iceberg-table":
         from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
+    elif fmt == "vortex":
+        import vortex.io  # noqa: F401
 
 
 def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=ct.default_dim):
@@ -723,6 +739,20 @@ def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches
     if fmt == "iceberg-table":
         snapshot_id, iceberg_url = _build_iceberg_table_in_minio(ext_key, cfg, batches=batches, dim=dim)
         return iceberg_url, build_external_spec(cfg, fmt=fmt, snapshot_id=int(snapshot_id))
+
+    if fmt == "vortex":
+        for idx, (start_id, num_rows) in enumerate(batches):
+            ids = list(range(start_id, start_id + num_rows))
+            vectors = _float_vectors(ids, dim)
+            table = pa.table(
+                {
+                    "id": pa.array(ids, type=pa.int64()),
+                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+                    "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+                }
+            )
+            write_vortex_table(minio_client, cfg["bucket"], f"{ext_key}/file_{idx:03d}.vortex", table)
+        return ext_url, build_external_spec(cfg, fmt=fmt)
 
     raise AssertionError(f"unsupported format: {fmt}")
 
@@ -767,6 +797,22 @@ def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim
                 minio_client.fput_object(bucket, f"{key_prefix}/{relative}", absolute)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def write_vortex_table(minio_client, bucket, key, table):
+    """Write a pyarrow table as a Vortex file and upload it to MinIO."""
+    import vortex.io as vortex_io
+
+    with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        vortex_io.write(table, tmp_path)
+        minio_client.fput_object(bucket, key, tmp_path, content_type="application/octet-stream")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=ct.default_dim):

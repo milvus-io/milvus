@@ -1,14 +1,11 @@
-import os
 import random
 import re
-import subprocess
 import threading
 import time
 from pathlib import Path
 from time import sleep
 
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pytest
 from chaos import constants
 from common import common_func as cf
@@ -24,6 +21,7 @@ from common.external_table_common import (
     new_minio_client,
     query_count,
     write_basic_format_dataset,
+    write_vortex_table,
 )
 from common.milvus_sys import MilvusSys
 from pymilvus import DataType, MilvusClient, connections
@@ -153,60 +151,14 @@ def _basic_arrow_table(num_rows, start_id, dim=ct.default_dim):
     )
 
 
-def _arrow_ipc_bytes(table):
-    sink = pa.BufferOutputStream()
-    with ipc.new_stream(sink, table.schema) as writer:
-        writer.write_table(table)
-    return sink.getvalue().to_pybytes()
-
-
-def _vortex_python():
-    candidates = []
-    explicit = os.environ.get("EXTERNAL_TABLE_VORTEX_PYTHON") or os.environ.get("REST_VORTEX_PYTHON")
-    if explicit:
-        candidates.append(Path(explicit))
-
-    test_root = Path(__file__).resolve().parents[1]
-    candidates.append(test_root / ".venv-vortex" / "bin" / "python")
-    candidates.append(test_root.parent / "restful_client_v2" / ".venv-vortex" / "bin" / "python")
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    pytest.skip(
-        "vortex external table dependency unavailable: set EXTERNAL_TABLE_VORTEX_PYTHON "
-        "or create tests/python_client/.venv-vortex with vortex-data"
-    )
-
-
-def _write_vortex_dataset(cfg, external_key, batches):
-    helper = Path(__file__).resolve().parents[1] / "milvus_client" / "_vortex_gen.py"
-    vortex_python = _vortex_python()
+def _write_vortex_dataset(minio_client, cfg, external_key, batches):
     for idx, (start_id, num_rows) in enumerate(batches):
-        env = {
-            **os.environ,
-            "MINIO_ADDRESS": cfg["address"],
-            "MINIO_BUCKET": cfg["bucket"],
-            "MINIO_ACCESS_KEY": cfg["access_key"],
-            "MINIO_SECRET_KEY": cfg["secret_key"],
-            "MINIO_SECURE": "true" if cfg["secure"] else "false",
-            "VT_INPUT_FROM_STDIN": "1",
-            "VT_MINIO_KEY": f"{external_key}/part-{idx:03d}.vortex",
-        }
-        result = subprocess.run(
-            [str(vortex_python), str(helper)],
-            input=_arrow_ipc_bytes(_basic_arrow_table(num_rows, start_id)),
-            env=env,
-            capture_output=True,
-            check=False,
+        write_vortex_table(
+            minio_client,
+            cfg["bucket"],
+            f"{external_key}/part-{idx:03d}.vortex",
+            _basic_arrow_table(num_rows, start_id),
         )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "failed to generate vortex external data: "
-                f"stdout={result.stdout.decode(errors='replace')!r}, "
-                f"stderr={result.stderr.decode(errors='replace')!r}"
-            )
 
 
 def _replace_source_address(source, old_address, new_address):
@@ -489,7 +441,7 @@ class TestExternalTableFaultInjection:
         in_cluster_source = build_external_source(in_cluster_cfg, external_key)
 
         if external_format == "vortex":
-            _write_vortex_dataset(cfg, external_key, batches)
+            _write_vortex_dataset(minio_client, cfg, external_key, batches)
             return in_cluster_source, build_external_spec(in_cluster_cfg, fmt=external_format)
 
         source, external_spec = write_basic_format_dataset(

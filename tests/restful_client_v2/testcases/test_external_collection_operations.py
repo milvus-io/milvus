@@ -4,9 +4,7 @@ import json
 import os
 import re
 import struct
-import subprocess
 import tempfile
-from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
@@ -203,13 +201,6 @@ def _basic_parquet_bytes(num_rows, start_id, dim=DIM):
     return buf.getvalue()
 
 
-def _arrow_ipc_bytes(table):
-    sink = pa.BufferOutputStream()
-    with pa.ipc.new_stream(sink, table.schema) as writer:
-        writer.write_table(table)
-    return sink.getvalue().to_pybytes()
-
-
 def _put_bytes(minio_client, bucket, key, data):
     minio_client.put_object(
         bucket,
@@ -347,56 +338,25 @@ def _write_iceberg_dataset(cfg, key_prefix, batches):
     )
 
 
-def _vortex_python():
-    explicit = os.environ.get("REST_VORTEX_PYTHON")
-    candidates = []
-    if explicit:
-        candidates.append(Path(explicit))
+def _write_vortex_tables(minio_client, cfg, key_prefix, tables):
+    import vortex.io as vortex_io
 
-    rest_root = Path(__file__).resolve().parents[1]
-    candidates.append(rest_root / ".venv-vortex" / "bin" / "python")
-    candidates.append(rest_root.parent / "python_client" / ".venv-vortex" / "bin" / "python")
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    pytest.skip(
-        "vortex external collection dependency unavailable: set REST_VORTEX_PYTHON "
-        "or create tests/restful_client_v2/.venv-vortex with vortex-data"
-    )
-
-
-def _write_vortex_tables(cfg, key_prefix, tables):
-    helper = Path(__file__).resolve().parent / "_vortex_gen.py"
-    vortex_python = _vortex_python()
     for idx, table in enumerate(tables):
-        env = {
-            **os.environ,
-            "MINIO_ADDRESS": cfg["address"],
-            "MINIO_BUCKET": cfg["bucket"],
-            "MINIO_ACCESS_KEY": cfg["access_key"],
-            "MINIO_SECRET_KEY": cfg["secret_key"],
-            "MINIO_SECURE": "true" if cfg["secure"] else "false",
-            "VT_MINIO_KEY": f"{key_prefix}/file_{idx:03d}.vortex",
-        }
-        result = subprocess.run(
-            [str(vortex_python), str(helper)],
-            input=_arrow_ipc_bytes(table),
-            env=env,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "failed to generate vortex external data: "
-                f"stdout={result.stdout.decode(errors='replace')!r}, "
-                f"stderr={result.stderr.decode(errors='replace')!r}"
+        with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            vortex_io.write(table, tmp_path)
+            minio_client.fput_object(
+                cfg["bucket"],
+                f"{key_prefix}/file_{idx:03d}.vortex",
+                tmp_path,
+                content_type="application/octet-stream",
             )
-
-
-def _write_vortex_dataset(cfg, key_prefix, batches):
-    _write_vortex_tables(cfg, key_prefix, [_basic_arrow_table(num_rows, start_id) for start_id, num_rows in batches])
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _cleanup_prefix(minio_client, bucket, key_prefix):
@@ -466,7 +426,7 @@ def _write_format_tables(fmt, external_store, tables):
         iceberg_source, snapshot_id = _write_iceberg_tables(cfg, key, tables)
         return iceberg_source, _external_spec(cfg, fmt=fmt, snapshot_id=snapshot_id)
     if fmt == "vortex":
-        _write_vortex_tables(cfg, key, tables)
+        _write_vortex_tables(minio_client, cfg, key, tables)
         return source, _external_spec(cfg, fmt=fmt)
     raise AssertionError(f"unsupported external format: {fmt}")
 

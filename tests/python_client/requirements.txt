@@ -54,7 +54,7 @@ deepdiff==8.6.1
 
 # for test result analyzer
 prettytable==3.8.0
-pyarrow==14.0.1
+pyarrow==23.0.1
 fastparquet==2024.11.0
 
 # for bf16 datatype
@@ -85,7 +85,10 @@ python-dotenv<=2.0.0
 shapely==2.1.1
 
 # for external table formats
-pylance==1.0.0
+pylance==1.0.4
+lance-namespace==0.6.0
+vortex-data==0.56.0
+substrait==0.26.0
 pyiceberg[sql-sqlite]==0.8.1
 
 # for time zone
