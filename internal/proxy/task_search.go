@@ -545,11 +545,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
-		// Hybrid search does not yet support vector array (embedding list) fields:
-		// placeholder type is per sub-request and element-level vs embedding-list-level
-		// differentiation is not wired up on this path. Reject range search / iterator /
-		// group by on such fields here; plain top-K stays allowed for now (unchanged
-		// behavior).
+		// Hybrid search supports plain top-K on ArrayOfVector fields, including
+		// EmbList row-level search. This path does not yet use the per-sub-request
+		// placeholder type to distinguish EmbList from element-level search for
+		// advanced features, so reject range search / iterator / group by on
+		// ArrayOfVector here.
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
 			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
