@@ -30,8 +30,8 @@ import (
 // applyArrayPartialOpOnRow overwrites dstField[baseIdx] with
 // ApplyArrayRowOp(existField[existIdx], upsertField[upsertIdx]) using the
 // given op + elementType + maxCapacity. dstField is assumed to already carry
-// a scalar Array layout at baseIdx (placed there by AppendFieldData +
-// UpdateFieldData in the per-row merge loop).
+// the existing row at baseIdx, placed there by AppendFieldData in the per-row
+// merge loop.
 func applyArrayPartialOpOnRow(
 	dstField, existField, upsertField *schemapb.FieldData,
 	baseIdx, existIdx, upsertIdx int64,

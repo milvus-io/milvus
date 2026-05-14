@@ -420,6 +420,17 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		existByName := lo.SliceToMap(existFieldData, func(f *schemapb.FieldData) (string, *schemapb.FieldData) {
 			return f.GetFieldName(), f
 		})
+		genericUpdateFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
+		if fieldOpMap != nil {
+			genericUpdateFieldData = make([]*schemapb.FieldData, 0, len(genericUpdateFieldData))
+			for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
+				op, ok := fieldOpMap[fieldData.GetFieldName()]
+				if ok && op != schemapb.FieldPartialUpdateOp_REPLACE {
+					continue
+				}
+				genericUpdateFieldData = append(genericUpdateFieldData, fieldData)
+			}
+		}
 
 		baseIdx := 0
 		for _, idx := range updateIdxInUpsert {
@@ -430,13 +441,14 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
 			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			if err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx)); err != nil {
+			if err := typeutil.UpdateFieldData(it.insertFieldData, genericUpdateFieldData, int64(baseIdx), int64(idx)); err != nil {
 				log.Info("update field data failed", zap.Error(err))
 				return err
 			}
-			// Per-row Array partial-op: dstField just got REPLACE'd with the
-			// upsert row above; overwrite it with ApplyArrayRowOp(existing
-			// row, upsert row) for any field carrying a non-REPLACE op.
+			// Per-row Array partial-op: generic REPLACE intentionally
+			// skipped non-REPLACE op fields, so dstField still carries the
+			// existing row appended above. Overwrite it with
+			// ApplyArrayRowOp(existing row, upsert row).
 			if fieldOpMap != nil {
 				for _, dstField := range it.insertFieldData {
 					op, ok := fieldOpMap[dstField.GetFieldName()]
