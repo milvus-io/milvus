@@ -1,14 +1,28 @@
-# Testcases All-in-one
-#   pod kill
-#     standalone
-#       3 pods(standalone-ha-blabla, etcd, minio)
-#     cluster-1-node
-#       11 pods(proxy, rootcoord, querynode, querycoord, datanode, datacoord,
-#               indexnode, indexcoord, pulsar, etcd, minio)
-#     cluster-n-nodes
-#       11 pods* n: kill one and kill all
+# Container Kill Testcases All-in-one
 
 Collections:
+  -
+    testcase:
+      name: test_querynode_container_kill
+      chaos: chaos_querynode_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          search: degrade
+          query: degrade
+  -
+    testcase:
+      name: test_querycoord_container_kill
+      chaos: chaos_querycoord_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          search: degrade
+          query: degrade
   -
     testcase:
       name: test_datanode_container_kill
@@ -19,14 +33,139 @@ Collections:
           flush: fail
         cluster_n_nodes:
           insert: degrade
-
   -
     testcase:
-      name: test_standalone_container_kill
-      chaos: chaos_standalone_container_kill.yaml
+      name: test_datacoord_container_kill
+      chaos: chaos_datacoord_container_kill.yaml
       expectation:
         cluster_1_node:
           insert: succ
           flush: fail
         cluster_n_nodes:
           insert: degrade
+  -
+    testcase:
+      name: test_indexnode_container_kill
+      chaos: chaos_indexnode_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          index: fail
+        cluster_n_nodes:
+          index: degrade
+  -
+    testcase:
+      name: test_indexcoord_container_kill
+      chaos: chaos_indexcoord_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          index: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_proxy_container_kill
+      chaos: chaos_proxy_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          insert: fail
+  -
+    testcase:
+      name: test_rootcoord_container_kill
+      chaos: chaos_rootcoord_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          insert: degrade
+  -
+    testcase:
+      name: test_etcd_container_kill
+      chaos: chaos_etcd_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_minio_container_kill
+      chaos: chaos_minio_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_pulsar_container_kill
+      chaos: chaos_pulsar_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_kafka_container_kill
+      chaos: chaos_kafka_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_standalone_container_kill
+      chaos: chaos_standalone_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_mixcoord_container_kill
+      chaos: chaos_mixcoord_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_streamingnode_container_kill
+      chaos: chaos_streamingnode_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          search: fail
+          query: fail
