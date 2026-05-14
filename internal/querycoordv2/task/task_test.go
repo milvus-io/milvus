@@ -180,6 +180,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLoadSegmentTask",
 		"TestLoadSegmentReopenTask",
 		"TestLoadSegmentTaskNotIndex",
+		"TestSegmentTaskWaitsDistAfterLoadRPC",
 		"TestLoadSegmentTaskFailed",
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
@@ -883,6 +884,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
+	suite.dist.SegmentDistManager.Update(targetNode)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -932,6 +934,153 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
 	}
+}
+
+func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterLoadRPC() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segmentID := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestSegmentTaskWaitsDistAfterLoadRPC",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		}, nil
+	})
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segmentID),
+	)
+	suite.NoError(err)
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	suite.NoError(suite.scheduler.Add(task))
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, partition, segmentID, targetNode, 1, channel.ChannelName))
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+}
+
+func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterReleaseRPC() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segmentID := suite.releaseSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, partition, segmentID, targetNode, 1, channel.ChannelName))
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dist.SegmentDistManager.Update(targetNode)
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+}
+
+func (suite *TaskSuite) TestSegmentTaskChecksTimeoutWhileWaitingDist() {
+	action := NewSegmentAction(3, ActionTypeGrow, "test-channel", suite.loadSegments[0])
+	action.rpcReturned.Store(true)
+	task, err := NewSegmentTask(
+		context.Background(),
+		time.Nanosecond,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	suite.NoError(err)
+	time.Sleep(time.Millisecond)
+
+	shouldProcess := suite.scheduler.preProcess(task)
+	suite.False(shouldProcess)
+	suite.Equal(TaskStatusCanceled, task.Status())
+	suite.ErrorIs(task.Err(), context.DeadlineExceeded)
 }
 
 func (suite *TaskSuite) TestMoveSegmentTask() {
@@ -1059,6 +1208,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	// First action done, execute the second action
 	suite.dispatchAndWait(sourceNode)
+	suite.dist.SegmentDistManager.Update(sourceNode)
 	// Check second action
 	suite.dispatchAndWait(sourceNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -2212,11 +2362,14 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 	executor.executeSegmentAction(moveTask, 0)
 	suite.Equal(targetNode, moveTask.ShardLeaderID())
 	suite.NoError(moveTask.Err())
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, 1, segmentID, targetNode, 1, channel.ChannelName))
+	suite.True(moveTask.actions[0].IsFinished(suite.dist))
 
 	// expect release action will execute successfully
 	executor.executeSegmentAction(moveTask, 1)
 	suite.Equal(targetNode, moveTask.ShardLeaderID())
-	suite.True(moveTask.actions[0].IsFinished(suite.dist))
+	suite.dist.SegmentDistManager.Update(sourceNode)
+	suite.True(moveTask.actions[1].IsFinished(suite.dist))
 	suite.NoError(moveTask.Err())
 
 	// test shard leader change before release action
