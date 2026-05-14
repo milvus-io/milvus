@@ -1186,6 +1186,11 @@ func (s *Server) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb
 	return s.proxy.UpdateReplicateConfiguration(ctx, req)
 }
 
+// GetReplicateConfiguration retrieves the current cross-cluster replication topology.
+func (s *Server) GetReplicateConfiguration(ctx context.Context, req *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error) {
+	return s.proxy.GetReplicateConfiguration(ctx, req)
+}
+
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
 func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
 	return s.proxy.GetReplicateInfo(ctx, req)
