@@ -564,8 +564,38 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_TenMillion
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
-	// Skip: createManifestForSegment calls packed.CreateSegmentManifestWithBasePath which requires CGO FFI
-	s.T().Skip("Skip test that requires CGO FFI calls for manifest creation")
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:  s.collectionID,
+		PartitionID:   2000,
+		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"col1"}
+
+	var gotBasePath string
+	var gotStorageConfig *indexpb.StorageConfig
+	mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(
+			ctx context.Context,
+			basePath string,
+			format string,
+			columns []string,
+			fragments []packed.Fragment,
+			storageConfig *indexpb.StorageConfig,
+		) (string, error) {
+			gotBasePath = basePath
+			gotStorageConfig = storageConfig
+			return "manifest-path", nil
+		}).Build()
+	defer mockCreate.UnPatch()
+
+	manifestPath, err := task.createManifestForSegment(ctx, 3000, []packed.Fragment{{FragmentID: 1}})
+	s.NoError(err)
+	s.Equal("manifest-path", manifestPath)
+	s.Equal("files/insert_log/1000/2000/3000", gotBasePath)
+	s.Same(req.GetStorageConfig(), gotStorageConfig)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestPreAllocatedSegmentIDs() {

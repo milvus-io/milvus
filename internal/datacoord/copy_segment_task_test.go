@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -774,6 +775,48 @@ func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
 	assert.Nil(t, req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "source segment 999 not found")
+}
+
+func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "external_pk", ExternalField: "pk"},
+				},
+			},
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, PartitionId: 10},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	mockReadSnapshot := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mockReadSnapshot.UnPatch()
+
+	mockStorageConfig := mockey.Mock(createStorageConfig).Return(nil).Build()
+	defer mockStorageConfig.UnPatch()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.snapshotMeta = sm
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	assert.NoError(t, err)
+	assert.Len(t, req.GetSources(), 1)
+	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
 }
 
 func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {

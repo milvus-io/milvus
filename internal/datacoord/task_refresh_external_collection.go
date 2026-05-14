@@ -470,9 +470,15 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		err = fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
 		return
 	}
+	if len(collInfo.Partitions) != 1 {
+		err = fmt.Errorf("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+		return
+	}
+	partitionID := collInfo.Partitions[0]
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           t.GetCollectionId(),
+		PartitionID:            partitionID,
 		TaskID:                 t.GetTaskId(),
 		CurrentSegments:        currentSegments,
 		ExternalSource:         t.GetExternalSource(),
