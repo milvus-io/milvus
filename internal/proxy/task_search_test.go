@@ -4409,6 +4409,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := shardclient.NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+			assert.Equal(t, map[string]int64{"mock_qn": 1}, workload.PreferredNodes)
 			err = workload.Exec(ctx, 0, qn, "")
 			assert.NoError(t, err)
 		}).Return(nil)
@@ -4446,7 +4447,9 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:                   node,
 			translatedOutputFields: outputFields,
 			shardClientMgr:         mgr,
+			queryChannelsNode:      typeutil.NewConcurrentMap[string, int64](),
 		}
+		qt.queryChannelsNode.Insert("mock_qn", 1)
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
 		queryResult, storageCost, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
@@ -4586,6 +4589,47 @@ func TestSearchTask_Requery(t *testing.T) {
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
+}
+
+func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
+	ctx := context.Background()
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	const nodeID int64 = 101
+
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *querypb.SearchRequest) bool {
+		return len(req.GetDmlChannels()) == 1 && req.GetDmlChannels()[0] == channel
+	})).Return(&internalpb.SearchResults{
+		Status:          merr.Success(),
+		CostAggregation: &internalpb.CostAggregation{},
+	}, nil)
+
+	lb := shardclient.NewMockLBPolicy(t)
+	lb.EXPECT().UpdateCostMetrics(nodeID, mock.Anything).Return()
+
+	task := &searchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: paramtable.GetNodeID(),
+			},
+		},
+		request: &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_search_shard_records_node_hint",
+		},
+		Condition:         NewTaskCondition(ctx),
+		lb:                lb,
+		resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+	}
+
+	err := task.searchShard(ctx, nodeID, qn, channel)
+	require.NoError(t, err)
+	recordedNodeID, ok := task.queryChannelsNode.Get(channel)
+	require.True(t, ok)
+	assert.Equal(t, nodeID, recordedNodeID)
 }
 
 type GetPartitionIDsSuite struct {

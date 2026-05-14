@@ -39,12 +39,13 @@ import (
 type ExecuteFunc func(context.Context, UniqueID, types.QueryNodeClient, string) error
 
 type ChannelWorkload struct {
-	Db             string
-	CollectionName string
-	CollectionID   int64
-	Channel        string
-	Nq             int64
-	Exec           ExecuteFunc
+	Db              string
+	CollectionName  string
+	CollectionID    int64
+	Channel         string
+	Nq              int64
+	Exec            ExecuteFunc
+	PreferredNodeID int64
 }
 
 type CollectionWorkLoad struct {
@@ -53,6 +54,7 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	PreferredNodes map[string]int64
 }
 
 type LBPolicy interface {
@@ -196,6 +198,13 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
+			targetNodeID, err := balancer.SelectNode(ctx, []int64{preferredNode.NodeID}, workload.Nq)
+			if err == nil && targetNodeID == preferredNode.NodeID {
+				return preferredNode, nil
+			}
+		}
+
 		// prefer serviceable nodes
 		var targetNodeID int64
 		if len(serviceableNodes) > 0 {
@@ -347,12 +356,13 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:             workload.Db,
-			CollectionName: workload.CollectionName,
-			CollectionID:   workload.CollectionID,
-			Channel:        channelList[0],
-			Nq:             workload.Nq,
-			Exec:           workload.Exec,
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channelList[0],
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: workload.PreferredNodes[channelList[0]],
 		})
 	}
 
@@ -360,12 +370,13 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				Db:             workload.Db,
-				CollectionName: workload.CollectionName,
-				CollectionID:   workload.CollectionID,
-				Channel:        channel,
-				Nq:             workload.Nq,
-				Exec:           workload.Exec,
+				Db:              workload.Db,
+				CollectionName:  workload.CollectionName,
+				CollectionID:    workload.CollectionID,
+				Channel:         channel,
+				Nq:              workload.Nq,
+				Exec:            workload.Exec,
+				PreferredNodeID: workload.PreferredNodes[channel],
 			})
 		})
 	}
@@ -383,12 +394,13 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// let every request could retry at least twice, which could retry after update shard leader cache
 	for _, channel := range channelList {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:             workload.Db,
-			CollectionName: workload.CollectionName,
-			CollectionID:   workload.CollectionID,
-			Channel:        channel,
-			Nq:             workload.Nq,
-			Exec:           workload.Exec,
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channel,
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: workload.PreferredNodes[channel],
 		})
 	}
 	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
