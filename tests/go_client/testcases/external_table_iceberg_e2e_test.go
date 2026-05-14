@@ -31,14 +31,15 @@ type icebergTableInfo struct {
 	Dim              int    `json:"dim"`
 }
 
-// toMilvusURI converts an Iceberg-native URI (s3://bucket/key) to Milvus format (s3://host/bucket/key).
-func toMilvusURI(icebergURI, host string) string {
+// toMilvusMinIOURI converts an Iceberg-native URI (s3://bucket/key) to
+// Milvus MinIO URI format (minio://host/bucket/key).
+func toMilvusMinIOURI(icebergURI, host string) string {
 	u, err := url.Parse(icebergURI)
 	if err != nil || u.Scheme == "" {
 		return icebergURI
 	}
-	// s3://bucket/key → bucket = u.Host, key = u.Path
-	return fmt.Sprintf("%s://%s/%s%s", u.Scheme, host, u.Host, u.Path)
+	// s3://bucket/key -> bucket = u.Host, key = u.Path
+	return fmt.Sprintf("minio://%s/%s%s", host, u.Host, u.Path)
 }
 
 // TestExternalTableIcebergE2E tests the full Iceberg external table pipeline:
@@ -46,8 +47,8 @@ func toMilvusURI(icebergURI, host string) string {
 //	Create Iceberg table on MinIO → CreateCollection (format=iceberg-table) →
 //	Refresh (with snapshot_id) → Load → Search → Query → Drop.
 //
-// The externalSource uses Milvus standard URI format (s3://host/bucket/path/metadata.json),
-// same as parquet and lance external tables. MinIO connection details are passed via extfs.
+// The externalSource uses minio://host/bucket/path/metadata.json. The scheme
+// carries MinIO routing defaults, so extfs only needs credentials.
 //
 // Run:
 //
@@ -74,12 +75,11 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	t.Logf("[Phase 0] Iceberg table created: metadata=%s, snapshot_id=%d, rows=%d",
 		tableInfo.MetadataLocation, tableInfo.SnapshotID, tableInfo.NumRows)
 
-	// Convert Iceberg-native URI (s3://bucket/key) to Milvus format (s3://host/bucket/key)
-	// to match the URI convention used by parquet/lance external tables.
+	// Convert Iceberg-native URI (s3://bucket/key) to Milvus MinIO URI format.
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
 
-	// Build ExternalSpec with extfs for MinIO access (same pattern as cross-bucket parquet E2E)
+	// Build ExternalSpec with the minimal extfs needed for MinIO access.
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
 		SnapshotID int64             `json:"snapshot_id,string"`
@@ -89,11 +89,6 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 		Format:     "iceberg-table",
 		SnapshotID: tableInfo.SnapshotID,
 		Extfs: map[string]string{
-			"bucket_name":      bucket,
-			"region":           "us-east-1",
-			"use_ssl":          "false",
-			"use_virtual_host": "false",
-			"cloud_provider":   "minio",
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
 		},
@@ -233,7 +228,7 @@ func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
 		bucket, tablePath, "16", "4")
 
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
 
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
@@ -244,11 +239,6 @@ func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
 		Format:     "iceberg-table",
 		SnapshotID: tableInfo.SnapshotID,
 		Extfs: map[string]string{
-			"bucket_name":      bucket,
-			"region":           "us-east-1",
-			"use_ssl":          "false",
-			"use_virtual_host": "false",
-			"cloud_provider":   "minio",
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
 		},
@@ -409,7 +399,7 @@ func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
 		minioSecretKey, bucket, tablePath, numRows, testVecDim, testBinVecDim)
 
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
-	externalSource := toMilvusURI(tableInfo.MetadataLocation, minioHost)
+	externalSource := toMilvusMinIOURI(tableInfo.MetadataLocation, minioHost)
 
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
@@ -420,16 +410,6 @@ func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
 		Format:     "iceberg-table",
 		SnapshotID: tableInfo.SnapshotID,
 		Extfs: map[string]string{
-			"bucket_name":      bucket,
-			"region":           "us-east-1",
-			"use_ssl":          "false",
-			"use_virtual_host": "false",
-			// `minio` sentinel: tells milvus to treat URI host as
-			// endpoint instead of swapping for AWS canonical endpoint.
-			// `aws` would derive s3.us-east-1.amazonaws.com and fail
-			// the (address, bucket) lookup against the URI host
-			// `localhost:9000`.
-			"cloud_provider":   "minio",
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
 		},
