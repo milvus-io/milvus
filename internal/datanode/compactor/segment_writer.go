@@ -116,6 +116,7 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 func (w *MultiSegmentWriter) closeWriter() error {
 	if w.writer != nil {
 		writer := w.writer
+		w.writer = nil
 		if err := writer.Close(); err != nil {
 			return err
 		}
@@ -137,7 +138,6 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		}
 
 		w.res = append(w.res, result)
-		w.writer = nil
 
 		log.Info("created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),

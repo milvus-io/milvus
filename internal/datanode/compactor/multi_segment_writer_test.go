@@ -61,6 +61,22 @@ type testCompactionAllocator struct {
 	failAllocOneAt int
 }
 
+type closeErrSerializeWriter struct {
+	err error
+}
+
+func (w closeErrSerializeWriter) WriteValue(*storage.Value) error {
+	return nil
+}
+
+func (w closeErrSerializeWriter) Flush() error {
+	return nil
+}
+
+func (w closeErrSerializeWriter) Close() error {
+	return w.err
+}
+
 func (a *testCompactionAllocator) Alloc(count uint32) (int64, int64, error) {
 	start := a.next
 	a.next += int64(count)
@@ -402,6 +418,23 @@ func (s *MultiSegmentWriterSuite) TestCloseAfterRotateAllocFailureDoesNotReclose
 	err = writer.Close()
 	s.NoError(err)
 	s.Len(writer.GetCompactionSegments(), 1)
+}
+
+func (s *MultiSegmentWriterSuite) TestCloseFailureClearsWriter() {
+	closeErr := errors.New("close failed")
+	writer := &MultiSegmentWriter{
+		writer: &storage.BinlogValueWriter{
+			SerializeWriter: closeErrSerializeWriter{err: closeErr},
+		},
+	}
+
+	err := writer.closeWriter()
+	s.ErrorIs(err, closeErr)
+	s.Nil(writer.writer)
+	s.Empty(writer.GetCompactionSegments())
+
+	err = writer.Close()
+	s.NoError(err)
 }
 
 func (s *MultiSegmentWriterSuite) TestWriterMethods() {
