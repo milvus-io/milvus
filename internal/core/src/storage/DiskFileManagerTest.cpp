@@ -57,6 +57,7 @@
 #include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
+#include "pb/index_coord.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -272,34 +273,56 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path);
 }
 
-TEST_F(DiskAnnFileManagerTest, ReadFullRelativeIndexPathWithStream) {
-    auto conf = milvus_storage::ArrowFileSystemConfig();
-    conf.storage_type = "local";
-    conf.root_path = TestLocalPath + "diskann_full_path";
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V0BuildRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
 
-    auto result = milvus_storage::CreateArrowFileSystem(conf);
-    EXPECT_TRUE(result.ok());
-    auto fs = result.ValueOrDie();
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_BUILD_ROOTED;
 
-    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
-    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
-    index_meta.index_store_path = "index_files_v1/1/2/3/1000/1";
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
 
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_files/1000/1/20/30") != std::string::npos)
+        << "prefix=" << prefix;
+    EXPECT_TRUE(prefix.find("/index_v1/") == std::string::npos)
+        << "prefix=" << prefix;
+}
 
-    uint64_t expected = 123456789;
-    auto os = diskAnnFileManager->OpenOutputStream("index_file");
-    os->Write(expected);
-    os->Close();
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
 
-    auto is = diskAnnFileManager->OpenInputStream(index_meta.index_store_path +
-                                                  "/index_file");
-    uint64_t actual = 0;
-    is->Read(actual);
-    EXPECT_EQ(actual, expected);
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
 
-    boost::filesystem::remove_all(conf.root_path);
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_v1/100/20/30/1000/1") != std::string::npos)
+        << "prefix=" << prefix;
+    const std::string key = "vector_index_data";
+    auto composed = prefix + "/" + key;
+    EXPECT_TRUE(composed.find("/index_v1/100/20/30/1000/1/") !=
+                std::string::npos);
 }
 
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {

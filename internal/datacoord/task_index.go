@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -304,14 +303,10 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
-	// Create the job request.
+	// Create the job request. The path layout (v0/v1) is propagated via
+	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
-	// Keep v0/v1 path layout construction on the write side.
-	indexPathBuilder := metautil.NewIndexPathBuilder(it.chunkManager.RootPath(),
-		segIndex.IndexStorePathVersion, segment.GetCollectionID(),
-		segment.GetPartitionID(), segment.GetID(),
-		segIndex.BuildID, segIndex.IndexVersion+1)
 	req := &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
@@ -332,7 +327,6 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		FieldType:                 field.GetDataType(),
 		Dim:                       int64(dim),
 		DataIds:                   binlogIDs,
-		IndexStorePath:            indexPathBuilder.BuildPrefix(),
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,

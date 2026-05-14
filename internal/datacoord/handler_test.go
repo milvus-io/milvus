@@ -1923,7 +1923,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 
 	require.Len(t, indexFiles, 1)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
-	assert.Equal(t, []string{"files/index_files_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {

@@ -160,7 +160,7 @@ const (
 	SegmentIndexV0Path = `index_files`
 
 	// SegmentIndexV1Path storage path const for collection-rooted segment index files.
-	SegmentIndexV1Path = `index_files_v1`
+	SegmentIndexV1Path = `index_v1`
 
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`

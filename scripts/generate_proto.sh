@@ -139,6 +139,14 @@ ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb clustering.proto|| { echo 'generate 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_cgo_msg.proto|| { echo 'generate index_cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
+# index_coord.proto and its transitive deps are needed in C++ because segcore.proto,
+# index_cgo_msg.proto and cgo_msg.proto now reference milvus.proto.index.IndexStorePathVersion.
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb internal.proto|| { echo 'generate internal.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb milvus.proto|| { echo 'generate milvus.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb rg.proto|| { echo 'generate rg.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb feder.proto|| { echo 'generate feder.proto failed'; exit 1; }
+${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb msg.proto|| { echo 'generate msg.proto failed'; exit 1; }
 
 restore_unchanged_generated_files
 

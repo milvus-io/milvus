@@ -880,8 +880,8 @@ func TestGetAllIndexFilesOfIndex_PathVersions(t *testing.T) {
 			IndexFileKeys:         []string{"file1", "file2"},
 		}
 		files := gc.getAllIndexFilesOfIndex(segIdx)
-		assert.Contains(t, files, "root/index_files_v1/100/200/300/1000/1/file1")
-		assert.Contains(t, files, "root/index_files_v1/100/200/300/1000/1/file2")
+		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file1")
+		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file2")
 		assert.Len(t, files, 2)
 	})
 }
@@ -1094,7 +1094,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		// v1 path prefix should be removed
 		assert.Len(t, removedPrefixes, 1)
-		assert.Equal(t, "root/index_files_v1/100/200/300/2000/1/", removedPrefixes[0])
+		assert.Equal(t, "root/index_v1/100/200/300/2000/1/", removedPrefixes[0])
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(2000)
 		assert.False(t, ok, "deleted v1 segment index tombstone should be removed after file deletion")
 	})
@@ -1168,7 +1168,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_files_v1/101/201/301/2001/1/").Return(errors.New("remove failed"))
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/101/201/301/2001/1/").Return(errors.New("remove failed"))
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedIndexFilesV1(context.TODO())

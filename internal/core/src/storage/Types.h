@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
+#include "pb/index_coord.pb.h"
 #include "pb/schema.pb.h"
 
 namespace milvus::storage {
@@ -89,7 +90,11 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
-    std::string index_store_path;
+    // Path format version used by the worker/loader to assemble the object-storage prefix.
+    // See milvus.proto.index.IndexStorePathVersion.
+    milvus::proto::index::IndexStorePathVersion index_store_path_version{
+        milvus::proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
 };
 
 struct StorageConfig {

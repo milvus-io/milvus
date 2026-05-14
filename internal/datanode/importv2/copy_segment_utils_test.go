@@ -334,10 +334,10 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 		},
 		{
 			name:        "vector scalar index path v1 format",
-			sourcePath:  "files/index_files_v1/111/222/333/1001/1/scalar_index",
+			sourcePath:  "files/index_v1/111/222/333/1001/1/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-			wantPath:    "files/index_files_v1/444/555/666/1001/1/scalar_index",
+			wantPath:    "files/index_v1/444/555/666/1001/1/scalar_index",
 			wantErr:     false,
 		},
 	}
@@ -387,10 +387,10 @@ func TestGenerateTargetIndexPath_BuildIDMapping(t *testing.T) {
 		},
 		{
 			name:        "v1 vector scalar maps buildID at offset 4",
-			sourcePath:  "files/index_files_v1/111/222/333/1001/1/scalar_index",
+			sourcePath:  "files/index_v1/111/222/333/1001/1/scalar_index",
 			indexType:   IndexTypeVectorScalarV0,
 			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-			wantPath:    "files/index_files_v1/444/555/666/2001/1/scalar_index",
+			wantPath:    "files/index_v1/444/555/666/2001/1/scalar_index",
 		},
 		{
 			name:       "text index maps buildID at offset 1",
@@ -431,7 +431,7 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 				BuildID:               1002,
 				IndexVersion:          1,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-				IndexFilePaths:        []string{"files/index_files_v1/111/222/333/1002/1/v1_file"},
+				IndexFilePaths:        []string{"files/index_v1/111/222/333/1002/1/v1_file"},
 			},
 		},
 	}
@@ -444,14 +444,14 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 	files := &SegmentFiles{
 		VectorScalarIndex: []string{
 			"files/index_files/1001/1/222/333/v0_file",
-			"files/index_files_v1/111/222/333/1002/1/v1_file",
+			"files/index_v1/111/222/333/1002/1/v1_file",
 		},
 	}
 
 	mappings, err := generateMappingsFromFiles(files, source, target)
 	assert.NoError(t, err)
 	assert.Equal(t, "files/index_files/2001/1/555/666/v0_file", mappings["files/index_files/1001/1/222/333/v0_file"])
-	assert.Equal(t, "files/index_files_v1/444/555/666/2002/1/v1_file", mappings["files/index_files_v1/111/222/333/1002/1/v1_file"])
+	assert.Equal(t, "files/index_v1/444/555/666/2002/1/v1_file", mappings["files/index_v1/111/222/333/1002/1/v1_file"])
 }
 
 func TestTransformFieldBinlogs(t *testing.T) {
@@ -823,7 +823,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          1,
 				SerializedSize:        2048,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-				IndexFilePaths:        []string{"files/index_files_v1/111/222/333/1002/1/v1_file"},
+				IndexFilePaths:        []string{"files/index_v1/111/222/333/1002/1/v1_file"},
 			},
 		},
 	}
@@ -834,8 +834,8 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
 	}
 	mappings := map[string]string{
-		"files/index_files/1001/1/222/333/v0_file":        "files/index_files/2001/1/555/666/v0_file",
-		"files/index_files_v1/111/222/333/1002/1/v1_file": "files/index_files_v1/444/555/666/2002/1/v1_file",
+		"files/index_files/1001/1/222/333/v0_file":  "files/index_files/2001/1/555/666/v0_file",
+		"files/index_v1/111/222/333/1002/1/v1_file": "files/index_v1/444/555/666/2002/1/v1_file",
 	}
 
 	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
