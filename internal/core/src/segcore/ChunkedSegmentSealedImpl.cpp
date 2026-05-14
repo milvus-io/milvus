@@ -1577,6 +1577,7 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     ValidResult result;
     result.valid_count = count;
 
+    bool got_valid_offsets_from_index = false;
     if (vector_indexings_.is_ready(field_id)) {
         auto field_indexing = vector_indexings_.get_field_indexing(field_id);
         auto cache_index = field_indexing->indexing_;
@@ -1599,8 +1600,11 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                 }
             }
             result.valid_count = result.valid_offsets.size();
+            got_valid_offsets_from_index = true;
         }
-    } else {
+    }
+
+    if (!got_valid_offsets_from_index) {
         auto column = get_column(field_id);
         if (column != nullptr && column->IsNullable()) {
             result.valid_data = std::make_unique<bool[]>(count);
@@ -3106,6 +3110,9 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         valid_offsets = filter_result.valid_offsets.data();
     }
     auto ret = fill_with_empty(field_id, count, valid_count, valid_data);
+    if (field_meta.is_vector() && valid_count == 0) {
+        return ret;
+    }
 
     if (!field_meta.is_vector() && column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
