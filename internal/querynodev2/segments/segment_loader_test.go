@@ -67,7 +67,7 @@ type SegmentLoaderSuite struct {
 
 func (suite *SegmentLoaderSuite) SetupSuite() {
 	paramtable.Init()
-	suite.rootPath = suite.T().Name()
+	suite.rootPath = paramtable.Get().MinioCfg.RootPath.GetValue()
 	suite.collectionID = rand.Int63()
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()

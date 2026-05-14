@@ -540,7 +540,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     ASSERT_GT(memSize, 0);
     ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
@@ -619,7 +619,7 @@ TEST_P(IndexTest, Mmap) {
     ASSERT_GT(memSize, 0);
     ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf["mmap_filepath"] =
         TestLocalPath + "mmap/test_index_mmap_" + index_type;
     load_conf[milvus::LOAD_PRIORITY] =
@@ -677,7 +677,7 @@ TEST_P(IndexTest, GetVector) {
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
 
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     load_conf[milvus::LOAD_PRIORITY] =
@@ -781,7 +781,7 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
@@ -867,7 +867,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     auto load_conf = generate_load_conf(index_type, metric_type, NB);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -955,7 +955,7 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -1042,7 +1042,7 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     auto load_conf = generate_load_conf<bfloat16>(index_type, metric_type, NB);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -1152,7 +1152,7 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     auto load_conf = generate_load_conf(index_type, metric_type, total_vectors);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -1298,7 +1298,7 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     auto load_conf = generate_load_conf(index_type, metric_type, total_vectors);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

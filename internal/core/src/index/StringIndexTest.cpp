@@ -39,6 +39,7 @@
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;
@@ -359,7 +360,7 @@ TEST_F(StringIndexMarisaTest, Codec) {
         auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         Config load_config;
-        load_config["index_files"] = index_files;
+        load_config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         copy_index->LoadUnified(load_config);
@@ -443,7 +444,7 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
         auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         Config load_config;
-        load_config["index_files"] = index_files;
+        load_config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         copy_index->LoadUnified(load_config);

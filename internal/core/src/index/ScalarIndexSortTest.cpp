@@ -23,6 +23,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -68,7 +69,7 @@ test_stlsort_for_range(
         config[milvus::index::ENABLE_MMAP] = enable_mmap;
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
 
         auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
             CreateScalarSortTestFileManagerContext());

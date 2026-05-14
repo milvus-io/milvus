@@ -247,7 +247,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, GetTempFileManagerCtx(dtype));
         milvus::Config load_config;
-        load_config["index_files"] = index_files;
+        load_config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         copy_index->LoadUnified(load_config);

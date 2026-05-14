@@ -193,7 +193,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     for (auto& binary : binary_set.binary_map_) {
         index_files.emplace_back(binary.first);
     }
-    config["index_files"] = index_files;
+    config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     auto copy_index =
         milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
             vec_field_data_type, config, file_manager_context);

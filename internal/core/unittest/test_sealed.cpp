@@ -3012,7 +3012,7 @@ TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromDiskIndex) {
     auto load_conf = generate_load_conf(knowhere::IndexEnum::INDEX_DISKANN,
                                         metric_type,
                                         dataset_size * emb_list_len);
-    load_conf["index_files"] = index_files;
+    load_conf["index_files"] = ToLogicalIndexFilesForLoad(index_files);
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

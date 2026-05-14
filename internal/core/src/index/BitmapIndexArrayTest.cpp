@@ -52,6 +52,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -255,7 +256,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
 
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         index_ =
@@ -679,7 +680,8 @@ TEST_P(BitmapIndexArrayRegressionTest,
         index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
 
-        config["index_files"] = create_index_result->GetIndexFiles();
+        config["index_files"] =
+            ToLogicalIndexFilesForLoad(create_index_result->GetIndexFiles());
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         if (param.use_mmap) {

@@ -50,6 +50,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -201,7 +202,7 @@ class HybridIndexTestV1 : public testing::Test {
         index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = type_;
 
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         index_ =

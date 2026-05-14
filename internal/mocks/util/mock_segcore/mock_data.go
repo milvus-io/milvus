@@ -23,7 +23,6 @@ import (
 	"math"
 	"math/rand"
 	"path"
-	"path/filepath"
 	"strconv"
 	"unsafe"
 
@@ -866,11 +865,10 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		// indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
-		indexPath := filepath.Join(cm.RootPath(), "index_files",
+		logicalIndexPath := path.Join("index_files",
 			strconv.Itoa(int(segmentID)), index.Key)
-		indexPaths = append(indexPaths, indexPath)
-		err := cm.Write(context.Background(), indexPath, index.Value)
+		indexPaths = append(indexPaths, logicalIndexPath)
+		err := cm.Write(context.Background(), path.Join(cm.RootPath(), logicalIndexPath), index.Value)
 		if err != nil {
 			return nil, err
 		}

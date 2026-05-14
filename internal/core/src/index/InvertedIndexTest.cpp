@@ -240,7 +240,7 @@ test_run() {
         index_info.field_type = dtype;
 
         Config config;
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         auto index =
@@ -635,7 +635,7 @@ test_string() {
         index_info.field_type = dtype;
 
         Config config;
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         auto index =

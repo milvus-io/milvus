@@ -55,6 +55,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -181,7 +182,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         index_files = create_index_result->GetIndexFiles();
 
         index::CreateIndexInfo index_info{};
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         config[milvus::index::ENABLE_MMAP] = true;
@@ -439,7 +440,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
         Config config;
-        config["index_files"] = index_files_;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files_);
         config[milvus::index::ENABLE_MMAP] = true;
         config[milvus::index::MMAP_FILE_PATH] = TestLocalPath + "mmap-file";
         config[milvus::LOAD_PRIORITY] =

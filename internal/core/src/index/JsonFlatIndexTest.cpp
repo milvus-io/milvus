@@ -180,7 +180,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         index_info.field_type = DataType::JSON;
 
         Config load_config;
-        load_config["index_files"] = index_files_;
+        load_config["index_files"] = ToLogicalIndexFilesForLoad(index_files_);
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");

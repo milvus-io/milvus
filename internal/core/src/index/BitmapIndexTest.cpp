@@ -50,6 +50,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -197,7 +198,7 @@ class BitmapIndexTest : public testing::Test {
         index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
         index_info.field_type = type_;
 
-        config["index_files"] = index_files;
+        config["index_files"] = ToLogicalIndexFilesForLoad(index_files);
 
         if (is_mmap_) {
             config["enable_mmap"] = "true";

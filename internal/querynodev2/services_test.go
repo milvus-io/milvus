@@ -101,7 +101,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.GCEnabled.Key, "false")
 
-	suite.rootPath = suite.T().Name()
+	suite.rootPath = paramtable.Get().MinioCfg.RootPath.GetValue()
 	suite.collectionID = 111
 	suite.collectionName = "test-collection"
 	suite.partitionIDs = []int64{222}
