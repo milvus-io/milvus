@@ -1170,6 +1170,261 @@ func TestInsertWithNullableField(t *testing.T) {
 	assert.Equal(t, len(coll.Fields), len(fieldData))
 }
 
+func TestInsertWithNullableVectorFields(t *testing.T) {
+	testcases := []struct {
+		name        string
+		dataType    schemapb.DataType
+		vectorValue interface{}
+		checkData   func(*testing.T, *schemapb.FieldData)
+	}{
+		{
+			name:        "float vector",
+			dataType:    schemapb.DataType_FloatVector,
+			vectorValue: []float32{0.1, 0.2},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Equal(t, []float32{0.1, 0.2}, fieldData.GetVectors().GetFloatVector().GetData())
+			},
+		},
+		{
+			name:        "binary vector",
+			dataType:    schemapb.DataType_BinaryVector,
+			vectorValue: []byte{1},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Equal(t, []byte{1}, fieldData.GetVectors().GetBinaryVector())
+			},
+		},
+		{
+			name:        "float16 vector",
+			dataType:    schemapb.DataType_Float16Vector,
+			vectorValue: []float32{0.1, 0.2},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Len(t, fieldData.GetVectors().GetFloat16Vector(), 4)
+			},
+		},
+		{
+			name:        "bfloat16 vector",
+			dataType:    schemapb.DataType_BFloat16Vector,
+			vectorValue: []float32{0.1, 0.2},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Len(t, fieldData.GetVectors().GetBfloat16Vector(), 4)
+			},
+		},
+		{
+			name:        "sparse float vector",
+			dataType:    schemapb.DataType_SparseFloatVector,
+			vectorValue: map[uint32]float32{1: 0.1, 2: 0.2},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Len(t, fieldData.GetVectors().GetSparseFloatVector().GetContents(), 1)
+			},
+		},
+		{
+			name:        "int8 vector",
+			dataType:    schemapb.DataType_Int8Vector,
+			vectorValue: []int8{1, 2},
+			checkData: func(t *testing.T, fieldData *schemapb.FieldData) {
+				assert.Equal(t, []byte{1, 2}, fieldData.GetVectors().GetInt8Vector())
+			},
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
+			vectorField := generateVectorFieldSchema(testcase.dataType)
+			vectorField.Name = FieldBookIntro
+			vectorField.Nullable = true
+			coll := &schemapb.CollectionSchema{
+				Name: DefaultCollectionName,
+				Fields: []*schemapb.FieldSchema{
+					primaryField,
+					vectorField,
+				},
+			}
+			body, err := wrapRequestBody([]map[string]interface{}{
+				{FieldBookID: int64(1), FieldBookIntro: nil},
+				{FieldBookID: int64(2), FieldBookIntro: testcase.vectorValue},
+				{FieldBookID: int64(3), FieldBookIntro: nil},
+			})
+			assert.NoError(t, err)
+
+			rows, validData, err := checkAndSetData(body, coll, false)
+			assert.NoError(t, err)
+			assert.Equal(t, []bool{false, true, false}, validData[FieldBookIntro])
+
+			fieldsData, err := anyToColumns(rows, validData, coll, true, false)
+			assert.NoError(t, err)
+
+			var vectorFieldData *schemapb.FieldData
+			for _, fieldData := range fieldsData {
+				if fieldData.GetFieldName() == FieldBookIntro {
+					vectorFieldData = fieldData
+					break
+				}
+			}
+			assert.NotNil(t, vectorFieldData)
+			assert.Equal(t, []bool{false, true, false}, vectorFieldData.GetValidData())
+			testcase.checkData(t, vectorFieldData)
+		})
+	}
+}
+
+func getFieldDataByName(fieldsData []*schemapb.FieldData, fieldName string) *schemapb.FieldData {
+	for _, fieldData := range fieldsData {
+		if fieldData.GetFieldName() == fieldName {
+			return fieldData
+		}
+	}
+	return nil
+}
+
+func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
+	t.Run("nullable scalar all null is kept as update", func(t *testing.T) {
+		coll := &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				{
+					Name:     "nullable",
+					FieldID:  common.StartOfUserFieldID + 1,
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				},
+			},
+		}
+		body, err := wrapRequestBody([]map[string]interface{}{
+			{FieldBookID: int64(1), "nullable": nil},
+			{FieldBookID: int64(2), "nullable": nil},
+		})
+		assert.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, false}, validData["nullable"])
+
+		fieldsData, err := anyToColumns(rows, validData, coll, false, true)
+		assert.NoError(t, err)
+		nullableField := getFieldDataByName(fieldsData, "nullable")
+		assert.NotNil(t, nullableField)
+		assert.Equal(t, []bool{false, false}, nullableField.GetValidData())
+		assert.Empty(t, nullableField.GetScalars().GetLongData().GetData())
+	})
+
+	t.Run("nullable scalar mixed null and value is kept as compact update", func(t *testing.T) {
+		coll := &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				{
+					Name:     "nullable",
+					FieldID:  common.StartOfUserFieldID + 1,
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				},
+			},
+		}
+		body, err := wrapRequestBody([]map[string]interface{}{
+			{FieldBookID: int64(1), "nullable": nil},
+			{FieldBookID: int64(2), "nullable": int64(20)},
+		})
+		assert.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, true}, validData["nullable"])
+
+		fieldsData, err := anyToColumns(rows, validData, coll, false, true)
+		assert.NoError(t, err)
+		nullableField := getFieldDataByName(fieldsData, "nullable")
+		assert.NotNil(t, nullableField)
+		assert.Equal(t, []bool{false, true}, nullableField.GetValidData())
+		assert.Equal(t, []int64{20}, nullableField.GetScalars().GetLongData().GetData())
+	})
+
+	t.Run("missing nullable field is skipped for partial update", func(t *testing.T) {
+		coll := &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				{
+					Name:     "nullable",
+					FieldID:  common.StartOfUserFieldID + 1,
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				},
+			},
+		}
+		body, err := wrapRequestBody([]map[string]interface{}{
+			{FieldBookID: int64(1)},
+			{FieldBookID: int64(2)},
+		})
+		assert.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, true)
+		assert.NoError(t, err)
+		assert.NotContains(t, validData, "nullable")
+
+		fieldsData, err := anyToColumns(rows, validData, coll, false, true)
+		assert.NoError(t, err)
+		assert.Nil(t, getFieldDataByName(fieldsData, "nullable"))
+	})
+
+	t.Run("mixed missing and null nullable field is rejected for partial update", func(t *testing.T) {
+		coll := &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				{
+					Name:     "nullable",
+					FieldID:  common.StartOfUserFieldID + 1,
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				},
+			},
+		}
+		body, err := wrapRequestBody([]map[string]interface{}{
+			{FieldBookID: int64(1)},
+			{FieldBookID: int64(2), "nullable": nil},
+		})
+		assert.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, true)
+		assert.NoError(t, err)
+		_, err = anyToColumns(rows, validData, coll, false, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "column nullable has length 1, expected 2")
+	})
+
+	t.Run("nullable vector all null is kept as update", func(t *testing.T) {
+		vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+		vectorField.Name = FieldBookIntro
+		vectorField.Nullable = true
+		coll := &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				vectorField,
+			},
+		}
+		body, err := wrapRequestBody([]map[string]interface{}{
+			{FieldBookID: int64(1), FieldBookIntro: nil},
+			{FieldBookID: int64(2), FieldBookIntro: nil},
+		})
+		assert.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, false}, validData[FieldBookIntro])
+
+		fieldsData, err := anyToColumns(rows, validData, coll, false, true)
+		assert.NoError(t, err)
+		vectorFieldData := getFieldDataByName(fieldsData, FieldBookIntro)
+		assert.NotNil(t, vectorFieldData)
+		assert.Equal(t, []bool{false, false}, vectorFieldData.GetValidData())
+		assert.Empty(t, vectorFieldData.GetVectors().GetFloatVector().GetData())
+		assert.Equal(t, int64(2), vectorFieldData.GetVectors().GetDim())
+	})
+}
+
 func TestInsertWithDefaultValueField(t *testing.T) {
 	arrayFieldName := "array-int64"
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
@@ -1595,6 +1850,76 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, nil, err)
 	exceptRows := generateSearchResult(schemapb.DataType_Int64)
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
+}
+
+func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
+	t.Run("nullable vector derives logical rows from ValidData", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{0.1, 0.2, 0.3, 0.4},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		assert.NoError(t, err)
+		assert.Len(t, rows, 3)
+		assert.Equal(t, []float32{0.1, 0.2}, rows[0][FieldBookIntro])
+		assert.Nil(t, rows[1][FieldBookIntro])
+		assert.Equal(t, []float32{0.3, 0.4}, rows[2][FieldBookIntro])
+	})
+
+	t.Run("nullable vector all null keeps logical rows", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{},
+					},
+				},
+			},
+			ValidData: []bool{false, false},
+		}
+
+		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		assert.NoError(t, err)
+		assert.Len(t, rows, 2)
+		assert.Nil(t, rows[0][FieldBookIntro])
+		assert.Nil(t, rows[1][FieldBookIntro])
+	})
+
+	t.Run("nullable scalar compact data uses physical index", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: FieldWordCount,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{20}},
+					},
+				},
+			},
+			ValidData: []bool{false, true},
+		}
+
+		rows, err := buildQueryResp(0, []string{FieldWordCount}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		assert.NoError(t, err)
+		assert.Len(t, rows, 2)
+		assert.Nil(t, rows[0][FieldWordCount])
+		assert.Equal(t, int64(20), rows[1][FieldWordCount])
+	})
 }
 
 func newCollectionSchema(coll *schemapb.CollectionSchema) *schemapb.CollectionSchema {

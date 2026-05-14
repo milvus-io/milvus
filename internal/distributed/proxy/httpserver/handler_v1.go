@@ -755,7 +755,8 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		httpReq.Data, _, err = checkAndSetData(body.([]byte), collSchema, false)
+		var validDataMap map[string][]bool
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -765,7 +766,7 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		insertReq := req.(*milvuspb.InsertRequest)
-		insertReq.FieldsData, err = anyToColumns(httpReq.Data, nil, collSchema, true, false)
+		insertReq.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -873,7 +874,8 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			}
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		httpReq.Data, _, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+		var validDataMap map[string][]bool
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -883,7 +885,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		upsertReq := req.(*milvuspb.UpsertRequest)
-		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, nil, collSchema, false, httpReq.PartialUpdate)
+		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{

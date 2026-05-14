@@ -2967,7 +2967,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-		errMsg:      "can only accept json format request, error: Mismatch type uint8",
+		errMsg:      "can only accept json format request, error: Mismatch type",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
