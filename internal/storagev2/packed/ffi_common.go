@@ -21,6 +21,7 @@ import (
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
@@ -37,6 +38,7 @@ var ErrLoonTransient = errors.New("loon FFI transient error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
+	PropertyFormat                = C.GoString(C.loon_properties_format)
 	PropertyFSAddress             = C.GoString(C.loon_properties_fs_address)
 	PropertyFSBucketName          = C.GoString(C.loon_properties_fs_bucket_name)
 	PropertyFSAccessKeyID         = C.GoString(C.loon_properties_fs_access_key_id)
@@ -189,6 +191,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	} else {
 		values = append(values, "false")
 	}
+
+	keys = append(keys, PropertyFormat)
+	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
 	// No extfs.default.* properties here. Per-collection extfs properties
 	// (extfs.{collectionID}.*) are injected downstream via

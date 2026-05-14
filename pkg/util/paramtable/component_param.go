@@ -6613,6 +6613,7 @@ type dataNodeConfig struct {
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
+	StorageFormat  ParamItem `refreshable:"false"`
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
@@ -7087,6 +7088,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.StorageFormat = ParamItem{
+		Key:          "dataNode.storage.format",
+		Version:      "3.0.0",
+		DefaultValue: "vortex",
+		Doc:          "storage format for insert data, options: [parquet, vortex]",
+		Export:       true,
+	}
+	p.StorageFormat.Init(base.mgr)
 
 	p.DeltalogFormat = ParamItem{
 		Key:          "dataNode.storage.deltalog",
