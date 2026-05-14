@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -179,6 +180,79 @@ func (s *LBPolicySuite) TestSelectNode() {
 		Nq:             1,
 	}, &excludeNodes)
 	s.ErrorIs(err, merr.ErrCollectionNotLoaded)
+}
+
+func (s *LBPolicySuite) TestPreferredNodeHint() {
+	ctx := context.Background()
+
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:              s.dbName,
+		CollectionName:  s.collectionName,
+		CollectionID:    s.collectionID,
+		Channel:         s.channels[0],
+		Nq:              1,
+		PreferredNodeID: 3,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(3), targetNode.NodeID)
+}
+
+func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
+	ctx := context.Background()
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true},
+		{NodeID: 2, Address: "localhost", Serviceable: false},
+		{NodeID: 3, Address: "localhost", Serviceable: true},
+	}
+
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(nodes []int64) bool {
+		return !lo.Contains(nodes, int64(2)) && lo.Contains(nodes, int64(1)) && lo.Contains(nodes, int64(3))
+	}), int64(1)).Return(int64(1), nil)
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:              s.dbName,
+		CollectionName:  s.collectionName,
+		CollectionID:    s.collectionID,
+		Channel:         s.channels[0],
+		Nq:              1,
+		PreferredNodeID: 2,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(1), targetNode.NodeID)
+}
+
+func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
+	ctx := context.Background()
+
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return([]string{s.channels[0]}, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.MatchedBy(func(node NodeInfo) bool {
+		return node.NodeID == 3
+	})).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(int64(3), int64(1))
+
+	var executedNodeID int64
+	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		PreferredNodes: map[string]int64{s.channels[0]: 3},
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodeID = nodeID
+			return nil
+		},
+	})
+	s.NoError(err)
+	s.Equal(int64(3), executedNodeID)
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetry() {

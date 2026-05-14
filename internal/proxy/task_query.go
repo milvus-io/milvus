@@ -75,6 +75,7 @@ type queryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
+	preferredNodes   map[string]int64
 	fastSkip         bool
 
 	reQuery              bool
@@ -601,6 +602,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
