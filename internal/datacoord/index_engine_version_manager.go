@@ -275,11 +275,15 @@ func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
 
 	maximum := int32(math.MaxInt32)
 	for _, version := range m.scalarIndexVersions {
-		if version.MaximumIndexVersion == 0 {
+		// Old QueryNodes do not report MaximumIndexVersion. In that case, use
+		// CurrentIndexVersion as the conservative upper bound; maxVersion should
+		// never be lower than the current version that the node already supports.
+		maxVersion := max(version.CurrentIndexVersion, version.MaximumIndexVersion)
+		if maxVersion == 0 {
 			continue
 		}
-		if version.MaximumIndexVersion < maximum {
-			maximum = version.MaximumIndexVersion
+		if maxVersion < maximum {
+			maximum = maxVersion
 		}
 	}
 	return maximum
