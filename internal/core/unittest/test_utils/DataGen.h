@@ -1670,27 +1670,10 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     return field_data;
 }
 
+template <typename IndexFiles>
 inline std::vector<std::string>
-ToLogicalIndexFilesForLoad(const std::vector<std::string>& index_files) {
-    auto root_path = milvus::index::kOverrideRootPathForUT;
-    if (root_path.empty()) {
-        return index_files;
-    }
-    if (root_path.back() != '/') {
-        root_path += "/";
-    }
-
-    std::vector<std::string> logical_index_files;
-    logical_index_files.reserve(index_files.size());
-    for (const auto& index_file : index_files) {
-        if (boost::algorithm::starts_with(index_file, root_path)) {
-            logical_index_files.emplace_back(
-                index_file.substr(root_path.size()));
-            continue;
-        }
-        logical_index_files.emplace_back(index_file);
-    }
-    return logical_index_files;
+ToLogicalIndexFilesForLoad(const IndexFiles& index_files) {
+    return {index_files.begin(), index_files.end()};
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>
@@ -2466,3 +2449,9 @@ generate_float_vector(int64_t N, int64_t dim) {
 };
 
 }  // namespace milvus::segcore
+
+namespace milvus {
+using segcore::ToLogicalIndexFilesForLoad;
+}  // namespace milvus
+
+using milvus::segcore::ToLogicalIndexFilesForLoad;
