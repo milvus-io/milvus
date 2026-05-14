@@ -45,7 +45,10 @@ var sensitivePatterns = []string{
 // sensitive pattern but are confirmed non-sensitive after review. Adding to
 // this list requires explicit reviewer sign-off — it bypasses redaction.
 var sensitiveAuditAllowlist = map[string]string{
-	// add entries here as "key": "reason for allowlist"
+	"proxy.minpasswordlength":                                "password length constraint, not a password",
+	"proxy.maxpasswordlength":                                "password length constraint, not a password",
+	"datacoord.compaction.storageversion.ratelimittokens":    "rate limit token count, not auth token",
+	"log.file.rootpath":                                      "log directory path; reveals neither credential nor infrastructure topology",
 }
 
 // knownSensitive enumerates ParamItem keys that MUST be marked Sensitive: true
