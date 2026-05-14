@@ -1383,6 +1383,109 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
 }
 
+func TestUpsertTask_queryPreExecute_ArrayPartialOpSkipsGenericReplace(t *testing.T) {
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_array_partial_op_skip_replace",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:     101,
+				Name:        "tags",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "16"},
+				},
+			},
+			{FieldID: 102, Name: "note", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	})
+
+	upsertTags := arrayLongFieldData("tags", [][]int64{{3}})
+	upsertTags.FieldId = 101
+	upsertTags.ValidData = []bool{true, false}
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+		},
+		upsertTags,
+		{
+			FieldName: "note", FieldId: 102, Type: schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"new1"}}}}},
+			ValidData: []bool{true, false},
+		},
+	}
+	numRows := uint64(2)
+
+	existingTags := arrayLongFieldData("tags", [][]int64{{10, 20}, {100, 200}})
+	existingTags.FieldId = 101
+	existingTags.ValidData = []bool{true, true}
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+			},
+			existingTags,
+			{
+				FieldName: "note", FieldId: 102, Type: schemapb.DataType_VarChar,
+				Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+				ValidData: []bool{true, true},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData:    upsertData,
+			NumRows:       uint32(numRows),
+			PartialUpdate: true,
+			FieldOps:      []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    numRows,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	var tagsField *schemapb.FieldData
+	var noteField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		switch f.GetFieldName() {
+		case "tags":
+			tagsField = f
+		case "note":
+			noteField = f
+		}
+	}
+	assert.NotNil(t, tagsField)
+	assert.Equal(t, []bool{true, true}, tagsField.ValidData)
+	tagRows := tagsField.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{10, 20, 3}, tagRows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{100, 200}, tagRows[1].GetLongData().GetData())
+
+	assert.NotNil(t, noteField)
+	assert.Equal(t, []bool{true, false}, noteField.ValidData)
+	assert.Equal(t, []string{"new1"}, noteField.GetScalars().GetStringData().GetData())
+}
+
 // Test ToCompressedFormatNullable for Geometry and Timestamptz types
 func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 	t.Run("timestamptz with null values", func(t *testing.T) {
