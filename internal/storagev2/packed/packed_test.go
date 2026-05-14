@@ -192,6 +192,35 @@ func (suite *PackedTestSuite) TestCloseAndTellOneGroup() {
 	suite.Positive(sizes[0], "file size should be positive after writing data")
 }
 
+func (suite *PackedTestSuite) TestCloseIsIdempotent() {
+	paths := []string{"/tmp/close_idempotent"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	err = pw.WriteRecordBatch(suite.rec)
+	suite.NoError(err)
+	err = pw.Close()
+	suite.NoError(err)
+	err = pw.Close()
+	suite.NoError(err)
+}
+
+func (suite *PackedTestSuite) TestCloseAndTellIsIdempotent() {
+	paths := []string{"/tmp/close_and_tell_idempotent"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	err = pw.WriteRecordBatch(suite.rec)
+	suite.NoError(err)
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 1)
+	suite.Positive(sizes[0])
+	again, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Equal(sizes, again)
+}
+
 func (suite *PackedTestSuite) TestCloseAndTellMultiGroups() {
 	batches := 100
 

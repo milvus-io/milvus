@@ -115,17 +115,20 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 
 func (w *MultiSegmentWriter) closeWriter() error {
 	if w.writer != nil {
-		if err := w.writer.Close(); err != nil {
+		writer := w.writer
+		if err := writer.Close(); err != nil {
 			return err
 		}
 
-		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := w.writer.GetLogs()
+		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := writer.GetLogs()
+		rowNum := writer.GetRowNum()
+		writtenUncompressed := writer.GetWrittenUncompressed()
 
 		result := &datapb.CompactionSegment{
 			SegmentID:           w.currentSegmentID,
 			InsertLogs:          storage.SortFieldBinlogs(fieldBinlogs),
 			Field2StatslogPaths: []*datapb.FieldBinlog{statsLog},
-			NumOfRows:           w.writer.GetRowNum(),
+			NumOfRows:           rowNum,
 			Channel:             w.channel,
 			Bm25Logs:            lo.Values(bm25Logs),
 			StorageVersion:      w.storageVersion,
@@ -134,12 +137,13 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		}
 
 		w.res = append(w.res, result)
+		w.writer = nil
 
 		log.Info("created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
-			zap.Int64("totalRows", w.writer.GetRowNum()),
-			zap.Uint64("totalSize", w.writer.GetWrittenUncompressed()),
+			zap.Int64("totalRows", rowNum),
+			zap.Uint64("totalSize", writtenUncompressed),
 			zap.Int64("expected segment size", w.segmentSize),
 			zap.Int64("storageVersion", w.storageVersion))
 	}
