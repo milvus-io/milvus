@@ -171,7 +171,11 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         info.field_id,
         id_);
 
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
+    const bool keep_nullable_vector_field_data =
+        field_meta.is_nullable() &&
+        IsVectorDataType(field_meta.get_data_type());
+    if (request.has_raw_data && !keep_nullable_vector_field_data &&
+        get_bit(field_data_ready_bitset_, field_id)) {
         drop_field_data_locked(field_id);
     }
     if (get_bit(binlog_index_bitset_, field_id)) {
@@ -924,6 +928,7 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     ValidResult result;
     result.valid_count = count;
 
+    bool got_valid_offsets_from_index = false;
     if (vector_indexings_.is_ready(field_id)) {
         auto field_indexing = vector_indexings_.get_field_indexing(field_id);
         auto cache_index = field_indexing->indexing_;
@@ -946,8 +951,11 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                 }
             }
             result.valid_count = result.valid_offsets.size();
+            got_valid_offsets_from_index = true;
         }
-    } else {
+    }
+
+    if (!got_valid_offsets_from_index) {
         auto column = get_column(field_id);
         if (column != nullptr && column->IsNullable()) {
             result.valid_data = std::make_unique<bool[]>(count);
@@ -1018,6 +1026,10 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                                    filter_result.valid_offsets.data());
             valid_count = filter_result.valid_count;
             valid_data = filter_result.valid_data.get();
+            if (valid_count == 0) {
+                return fill_with_empty(
+                    field_id, count, valid_count, valid_data);
+            }
         } else {
             ids_ds = GenIdsDataset(count, ids);
         }
@@ -1939,6 +1951,9 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         valid_offsets = filter_result.valid_offsets.data();
     }
     auto ret = fill_with_empty(field_id, count, valid_count, valid_data);
+    if (field_meta.is_vector() && valid_count == 0) {
+        return ret;
+    }
 
     if (!field_meta.is_vector() && column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
@@ -2696,8 +2711,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     // If the interim index doesn't have raw data, we need to keep the field data
     // because the data cannot be retrieved from the index.
     auto iter = index_has_raw_data_.find(field_id);
+    const bool keep_nullable_vector_field_data =
+        column->IsNullable() && IsVectorDataType(data_type);
     if (generated_interim_index && iter != index_has_raw_data_.end() &&
-        iter->second) {
+        iter->second && !keep_nullable_vector_field_data) {
         drop_field_data_locked(field_id);
     }
     if (data_type == DataType::GEOMETRY &&
@@ -3247,6 +3264,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool has_mmap_setting = false;
         bool mmap_enabled = false;
         bool is_vector = false;
+        bool has_nullable_vector = false;
 
         bool has_warmup_setting = false;
         bool warmup_sync = false;
@@ -3254,6 +3272,8 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             auto& field_meta = schema_->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
                 is_vector = true;
+                has_nullable_vector =
+                    has_nullable_vector || field_meta.is_nullable();
             }
 
             // if field has mmap setting, use it
@@ -3283,8 +3303,9 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         }
 
         auto group_id = field_binlog.fieldid();
-        // Skip if this field has an index with raw data
-        if (index_has_raw_data) {
+        // Nullable vectors may need column offset mapping when an index carries
+        // raw vectors but no valid-data mapping.
+        if (index_has_raw_data && !has_nullable_vector) {
             LOG_INFO(
                 "Skip loading fielddata for segment {} group {} because "
                 "index "
