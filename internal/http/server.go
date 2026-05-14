@@ -114,26 +114,19 @@ func registerDefaults() {
 				return
 			}
 
-			code := req.URL.Query().Get("code")
-			var auth string
-
-			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
+			// Only Proxy nodes can access /expr endpoint. (The auth wrapper
+			// above already verified credentials; if we got here on a non-proxy
+			// node it means the wrapper accepted root creds but the endpoint
+			// itself isn't backed by an executor on this node.)
+			if !expr.HasRegistered("proxy") {
 				w.WriteHeader(http.StatusForbidden)
 				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
 				return
 			}
 
-			// On Proxy node: require root user authentication via HTTP Basic Auth
-			if err := checkExprRootAuth(req); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
-				return
-			}
-			// Use bypass since we've already authenticated
-			auth = expr.AuthBypass
-
-			output, err := expr.Exec(code, auth)
+			code := req.URL.Query().Get("code")
+			// Use bypass since the wrapper already authenticated the caller as root.
+			output, err := expr.Exec(code, expr.AuthBypass)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error()) //nolint:gosec // error message is safe to include in response
@@ -145,6 +138,10 @@ func registerDefaults() {
 			resp["output"] = output
 			json.NewEncoder(w).Encode(resp)
 		}),
+		// /expr executes arbitrary Go expressions, so authentication is
+		// mandatory whenever the endpoint is enabled — not gated by
+		// adminAuthEnabled.
+		AuthPolicy: AuthAlways,
 	})
 	Register(&Handler{
 		Path:    StaticPath,
@@ -379,41 +376,3 @@ func getHTTPAddr() string {
 	return fmt.Sprintf(":%s", port)
 }
 
-// checkExprRootAuth verifies that the request is from the root user.
-// It supports HTTP Basic Auth and Bearer token formats.
-func checkExprRootAuth(req *http.Request) error {
-	// Try HTTP Basic Auth first
-	username, password, ok := req.BasicAuth()
-	if !ok {
-		// Try Bearer token format: "user:password"
-		auth := req.Header.Get("Authorization")
-		auth = strings.TrimPrefix(auth, "Bearer ")
-		parts := strings.SplitN(auth, ":", 2)
-		if len(parts) == 2 {
-			username, password = parts[0], parts[1]
-			ok = true
-		}
-	}
-
-	if !ok || username == "" || password == "" {
-		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
-	}
-
-	// Only root user can access /expr
-	if username != "root" {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return fmt.Errorf("only root user can access /expr endpoint")
-	}
-
-	// Verify root password
-	if passwordVerifyFunc == nil {
-		return fmt.Errorf("password verification not available")
-	}
-	if !passwordVerifyFunc(context.Background(), username, password) {
-		log.Warn("invalid root password for /expr access")
-		return fmt.Errorf("invalid root password")
-	}
-
-	log.Info("root user authenticated for /expr access")
-	return nil
-}
