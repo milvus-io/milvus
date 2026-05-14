@@ -90,6 +90,7 @@ type Manager struct {
 	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
 	forbiddenKeys *typeutil.ConcurrentSet[string]
 	immutableKeys *typeutil.ConcurrentSet[string]
+	sensitiveKeys *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -104,6 +105,7 @@ func NewManager() *Manager {
 		overlays:      typeutil.NewConcurrentMap[string, string](),
 		forbiddenKeys: typeutil.NewConcurrentSet[string](),
 		immutableKeys: typeutil.NewConcurrentSet[string](),
+		sensitiveKeys: typeutil.NewConcurrentSet[string](),
 		configCache:   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
@@ -323,6 +325,19 @@ func (m *Manager) ImmutableUpdate(key string) {
 // IsImmutable checks if a configuration key is marked as immutable
 func (m *Manager) IsImmutable(key string) bool {
 	return m.immutableKeys.Contain(formatKey(key))
+}
+
+// SensitiveUpdate marks a configuration key as sensitive. Sensitive keys are
+// redacted by the /management/config/get endpoint to prevent disclosure of
+// credentials, infrastructure topology, and security posture to authenticated
+// but unprivileged callers.
+func (m *Manager) SensitiveUpdate(key string) {
+	m.sensitiveKeys.Insert(formatKey(key))
+}
+
+// IsSensitive checks if a configuration key is marked as sensitive.
+func (m *Manager) IsSensitive(key string) bool {
+	return m.sensitiveKeys.Contain(formatKey(key))
 }
 
 func (m *Manager) UpdateSourceOptions(opts ...Option) {

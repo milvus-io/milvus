@@ -1405,10 +1405,10 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
+		// Redact keys explicitly marked Sensitive at the ParamItem level.
+		// Sensitive marking covers credentials, infrastructure topology
+		// (minio/etcd endpoints), and security posture (tlsMode, superUsers).
+		if paramMgr.IsSensitive(key) {
 			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
 			continue
 		}
