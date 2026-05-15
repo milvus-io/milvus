@@ -270,6 +270,7 @@ def kubectl_helper(milvus_ns):
           2. Then `kubectl wait` for Ready on the remaining time budget.
         """
         deadline = _time.time() + timeout
+        existence = None
         while _time.time() < deadline:
             existence = _sp.run(
                 [
@@ -290,10 +291,9 @@ def kubectl_helper(milvus_ns):
                 break
             _time.sleep(5)
         else:
-            logger.warning(f"[KUBECTL] no pods matched {instance_label} within {timeout}s")
-            return existence
+            raise TimeoutError(f"no pods matched {instance_label} within {timeout}s")
 
-        remaining = max(60, int(deadline - _time.time()))
+        remaining = max(1, int(deadline - _time.time()))
         cmd = [
             "kubectl",
             "wait",
@@ -307,6 +307,11 @@ def kubectl_helper(milvus_ns):
         ]
         result = _sp.run(cmd, capture_output=True, text=True, check=False)
         logger.info(f"[KUBECTL] wait pods {instance_label}: rc={result.returncode}")
+        if result.returncode != 0:
+            raise TimeoutError(
+                f"pods matching {instance_label} did not become Ready within {remaining}s: "
+                f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+            )
         return result
 
     class KubectlHelper:

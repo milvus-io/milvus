@@ -24,11 +24,10 @@ import pytest
 import yaml
 from common.common_type import CaseLabel
 
-from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
-
 from .base import TestCDCSyncBase, logger
 
 FAILOVER_TIMEOUT = int(os.getenv("FAILOVER_TIMEOUT", "180"))
+FORCE_PROMOTE_RPC_TIMEOUT = int(os.getenv("FORCE_PROMOTE_RPC_TIMEOUT", "60"))
 PROMOTE_RETRY_INTERVAL = 5
 DEFAULT_INSERT_COUNT = 200
 
@@ -71,6 +70,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         downstream_uri,
         downstream_token,
         pchannel_num,
+        timeout=FORCE_PROMOTE_RPC_TIMEOUT,
     ):
         """Call force_promote on downstream with a standalone-primary config."""
         config = {
@@ -84,7 +84,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
             "cross_cluster_topology": [],
         }
         downstream_client.update_replicate_configuration(
-            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS,
+            timeout=timeout,
             force_promote=True,
             **config,
         )
@@ -114,12 +114,14 @@ class TestCDCForcePromote(TestCDCSyncBase):
         while time.time() < deadline:
             try:
                 try:
+                    remaining = max(1, int(deadline - time.time()))
                     self.do_force_promote(
                         downstream_client,
                         target_cluster_id,
                         downstream_uri,
                         downstream_token,
                         pchannel_num,
+                        timeout=min(FORCE_PROMOTE_RPC_TIMEOUT, remaining),
                     )
                 except Exception as e:
                     if not self.is_already_primary_error(e):
@@ -134,7 +136,9 @@ class TestCDCForcePromote(TestCDCSyncBase):
             except Exception as e:
                 last_err = e
                 logger.warning(f"[FORCE_PROMOTE_RETRY] failed: {e}")
-                time.sleep(PROMOTE_RETRY_INTERVAL)
+                sleep_seconds = min(PROMOTE_RETRY_INTERVAL, max(0, deadline - time.time()))
+                if sleep_seconds:
+                    time.sleep(sleep_seconds)
         raise TimeoutError(f"force_promote did not become writable within {timeout}s; last error: {last_err}")
 
     def cleanup_resources(self):
@@ -355,6 +359,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
             kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
 
             th.join(timeout=FAILOVER_TIMEOUT)
+            assert not th.is_alive(), "Background force_promote thread did not finish in time"
             if promote_err:
                 logger.info(f"[EXPECTED] async promote raised: {promote_err[0]}")
 
@@ -384,6 +389,8 @@ class TestCDCForcePromote(TestCDCSyncBase):
             res = downstream_client.query(collection_name=c_after, filter="", output_fields=["count(*)"])
             assert res and res[0]["count(*)"] >= 100, f"downstream not writable after target restart: {res}"
         finally:
+            logger.info("[TEARDOWN] Waiting for target pods before topology restore...")
+            kubectl_helper.wait_for_pods_ready(target_cluster_id, timeout=300)
             logger.info("[TEARDOWN] Restoring A→B topology...")
             try:
                 switchover_helper(source_cluster_id, target_cluster_id)
@@ -485,6 +492,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
             # of whether the old primary is back.
 
             th.join(timeout=FAILOVER_TIMEOUT)
+            assert not th.is_alive(), "Background force_promote thread did not finish in time"
             if promote_err:
                 logger.info(f"[INFO] async promote raised (may be expected): {promote_err[0]}")
 
@@ -826,7 +834,7 @@ class TestCDCForcePromote(TestCDCSyncBase):
         try:
             switchover_helper(source_cluster_id, target_cluster_id)
         except Exception as e:
-            logger.warning(f"[iter {iteration}] pre-iter switchover skipped: {e}")
+            raise RuntimeError(f"[iter {iteration}] pre-iter switchover failed") from e
 
         # DDL before failover on upstream
         self.cleanup_collection(upstream_client, c_before)
