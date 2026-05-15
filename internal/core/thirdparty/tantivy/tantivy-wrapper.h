@@ -678,11 +678,18 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        auto res = RustResultWrapper(tantivy_finish_index(writer_));
+        // Null writer_ before the FFI call because tantivy_finish_index
+        // always consumes (frees) the Rust-side IndexWriterWrapper via
+        // Box::from_raw, regardless of success or failure.  If we leave
+        // writer_ pointing at the now-freed memory and the AssertInfo
+        // below throws, the destructor path will call free() on a
+        // dangling pointer (use-after-free / SEGFAULT).
+        auto w = writer_;
+        writer_ = nullptr;
+        auto res = RustResultWrapper(tantivy_finish_index(w));
         AssertInfo(res.result_->success,
                    "failed to finish index: {}",
                    res.result_->error);
-        writer_ = nullptr;
         finished_ = true;
     }
 
