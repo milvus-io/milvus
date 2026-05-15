@@ -723,6 +723,23 @@ func Test_NewServer(t *testing.T) {
 	})
 }
 
+func TestServer_GetReplicateConfiguration(t *testing.T) {
+	ctx := context.Background()
+	req := &milvuspb.GetReplicateConfigurationRequest{}
+	expectedResp := &milvuspb.GetReplicateConfigurationResponse{
+		Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Configuration: &commonpb.ReplicateConfiguration{},
+	}
+	mockProxy := mocks.NewMockProxy(t)
+	mockProxy.EXPECT().GetReplicateConfiguration(mock.Anything, req).Return(expectedResp, nil)
+
+	server := &Server{proxy: mockProxy}
+	resp, err := server.GetReplicateConfiguration(ctx, req)
+
+	assert.NoError(t, err)
+	assert.Same(t, expectedResp, resp)
+}
+
 func TestServer_Check(t *testing.T) {
 	ctx := context.Background()
 	server := getServer(t)

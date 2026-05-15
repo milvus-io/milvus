@@ -638,6 +638,16 @@ func (s *DelegatorSuite) TestSearch() {
 		})
 
 		s.Error(err)
+		s.ErrorIs(err, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(err))
+
+		status := merr.Status(err)
+		s.True(status.GetRetriable())
+		s.Equal(commonpb.ErrorCode_TimeTickLongDelay, status.GetErrorCode())
+
+		roundTripErr := merr.Error(status)
+		s.ErrorIs(roundTripErr, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(roundTripErr))
 	})
 
 	s.Run("downgrade_tsafe", func() {
@@ -1049,6 +1059,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
+		s.ErrorIs(err, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(err))
 	})
 
 	s.Run("get_worker_failed", func() {

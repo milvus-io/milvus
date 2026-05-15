@@ -11,8 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <algorithm>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -2679,7 +2682,179 @@ MakeManifestProto(const std::string& manifest_path) {
     return p;
 }
 
+SchemaPtr
+MakeSchemaWithFieldIds(std::initializer_list<int64_t> field_ids) {
+    auto schema = std::make_shared<Schema>();
+    for (auto field_id : field_ids) {
+        schema->AddField(FieldName("field_" + std::to_string(field_id)),
+                         FieldId(field_id),
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+    }
+    if (std::find(field_ids.begin(), field_ids.end(), 100) != field_ids.end()) {
+        schema->set_primary_field_id(FieldId(100));
+    }
+    return schema;
+}
+
 }  // namespace
+
+TEST_F(SegmentLoadInfoTest, ConstructSkipsIndexInfoForDroppedField) {
+    proto::segcore::SegmentLoadInfo p;
+    p.set_segmentid(100);
+    p.set_num_of_rows(1000);
+    auto* index_info = p.add_index_infos();
+    index_info->set_fieldid(102);
+    index_info->set_indexid(1002);
+    index_info->add_index_file_paths("/path/to/stale_index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo info(p, MakeSchemaWithFieldIds({100, 101}));
+
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(102)));
+    EXPECT_TRUE(info.GetIndexedFieldIds().empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewBinlogForDroppedField) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* stale_binlog = new_proto.add_binlog_paths();
+    stale_binlog->set_fieldid(102);
+    auto* log = stale_binlog->add_binlogs();
+    log->set_log_path("/path/to/stale_binlog");
+    log->set_entries_num(1000);
+
+    auto latest_schema = MakeSchemaWithFieldIds({100, 101});
+    SegmentLoadInfo current_info(current_proto, latest_schema);
+    SegmentLoadInfo new_info(new_proto, latest_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffFiltersDroppedChildFromMixedBinlogGroup) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* mixed_binlog = new_proto.add_binlog_paths();
+    mixed_binlog->set_fieldid(104);
+    mixed_binlog->add_child_fields(105);
+    mixed_binlog->add_child_fields(106);
+    auto* log = mixed_binlog->add_binlogs();
+    log->set_log_path("/path/to/mixed_binlog");
+    log->set_entries_num(1000);
+
+    auto latest_schema = MakeSchemaWithFieldIds({100, 105});
+    SegmentLoadInfo current_info(current_proto, latest_schema);
+    SegmentLoadInfo new_info(new_proto, latest_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewManifestColumnForDroppedField) {
+    auto latest_schema = MakeSchemaWithFieldIds({100, 101});
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"),
+                                 latest_schema);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), latest_schema);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/stale.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropsManifestFieldRemovedFromSchema) {
+    auto current_schema = MakeSchemaWithFieldIds({100, 102});
+    auto latest_schema = MakeSchemaWithFieldIds({100});
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"),
+                                 current_schema);
+    current_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/old.parquet"}}}));
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), latest_schema);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/stale.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsUsesNewSchema) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+
+    SegmentLoadInfo current_info(current_proto, MakeSchemaWithFieldIds({100}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100, 101}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_EQ(diff.fields_to_fill_default.size(), 1);
+    EXPECT_EQ(diff.fields_to_fill_default[0].get(), 101);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffDropsResourcesForFieldRemovedFromSchema) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* index_info = current_proto.add_index_infos();
+    index_info->set_fieldid(102);
+    index_info->set_indexid(1002);
+    index_info->add_index_file_paths("/path/to/stale_index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+    auto* binlog = current_proto.add_binlog_paths();
+    binlog->set_fieldid(102);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/stale_binlog");
+    log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    SegmentLoadInfo current_info(current_proto,
+                                 MakeSchemaWithFieldIds({100, 102}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+}
 
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffExternalManifestWithNewIndexDoesNotParseColumnNames) {

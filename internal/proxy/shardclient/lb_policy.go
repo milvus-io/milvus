@@ -237,10 +237,36 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		zap.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	var err error
+	var shardLeaders []NodeInfo
+	requestExcludedNodes := typeutil.NewUniqueSet()
 	tryExecute := func() (bool, error) {
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
+		if len(shardLeaders) > 0 && requestExcludedNodes.Len() >= len(shardLeaders) {
+			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
+			if err != nil {
+				log.Warn("failed to refresh shard leaders", zap.Error(err))
+				if lastErr != nil {
+					return true, lastErr
+				}
+				return true, err
+			}
+
+			allReplicaExcluded := len(shardLeaders) > 0
+			for _, node := range shardLeaders {
+				if !requestExcludedNodes.Contain(node.NodeID) {
+					allReplicaExcluded = false
+					break
+				}
+			}
+			if allReplicaExcluded {
+				log.Warn("all replicas are request-level excluded after refresh, clear it and retry")
+				requestExcludedNodes.Clear()
+			}
+		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
+		excludeNodes.Insert(requestExcludedNodes.Collect()...)
 		balancer := lb.getBalancer()
 		targetNode, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
@@ -273,7 +299,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
-			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
+			if merr.IsRetryableErr(err) {
+				requestExcludedNodes.Insert(targetNode.NodeID)
+			} else {
+				lb.blacklist.Add(workload.Channel, targetNode.NodeID)
+			}
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
 			return true, lastErr
 		}
@@ -281,12 +311,13 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		return true, nil
 	}
 
-	shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
+	shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
 		log.Warn("failed to get shard leaders", zap.Error(err))
 		return err
 	}
-	retryTimes := max(lb.retryOnReplica, len(shardLeaders))
+	// Sweep all shard leaders once, then allow configured request-level retries after every leader returns a retriable error.
+	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
 	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
 	if err != nil {
 		log.Warn("failed to execute",

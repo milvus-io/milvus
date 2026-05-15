@@ -2050,16 +2050,18 @@ class SegmentExpr : public Expr {
 
         using Index = index::ScalarIndex<IndexInnerType>;
         if (op == OpType::Match || op == OpType::InnerMatch ||
-            op == OpType::PostfixMatch) {
+            op == OpType::PostfixMatch || op == OpType::RegexMatch) {
             AssertInfo(num_index_chunk_ == 1,
                        "scalar index should have exactly 1 chunk, got {}",
                        num_index_chunk_);
             auto scalar_index =
                 dynamic_cast<const Index*>(pinned_index_[0].get());
             auto* index_ptr = const_cast<Index*>(scalar_index);
-            // 1, index support pattern query and try use it, then index handles the query;
-            // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-            return (index_ptr->TryUsePatternQuery() &&
+            // 1. index supports PatternMatch (iterates unique values) — preferred;
+            // 2. index supports PatternQuery via TryUsePatternQuery;
+            // 3. index has raw data for Reverse_Lookup fallback.
+            return index_ptr->SupportPatternMatch() ||
+                   (index_ptr->TryUsePatternQuery() &&
                     index_ptr->SupportPatternQuery()) ||
                    index_ptr->HasRawData();
         }

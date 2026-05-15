@@ -54,6 +54,12 @@ type SearchPipelineSuite struct {
 	span trace.Span
 }
 
+type searchPipelineTestOperator func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error)
+
+func (op searchPipelineTestOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	return op(ctx, span, inputs...)
+}
+
 func (s *SearchPipelineSuite) SetupTest() {
 	_, sp := otel.Tracer("test").Start(context.Background(), "Proxy-Search-PostExecute")
 	s.span = sp
@@ -243,6 +249,364 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesElementLevelResultsByRowID() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       4,
+			Topks:      []int64{4},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 3}},
+				},
+			},
+			Scores:         []float32{0.72, 0.85, 0.60, 0.95},
+			Distances:      []float32{7.2, 8.5, 6.0, 9.5},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 3, 1, 0}},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 30, 20, 90}},
+							},
+						},
+					},
+				},
+			},
+			AllSearchCount: 4,
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	s.Require().Len(results, 1)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal(int64(1), result.GetNumQueries())
+	s.Equal(int64(3), result.GetTopK())
+	s.Equal([]int64{3}, result.GetTopks())
+	s.Equal([]int64{3, 1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.95, 0.85, 0.60}, result.GetScores())
+	s.Equal([]float32{9.5, 8.5, 6.0}, result.GetDistances())
+	s.Equal([]int64{90, 30, 20}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal(int64(4), result.GetAllSearchCount())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesEachQueryChunkIndependently() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{3, 3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 1, 2, 2}},
+				},
+			},
+			Scores:         []float32{0.30, 0.90, 0.70, 0.80, 0.20, 0.60},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 0, 1, 0, 3}},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 11, 20, 30, 40, 41}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal(int64(2), result.GetNumQueries())
+	s.Equal(int64(2), result.GetTopK())
+	s.Equal([]int64{2, 2}, result.GetTopks())
+	s.Equal([]int64{1, 2, 1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.90, 0.70, 0.80, 0.60}, result.GetScores())
+	s.Equal([]int64{11, 20, 30, 41}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesStringPrimaryKeys() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{"row-a", "row-a", "row-b"}},
+				},
+			},
+			Scores:         []float32{0.10, 0.60, 0.40},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal([]string{"row-a", "row-b"}, result.GetIds().GetStrId().GetData())
+	s.Equal([]float32{0.60, 0.40}, result.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_PassesRowLevelResultsThrough() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+			Scores: []float32{0.90, 0.80},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	s.Require().Len(results, 1)
+	s.Same(input, results[0])
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_AllowsEmptyElementLevelResultWithoutMetric() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           0,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
+			AllSearchCount: 10,
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal(int64(1), result.GetNumQueries())
+	s.Equal(int64(0), result.GetTopK())
+	s.Equal([]int64{0}, result.GetTopks())
+	s.Empty(result.GetScores())
+	s.Equal(int64(10), result.GetAllSearchCount())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_DeduplicatesEqualScoreElementsByRowID() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2}},
+				},
+			},
+			Scores:         []float32{0.50, 0.50, 0.40},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 1, 0}},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal([]int64{1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.50, 0.40}, result.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestHybridSearchPipe_RerankReceivesCollapsedRowLevelResults() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2}},
+				},
+			},
+			Scores:         []float32{0.40, 0.60, 0.90},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 1, 0}},
+		},
+	}
+
+	originalReduceFactory := opFactory[hybridSearchReduceOp]
+	originalRerankFactory := opFactory[rerankOp]
+	originalAssembleFactory := opFactory[hybridAssembleOp]
+	defer func() {
+		opFactory[hybridSearchReduceOp] = originalReduceFactory
+		opFactory[rerankOp] = originalRerankFactory
+		opFactory[hybridAssembleOp] = originalAssembleFactory
+	}()
+
+	opFactory[hybridSearchReduceOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			return []any{[]*milvuspb.SearchResults{input}, []string{"IP"}}, nil
+		}), nil
+	}
+
+	rerankCalled := false
+	opFactory[rerankOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			rerankCalled = true
+
+			collapsed, ok := inputs[0].([]*milvuspb.SearchResults)
+			s.Require().True(ok)
+			metrics, ok := inputs[1].([]string)
+			s.Require().True(ok)
+			s.Equal([]string{"IP"}, metrics)
+			s.Require().Len(collapsed, 1)
+
+			data := collapsed[0].GetResults()
+			s.Nil(data.GetElementIndices())
+			s.Equal([]int64{2, 1}, data.GetIds().GetIntId().GetData())
+			s.Equal([]float32{0.90, 0.60}, data.GetScores())
+
+			return []any{&milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: data.GetNumQueries(),
+					TopK:       data.GetTopK(),
+					Topks:      append([]int64(nil), data.GetTopks()...),
+					Ids:        data.GetIds(),
+					Scores:     append([]float32(nil), data.GetScores()...),
+				},
+			}}, nil
+		}), nil
+	}
+
+	opFactory[hybridAssembleOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			collapsed, ok := inputs[0].([]*milvuspb.SearchResults)
+			s.Require().True(ok)
+			s.Require().Len(collapsed, 1)
+			s.Nil(collapsed[0].GetResults().GetElementIndices())
+
+			rankResult, ok := inputs[1].(*milvuspb.SearchResults)
+			s.Require().True(ok)
+			return []any{rankResult}, nil
+		}), nil
+	}
+
+	pipeline, err := newPipeline(hybridSearchPipe, &searchTask{})
+	s.Require().NoError(err)
+	err = pipeline.AddNodes(&searchTask{}, &nodeDef{
+		name:    "finish",
+		inputs:  []string{"result"},
+		outputs: []string{pipelineOutput},
+		opName:  lambdaOp,
+		params: map[string]any{
+			lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+				return []any{inputs[0]}, nil
+			},
+		},
+	})
+	s.Require().NoError(err)
+
+	result, _, err := pipeline.Run(context.Background(), s.span, nil, segcore.StorageCost{})
+	s.Require().NoError(err)
+	s.True(rerankCalled)
+	s.Equal([]int64{2, 1}, result.GetResults().GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.90, 0.60}, result.GetResults().GetScores())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_UsesMetricDirection() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1, 2}},
+				},
+			},
+			Scores:         []float32{0.8, 0.2, 0.5},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 3, 1}},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+	s.Require().NoError(err)
+
+	results := out[0].([]*milvuspb.SearchResults)
+	result := results[0].GetResults()
+
+	s.Nil(result.GetElementIndices())
+	s.Equal([]int64{1, 2}, result.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.2, 0.5}, result.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsEmptyMetricForElementLevelResult() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1}},
+				},
+			},
+			Scores:         []float32{0.8},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		},
+	}
+
+	op := &elementBestCollapseOperator{}
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+	s.Error(err)
+	s.Contains(err.Error(), "missing metric type")
 }
 
 // TestHybridAssembleOp_MixedFieldsDataLayoutErrors verifies that hybrid

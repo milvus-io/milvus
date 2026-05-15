@@ -273,6 +273,9 @@ func sortedKeys(m map[string]bool) []string {
 // allowlisted scheme (SSRF guard), non-empty host, no embedded userinfo.
 // Accepts two URI shapes — Milvus form (host=endpoint, path[0]=bucket) and
 // AWS form (host=bucket, endpoint from spec.extfs).
+//
+// For minio://, URI.host is treated as the endpoint; callers should use
+// minio://<endpoint>/<bucket>/<key>.
 func ValidateExternalSource(source string) error {
 	if source == "" {
 		return fmt.Errorf("external_source is empty")
@@ -293,7 +296,7 @@ func ValidateExternalSource(source string) error {
 		return fmt.Errorf("external_source must not embed credentials in the URL (use extfs.access_key_id / extfs.access_key_value instead)")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("external_source must have a non-empty host (e.g. s3://bucket/key or s3://endpoint/bucket/key)")
+		return fmt.Errorf("external_source must have a non-empty host (e.g. s3://bucket/key, s3://endpoint/bucket/key, or minio://endpoint/bucket/key)")
 	}
 	return nil
 }
@@ -320,18 +323,30 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 // anonymous=true), and region for AWS-family schemes. role_arn subsumes
 // use_iam (do not double-count). No inheritance from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
-	// extfs.cloud_provider is required and must be from the allowed set.
-	// Inferring cloud_provider from URI scheme is ambiguous (s3:// matches
-	// AWS S3 and self-hosted MinIO; no scheme-only signal can pick the
-	// correct URI parsing form, auth protocol, or default endpoint). Force
-	// the caller to be explicit so misconfiguration fails at the API
-	// boundary instead of silently routing to the wrong backend.
+	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
+	u, err := url.Parse(externalSource)
+	scheme := ""
+	if err == nil {
+		scheme = strings.ToLower(u.Scheme)
+	}
+
+	// extfs.cloud_provider is required and must be from the allowed set, except
+	// for minio:// where the scheme selects MinIO validation semantics. This is
+	// a local classification only; it is not written back to external_spec.
+	// Inferring cloud_provider from s3:// is ambiguous (AWS S3 vs self-hosted
+	// MinIO), so s3-family URIs still require the caller to be explicit.
 	cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	if scheme == SchemeMinIO && cp == "" {
+		cp = CloudProviderMinIO
+	}
 	if cp == "" {
 		return fmt.Errorf("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
 	}
 	if !validCloudProviders[cp] {
 		return fmt.Errorf("extfs.cloud_provider=%q is not supported: must be one of [aws, gcp, aliyun, tencent, huawei, azure, minio]", cp)
+	}
+	if scheme == SchemeMinIO && cp != CloudProviderMinIO {
+		return fmt.Errorf("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
@@ -356,13 +371,6 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 	if modes > 1 {
 		return fmt.Errorf("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
-	}
-
-	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
-	u, err := url.Parse(externalSource)
-	scheme := ""
-	if err == nil {
-		scheme = strings.ToLower(u.Scheme)
 	}
 
 	if hasGCPImpersonation {

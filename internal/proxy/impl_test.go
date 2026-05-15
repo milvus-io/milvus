@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/bytedance/mockey"
@@ -2398,9 +2398,9 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
 }
 
-func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
-	t.Run("consistency check fails", func(t *testing.T) {
-		mockey.PatchConvey("consistency check blocks AddCollectionField", t, func() {
+func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
+	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {
+		mockey.PatchConvey("AddCollectionField skips schema version stats gate", t, func() {
 			node := createTestProxy()
 			defer node.sched.Close()
 
@@ -2408,46 +2408,15 @@ func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
 				Status: merr.Success(),
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
-
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
-				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
-			).Build()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-			defer cancel()
-
-			resp, err := node.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
-				DbName:         "default",
-				CollectionName: "test_coll",
-			})
-			assert.NoError(t, err)
-			assert.ErrorIs(t, merr.Error(resp), merr.ErrCollectionSchemaVersionNotReady)
-			assert.True(t, resp.GetRetriable())
-			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
-		})
-	})
-
-	t.Run("consistency check retries until success", func(t *testing.T) {
-		mockey.PatchConvey("consistency check retries AddCollectionField", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(),
-				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
-			}, nil).Build()
-
-			attempt := 0
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).To(func(*Proxy, context.Context, string, string) error {
-				attempt++
-				if attempt == 1 {
-					return merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3)
-				}
-				return nil
-			}).Build()
-
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(*Proxy, context.Context, *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					require.FailNow(t, "AddCollectionField should not query collection statistics")
+					return nil, errors.New("unexpected GetCollectionStatistics call")
+				}).Build()
 			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
 				_ = t.OnEnqueue()
+				addTask := t.(*addCollectionFieldTask)
+				addTask.result = merr.Success()
 				return nil
 			}).Build()
 			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -2458,12 +2427,11 @@ func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
 			})
 			assert.NoError(t, err)
 			assert.True(t, merr.Ok(resp))
-			assert.Equal(t, 2, attempt)
 		})
 	})
 
-	t.Run("concurrent request rejected", func(t *testing.T) {
-		mockey.PatchConvey("in-flight gate blocks concurrent AddCollectionField", t, func() {
+	t.Run("allows overlapping requests for same collection", func(t *testing.T) {
+		mockey.PatchConvey("AddCollectionField has no proxy-local in-flight gate", t, func() {
 			node := createTestProxy()
 			defer node.sched.Close()
 
@@ -2471,20 +2439,48 @@ func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
 				Status: merr.Success(),
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
+				Status: merr.Success(),
+			}, nil).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				addTask := t.(*addCollectionFieldTask)
+				addTask.result = merr.Success()
+				return nil
+			}).Build()
 
-			// Simulate an in-flight schema change on the same collection
-			collKey := "default/test_coll"
-			node.alterSchemaInFlight.Store(collKey, struct{}{})
+			firstWaitStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var waitCalls atomic.Int32
+			mockey.Mock((*TaskCondition).WaitToFinish).To(func(*TaskCondition) error {
+				if waitCalls.Add(1) == 1 {
+					close(firstWaitStarted)
+					<-releaseFirst
+				}
+				return nil
+			}).Build()
+
+			firstDone := make(chan *commonpb.Status, 1)
+			go func() {
+				resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+					DbName:         "default",
+					CollectionName: "test_coll",
+				})
+				require.NoError(t, err)
+				firstDone <- resp
+			}()
+			<-firstWaitStarted
 
 			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
 				DbName:         "default",
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp))
-			assert.Contains(t, resp.GetReason(), "another schema-change request is already in progress")
+			assert.True(t, merr.Ok(resp))
+			assert.Equal(t, int32(2), waitCalls.Load())
 
-			node.alterSchemaInFlight.Delete(collKey)
+			close(releaseFirst)
+			assert.True(t, merr.Ok(<-firstDone))
 		})
 	})
 }
@@ -2754,8 +2750,8 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 		})
 	})
 
-	t.Run("schema version consistency check fails", func(t *testing.T) {
-		mockey.PatchConvey("consistency check fails", t, func() {
+	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {
+		mockey.PatchConvey("AlterCollectionSchema skips schema version stats gate", t, func() {
 			node := createTestProxy()
 			defer node.sched.Close()
 
@@ -2763,21 +2759,79 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				Status: merr.Success(),
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(*Proxy, context.Context, *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					require.FailNow(t, "AlterCollectionSchema should not query collection statistics")
+					return nil, errors.New("unexpected GetCollectionStatistics call")
+				}).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				alterTask := t.(*alterCollectionSchemaTask)
+				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
 
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
-				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
-			).Build()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-			defer cancel()
-
-			resp, err := node.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				DbName:         "default",
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-			assert.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrCollectionSchemaVersionNotReady)
-			assert.True(t, resp.GetAlterStatus().GetRetriable())
-			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetAlterStatus().GetErrorCode())
+			assert.True(t, merr.Ok(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("allows overlapping requests for same collection", func(t *testing.T) {
+		mockey.PatchConvey("AlterCollectionSchema has no proxy-local in-flight gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
+				Status: merr.Success(),
+			}, nil).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				alterTask := t.(*alterCollectionSchemaTask)
+				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+				return nil
+			}).Build()
+
+			firstWaitStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var waitCalls atomic.Int32
+			mockey.Mock((*TaskCondition).WaitToFinish).To(func(*TaskCondition) error {
+				if waitCalls.Add(1) == 1 {
+					close(firstWaitStarted)
+					<-releaseFirst
+				}
+				return nil
+			}).Build()
+
+			firstDone := make(chan *milvuspb.AlterCollectionSchemaResponse, 1)
+			go func() {
+				resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+					DbName:         "default",
+					CollectionName: "test_coll",
+				})
+				require.NoError(t, err)
+				firstDone <- resp
+			}()
+			<-firstWaitStarted
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp.GetAlterStatus()))
+			assert.Equal(t, int32(2), waitCalls.Load())
+
+			close(releaseFirst)
+			assert.True(t, merr.Ok((<-firstDone).GetAlterStatus()))
 		})
 	})
 
@@ -2790,8 +2844,6 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				Status: merr.Success(),
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
-
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
 
 			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, _ task) error {
 				return errors.New("queue full")
@@ -2814,8 +2866,6 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				Status: merr.Success(),
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
-
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
 
 			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
 			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
@@ -2843,8 +2893,6 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
 			}, nil).Build()
 
-			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
-
 			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
 			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
 				_ = t.OnEnqueue()
@@ -2857,189 +2905,6 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-		})
-	})
-}
-
-func TestCheckSchemaVersionConsistency(t *testing.T) {
-	t.Run("GetCollectionStatistics returns error", func(t *testing.T) {
-		mockey.PatchConvey("error from GetCollectionStatistics", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return nil, errors.New("rpc error")
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
-		})
-	})
-
-	t.Run("GetCollectionStatistics returns RPC error status", func(t *testing.T) {
-		mockey.PatchConvey("rpc status error", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Status(merr.ErrCollectionNotFound),
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
-		})
-	})
-
-	t.Run("both keys absent returns nil", func(t *testing.T) {
-		mockey.PatchConvey("no keys present", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats:  []*commonpb.KeyValuePair{},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.NoError(t, err)
-		})
-	})
-
-	t.Run("only consistent key present total absent returns error", func(t *testing.T) {
-		mockey.PatchConvey("consistent only", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "incomplete schema version consistency stats")
-		})
-	})
-
-	t.Run("only total key present consistent absent returns error", func(t *testing.T) {
-		mockey.PatchConvey("total only", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "incomplete schema version consistency stats")
-		})
-	})
-
-	t.Run("consistent less than total returns error with counts", func(t *testing.T) {
-		mockey.PatchConvey("consistent < total", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
-							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
-			assert.Contains(t, err.Error(), "5")
-			assert.Contains(t, err.Error(), "10")
-			status := merr.Status(err)
-			assert.True(t, status.GetRetriable())
-			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
-		})
-	})
-
-	t.Run("consistent equals total returns nil", func(t *testing.T) {
-		mockey.PatchConvey("consistent == total", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "10"},
-							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.NoError(t, err)
-		})
-	})
-
-	t.Run("malformed consistent value returns parse error", func(t *testing.T) {
-		mockey.PatchConvey("bad consistent value", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "not-a-number"},
-							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
-		})
-	})
-
-	t.Run("malformed total value returns parse error", func(t *testing.T) {
-		mockey.PatchConvey("bad total value", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
-
-			mockey.Mock((*Proxy).GetCollectionStatistics).To(
-				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-					return &milvuspb.GetCollectionStatisticsResponse{
-						Status: merr.Success(),
-						Stats: []*commonpb.KeyValuePair{
-							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
-							{Key: common.SchemaVersionTotalSegmentsKey, Value: "bad-value"},
-						},
-					}, nil
-				}).Build()
-
-			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
 		})
 	})
 }

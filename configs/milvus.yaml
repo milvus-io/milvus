@@ -502,6 +502,9 @@ queryNode:
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
         scalarField: sync
+        # options: sync, async, disable.
+        # Cache warmup for scalar indexes and the system PK index.
+        # Defaults to "sync".
         scalarIndex: sync
         vectorField: disable # cache warmup for vector field raw data is by default disabled.
         vectorIndex: sync

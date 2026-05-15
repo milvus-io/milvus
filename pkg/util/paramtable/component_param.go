@@ -3667,7 +3667,10 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Export:       true,
+		Doc: `options: sync, async, disable.
+Cache warmup for scalar indexes and the system PK index.
+Defaults to "sync".`,
+		Export: true,
 	}
 	p.TieredWarmupScalarIndex.Init(base.mgr)
 

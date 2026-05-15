@@ -27,9 +27,11 @@
 #include <boost/dynamic_bitset.hpp>
 #include <NamedType/named_type.hpp>
 
+#include "common/BitsetView.h"
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
+#include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -277,6 +279,14 @@ struct SearchResult {
         this->vector_iterators_ = vector_iterators;
     }
 
+    BitsetView
+    PinBitset(TargetBitmap&& bitset) {
+        auto pinned = std::make_unique<TargetBitmap>(std::move(bitset));
+        auto view = BitsetView(*pinned);
+        pinned_bitsets_.emplace_back(std::move(pinned));
+        return view;
+    }
+
  public:
     int64_t total_nq_;
     int64_t unity_topK_;
@@ -322,6 +332,7 @@ struct SearchResult {
         element_iterators_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
+    std::vector<TargetBitmapPtr> pinned_bitsets_{};
 
     bool
     HasIterators() const {

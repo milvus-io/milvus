@@ -32,6 +32,7 @@ import (
 
 type PackedWriter struct {
 	cPackedWriter C.CPackedWriter
+	closedSizes   []int64
 }
 
 type FFIPackedWriter struct {

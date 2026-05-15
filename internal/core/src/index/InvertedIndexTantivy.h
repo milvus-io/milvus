@@ -254,6 +254,22 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
             case proto::plan::OpType::Match: {
                 return PatternQuery(pattern);
             }
+            case proto::plan::OpType::RegexMatch: {
+                TargetBitmap bitset(Count());
+                PartialRegexMatcher matcher(pattern);
+                wrapper_->regex_match_query(
+                    &matcher,
+                    [](void* ctx,
+                       const uint8_t* term,
+                       uintptr_t term_len) -> bool {
+                        auto* matcher = static_cast<PartialRegexMatcher*>(ctx);
+                        std::string_view term_view(
+                            reinterpret_cast<const char*>(term), term_len);
+                        return (*matcher)(term_view);
+                    },
+                    &bitset);
+                return bitset;
+            }
             default:
                 ThrowInfo(
                     ErrorCode::OpTypeInvalid,

@@ -410,6 +410,12 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				fieldName := field.Name
 				fieldValue := data.Get(fieldName)
 
+				// For partial update, missing fields mean "do not update this field".
+				// Explicit JSON null is handled below as an update to null for nullable fields.
+				if partialUpdate && !fieldValue.Exists() {
+					continue
+				}
+
 				if field.Nullable || field.DefaultValue != nil {
 					if fieldValue.Type == gjson.Null {
 						validDataMap[fieldName] = append(validDataMap[fieldName], false)
@@ -417,12 +423,6 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					} else {
 						validDataMap[fieldName] = append(validDataMap[fieldName], true)
 					}
-				}
-
-				// For partial update, check if field exists in the data
-				if partialUpdate && !fieldValue.Exists() {
-					// Skip fields that are not provided in partial update
-					continue
 				}
 
 				dataString := fieldValue.String()
@@ -1063,17 +1063,26 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
 	for name, column := range nameColumns {
+		validData, hasValidData := validDataMap[name]
 		if fieldLen[name] == 0 && name == pkFieldName && isAutoIDPK {
 			continue
 		}
 		if fieldLen[name] == 0 && partialUpdate {
-			// for partial update, skip update for nullable field
-			// cause we cannot distinguish between missing fields and fields explicitly set to null
-			log.Info("skip empty field for partial update",
-				zap.String("fieldName", name))
-			continue
+			if hasValidData {
+				if len(validData) != rowsLen {
+					log.Info("field len is not equal to rows len",
+						zap.String("fieldName", name),
+						zap.Int("fieldLen", len(validData)),
+						zap.Int("rowsLen", rowsLen))
+					return nil, fmt.Errorf("column %s has length %d, expected %d", name, len(validData), rowsLen)
+				}
+			} else {
+				log.Info("skip empty field for partial update",
+					zap.String("fieldName", name))
+				continue
+			}
 		}
-		if fieldLen[name] != rowsLen && partialUpdate {
+		if fieldLen[name] != rowsLen && partialUpdate && (!hasValidData || len(validData) != rowsLen) {
 			// for partial update, if try to update different field in different rows, return error
 			log.Info("field len is not equal to rows len",
 				zap.String("fieldName", name),
@@ -1488,6 +1497,141 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
+func fieldDataRowCount(fieldData *schemapb.FieldData) (int64, error) {
+	if len(fieldData.GetValidData()) > 0 {
+		return int64(len(fieldData.GetValidData())), nil
+	}
+	return fieldDataValueCount(fieldData)
+}
+
+func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
+	switch fieldData.GetType() {
+	case schemapb.DataType_Bool:
+		return int64(len(fieldData.GetScalars().GetBoolData().GetData())), nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return int64(len(fieldData.GetScalars().GetIntData().GetData())), nil
+	case schemapb.DataType_Int64:
+		return int64(len(fieldData.GetScalars().GetLongData().GetData())), nil
+	case schemapb.DataType_Float:
+		return int64(len(fieldData.GetScalars().GetFloatData().GetData())), nil
+	case schemapb.DataType_Double:
+		return int64(len(fieldData.GetScalars().GetDoubleData().GetData())), nil
+	case schemapb.DataType_Timestamptz:
+		if fieldData.GetScalars().GetTimestamptzData() != nil {
+			return int64(len(fieldData.GetScalars().GetTimestamptzData().GetData())), nil
+		}
+		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
+	case schemapb.DataType_Array:
+		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
+	case schemapb.DataType_JSON:
+		return int64(len(fieldData.GetScalars().GetJsonData().GetData())), nil
+	case schemapb.DataType_Geometry:
+		if fieldData.GetScalars().GetGeometryData() != nil {
+			return int64(len(fieldData.GetScalars().GetGeometryData().GetData())), nil
+		}
+		return int64(len(fieldData.GetScalars().GetGeometryWktData().GetData())), nil
+	case schemapb.DataType_BinaryVector:
+		dim := fieldData.GetVectors().GetDim()
+		bytesPerRow := dim / 8
+		if bytesPerRow <= 0 {
+			return 0, fmt.Errorf("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
+		}
+		return int64(len(fieldData.GetVectors().GetBinaryVector())) / bytesPerRow, nil
+	case schemapb.DataType_FloatVector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 {
+			return 0, fmt.Errorf("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
+		}
+		return int64(len(fieldData.GetVectors().GetFloatVector().GetData())) / dim, nil
+	case schemapb.DataType_Float16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		bytesPerRow := dim * 2
+		if bytesPerRow <= 0 {
+			return 0, fmt.Errorf("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+		}
+		return int64(len(fieldData.GetVectors().GetFloat16Vector())) / bytesPerRow, nil
+	case schemapb.DataType_BFloat16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		bytesPerRow := dim * 2
+		if bytesPerRow <= 0 {
+			return 0, fmt.Errorf("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+		}
+		return int64(len(fieldData.GetVectors().GetBfloat16Vector())) / bytesPerRow, nil
+	case schemapb.DataType_SparseFloatVector:
+		return int64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents())), nil
+	case schemapb.DataType_Int8Vector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 {
+			return 0, fmt.Errorf("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+		}
+		return int64(len(fieldData.GetVectors().GetInt8Vector())) / dim, nil
+	default:
+		return 0, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+	}
+}
+
+type fieldDataRowAccessor struct {
+	fieldData      *schemapb.FieldData
+	validData      []bool
+	compactIndices []int64
+}
+
+func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccessor, error) {
+	accessor := &fieldDataRowAccessor{
+		fieldData: fieldData,
+		validData: fieldData.GetValidData(),
+	}
+	if len(accessor.validData) == 0 {
+		return accessor, nil
+	}
+
+	compactIndices := make([]int64, len(accessor.validData))
+	validCount := int64(0)
+	for i, valid := range accessor.validData {
+		if valid {
+			compactIndices[i] = validCount
+			validCount++
+		} else {
+			compactIndices[i] = -1
+		}
+	}
+	if validCount == 0 {
+		accessor.compactIndices = compactIndices
+		return accessor, nil
+	}
+
+	valueCount, err := fieldDataValueCount(fieldData)
+	if err != nil {
+		return nil, err
+	}
+	if valueCount == int64(len(accessor.validData)) {
+		return accessor, nil
+	}
+	if valueCount != validCount {
+		return nil, fmt.Errorf("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
+	}
+	accessor.compactIndices = compactIndices
+	return accessor, nil
+}
+
+func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error) {
+	if len(accessor.validData) == 0 {
+		return rowIdx, true, nil
+	}
+	if rowIdx >= int64(len(accessor.validData)) {
+		return 0, false, fmt.Errorf("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
+	}
+	if !accessor.validData[rowIdx] {
+		return 0, false, nil
+	}
+	if accessor.compactIndices != nil {
+		return accessor.compactIndices[rowIdx], true, nil
+	}
+	return rowIdx, true, nil
+}
+
 //nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
@@ -1495,47 +1639,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	columnNum := len(fieldDataList)
 	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
-			switch fieldDataList[0].GetType() {
-			case schemapb.DataType_Bool:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetBoolData().GetData()))
-			case schemapb.DataType_Int8:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetIntData().GetData()))
-			case schemapb.DataType_Int16:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetIntData().GetData()))
-			case schemapb.DataType_Int32:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetIntData().GetData()))
-			case schemapb.DataType_Int64:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetLongData().GetData()))
-			case schemapb.DataType_Float:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetFloatData().GetData()))
-			case schemapb.DataType_Double:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetDoubleData().GetData()))
-			case schemapb.DataType_Timestamptz:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetStringData().GetData()))
-			case schemapb.DataType_String:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetStringData().GetData()))
-			case schemapb.DataType_VarChar:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetStringData().GetData()))
-			case schemapb.DataType_Array:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetArrayData().GetData()))
-			case schemapb.DataType_JSON:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetJsonData().GetData()))
-			case schemapb.DataType_Geometry:
-				rowsNum = int64(len(fieldDataList[0].GetScalars().GetGeometryWktData().Data))
-			case schemapb.DataType_BinaryVector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBinaryVector())*8) / fieldDataList[0].GetVectors().GetDim()
-			case schemapb.DataType_FloatVector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetFloatVector().GetData())) / fieldDataList[0].GetVectors().GetDim()
-			case schemapb.DataType_Float16Vector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetFloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
-			case schemapb.DataType_BFloat16Vector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBfloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
-			case schemapb.DataType_SparseFloatVector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetSparseFloatVector().GetContents()))
-			case schemapb.DataType_Int8Vector:
-				rowsNum = int64(len(fieldDataList[0].GetVectors().GetInt8Vector())) / fieldDataList[0].GetVectors().GetDim()
-			default:
-				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].GetType(), fieldDataList[0].GetFieldName())
+			var err error
+			rowsNum, err = fieldDataRowCount(fieldDataList[0])
+			if err != nil {
+				return nil, err
 			}
 		} else if ids != nil {
 			switch ids.GetIdField().(type) {
@@ -1552,6 +1659,14 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 	if rowsNum == int64(0) {
 		return []map[string]interface{}{}, nil
+	}
+	fieldDataAccessors := make([]*fieldDataRowAccessor, 0, columnNum)
+	for _, fieldData := range fieldDataList {
+		accessor, err := newFieldDataRowAccessor(fieldData)
+		if err != nil {
+			return nil, err
+		}
+		fieldDataAccessors = append(fieldDataAccessors, accessor)
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
@@ -1570,101 +1685,68 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		row := map[string]interface{}{}
 		if columnNum > 0 {
 			for j := 0; j < columnNum; j++ {
+				fieldData := fieldDataList[j]
+				dataIdx, valid, err := fieldDataAccessors[j].rowIndex(i)
+				if err != nil {
+					return nil, err
+				}
+				if !valid {
+					if !fieldData.GetIsDynamic() {
+						row[fieldData.GetFieldName()] = nil
+					}
+					continue
+				}
 				switch fieldDataList[j].GetType() {
 				case schemapb.DataType_Bool:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetBoolData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetBoolData().GetData()[dataIdx]
 				case schemapb.DataType_Int8:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = int8(fieldDataList[j].GetScalars().GetIntData().GetData()[i])
+					row[fieldDataList[j].GetFieldName()] = int8(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
 				case schemapb.DataType_Int16:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = int16(fieldDataList[j].GetScalars().GetIntData().GetData()[i])
+					row[fieldDataList[j].GetFieldName()] = int16(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
 				case schemapb.DataType_Int32:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetIntData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx]
 				case schemapb.DataType_Int64:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
 					if enableInt64 {
-						row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetLongData().GetData()[i]
+						row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx]
 					} else {
-						row[fieldDataList[j].GetFieldName()] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().GetData()[i], 10)
+						row[fieldDataList[j].GetFieldName()] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx], 10)
 					}
 				case schemapb.DataType_Float:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetFloatData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetFloatData().GetData()[dataIdx]
 				case schemapb.DataType_Double:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[dataIdx]
 				case schemapb.DataType_Timestamptz:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
+					if fieldDataList[j].GetScalars().GetTimestamptzData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}
-					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[i]
 				case schemapb.DataType_String:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_VarChar:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_BinaryVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[i*(fieldDataList[j].GetVectors().GetDim()/8) : (i+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[i*fieldDataList[j].GetVectors().GetDim() : (i+1)*fieldDataList[j].GetVectors().GetDim()]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Float16Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBfloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBfloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_SparseFloatVector:
-					row[fieldDataList[j].GetFieldName()] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[i])
+					row[fieldDataList[j].GetFieldName()] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[dataIdx])
 				case schemapb.DataType_Int8Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[i*fieldDataList[j].GetVectors().GetDim() : (i+1)*fieldDataList[j].GetVectors().GetDim()]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Array:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetArrayData().GetData()[i]
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
 				case schemapb.DataType_JSON:
-					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
-						row[fieldDataList[j].GetFieldName()] = nil
-						continue
-					}
 					data, ok := fieldDataList[j].GetScalars().GetData().(*schemapb.ScalarField_JsonData)
 					if ok && !fieldDataList[j].GetIsDynamic() {
-						row[fieldDataList[j].GetFieldName()] = string(data.JsonData.GetData()[i])
+						row[fieldDataList[j].GetFieldName()] = string(data.JsonData.GetData()[dataIdx])
 					} else {
 						var dataMap map[string]interface{}
 
-						err := json.Unmarshal(fieldDataList[j].GetScalars().GetJsonData().Data[i], &dataMap)
+						err := json.Unmarshal(fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx], &dataMap)
 						if err != nil {
 							log.Error(fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
 							return nil, err
@@ -1683,11 +1765,11 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						}
 					}
 				case schemapb.DataType_Geometry:
-					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
-						row[fieldDataList[j].FieldName] = nil
-						continue
+					if fieldDataList[j].GetScalars().GetGeometryData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
 					}
-					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[i]
 				default:
 					row[fieldDataList[j].GetFieldName()] = ""
 				}

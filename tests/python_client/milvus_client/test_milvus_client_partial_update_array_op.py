@@ -1419,3 +1419,227 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         assert res[0]["tags"] == [2, 3, 4]
 
         self.drop_collection(client, collection_name)
+
+    """
+    ******************************************************************
+    #  Module 4: Sealed segment / index path (P1)
+    #  Verify flush + release + load + array predicate query
+    ******************************************************************
+    """
+
+    # 4.1 Append on sealed segment — verify via query + array predicate
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_partial_op_append_sealed_path(self):
+        """
+        target: verify ARRAY_APPEND works on sealed segment after flush + reload
+        method: insert rows, append, flush, release, load, then verify via
+                both output_fields and array_contains predicate
+        expected: appended values are present in sealed segment and queryable
+                  via array_contains
+        """
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64, max_capacity=16)
+
+        index_params = self.prepare_index_params(client)[0]
+        for f in schema.fields:
+            index_params.add_index(f.name, index_type="AUTOINDEX")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
+
+        # insert initial rows
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2]},
+                {"id": 1, "vector": [0.2] * 4, "tags": [10, 20]},
+            ],
+            partial_update=True,
+        )
+
+        # append
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [3, 4]},
+                {"id": 1, "tags": [30]},
+            ],
+            field_ops={"tags": FieldOp.array_append()},
+        )
+
+        # flush → release → load to force sealed segment path
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # verify via output_fields
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
+        actual = {row["id"]: row["tags"] for row in res}
+        assert actual[0] == [1, 2, 3, 4]
+        assert actual[1] == [10, 20, 30]
+
+        # verify via array_contains predicate — appended value 3 should be found
+        res = self.query(client, collection_name, filter="array_contains(tags, 3)", output_fields=["id"])[0]
+        assert len(res) == 1
+        assert res[0]["id"] == 0
+
+        # appended value 30 should be found
+        res = self.query(client, collection_name, filter="array_contains(tags, 30)", output_fields=["id"])[0]
+        assert len(res) == 1
+        assert res[0]["id"] == 1
+
+        self.drop_collection(client, collection_name)
+
+    # 4.2 Remove on sealed segment — verify via query + array predicate
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_partial_op_remove_sealed_path(self):
+        """
+        target: verify ARRAY_REMOVE works on sealed segment after flush + reload
+        method: insert rows, remove, flush, release, load, then verify via
+                both output_fields and array_contains predicate
+        expected: removed values are gone from sealed segment and not queryable
+                  via array_contains
+        """
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field("tags", DataType.ARRAY, element_type=DataType.INT64, max_capacity=16)
+
+        index_params = self.prepare_index_params(client)[0]
+        for f in schema.fields:
+            index_params.add_index(f.name, index_type="AUTOINDEX")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
+
+        # insert initial rows
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "vector": [0.1] * 4, "tags": [1, 2, 1, 3]},
+                {"id": 1, "vector": [0.2] * 4, "tags": [10, 20, 10]},
+            ],
+            partial_update=True,
+        )
+
+        # remove value 1 from row0, value 10 from row1
+        self.upsert(
+            client,
+            collection_name,
+            [
+                {"id": 0, "tags": [1]},
+                {"id": 1, "tags": [10]},
+            ],
+            field_ops={"tags": FieldOp.array_remove()},
+        )
+
+        # flush → release → load to force sealed segment path
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # verify via output_fields
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["tags"])[0]
+        actual = {row["id"]: row["tags"] for row in res}
+        assert actual[0] == [2, 3]
+        assert actual[1] == [20]
+
+        # removed value 1 should NOT be found via array_contains
+        res = self.query(client, collection_name, filter="array_contains(tags, 1)", output_fields=["id"])[0]
+        assert len(res) == 0
+
+        # removed value 10 should NOT be found
+        res = self.query(client, collection_name, filter="array_contains(tags, 10)", output_fields=["id"])[0]
+        assert len(res) == 0
+
+        # remaining value 2 should still be found
+        res = self.query(client, collection_name, filter="array_contains(tags, 2)", output_fields=["id"])[0]
+        assert len(res) == 1
+        assert res[0]["id"] == 0
+
+        self.drop_collection(client, collection_name)
+
+    # 4.3 Append + Remove on sealed segment with VarChar type
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_partial_op_append_remove_varchar_sealed_path(self):
+        """
+        target: verify append then remove on sealed segment with VarChar array
+        method: insert, append, flush+release+load, verify; then remove,
+                flush+release+load, verify again via array_contains
+        expected: values correctly appended and removed on sealed path
+        """
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field("labels", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=16, max_length=50)
+
+        index_params = self.prepare_index_params(client)[0]
+        for f in schema.fields:
+            index_params.add_index(f.name, index_type="AUTOINDEX")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client, collection_name, 4, schema=schema, consistency_level="Strong", index_params=index_params
+        )
+
+        # insert
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": 0, "vector": [0.1] * 4, "labels": ["red", "blue"]}],
+            partial_update=True,
+        )
+
+        # append "green"
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": 0, "labels": ["green"]}],
+            field_ops={"labels": FieldOp.array_append()},
+        )
+
+        # flush → release → load
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # verify append on sealed path
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["labels"])[0]
+        assert res[0]["labels"] == ["red", "blue", "green"]
+
+        res = self.query(client, collection_name, filter='array_contains(labels, "green")', output_fields=["id"])[0]
+        assert len(res) == 1
+
+        # now remove "blue" on sealed segment
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": 0, "labels": ["blue"]}],
+            field_ops={"labels": FieldOp.array_remove()},
+        )
+
+        # flush → release → load again
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # verify remove on sealed path
+        res = self.query(client, collection_name, filter="id >= 0", output_fields=["labels"])[0]
+        assert res[0]["labels"] == ["red", "green"]
+
+        res = self.query(client, collection_name, filter='array_contains(labels, "blue")', output_fields=["id"])[0]
+        assert len(res) == 0
+
+        res = self.query(client, collection_name, filter='array_contains(labels, "red")', output_fields=["id"])[0]
+        assert len(res) == 1
+
+        self.drop_collection(client, collection_name)

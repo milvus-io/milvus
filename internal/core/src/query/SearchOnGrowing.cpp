@@ -186,7 +186,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         BitsetView search_bitset = bitset;
         if (offset_mapping.IsEnabled()) {
             transformed_bitset = TransformBitset(bitset, offset_mapping);
-            search_bitset = BitsetView(transformed_bitset);
         }
 
         auto active_count = offset_mapping.IsEnabled()
@@ -204,6 +203,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.unity_topK_ = info.topk_;
             return;
         }
+        if (offset_mapping.IsEnabled()) {
+            search_bitset =
+                search_result.PinBitset(std::move(transformed_bitset));
+        }
 
         // Element-level search (embedding-search-embedding): knowhere sees
         // a scalar vector type and the per-chunk size must be measured in
@@ -216,6 +219,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             info.array_offsets_ != nullptr;
         const auto iter_data_type =
             is_element_level_search ? element_type : data_type;
+        const bool use_vector_iterator = milvus::exec::UseVectorIterator(info);
 
         if (info.iterator_v2_info_.has_value()) {
             AssertInfo(iter_data_type != DataType::VECTOR_ARRAY,
@@ -304,7 +308,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 }
             }
 
-            if (milvus::exec::UseVectorIterator(info)) {
+            if (use_vector_iterator) {
                 AssertInfo(iter_data_type != DataType::VECTOR_ARRAY,
                            "vector array(embedding list) is not supported for "
                            "vector iterator");
@@ -333,7 +337,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 final_qr.merge(sub_qr);
             }
         }
-        if (milvus::exec::UseVectorIterator(info)) {
+        if (use_vector_iterator) {
             bool larger_is_closer = PositivelyRelated(info.metric_type_);
             // Element-level search skips row-level mapping (element IDs are
             // not row-aligned); see ChunkMergeIterator ctor.

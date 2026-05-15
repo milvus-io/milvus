@@ -19,6 +19,7 @@ package httpserver
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -325,15 +326,54 @@ func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
 func (req *CollectionFilterReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionDataReq struct {
-	DbName         string                   `json:"dbName"`
-	CollectionName string                   `json:"collectionName" binding:"required"`
-	PartitionName  string                   `json:"partitionName"`
-	Data           []map[string]interface{} `json:"data" binding:"required"`
-	PartialUpdate  bool                     `json:"partialUpdate"`
+	DbName         string                    `json:"dbName"`
+	CollectionName string                    `json:"collectionName" binding:"required"`
+	PartitionName  string                    `json:"partitionName"`
+	Data           []map[string]interface{}  `json:"data" binding:"required"`
+	PartialUpdate  bool                      `json:"partialUpdate"`
+	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }
 
 func (req *CollectionDataReq) GetDbName() string         { return req.DbName }
 func (req *CollectionDataReq) GetCollectionName() string { return req.CollectionName }
+
+type FieldPartialUpdateOpReq struct {
+	FieldName string `json:"fieldName"`
+	Op        string `json:"op"`
+}
+
+func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	if len(fieldOps) == 0 {
+		return nil, nil
+	}
+
+	ops := make([]*schemapb.FieldPartialUpdateOp, 0, len(fieldOps))
+	for _, fieldOp := range fieldOps {
+		op, err := parseFieldPartialUpdateOp(fieldOp.Op)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, &schemapb.FieldPartialUpdateOp{
+			FieldName: fieldOp.FieldName,
+			Op:        op,
+		})
+	}
+	return ops, nil
+}
+
+func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
+	switch strings.ToUpper(strings.TrimSpace(op)) {
+	case "REPLACE":
+		return schemapb.FieldPartialUpdateOp_REPLACE, nil
+	case "ARRAY_APPEND":
+		return schemapb.FieldPartialUpdateOp_ARRAY_APPEND, nil
+	case "ARRAY_REMOVE":
+		return schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, nil
+	default:
+		return schemapb.FieldPartialUpdateOp_REPLACE,
+			merr.WrapErrParameterInvalidMsg("unsupported partial update op: " + op)
+	}
+}
 
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`

@@ -134,6 +134,9 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	if recordBatch == nil || recordBatch.NumCols() == 0 {
 		return nil
 	}
+	if pw.cPackedWriter == nil {
+		return errors.New("packed writer is closed")
+	}
 
 	cArrays := make([]CArrowArray, recordBatch.NumCols())
 	cSchemas := make([]CArrowSchema, recordBatch.NumCols())
@@ -159,7 +162,12 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 }
 
 func (pw *PackedWriter) Close() error {
-	status := C.CloseWriter(pw.cPackedWriter)
+	if pw.cPackedWriter == nil {
+		return nil
+	}
+	cPackedWriter := pw.cPackedWriter
+	pw.cPackedWriter = nil
+	status := C.CloseWriter(cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}
@@ -170,10 +178,20 @@ func (pw *PackedWriter) CloseAndTell(numGroups int) ([]int64, error) {
 	if numGroups <= 0 {
 		return nil, errors.New("numGroups must be greater than 0")
 	}
+	if pw.cPackedWriter == nil {
+		if len(pw.closedSizes) == numGroups {
+			return append([]int64(nil), pw.closedSizes...), nil
+		}
+		return nil, errors.New("packed writer is closed")
+	}
+
 	sizes := make([]int64, numGroups)
-	status := C.CloseAndTell(pw.cPackedWriter, (*C.int64_t)(unsafe.Pointer(&sizes[0])), C.size_t(numGroups))
+	cPackedWriter := pw.cPackedWriter
+	pw.cPackedWriter = nil
+	status := C.CloseAndTell(cPackedWriter, (*C.int64_t)(unsafe.Pointer(&sizes[0])), C.size_t(numGroups))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
+	pw.closedSizes = append([]int64(nil), sizes...)
 	return sizes, nil
 }

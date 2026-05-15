@@ -507,6 +507,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::RegexMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::RegexMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             case proto::plan::PostfixMatch: {
                 UnaryElementFuncForArray<ValueType,
                                          proto::plan::PostfixMatch,
@@ -969,6 +986,30 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 }
                 break;
             }
+            case proto::plan::RegexMatch: {
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    PartialRegexMatcher matcher(val);
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
+                        UnaryRangeJSONCompare(matcher(value));
+                    }
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation only supports string type");
+                }
+                break;
+            }
             default:
                 ThrowInfo(
                     OpTypeInvalid,
@@ -1159,14 +1200,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         // Pre-construct context with LikePatternMatcher for Match ops on
         // string types to avoid re-parsing the pattern on every row.
         [[maybe_unused]] std::optional<LikePatternMatcher> like_matcher;
+        [[maybe_unused]] std::optional<PartialRegexMatcher> regex_matcher;
         if constexpr (std::is_same_v<GetType, std::string> ||
                       std::is_same_v<GetType, std::string_view>) {
             if (op_type == proto::plan::OpType::Match) {
                 like_matcher.emplace(val);
+            } else if (op_type == proto::plan::OpType::RegexMatch) {
+                regex_matcher.emplace(val);
             }
         }
         UnaryCompareContext context{
-            like_matcher.has_value() ? &like_matcher.value() : nullptr};
+            like_matcher.has_value() ? &like_matcher.value() : nullptr,
+            regex_matcher.has_value() ? &regex_matcher.value() : nullptr};
         auto shared_executor = [op_type, val, array_index, &res_view, &context](
                                    milvus::BsonView bson,
                                    uint32_t row_id,
@@ -1475,6 +1520,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                 res = func(index_ptr, val);
                 break;
             }
+            case proto::plan::RegexMatch: {
+                UnaryIndexFunc<T, proto::plan::RegexMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
             default:
                 ThrowInfo(
                     OpTypeInvalid,
@@ -1587,10 +1637,20 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     auto expr_type = expr_->op_type_;
 
+    // Pre-build regex objects once for the entire segment
+    EnsureRegexCache();
+    const PartialRegexMatcher* regex_matcher_ptr = cached_regex_matcher_.get();
+    const VolnitskySearcher* volnitsky_ptr = cached_volnitsky_searcher_.get();
+
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [ expr_type, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [
+            expr_type,
+            &processed_cursor,
+            &bitmap_input,
+            regex_matcher_ptr,
+            volnitsky_ptr
+        ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1708,6 +1768,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             }
             case proto::plan::Match: {
                 UnaryElementFunc<T, proto::plan::Match, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::RegexMatch: {
+                UnaryElementFuncForRegexMatch<T, filter_type> func;
+                func.matcher = regex_matcher_ptr;
+                func.searcher = volnitsky_ptr;
                 func(data,
                      size,
                      val,

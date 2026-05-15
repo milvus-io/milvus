@@ -65,25 +65,20 @@ func newMinIOClient(cfg minioConfig) (*miniogo.Client, error) {
 	})
 }
 
-// extTestURI wraps a MinIO-relative object path into a full Milvus-form URI
-// pointing at the configured bucket. External-table tests that used to pass
-// bare relative paths (e.g. "external-e2e-test/foo") must now construct a
-// fully qualified URI because the new validator rejects bare paths — extfs
-// is isolated from the fs.* baseline, so the endpoint+bucket must appear in
-// the URI or explicitly in spec.extfs. This helper keeps the test call-site
-// succinct while staying close to the original dataPath variable.
+// extTestURI wraps a MinIO-relative object path into a full MinIO URI pointing
+// at the configured bucket. The minio:// scheme is unambiguous, so tests do
+// not need to carry AWS-family region or provider fields just to disambiguate
+// s3:// from AWS S3.
 func extTestURI(cfg minioConfig, relPath string) string {
-	return fmt.Sprintf("s3://%s/%s/%s", cfg.address, cfg.bucket, relPath)
+	return fmt.Sprintf("minio://%s/%s/%s", cfg.address, cfg.bucket, relPath)
 }
 
 // extTestSpec returns an ExternalSpec JSON fragment for external-table tests
-// that target Milvus's own MinIO. It carries the real MinIO credentials and
-// region (required by ValidateExtfsComplete for s3-family schemes). No
-// cloud_provider: MinIO is not AWS, and cloud_provider=aws would trigger
-// Tier-2 endpoint derivation that redirects the URI at AWS S3.
+// that target Milvus's own MinIO. The URI scheme already selects MinIO, so the
+// spec only needs the file format plus credentials.
 func extTestSpec(cfg minioConfig, format string) string {
 	return fmt.Sprintf(
-		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q}}`,
 		format, cfg.accessKey, cfg.secretKey)
 }
 
@@ -2667,14 +2662,14 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	})
 
 	// ---------------------------------------------------------------
-	// Step 2: Create external collection with s3://external-bucket/path URI
+	// Step 2: Create external collection with minio://external-bucket/path URI
 	// ---------------------------------------------------------------
-	// The key difference: ExternalSource uses a full s3:// URI pointing to
+	// The key difference: ExternalSource uses a full minio:// URI pointing to
 	// a different bucket than Milvus's own bucket (a-bucket).
-	// URI format: s3://host:port/bucket/path — post-refactor validator
+	// URI format: minio://host:port/bucket/path — post-refactor validator
 	// requires explicit non-empty scheme + host. Empty-host shorthand
 	// (s3:///bucket/path) was dropped.
-	externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, extPath)
+	externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, extPath)
 	t.Logf("ExternalSource: %s (Milvus bucket: %s)", externalSource, minioCfg.bucket)
 
 	schema := entity.NewSchema().
@@ -2843,7 +2838,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll.Schema.ExternalSpec, `"region":`)
 
 	// ---------------------------------------------------------------
 	// Step 2: First refresh (with default source/spec) — establishes baseline
@@ -2881,7 +2876,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll2.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll2.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll2.Schema.ExternalSpec, `"region":`)
 	t.Logf("Verified: schema updated — source=%s, spec=%s", coll2.Schema.ExternalSource, coll2.Schema.ExternalSpec)
 	_ = specV2 // value used to drive the refresh; final spec compared structurally above.
 }
@@ -2922,18 +2917,10 @@ func TestExternalSourceFormats(t *testing.T) {
 	const rowsPerFile = int64(100)
 	const numRows = 100
 
-	// Build extfs credentials JSON fragment once — all subtests share the
-	// same MinIO credentials and region. Required by ValidateExtfsComplete.
-	//
-	// Deliberately do NOT set cloud_provider: MinIO is not AWS. Setting
-	// cloud_provider=aws would activate Tier-2 derivation and point
-	// effectiveAddr at `https://s3.us-east-1.amazonaws.com`, which then
-	// causes NormalizeExternalSource to rewrite the localhost MinIO URI
-	// into an AWS S3 URI with localhost:9000 as a path segment. Region is
-	// still required by ValidateExtfsComplete for s3-family schemes, but
-	// the endpoint must come from the URI host (Milvus form).
+	// Build extfs credentials JSON fragment once. The minio:// external source
+	// carries the endpoint and bucket, so tests only need credentials here.
 	extfsFragment := fmt.Sprintf(
-		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}`,
+		`"extfs":{"access_key_id":%q,"access_key_value":%q}`,
 		minioCfg.accessKey, minioCfg.secretKey)
 
 	type testCase struct {
@@ -2964,7 +2951,7 @@ func TestExternalSourceFormats(t *testing.T) {
 			// Fully qualified URI (scheme://endpoint/bucket/key) targeting
 			// the dedicated external bucket.
 			targetBucket := externalBucket
-			externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
+			externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
 
 			// Generate and upload test data
 			switch tc.format {
@@ -3441,7 +3428,7 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	// Embed secret credentials in extfs; they are persisted into etcd and
 	// must NOT flow back out unredacted through DescribeCollection.
 	rawSpec := fmt.Sprintf(
-		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q}}`,
 		"AKIAEXAMPLELEAKME", "supersecretvaluemustnotleak")
 
 	schema := entity.NewSchema().
@@ -3473,8 +3460,8 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	require.Contains(t, returnedSpec, `"access_key_value":"***"`,
 		"access_key_value must be redacted to ***")
 	// Non-secret values remain visible for operator troubleshooting.
-	require.Contains(t, returnedSpec, `"region":"us-east-1"`,
-		"non-secret extfs values must remain readable")
+	require.Contains(t, returnedSpec, `"format":"parquet"`,
+		"non-secret spec values must remain readable")
 }
 
 // Regression for issue #49335: a refresh_external_collection call carrying

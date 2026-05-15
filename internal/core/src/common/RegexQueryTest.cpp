@@ -502,6 +502,98 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
     ASSERT_TRUE(final[4]);
 }
 
+TEST_F(SealedSegmentRegexQueryTest,
+       RegexQueryWithStartAnchorOnInvertedIndexStringField) {
+    std::string operand = "^abbb";
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
+    auto unary_range_expr =
+        test::GenUnaryRangeExpr(OpType::RegexMatch, operand);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+
+    auto parser = ProtoParser(schema);
+    auto typed_expr = parser.ParseExprs(*expr);
+    auto parsed =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
+
+    LoadInvertedIndex();
+
+    auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+    BitsetType final;
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+    ASSERT_FALSE(final[0]);
+    ASSERT_FALSE(final[1]);
+    ASSERT_FALSE(final[2]);
+    ASSERT_TRUE(final[3]);
+    ASSERT_FALSE(final[4]);
+}
+
+TEST_F(SealedSegmentRegexQueryTest,
+       RegexQueryOnInvertedIndexUsesRe2PartialMatchSemantics) {
+    auto run_regex = [&](const std::string& operand) {
+        const auto& str_meta = schema->operator[](FieldName("str"));
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false);
+        auto unary_range_expr =
+            test::GenUnaryRangeExpr(OpType::RegexMatch, operand);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
+
+        auto parser = ProtoParser(schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
+
+        auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+        return ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
+    };
+
+    LoadInvertedIndex();
+
+    auto multiline_end = run_regex("(?m)aaa$");
+    ASSERT_FALSE(multiline_end[0]);
+    ASSERT_FALSE(multiline_end[1]);
+    ASSERT_TRUE(multiline_end[2]);
+    ASSERT_FALSE(multiline_end[3]);
+    ASSERT_FALSE(multiline_end[4]);
+
+    auto word_boundary = run_regex("\\baaa\\b");
+    ASSERT_FALSE(word_boundary[0]);
+    ASSERT_FALSE(word_boundary[1]);
+    ASSERT_TRUE(word_boundary[2]);
+    ASSERT_FALSE(word_boundary[3]);
+    ASSERT_FALSE(word_boundary[4]);
+
+    auto lazy_quantifier = run_regex("a+?\\n");
+    ASSERT_FALSE(lazy_quantifier[0]);
+    ASSERT_TRUE(lazy_quantifier[1]);
+    ASSERT_TRUE(lazy_quantifier[2]);
+    ASSERT_FALSE(lazy_quantifier[3]);
+    ASSERT_FALSE(lazy_quantifier[4]);
+}
+
+TEST(InvertedIndexRegexQueryTest, RegexQueryUsesRe2CharacterClassSemantics) {
+    std::vector<std::string> raw_str = {
+        "123",
+        "\xD9\xA3",
+    };
+
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    index->BuildWithRawDataForUT(raw_str.size(), raw_str.data());
+
+    auto bitset = index->PatternMatch("^\\d+$", OpType::RegexMatch);
+    ASSERT_TRUE(bitset[0]);
+    ASSERT_FALSE(bitset[1]);
+}
+
 TEST_F(SealedSegmentRegexQueryTest, PostfixMatchOnInvertedIndexStringField) {
     std::string operand = "a";
     const auto& str_meta = schema->operator[](FieldName("str"));

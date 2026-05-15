@@ -994,6 +994,21 @@ struct TantivyIndexWrapper {
     }
 
     void
+    regex_match_query(void* matcher_ctx,
+                      bool (*matcher)(void*, const uint8_t*, uintptr_t),
+                      void* bitset) {
+        auto array =
+            tantivy_regex_match_query(reader_, matcher_ctx, matcher, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.regex_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.regex_match_query: invalid result type");
+    }
+
+    void
     match_query(const std::string& query,
                 uintptr_t min_should_match,
                 void* bitset) {

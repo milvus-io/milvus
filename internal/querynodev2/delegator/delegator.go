@@ -1068,7 +1068,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 			zap.Duration("lag", lag),
 			zap.Duration("maxTsLag", maxLag),
 		)
-		return 0, WrapErrTsLagTooLarge(lag, maxLag)
+		return 0, WrapErrTsLagTooLarge(sd.vchannelName, lag, maxLag)
 	}
 
 	// Stall detection: if tSafe does not advance within stallTimeout, return
@@ -1094,7 +1094,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 				zap.Uint64("targetTs", ts),
 				zap.Duration("stallTimeout", stallTimeout),
 			)
-			return 0, WrapErrTsLagTooLarge(gt.Sub(st), stallTimeout)
+			return 0, WrapErrTsLagTooLarge(sd.vchannelName, gt.Sub(st), stallTimeout)
 		}
 		// Woken by broadcast with lock re-acquired, loop back to re-check condition.
 	}
