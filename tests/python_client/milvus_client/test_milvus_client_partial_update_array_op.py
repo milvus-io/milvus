@@ -1485,12 +1485,12 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         assert actual[1] == [10, 20, 30]
 
         # verify via array_contains predicate — appended value 3 should be found
-        res = self.query(client, collection_name, filter='array_contains(tags, 3)', output_fields=["id"])[0]
+        res = self.query(client, collection_name, filter="array_contains(tags, 3)", output_fields=["id"])[0]
         assert len(res) == 1
         assert res[0]["id"] == 0
 
         # appended value 30 should be found
-        res = self.query(client, collection_name, filter='array_contains(tags, 30)', output_fields=["id"])[0]
+        res = self.query(client, collection_name, filter="array_contains(tags, 30)", output_fields=["id"])[0]
         assert len(res) == 1
         assert res[0]["id"] == 1
 
@@ -1554,15 +1554,15 @@ class TestMilvusClientArrayPartialOpValid(TestMilvusClientV2Base):
         assert actual[1] == [20]
 
         # removed value 1 should NOT be found via array_contains
-        res = self.query(client, collection_name, filter='array_contains(tags, 1)', output_fields=["id"])[0]
+        res = self.query(client, collection_name, filter="array_contains(tags, 1)", output_fields=["id"])[0]
         assert len(res) == 0
 
         # removed value 10 should NOT be found
-        res = self.query(client, collection_name, filter='array_contains(tags, 10)', output_fields=["id"])[0]
+        res = self.query(client, collection_name, filter="array_contains(tags, 10)", output_fields=["id"])[0]
         assert len(res) == 0
 
         # remaining value 2 should still be found
-        res = self.query(client, collection_name, filter='array_contains(tags, 2)', output_fields=["id"])[0]
+        res = self.query(client, collection_name, filter="array_contains(tags, 2)", output_fields=["id"])[0]
         assert len(res) == 1
         assert res[0]["id"] == 0
 
