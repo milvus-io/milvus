@@ -384,6 +384,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
 
 	if len(updateIdxInUpsert) > 0 {
+		fieldOpMap := buildFieldOpMap(it.req)
 		// Note: For fields containing default values, default values need to be set according to valid data during insertion,
 		// but query results fields do not set valid data when returning default value fields,
 		// therefore valid data needs to be manually set to true
@@ -411,6 +412,26 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			existPKToIndex[pk] = j
 		}
 
+		// Index upsert FieldData by name once, so per-row Array-op application
+		// can locate the matching payload in O(1).
+		upsertByName := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(f *schemapb.FieldData) (string, *schemapb.FieldData) {
+			return f.GetFieldName(), f
+		})
+		existByName := lo.SliceToMap(existFieldData, func(f *schemapb.FieldData) (string, *schemapb.FieldData) {
+			return f.GetFieldName(), f
+		})
+		genericUpdateFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
+		if fieldOpMap != nil {
+			genericUpdateFieldData = make([]*schemapb.FieldData, 0, len(genericUpdateFieldData))
+			for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
+				op, ok := fieldOpMap[fieldData.GetFieldName()]
+				if ok && op != schemapb.FieldPartialUpdateOp_REPLACE {
+					continue
+				}
+				genericUpdateFieldData = append(genericUpdateFieldData, fieldData)
+			}
+		}
+
 		baseIdx := 0
 		for _, idx := range updateIdxInUpsert {
 			typeutil.AppendIDs(it.deletePKs, upsertIDs, idx)
@@ -420,12 +441,43 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
 			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
-			baseIdx += 1
-			if err != nil {
+			if err := typeutil.UpdateFieldData(it.insertFieldData, genericUpdateFieldData, int64(baseIdx), int64(idx)); err != nil {
 				log.Info("update field data failed", zap.Error(err))
 				return err
 			}
+			// Per-row Array partial-op: generic REPLACE intentionally
+			// skipped non-REPLACE op fields, so dstField still carries the
+			// existing row appended above. Overwrite it with
+			// ApplyArrayRowOp(existing row, upsert row).
+			if fieldOpMap != nil {
+				for _, dstField := range it.insertFieldData {
+					op, ok := fieldOpMap[dstField.GetFieldName()]
+					if !ok || op == schemapb.FieldPartialUpdateOp_REPLACE {
+						continue
+					}
+					fieldSchema, schemaErr := it.schema.schemaHelper.GetFieldFromName(dstField.GetFieldName())
+					if schemaErr != nil {
+						return schemaErr
+					}
+					existField, ok := existByName[dstField.GetFieldName()]
+					if !ok {
+						continue
+					}
+					upsertField, ok := upsertByName[dstField.GetFieldName()]
+					if !ok {
+						return merr.WrapErrParameterInvalidMsg(
+							fmt.Sprintf("partial-update op field %q missing from upsert payload", dstField.GetFieldName()))
+					}
+					if err := applyArrayPartialOpOnRow(
+						dstField, existField, upsertField,
+						int64(baseIdx), int64(existIndex), int64(idx),
+						op, fieldSchema.GetElementType(), readMaxCapacity(fieldSchema),
+					); err != nil {
+						return err
+					}
+				}
+			}
+			baseIdx++
 		}
 	}
 
@@ -1066,6 +1118,19 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+
+	// Validate any FieldPartialUpdateOp directives attached to
+	// UpsertRequest.field_ops. A non-REPLACE op implicitly promotes the
+	// request to partial_update=true so users do not need to set both
+	// fields explicitly.
+	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	if err != nil {
+		log.Warn("validate field partial update ops failed", zap.Error(err))
+		return err
+	}
+	if nonReplaceSeen && !it.req.GetPartialUpdate() {
+		it.req.PartialUpdate = true
+	}
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
