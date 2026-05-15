@@ -38,11 +38,15 @@ func NewColumnSparseVectors(name string, values []entity.SparseEmbedding) *Colum
 
 func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
 	fd := c.vectorBase.FieldData()
-	max := lo.MaxBy(c.values, func(a, b entity.SparseEmbedding) bool {
-		return a.Dim() > b.Dim()
-	})
 	vectors := fd.GetVectors()
-	vectors.Dim = int64(max.Dim())
+	if len(c.values) > 0 {
+		max := lo.MaxBy(c.values, func(a, b entity.SparseEmbedding) bool {
+			return a.Dim() > b.Dim()
+		})
+		vectors.Dim = int64(max.Dim())
+	} else {
+		vectors.Dim = 0
+	}
 	return fd
 }
 

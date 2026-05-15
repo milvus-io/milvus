@@ -141,7 +141,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 	memSize := insertBuffer.Buffer(groups[0], &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 
 	s.EqualValues(100, insertBuffer.MinTimestamp())
-	s.EqualValues(5367, memSize)
+	s.EqualValues(5376, memSize)
 }
 
 func (s *InsertBufferSuite) TestYield() {

@@ -120,7 +120,8 @@ class Schema {
     AddDebugField(const std::string& name,
                   DataType data_type,
                   int64_t dim,
-                  std::optional<knowhere::MetricType> metric_type) {
+                  std::optional<knowhere::MetricType> metric_type,
+                  bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -128,7 +129,7 @@ class Schema {
                                     data_type,
                                     dim,
                                     metric_type,
-                                    false,
+                                    nullable,
                                     std::nullopt);
         this->AddField(std::move(field_meta));
         return field_id;
@@ -250,7 +251,7 @@ class Schema {
              std::optional<knowhere::MetricType> metric_type,
              bool nullable) {
         auto field_meta = FieldMeta(
-            name, id, data_type, dim, metric_type, false, std::nullopt);
+            name, id, data_type, dim, metric_type, nullable, std::nullopt);
         this->AddField(std::move(field_meta));
     }
 

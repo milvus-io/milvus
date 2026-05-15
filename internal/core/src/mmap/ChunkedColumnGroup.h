@@ -415,7 +415,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            field_meta_.is_nullable()
+                ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
@@ -505,7 +508,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            field_meta_.is_nullable()
+                ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {

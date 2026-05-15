@@ -280,11 +280,10 @@ TEST_P(GrowingIndexTest, Correctness) {
         auto inserted = (i + 1) * per_batch;
         // once index built, chunk data will be removed.
         // growing index will only be built when num rows reached
-        // get_build_threshold(). This value for sparse is 0, thus sparse index
-        // will be built since the first chunk. Dense segment buffers the first
+        // get_build_threshold(). Both sparse and dense segment buffer the first
         // 2 chunks before building an index in this test case.
 
-        if ((!is_sparse && i < 2) || !intermin_index_with_raw_data) {
+        if (i < 2 || !intermin_index_with_raw_data) {
             EXPECT_EQ(field_data->num_chunk(),
                       upper_div(inserted, field_data->get_size_per_chunk()));
         } else {

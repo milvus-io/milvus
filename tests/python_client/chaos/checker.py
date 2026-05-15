@@ -1,31 +1,41 @@
-import pytest
-import unittest
-from enum import Enum
+import functools
+import json
+import math
 import random
 import re
-import time
 import threading
+import time
+import unittest
 import uuid
-import json
-import pandas as pd
-from datetime import datetime
-from prettytable import PrettyTable
-import functools
 from collections import Counter
+from datetime import datetime
+from enum import Enum
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections, LexicalHighlighter
-from pymilvus.milvus_client.index import IndexParams
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
-from pymilvus.client.embedding_list import EmbeddingList
+
+import pandas as pd
+import pytest
+from chaos import constants
 from common import common_func as cf
 from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from chaos import constants
-from faker import Faker
-
 from common.common_type import CheckTasks
-from utils.util_log import test_log as log
+from common.milvus_sys import MilvusSys
+from faker import Faker
+from prettytable import PrettyTable
+from pymilvus import (
+    AnnSearchRequest,
+    CollectionSchema,
+    DataType,
+    LexicalHighlighter,
+    MilvusClient,
+    RRFRanker,
+    connections,
+)
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
+from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.exceptions import SchemaMismatchRetryableException
+from pymilvus.milvus_client.index import IndexParams
 from utils.api_request import Error
+from utils.util_log import test_log as log
 
 event_lock = threading.Lock()
 request_lock = threading.Lock()
@@ -33,7 +43,7 @@ request_lock = threading.Lock()
 
 def get_chaos_info():
     try:
-        with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
+        with open(constants.CHAOS_INFO_SAVE_PATH) as f:
             chaos_info = json.load(f)
     except Exception as e:
         log.warning(f"get_chaos_info error: {e}")
@@ -51,27 +61,22 @@ class Singleton(type):
 
 
 class EventRecords(metaclass=Singleton):
-
     def __init__(self):
         self.file_name = f"/tmp/ci_logs/event_records_{uuid.uuid4()}.jsonl"
 
     def insert(self, event_name, event_status, ts=None):
         log.info(f"insert event: {event_name}, {event_status}")
-        insert_ts = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f') if ts is None else ts
-        data = {
-            "event_name": event_name,
-            "event_status": event_status,
-            "event_ts": insert_ts
-        }
+        insert_ts = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f") if ts is None else ts
+        data = {"event_name": event_name, "event_status": event_status, "event_ts": insert_ts}
         with event_lock:
-            with open(self.file_name, 'a') as f:
-                f.write(json.dumps(data) + '\n')
+            with open(self.file_name, "a") as f:
+                f.write(json.dumps(data) + "\n")
 
     def get_records_df(self):
         with event_lock:
             try:
                 records = []
-                with open(self.file_name, 'r') as f:
+                with open(self.file_name) as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -87,7 +92,6 @@ class EventRecords(metaclass=Singleton):
 
 
 class RequestRecords(metaclass=Singleton):
-
     def __init__(self):
         self.file_name = f"/tmp/ci_logs/request_records_{uuid.uuid4()}.jsonl"
         self.buffer = []
@@ -98,7 +102,7 @@ class RequestRecords(metaclass=Singleton):
             "collection_name": collection_name,
             "start_time": start_time,
             "time_cost": time_cost,
-            "result": result
+            "result": result,
         }
         with request_lock:
             self.buffer.append(data)
@@ -110,9 +114,9 @@ class RequestRecords(metaclass=Singleton):
         if not self.buffer:
             return
         try:
-            with open(self.file_name, 'a') as f:
+            with open(self.file_name, "a") as f:
                 for record in self.buffer:
-                    f.write(json.dumps(record) + '\n')
+                    f.write(json.dumps(record) + "\n")
             self.buffer = []
         except Exception as e:
             log.error(f"RequestRecords flush error: {e}")
@@ -126,13 +130,15 @@ class RequestRecords(metaclass=Singleton):
         with request_lock:
             try:
                 records = []
-                with open(self.file_name, 'r') as f:
+                with open(self.file_name) as f:
                     for line in f:
                         line = line.strip()
                         if line:
                             records.append(json.loads(line))
                 if not records:
-                    return pd.DataFrame(columns=["operation_name", "collection_name", "start_time", "time_cost", "result"])
+                    return pd.DataFrame(
+                        columns=["operation_name", "collection_name", "start_time", "time_cost", "result"]
+                    )
                 return pd.DataFrame(records)
             except FileNotFoundError:
                 return pd.DataFrame(columns=["operation_name", "collection_name", "start_time", "time_cost", "result"])
@@ -142,17 +148,16 @@ class RequestRecords(metaclass=Singleton):
 
 
 class ResultAnalyzer:
-
     def __init__(self):
         rr = RequestRecords()
         df = rr.get_records_df()
         df["start_time"] = pd.to_datetime(df["start_time"])
-        df = df.sort_values(by='start_time')
+        df = df.sort_values(by="start_time")
         self.df = df
         self.chaos_info = get_chaos_info()
-        self.chaos_start_time = self._extract_chaos_time('create_time')
-        self.chaos_end_time = self._extract_chaos_time('delete_time')
-        self.recovery_time = self._extract_chaos_time('recovery_time')
+        self.chaos_start_time = self._extract_chaos_time("create_time")
+        self.chaos_end_time = self._extract_chaos_time("delete_time")
+        self.recovery_time = self._extract_chaos_time("recovery_time")
 
     @staticmethod
     def _extract_chaos_time(key):
@@ -167,25 +172,25 @@ class ResultAnalyzer:
             return None
         if key in info:
             return info[key]
-        steps = info.get('steps', [])
+        steps = info.get("steps", [])
         if steps:
-            if key == 'create_time':
+            if key == "create_time":
                 return steps[0].get(key)
-            elif key == 'delete_time':
+            elif key == "delete_time":
                 return steps[-1].get(key)
-        records = info.get('records', [])
+        records = info.get("records", [])
         if records:
-            if key == 'create_time':
+            if key == "create_time":
                 for r in records:
-                    for s in r.get('steps', []):
+                    for s in r.get("steps", []):
                         if key in s:
                             return s[key]
-            elif key == 'delete_time':
+            elif key == "delete_time":
                 for r in reversed(records):
-                    for s in reversed(r.get('steps', [])):
+                    for s in reversed(r.get("steps", [])):
                         if key in s:
                             return s[key]
-            elif key == 'recovery_time':
+            elif key == "recovery_time":
                 for r in reversed(records):
                     if key in r:
                         return r[key]
@@ -195,14 +200,15 @@ class ResultAnalyzer:
         df = self.df
         window = pd.offsets.Milli(1000)
 
-        result = df.groupby([pd.Grouper(key='start_time', freq=window), 'operation_name']).apply(lambda x: pd.Series({
-            'success_count': x[x['result'] == 'True'].shape[0],
-            'failed_count': x[x['result'] == 'False'].shape[0]
-        }))
+        result = df.groupby([pd.Grouper(key="start_time", freq=window), "operation_name"]).apply(
+            lambda x: pd.Series(
+                {"success_count": x[x["result"] == "True"].shape[0], "failed_count": x[x["result"] == "False"].shape[0]}
+            )
+        )
         data = result.reset_index()
-        data['success_rate'] = data['success_count'] / (data['success_count'] + data['failed_count']).replace(0, 1)
-        grouped_data = data.groupby('operation_name')
-        now_str = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
+        data["success_rate"] = data["success_count"] / (data["success_count"] + data["failed_count"]).replace(0, 1)
+        grouped_data = data.groupby("operation_name")
+        now_str = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
         chaos_start_time = self.chaos_start_time or now_str
         chaos_end_time = self.chaos_end_time or now_str
         recovery_time = self.recovery_time or now_str
@@ -210,17 +216,25 @@ class ResultAnalyzer:
         for name, group in grouped_data:
             log.info(f"operation_name: {name}")
             # spilt data to 3 parts by chaos start time and chaos end time and aggregate the success rate
-            data_before_chaos = group[group['start_time'] < chaos_start_time].agg(
-                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
+            data_before_chaos = group[group["start_time"] < chaos_start_time].agg(
+                {"success_rate": "mean", "failed_count": "sum", "success_count": "sum"}
+            )
             data_during_chaos = group[
-                (group['start_time'] >= chaos_start_time) & (group['start_time'] <= chaos_end_time)].agg(
-                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
-            data_after_chaos = group[group['start_time'] > recovery_time].agg(
-                {'success_rate': 'mean', 'failed_count': 'sum', 'success_count': 'sum'})
+                (group["start_time"] >= chaos_start_time) & (group["start_time"] <= chaos_end_time)
+            ].agg({"success_rate": "mean", "failed_count": "sum", "success_count": "sum"})
+            data_after_chaos = group[group["start_time"] > recovery_time].agg(
+                {"success_rate": "mean", "failed_count": "sum", "success_count": "sum"}
+            )
             stage_success_rate[name] = {
-                'before_chaos': f"{data_before_chaos['success_rate']}({data_before_chaos['success_count']}/{data_before_chaos['success_count'] + data_before_chaos['failed_count']})" if not data_before_chaos.empty else "no data",
-                'during_chaos': f"{data_during_chaos['success_rate']}({data_during_chaos['success_count']}/{data_during_chaos['success_count'] + data_during_chaos['failed_count']})" if not data_during_chaos.empty else "no data",
-                'after_chaos': f"{data_after_chaos['success_rate']}({data_after_chaos['success_count']}/{data_after_chaos['success_count'] + data_after_chaos['failed_count']})" if not data_after_chaos.empty else "no data",
+                "before_chaos": f"{data_before_chaos['success_rate']}({data_before_chaos['success_count']}/{data_before_chaos['success_count'] + data_before_chaos['failed_count']})"
+                if not data_before_chaos.empty
+                else "no data",
+                "during_chaos": f"{data_during_chaos['success_rate']}({data_during_chaos['success_count']}/{data_during_chaos['success_count'] + data_during_chaos['failed_count']})"
+                if not data_during_chaos.empty
+                else "no data",
+                "after_chaos": f"{data_after_chaos['success_rate']}({data_after_chaos['success_count']}/{data_after_chaos['success_count'] + data_after_chaos['failed_count']})"
+                if not data_after_chaos.empty
+                else "no data",
             }
         log.info(f"stage_success_rate: {stage_success_rate}")
         return stage_success_rate
@@ -228,69 +242,76 @@ class ResultAnalyzer:
     def get_realtime_success_rate(self, interval=10):
         df = self.df
         window = pd.offsets.Second(interval)
-        result = df.groupby([pd.Grouper(key='start_time', freq=window), 'operation_name']).apply(lambda x: pd.Series({
-            'success_count': x[x['result'] == 'True'].shape[0],
-            'failed_count': x[x['result'] == 'False'].shape[0]
-        }))
+        result = df.groupby([pd.Grouper(key="start_time", freq=window), "operation_name"]).apply(
+            lambda x: pd.Series(
+                {"success_count": x[x["result"] == "True"].shape[0], "failed_count": x[x["result"] == "False"].shape[0]}
+            )
+        )
         data = result.reset_index()
-        data['success_rate'] = data['success_count'] / (data['success_count'] + data['failed_count']).replace(0, 1)
-        grouped_data = data.groupby('operation_name')
+        data["success_rate"] = data["success_count"] / (data["success_count"] + data["failed_count"]).replace(0, 1)
+        grouped_data = data.groupby("operation_name")
         return grouped_data
 
     def show_result_table(self):
         table = PrettyTable()
-        table.field_names = ['operation_name', 'before_chaos',
-                             f'during_chaos: {self.chaos_start_time}~{self.recovery_time}',
-                             'after_chaos']
+        table.field_names = [
+            "operation_name",
+            "before_chaos",
+            f"during_chaos: {self.chaos_start_time}~{self.recovery_time}",
+            "after_chaos",
+        ]
         data = self.get_stage_success_rate()
         for operation, values in data.items():
-            row = [operation, values['before_chaos'], values['during_chaos'], values['after_chaos']]
+            row = [operation, values["before_chaos"], values["during_chaos"], values["after_chaos"]]
             table.add_row(row)
         log.info(f"succ rate for operations in different stage\n{table}")
 
 
 class Op(Enum):
-    create = 'create'  # short name for create collection
-    create_db = 'create_db'
-    create_collection = 'create_collection'
-    create_partition = 'create_partition'
-    insert = 'insert'
-    insert_freshness = 'insert_freshness'
-    upsert = 'upsert'
-    upsert_freshness = 'upsert_freshness'
-    partial_update = 'partial_update'
-    flush = 'flush'
-    index = 'index'
-    create_index = 'create_index'
-    drop_index = 'drop_index'
-    load = 'load'
-    load_collection = 'load_collection'
-    load_partition = 'load_partition'
-    release = 'release'
-    release_collection = 'release_collection'
-    release_partition = 'release_partition'
-    search = 'search'
-    tensor_search = 'tensor_search'
-    full_text_search = 'full_text_search'
-    hybrid_search = 'hybrid_search'
-    query = 'query'
-    text_match = 'text_match'
-    phrase_match = 'phrase_match'
-    json_query = 'json_query'
-    geo_query = 'geo_query'
-    delete = 'delete'
-    delete_freshness = 'delete_freshness'
-    compact = 'compact'
-    drop = 'drop'  # short name for drop collection
-    drop_db = 'drop_db'
-    drop_collection = 'drop_collection'
-    drop_partition = 'drop_partition'
-    load_balance = 'load_balance'
-    bulk_insert = 'bulk_insert'
-    alter_collection = 'alter_collection'
-    add_field = 'add_field'
-    rename_collection = 'rename_collection'
-    unknown = 'unknown'
+    create = "create"  # short name for create collection
+    create_db = "create_db"
+    create_collection = "create_collection"
+    create_partition = "create_partition"
+    insert = "insert"
+    insert_freshness = "insert_freshness"
+    upsert = "upsert"
+    upsert_freshness = "upsert_freshness"
+    partial_update = "partial_update"
+    flush = "flush"
+    index = "index"
+    create_index = "create_index"
+    drop_index = "drop_index"
+    load = "load"
+    load_collection = "load_collection"
+    load_partition = "load_partition"
+    release = "release"
+    release_collection = "release_collection"
+    release_partition = "release_partition"
+    search = "search"
+    tensor_search = "tensor_search"
+    full_text_search = "full_text_search"
+    hybrid_search = "hybrid_search"
+    query = "query"
+    text_match = "text_match"
+    phrase_match = "phrase_match"
+    json_query = "json_query"
+    geo_query = "geo_query"
+    delete = "delete"
+    delete_freshness = "delete_freshness"
+    compact = "compact"
+    drop = "drop"  # short name for drop collection
+    drop_db = "drop_db"
+    drop_collection = "drop_collection"
+    drop_partition = "drop_partition"
+    load_balance = "load_balance"
+    bulk_insert = "bulk_insert"
+    alter_collection = "alter_collection"
+    add_field = "add_field"
+    add_vector_field = "add_vector_field"
+    null_vector_search = "null_vector_search"
+    null_vector_query = "null_vector_query"
+    rename_collection = "rename_collection"
+    unknown = "unknown"
 
 
 timeout = 120
@@ -298,7 +319,7 @@ search_timeout = 30
 query_timeout = 30
 
 enable_traceback = False
-DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
+DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
 
@@ -322,28 +343,28 @@ def normalize_error_message(error_msg):
     messages = re.findall(r'message[=:]\s*["\']?([^"\'>,\)]+)', msg, re.IGNORECASE)
     if messages:
         # Combine all message content and keep only letters and spaces
-        combined = ' '.join(messages)
-        combined = re.sub(r'[^a-zA-Z\s]', ' ', combined)
-        combined = re.sub(r'\s+', ' ', combined).strip()
+        combined = " ".join(messages)
+        combined = re.sub(r"[^a-zA-Z\s]", " ", combined)
+        combined = re.sub(r"\s+", " ", combined).strip()
         return combined
     # Fallback: extract text from details= if no message found
     details = re.findall(r'details\s*=\s*"([^"]+)"', msg)
     if details:
-        combined = ' '.join(details)
-        combined = re.sub(r'[^a-zA-Z\s]', ' ', combined)
-        combined = re.sub(r'\s+', ' ', combined).strip()
+        combined = " ".join(details)
+        combined = re.sub(r"[^a-zA-Z\s]", " ", combined)
+        combined = re.sub(r"\s+", " ", combined).strip()
         return combined
     # Last fallback: keep only letters from entire message
-    msg = re.sub(r'[^a-zA-Z\s]', ' ', msg)
-    msg = re.sub(r'\s+', ' ', msg).strip()
+    msg = re.sub(r"[^a-zA-Z\s]", " ", msg)
+    msg = re.sub(r"\s+", " ", msg).strip()
     return msg
 
 
-def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
+def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
     def decorate(func):
         @functools.wraps(func)
         def inner_wrapper(self, *args, **kwargs):
-            start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
+            start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
             start_time_ts = time.time()
             t0 = time.perf_counter()
             res, result = func(self, *args, **kwargs)
@@ -363,18 +384,20 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
                 log.debug(log_str)
             if result:
                 self.rsp_times.append(elapsed)
-                self.average_time = (
-                                            elapsed + self.average_time * self._succ) / (self._succ + 1)
+                self.average_time = (elapsed + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 # add first success record if there is no success record before
-                if len(self.fail_records) > 0 and self.fail_records[-1][0] == "failure" and \
-                        self._succ + self._fail == self.fail_records[-1][1] + 1:
+                if (
+                    len(self.fail_records) > 0
+                    and self.fail_records[-1][0] == "failure"
+                    and self._succ + self._fail == self.fail_records[-1][1] + 1
+                ):
                     self.fail_records.append(("success", self._succ + self._fail, start_time, start_time_ts))
             else:
                 self._fail += 1
                 self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
                 # Collect unique error messages (normalized to group similar errors)
-                if hasattr(res, 'message'):
+                if hasattr(res, "message"):
                     normalized_msg = normalize_error_message(res.message)
                 elif res is not None:
                     normalized_msg = normalize_error_message(str(res))
@@ -396,13 +419,13 @@ def exception_handler():
             function_name = None
             try:
                 function_name = func.__name__
-                class_name = getattr(self, '__class__', None).__name__ if self else None
+                class_name = getattr(self, "__class__", None).__name__ if self else None
                 res, result = func(self, *args, **kwargs)
                 return res, result
             except Exception as e:
                 log_row_length = 300
                 e_str = str(e)
-                log_e = e_str[0:log_row_length] + '......' if len(e_str) > log_row_length else e_str
+                log_e = e_str[0:log_row_length] + "......" if len(e_str) > log_row_length else e_str
                 if class_name:
                     log_message = f"Error in {class_name}.{function_name}: {log_e}"
                 else:
@@ -423,8 +446,17 @@ class Checker:
        b. count operations and success rate
     """
 
-    def __init__(self, collection_name=None, partition_name=None, shards_num=2, dim=8, insert_data=True,
-                 schema=None, replica_number=0, **kwargs):
+    def __init__(
+        self,
+        collection_name=None,
+        partition_name=None,
+        shards_num=2,
+        dim=8,
+        insert_data=True,
+        schema=None,
+        replica_number=0,
+        **kwargs,
+    ):
         self.recovery_time = 0
         self._succ = 0
         self._fail = 0
@@ -433,7 +465,7 @@ class Checker:
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
-        self.scale = 1 * 10 ** 6
+        self.scale = 1 * 10**6
         self.files = []
         self.word_freq = Counter()
         self.ms = MilvusSys()
@@ -453,13 +485,8 @@ class Checker:
 
         # Also create a connection for low-level APIs that MilvusClient doesn't support
         self.alias = cf.gen_unique_str("checker_alias_")
-        connections.connect(
-            alias=self.alias,
-            uri=uri,
-            token=token
-        )
-        c_name = collection_name if collection_name is not None else cf.gen_unique_str(
-            'Checker_')
+        connections.connect(alias=self.alias, uri=uri, token=token)
+        c_name = collection_name if collection_name is not None else cf.gen_unique_str("Checker_")
         self.c_name = c_name
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
@@ -472,7 +499,15 @@ class Checker:
         else:
             enable_struct_array_field = kwargs.get("enable_struct_array_field", True)
             enable_dynamic_field = kwargs.get("enable_dynamic_field", True)
-            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field, enable_dynamic_field=enable_dynamic_field) if schema is None else schema
+            schema = (
+                cf.gen_all_datatype_collection_schema(
+                    dim=dim,
+                    enable_struct_array_field=enable_struct_array_field,
+                    enable_dynamic_field=enable_dynamic_field,
+                )
+                if schema is None
+                else schema
+            )
 
         log.debug(f"schema: {schema}")
         self.schema = schema
@@ -489,7 +524,7 @@ class Checker:
                 schema=schema,
                 shards_num=shards_num,
                 consistency_level="Strong",
-                timeout=timeout
+                timeout=timeout,
             )
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
@@ -507,8 +542,8 @@ class Checker:
             for idx_name in index_names:
                 try:
                     idx_info = self.milvus_client.describe_index(c_name, idx_name)
-                    if 'field_name' in idx_info:
-                        indexed_fields.add(idx_info['field_name'])
+                    if "field_name" in idx_info:
+                        indexed_fields.add(idx_info["field_name"])
                 except Exception as e:
                     log.debug(f"Failed to describe index {idx_name}: {e}")
         except Exception as e:
@@ -523,11 +558,7 @@ class Checker:
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="INVERTED")
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
                 log.debug(f"Failed to create index for {f}: {e}")
 
@@ -541,13 +572,9 @@ class Checker:
                     index_params.add_index(
                         field_name=f,
                         index_type="INVERTED",
-                        params={"json_path": f"{f}['{json_path}']", "json_cast_type": json_cast}
+                        params={"json_path": f"{f}['{json_path}']", "json_cast_type": json_cast},
                     )
-                    self.milvus_client.create_index(
-                        collection_name=c_name,
-                        index_params=index_params,
-                        timeout=timeout
-                    )
+                    self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 except Exception as e:
                     log.debug(f"Failed to create json index for {f}['{json_path}']: {e}")
 
@@ -558,11 +585,7 @@ class Checker:
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="RTREE")
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
                 log.debug(f"Failed to create index for {f}: {e}")
 
@@ -575,11 +598,7 @@ class Checker:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INDEX_PARAM)
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for float vector field {f}")
                 indexed_fields.add(f)
                 vector_index_created = True
@@ -594,11 +613,7 @@ class Checker:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INT8_INDEX_PARAM)
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for int8 vector field {f}")
                 indexed_fields.add(f)
                 vector_index_created = True
@@ -613,11 +628,7 @@ class Checker:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BINARY_INDEX_PARAM)
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for binary vector field {f}")
                 indexed_fields.add(f)
                 vector_index_created = True
@@ -630,11 +641,7 @@ class Checker:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BM25_INDEX_PARAM)
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for bm25 sparse field {f}")
             except Exception as e:
                 log.warning(f"Failed to create index for {f}: {e}")
@@ -645,11 +652,7 @@ class Checker:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_EMB_LIST_INDEX_PARAM)
-                self.milvus_client.create_index(
-                    collection_name=c_name,
-                    index_params=index_params,
-                    timeout=timeout
-                )
+                self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for emb list field {f}")
             except Exception as e:
                 log.warning(f"Failed to create index for {f}: {e}")
@@ -663,7 +666,9 @@ class Checker:
             except Exception as e:
                 log.warning(f"Failed to load collection {c_name}: {e}. Collection may need to be loaded manually.")
         else:
-            log.warning(f"No vector index created for collection {c_name}, skipping load. You may need to create indexes and load manually.")
+            log.warning(
+                f"No vector index created for collection {c_name}, skipping load. You may need to create indexes and load manually."
+            )
 
         # Create partition if specified
         if p_name != "_default" and not self.milvus_client.has_partition(c_name, p_name):
@@ -707,16 +712,19 @@ class Checker:
             # Check for struct array fields (common names: struct_array, metadata, etc.)
             for key, value in data[0].items():
                 if isinstance(value, list) and value and isinstance(value[0], dict):
-                    log.debug(f"[insert_data] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}")
+                    log.debug(
+                        f"[insert_data] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}"
+                    )
 
         try:
             res = self.milvus_client.insert(
-                                             collection_name=self.c_name,
-                                             data=data,
-                                             partition_name=partition_name,
-                                             timeout=timeout,
-                                             enable_traceback=enable_traceback,
-                                             check_task=CheckTasks.check_nothing)
+                collection_name=self.c_name,
+                data=data,
+                partition_name=partition_name,
+                timeout=timeout,
+                enable_traceback=enable_traceback,
+                check_task=CheckTasks.check_nothing,
+            )
             return res, True
         except Exception as e:
             return str(e), False
@@ -731,8 +739,7 @@ class Checker:
         succ_rate = self.succ_rate()
         total = self.total()
         rsp_times = self.rsp_times
-        average_time = 0 if len(rsp_times) == 0 else sum(
-            rsp_times) / len(rsp_times)
+        average_time = 0 if len(rsp_times) == 0 else sum(rsp_times) / len(rsp_times)
         max_time = 0 if len(rsp_times) == 0 else max(rsp_times)
         min_time = 0 if len(rsp_times) == 0 else min(rsp_times)
         checker_name = self.__class__.__name__
@@ -771,24 +778,22 @@ class Checker:
         recovery_time = end - start  # second
         self.recovery_time = recovery_time
         checker_name = self.__class__.__name__
-        log.info(f"{checker_name} recovery time is {self.recovery_time}, start at {self.fail_records[0][2]}, "
-                 f"end at {self.fail_records[-1][2]}")
+        log.info(
+            f"{checker_name} recovery time is {self.recovery_time}, start at {self.fail_records[0][2]}, "
+            f"end at {self.fail_records[-1][2]}"
+        )
         return recovery_time
 
-    def prepare_bulk_insert_data(self,
-                                 nb=constants.ENTITIES_FOR_BULKINSERT,
-                                 file_type="npy",
-                                 minio_endpoint="127.0.0.1:9000",
-                                 bucket_name=None):
+    def prepare_bulk_insert_data(
+        self, nb=constants.ENTITIES_FOR_BULKINSERT, file_type="npy", minio_endpoint="127.0.0.1:9000", bucket_name=None
+    ):
         schema = self.schema
         bucket_name = self.bucket_name if bucket_name is None else bucket_name
         log.info("prepare data for bulk insert")
         try:
-            files = cf.prepare_bulk_insert_data(schema=schema,
-                                                nb=nb,
-                                                file_type=file_type,
-                                                minio_endpoint=minio_endpoint,
-                                                bucket_name=bucket_name)
+            files = cf.prepare_bulk_insert_data(
+                schema=schema, nb=nb, file_type=file_type, minio_endpoint=minio_endpoint, bucket_name=bucket_name
+            )
             self.files = files
             return files, True
         except Exception as e:
@@ -798,6 +803,7 @@ class Checker:
     def do_bulk_insert(self):
         log.info(f"bulk insert collection name: {self.c_name}")
         from pymilvus import utility
+
         task_ids = utility.do_bulk_insert(collection_name=self.c_name, files=self.files, using=self.alias)
         log.info(f"task ids {task_ids}")
         completed = utility.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720, using=self.alias)
@@ -807,7 +813,13 @@ class Checker:
 class CollectionLoadChecker(Checker):
     """check collection load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionLoadChecker_")
@@ -837,7 +849,13 @@ class CollectionLoadChecker(Checker):
 class CollectionReleaseChecker(Checker):
     """check collection release operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionReleaseChecker_")
@@ -865,11 +883,16 @@ class CollectionReleaseChecker(Checker):
             sleep(constants.WAIT_PER_OP)
 
 
-
 class CollectionRenameChecker(Checker):
     """check collection rename operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionRenameChecker_")
@@ -905,7 +928,13 @@ class CollectionRenameChecker(Checker):
 class PartitionLoadChecker(Checker):
     """check partition load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartitionLoadChecker_")
@@ -916,7 +945,9 @@ class PartitionLoadChecker(Checker):
     @trace()
     def load_partition(self):
         try:
-            self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
+            self.milvus_client.load_partitions(
+                collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number
+            )
             return None, True
         except Exception as e:
             return str(e), False
@@ -937,14 +968,22 @@ class PartitionLoadChecker(Checker):
 class PartitionReleaseChecker(Checker):
     """check partition release operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartitionReleaseChecker_")
         p_name = cf.gen_unique_str("PartitionReleaseChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, partition_name=p_name)
         self.milvus_client.release_collection(collection_name=self.c_name)
-        self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
+        self.milvus_client.load_partitions(
+            collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number
+        )
 
     @trace()
     def release_partition(self):
@@ -958,7 +997,9 @@ class PartitionReleaseChecker(Checker):
     def run_task(self):
         res, result = self.release_partition()
         if result:
-            self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
+            self.milvus_client.load_partitions(
+                collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number
+            )
         return res, result
 
     def keep_running(self):
@@ -990,7 +1031,7 @@ class SearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
             )
             return res, True
         except Exception as e:
@@ -1014,6 +1055,7 @@ class SearchChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
+
 
 class TensorSearchChecker(Checker):
     """check search operations for struct array vector fields in a dependent thread"""
@@ -1048,7 +1090,7 @@ class TensorSearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
             )
             return res, True
         except Exception as e:
@@ -1087,7 +1129,13 @@ class TensorSearchChecker(Checker):
 class FullTextSearchChecker(Checker):
     """check full text search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FullTextSearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -1098,11 +1146,7 @@ class FullTextSearchChecker(Checker):
         bm25_anns_field = random.choice(self.bm25_sparse_field_names)
         # Create highlighter for full text search results
         highlighter = LexicalHighlighter(
-            pre_tags=["<em>"],
-            post_tags=["</em>"],
-            highlight_search_text=True,
-            fragment_offset=10,
-            fragment_size=50
+            pre_tags=["<em>"], post_tags=["</em>"], highlight_search_text=True, fragment_offset=10, fragment_size=50
         )
         try:
             res = self.milvus_client.search(
@@ -1113,7 +1157,7 @@ class FullTextSearchChecker(Checker):
                 limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout,
-                highlighter=highlighter
+                highlighter=highlighter,
             )
             return res, True
         except Exception as e:
@@ -1133,7 +1177,13 @@ class FullTextSearchChecker(Checker):
 class HybridSearchChecker(Checker):
     """check hybrid search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
+    def __init__(
+        self,
+        collection_name=None,
+        shards_num=2,
+        replica_number=0,
+        schema=None,
+    ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("HybridSearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -1165,7 +1215,7 @@ class HybridSearchChecker(Checker):
                 ranker=RRFRanker(),
                 limit=10,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
             )
             return res, True
         except Exception as e:
@@ -1199,7 +1249,7 @@ class InsertFlushChecker(Checker):
                 self.milvus_client.insert(
                     collection_name=self.c_name,
                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
-                    timeout=timeout
+                    timeout=timeout,
                 )
                 insert_result = True
             except Exception:
@@ -1257,7 +1307,7 @@ class FlushChecker(Checker):
             self.milvus_client.insert(
                 collection_name=self.c_name,
                 data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
-                timeout=timeout
+                timeout=timeout,
             )
             res, result = self.flush()
             return res, result
@@ -1296,20 +1346,20 @@ class AddFieldChecker(Checker):
             field_count = self._get_field_count()
             if field_count >= self.MAX_FIELDS:
                 log.debug(
-                    f"skip add_field: collection {self.c_name} already has {field_count} fields (limit {self.MAX_FIELDS})")
+                    f"skip add_field: collection {self.c_name} already has {field_count} fields (limit {self.MAX_FIELDS})"
+                )
                 return None, True
 
             new_field_name = cf.gen_unique_str("new_field_")
-            self.milvus_client.add_collection_field(collection_name=self.c_name,
-                                                    field_name=new_field_name,
-                                                    data_type=DataType.INT64,
-                                                    nullable=True)
+            self.milvus_client.add_collection_field(
+                collection_name=self.c_name, field_name=new_field_name, data_type=DataType.INT64, nullable=True
+            )
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
             _, result = self.insert_data()
-            res = self.milvus_client.query(collection_name=self.c_name,
-                                           filter=f"{new_field_name} >= 0",
-                                           output_fields=[new_field_name])
+            self.milvus_client.query(
+                collection_name=self.c_name, filter=f"{new_field_name} >= 0", output_fields=[new_field_name]
+            )
             result = True
             if result:
                 log.debug(f"query with field {new_field_name} success")
@@ -1329,7 +1379,6 @@ class AddFieldChecker(Checker):
             sleep(constants.WAIT_PER_OP * 6)
 
 
-
 class InsertChecker(Checker):
     """check insert operations in a dependent thread"""
 
@@ -1341,9 +1390,9 @@ class InsertChecker(Checker):
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
         self.inserted_data = []
-        self.scale = 1 * 10 ** 6
+        self.scale = 1 * 10**6
         self.start_time_stamp = int(time.time() * self.scale)  # us
-        self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
+        self.term_expr = f"{self.int64_field_name} >= {self.start_time_stamp}"
 
     @trace()
     def insert_entities(self):
@@ -1365,14 +1414,42 @@ class InsertChecker(Checker):
             # Check for struct array fields (common names: struct_array, metadata, etc.)
             for key, value in data[0].items():
                 if isinstance(value, list) and value and isinstance(value[0], dict):
-                    log.debug(f"[InsertChecker] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}")
+                    log.debug(
+                        f"[InsertChecker] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}"
+                    )
 
         try:
-            res = self.milvus_client.insert(collection_name=self.c_name,
-                                           data=data,
-                                           partition_name=self.p_names[0] if self.p_names else None,
-                                           timeout=timeout)
+            res = self.milvus_client.insert(
+                collection_name=self.c_name,
+                data=data,
+                partition_name=self.p_names[0] if self.p_names else None,
+                timeout=timeout,
+            )
             return res, True
+        except SchemaMismatchRetryableException:
+            # Schema changed concurrently (AddVectorFieldChecker). The server rejected the request
+            # because the schema_timestamp in the request is stale (not a missing-field issue —
+            # new fields are always nullable). Invalidate the SDK schema cache so the next
+            # insert_rows() picks up the new schema_timestamp, then retry once.
+            log.debug("[InsertChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
+            for i in range(len(data)):
+                data[i][self.int64_field_name] = int(time.time() * self.scale)
+            try:
+                res = self.milvus_client.insert(
+                    collection_name=self.c_name,
+                    data=data,
+                    partition_name=self.p_names[0] if self.p_names else None,
+                    timeout=timeout,
+                )
+                return res, True
+            except Exception as e:
+                log.info(f"insert error (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"insert error: {e}")
             return str(e), False
@@ -1397,17 +1474,20 @@ class InsertChecker(Checker):
             log.error(f"create index error: {e}")
         self.milvus_client.load_collection(collection_name=self.c_name)
         end_time_stamp = int(time.time() * self.scale)
-        self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp} and ' \
-                         f'{self.int64_field_name} <= {end_time_stamp}'
+        self.term_expr = (
+            f"{self.int64_field_name} >= {self.start_time_stamp} and {self.int64_field_name} <= {end_time_stamp}"
+        )
         data_in_client = []
         for d in self.inserted_data:
             if self.start_time_stamp <= d <= end_time_stamp:
                 data_in_client.append(d)
-        res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr,
-                                      output_fields=[f'{self.int64_field_name}'],
-                                      limit=len(data_in_client) * 2, timeout=timeout)
-        result = True
-
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=self.term_expr,
+            output_fields=[f"{self.int64_field_name}"],
+            limit=len(data_in_client) * 2,
+            timeout=timeout,
+        )
         data_in_server = []
         for r in res:
             d = r[f"{ct.default_int64_field_name}"]
@@ -1427,9 +1507,9 @@ class InsertFreshnessChecker(Checker):
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
         self.inserted_data = []
-        self.scale = 1 * 10 ** 6
+        self.scale = 1 * 10**6
         self.start_time_stamp = int(time.time() * self.scale)  # us
-        self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
+        self.term_expr = f"{self.int64_field_name} >= {self.start_time_stamp}"
 
     def insert_entities(self):
         data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
@@ -1442,26 +1522,30 @@ class InsertFreshnessChecker(Checker):
         data[0] = ts_data  # set timestamp (ms) as int64
         log.debug(f"insert data: {len(ts_data)}")
         try:
-            res = self.milvus_client.insert(collection_name=self.c_name,
-                                           data=data,
-                                           partition_name=self.p_names[0] if self.p_names else None,
-                                           timeout=timeout)
+            res = self.milvus_client.insert(
+                collection_name=self.c_name,
+                data=data,
+                partition_name=self.p_names[0] if self.p_names else None,
+                timeout=timeout,
+            )
             result = True
         except Exception as e:
             res = str(e)
             result = False
         self.latest_data = ts_data[-1]
-        self.term_expr = f'{self.int64_field_name} == {self.latest_data}'
+        self.term_expr = f"{self.int64_field_name} == {self.latest_data}"
         return res, result
 
     @trace()
     def insert_freshness(self):
         while True:
             try:
-                res = self.milvus_client.query(collection_name=self.c_name,
-                                              filter=self.term_expr,
-                                              output_fields=[f'{self.int64_field_name}'],
-                                              timeout=timeout)
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=self.term_expr,
+                    output_fields=[f"{self.int64_field_name}"],
+                    timeout=timeout,
+                )
                 result = True
             except Exception as e:
                 res = str(e)
@@ -1495,10 +1579,23 @@ class UpsertChecker(Checker):
     @trace()
     def upsert_entities(self):
         try:
-            res = self.milvus_client.upsert(collection_name=self.c_name,
-                                           data=self.data,
-                                           timeout=timeout)
+            res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
             return res, True
+        except SchemaMismatchRetryableException:
+            # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
+            # so the next upsert_rows() fetches the new schema_timestamp, then retry once.
+            log.debug("[UpsertChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
+            try:
+                res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
+                return res, True
+            except Exception as e:
+                log.info(f"upsert failed (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"upsert failed: {e}")
             return str(e), False
@@ -1507,9 +1604,9 @@ class UpsertChecker(Checker):
     def run_task(self):
         # half of the data is upsert, the other half is insert
         rows = len(self.data)
-        pk_old = [d[self.int64_field_name] for d in self.data[:rows // 2]]
+        pk_old = [d[self.int64_field_name] for d in self.data[: rows // 2]]
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
-        pk_new = [d[self.int64_field_name] for d in self.data[rows // 2:]]
+        pk_new = [d[self.int64_field_name] for d in self.data[rows // 2 :]]
         pk_update = pk_old + pk_new
         for i in range(rows):
             self.data[i][self.int64_field_name] = pk_update[i]
@@ -1535,9 +1632,7 @@ class UpsertFreshnessChecker(Checker):
 
     def upsert_entities(self):
         try:
-            res = self.milvus_client.upsert(collection_name=self.c_name,
-                                           data=self.data,
-                                           timeout=timeout)
+            res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
             return res, True
         except Exception as e:
             return str(e), False
@@ -1546,10 +1641,12 @@ class UpsertFreshnessChecker(Checker):
     def upsert_freshness(self):
         while True:
             try:
-                res = self.milvus_client.query(collection_name=self.c_name,
-                                              filter=self.term_expr,
-                                              output_fields=[f'{self.int64_field_name}'],
-                                              timeout=timeout)
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=self.term_expr,
+                    output_fields=[f"{self.int64_field_name}"],
+                    timeout=timeout,
+                )
                 result = True
             except Exception as e:
                 res = str(e)
@@ -1563,13 +1660,13 @@ class UpsertFreshnessChecker(Checker):
     def run_task(self):
         # half of the data is upsert, the other half is insert
         rows = len(self.data[0])
-        pk_old = self.data[0][:rows // 2]
+        pk_old = self.data[0][: rows // 2]
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
-        pk_new = self.data[0][rows // 2:]
+        pk_new = self.data[0][rows // 2 :]
         pk_update = pk_old + pk_new
         self.data[0] = pk_update
         self.latest_data = self.data[0][-1]
-        self.term_expr = f'{self.int64_field_name} == {self.latest_data}'
+        self.term_expr = f"{self.int64_field_name} == {self.latest_data}"
         res, result = self.upsert_entities()
         res, result = self.upsert_freshness()
         return res, result
@@ -1578,25 +1675,42 @@ class UpsertFreshnessChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP * 6)
-    
+
+
 class PartialUpdateChecker(Checker):
     """check partial update operations in a dependent thread"""
 
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartialUpdateChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, enable_struct_array_field=False)
+        super().__init__(
+            collection_name=collection_name, shards_num=shards_num, schema=schema, enable_struct_array_field=False
+        )
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
 
     @trace()
     def partial_update_entities(self):
         try:
-
-            res = self.milvus_client.upsert(collection_name=self.c_name,
-                                           data=self.data,
-                                           partial_update=True,
-                                           timeout=timeout)
+            res = self.milvus_client.upsert(
+                collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
+            )
             return res, True
+        except SchemaMismatchRetryableException:
+            # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
+            # so the next upsert_rows() fetches the new schema_timestamp, then retry once.
+            log.debug("[PartialUpdateChecker] schema_timestamp stale, invalidating cache and retrying")
+            try:
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
+            except Exception:
+                pass
+            try:
+                res = self.milvus_client.upsert(
+                    collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
+                )
+                return res, True
+            except Exception as e:
+                log.info(f"partial update failed (retry): {e}")
+                return str(e), False
         except Exception as e:
             log.info(f"error {e}")
             return str(e), False
@@ -1618,8 +1732,7 @@ class PartialUpdateChecker(Checker):
             # Choose subset fields to update: always include PK + one non-PK field if available
             num = count % num_fields
             desired_fields = [pk_field_name, schema["fields"][num if num != 0 else 1]["name"]]
-            partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema,
-                                                    desired_field_names=desired_fields)
+            partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema, desired_field_names=desired_fields)
             self.data = partial_rows
         res, result = self.partial_update_entities()
         return res, result
@@ -1645,9 +1758,9 @@ class CollectionCreateChecker(Checker):
         try:
             collection_name = cf.gen_unique_str("CreateChecker_")
             schema = cf.gen_default_collection_schema()
-            self.milvus_client.create_collection(collection_name=collection_name,
-                                                schema=schema,
-                                                consistency_level="Strong")
+            self.milvus_client.create_collection(
+                collection_name=collection_name, schema=schema, consistency_level="Strong"
+            )
             return None, True
         except Exception as e:
             return str(e), False
@@ -1681,7 +1794,9 @@ class CollectionDropChecker(Checker):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
-                self.milvus_client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+                self.milvus_client.create_collection(
+                    collection_name=collection_name, schema=schema, consistency_level="Strong"
+                )
                 self.collection_pool.append(collection_name)
             except Exception as e:
                 log.error(f"Failed to create collection {collection_name}: {e}")
@@ -1740,8 +1855,7 @@ class PartitionCreateChecker(Checker):
     def create_partition(self):
         try:
             partition_name = cf.gen_unique_str("PartitionCreateChecker_")
-            self.milvus_client.create_partition(collection_name=self.c_name,
-                                               partition_name=partition_name)
+            self.milvus_client.create_partition(collection_name=self.c_name, partition_name=partition_name)
             return None, True
         except Exception as e:
             return str(e), False
@@ -1871,9 +1985,11 @@ class IndexCreateChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
-            self.milvus_client.insert(collection_name=self.c_name,
-                                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
-                                     timeout=timeout)
+            self.milvus_client.insert(
+                collection_name=self.c_name,
+                data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
+                timeout=timeout,
+            )
         # do as a flush before indexing
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         log.debug(f"Index ready entities: {stats.get('row_count', 0)}")
@@ -1882,8 +1998,7 @@ class IndexCreateChecker(Checker):
     def create_index(self):
         try:
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-            self.milvus_client.create_index(collection_name=self.c_name,
-                                           index_params=index_params)
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             return None, True
         except Exception as e:
             return str(e), False
@@ -1912,8 +2027,11 @@ class IndexDropChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
-            self.milvus_client.insert(collection_name=self.c_name, data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
-                               timeout=timeout)
+            self.milvus_client.insert(
+                collection_name=self.c_name,
+                data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
+                timeout=timeout,
+            )
         # do as a flush before indexing
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         log.debug(f"Index ready entities: {stats.get('row_count', 0)}")
@@ -1931,14 +2049,18 @@ class IndexDropChecker(Checker):
     def run_task(self):
         res, result = self.drop_index()
         if result:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
+            self.milvus_client.create_collection(
+                collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong"
+            )
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         return res, result
 
     def keep_running(self):
         while self._keep_running:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
+            self.milvus_client.create_collection(
+                collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong"
+            )
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             self.run_task()
@@ -1954,14 +2076,18 @@ class QueryChecker(Checker):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(
+            collection_name=self.c_name, replica_number=replica_number
+        )  # do load before query
         self.insert_data()
         self.term_expr = f"{self.int64_field_name} > 0"
 
     @trace()
     def query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.query(
+                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+            )
             return res, True
         except Exception as e:
             log.info(f"query error: {e}")
@@ -2001,7 +2127,7 @@ class TextMatchChecker(Checker):
             pre_tags=["<em>"],
             post_tags=["</em>"],
             highlight_search_text=False,
-            highlight_query=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}]
+            highlight_query=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}],
         )
         try:
             res = self.milvus_client.search(
@@ -2013,7 +2139,7 @@ class TextMatchChecker(Checker):
                 limit=5,
                 output_fields=[self.text_match_field_name],
                 timeout=search_timeout,
-                highlighter=highlighter
+                highlighter=highlighter,
             )
             return res, True
         except Exception as e:
@@ -2043,18 +2169,22 @@ class PhraseMatchChecker(Checker):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(
+            collection_name=self.c_name, replica_number=replica_number
+        )  # do load before query
         self.insert_data()
         key_word_1 = self.word_freq.most_common(2)[0][0]
         key_word_2 = self.word_freq.most_common(2)[1][0]
-        slop=5
+        slop = 5
         text_match_field_name = random.choice(self.text_match_field_name_list)
         self.term_expr = f"PHRASE_MATCH({text_match_field_name}, '{key_word_1} {key_word_2}', {slop})"
 
     @trace()
     def phrase_match(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.query(
+                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+            )
             return res, True
         except Exception as e:
             log.info(f"phrase_match error: {e}")
@@ -2064,7 +2194,7 @@ class PhraseMatchChecker(Checker):
     def run_task(self):
         key_word_1 = self.word_freq.most_common(2)[0][0]
         key_word_2 = self.word_freq.most_common(2)[1][0]
-        slop=5
+        slop = 5
         text_match_field_name = random.choice(self.text_match_field_name_list)
         self.term_expr = f"PHRASE_MATCH({text_match_field_name}, '{key_word_1} {key_word_2}', {slop})"
         res, result = self.phrase_match()
@@ -2085,7 +2215,9 @@ class JsonQueryChecker(Checker):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(
+            collection_name=self.c_name, replica_number=replica_number
+        )  # do load before query
         self.insert_data()
         self.term_expr = self.get_term_expr()
 
@@ -2095,19 +2227,20 @@ class JsonQueryChecker(Checker):
         address_list = [fake.address() for _ in range(10)]
         name_list = [fake.name() for _ in range(10)]
         number_list = [random.randint(0, 100) for _ in range(10)]
-        path = random.choice([ "name", "count"])
+        path = random.choice(["name", "count"])
         path_value = {
-            "address": address_list, # TODO not used in json query because of issue
+            "address": address_list,  # TODO not used in json query because of issue
             "name": name_list,
-            "count": number_list
+            "count": number_list,
         }
         return f"{json_field_name}['{path}'] <= '{path_value[path][random.randint(0, len(path_value[path]) - 1)]}'"
-        
 
     @trace()
     def json_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.query(
+                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+            )
             return res, True
         except Exception as e:
             log.info(f"json_query error: {e}")
@@ -2124,6 +2257,7 @@ class JsonQueryChecker(Checker):
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
 
+
 class GeoQueryChecker(Checker):
     """check geometry query operations in a dependent thread"""
 
@@ -2133,7 +2267,9 @@ class GeoQueryChecker(Checker):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(
+            collection_name=self.c_name, replica_number=replica_number
+        )  # do load before query
         self.insert_data()
         self.term_expr = self.get_term_expr()
 
@@ -2141,12 +2277,13 @@ class GeoQueryChecker(Checker):
         geometry_field_name = random.choice(self.geometry_field_names)
         query_polygon = "POLYGON ((-180 -90, 180 -90, 180 90, -180 90, -180 -90))"
         return f"ST_WITHIN({geometry_field_name}, '{query_polygon}')"
-        
 
     @trace()
     def geo_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.query(
+                collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout
+            )
             return res, True
         except Exception as e:
             log.info(f"geo_query error: {e}")
@@ -2175,28 +2312,45 @@ class DeleteChecker(Checker):
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
-        query_expr = f'{self.int64_field_name} > 0'
-        res = self.milvus_client.query(collection_name=self.c_name, filter=query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+        query_expr = f"{self.int64_field_name} > 0"
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=query_expr,
+            output_fields=[self.int64_field_name],
+            partition_name=self.p_name,
+        )
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
-        delete_ids = self.ids[:len(self.ids) // 2]  # delete half of ids
-        self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
+        delete_ids = self.ids[: len(self.ids) // 2]  # delete half of ids
+        self.delete_expr = f"{self.int64_field_name} in {delete_ids}"
 
     def update_delete_expr(self):
-        res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=self.query_expr,
+            output_fields=[self.int64_field_name],
+            partition_name=self.p_name,
+        )
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
             # insert data to make sure there are enough ids to delete
             self.insert_data(nb=10000)
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=self.query_expr,
+                output_fields=[self.int64_field_name],
+                partition_name=self.p_name,
+            )
             all_ids = [r[self.int64_field_name] for r in res]
         delete_ids = all_ids[:3000]  # delete 3000 ids
-        self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
+        self.delete_expr = f"{self.int64_field_name} in {delete_ids}"
 
     @trace()
     def delete_entities(self):
         try:
-            res = self.milvus_client.delete(collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name)
+            res = self.milvus_client.delete(
+                collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name
+            )
             return res, True
         except Exception as e:
             log.info(f"delete_entities error: {e}")
@@ -2225,27 +2379,44 @@ class DeleteFreshnessChecker(Checker):
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
-        query_expr = f'{self.int64_field_name} > 0'
-        res = self.milvus_client.query(collection_name=self.c_name, filter=query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+        query_expr = f"{self.int64_field_name} > 0"
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=query_expr,
+            output_fields=[self.int64_field_name],
+            partition_name=self.p_name,
+        )
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
-        delete_ids = self.ids[:len(self.ids) // 2]  # delete half of ids
-        self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
+        delete_ids = self.ids[: len(self.ids) // 2]  # delete half of ids
+        self.delete_expr = f"{self.int64_field_name} in {delete_ids}"
 
     def update_delete_expr(self):
-        res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=self.query_expr,
+            output_fields=[self.int64_field_name],
+            partition_name=self.p_name,
+        )
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
             # insert data to make sure there are enough ids to delete
             self.insert_data(nb=10000)
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=self.query_expr,
+                output_fields=[self.int64_field_name],
+                partition_name=self.p_name,
+            )
             all_ids = [r[self.int64_field_name] for r in res]
-        delete_ids = all_ids[:len(all_ids) // 2]  # delete half of ids
-        self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
+        delete_ids = all_ids[: len(all_ids) // 2]  # delete half of ids
+        self.delete_expr = f"{self.int64_field_name} in {delete_ids}"
 
     def delete_entities(self):
         try:
-            res = self.milvus_client.delete(collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name)
+            res = self.milvus_client.delete(
+                collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name
+            )
             return res, True
         except Exception as e:
             log.info(f"delete_entities error: {e}")
@@ -2255,7 +2426,12 @@ class DeleteFreshnessChecker(Checker):
     def delete_freshness(self):
         try:
             while True:
-                res = self.milvus_client.query(collection_name=self.c_name, filter=self.delete_expr, output_fields=[f'{self.int64_field_name}'], timeout=timeout)
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=self.delete_expr,
+                    output_fields=[f"{self.int64_field_name}"],
+                    timeout=timeout,
+                )
                 if len(res) == 0:
                     break
             return res, True
@@ -2291,6 +2467,7 @@ class CompactChecker(Checker):
     @trace()
     def compact(self):
         from pymilvus import Collection
+
         collection = Collection(name=self.c_name, using=self.alias)
         res = collection.compact(timeout=timeout)
         collection.wait_for_compaction_completed()
@@ -2325,12 +2502,20 @@ class LoadBalanceChecker(Checker):
     @trace()
     def load_balance(self):
         from pymilvus import utility
-        res = utility.load_balance(collection_name=self.c_name, src_node_id=self.src_node_id, dst_node_ids=self.dst_node_ids, sealed_segment_ids=self.sealed_segment_ids, using=self.alias)
+
+        res = utility.load_balance(
+            collection_name=self.c_name,
+            src_node_id=self.src_node_id,
+            dst_node_ids=self.dst_node_ids,
+            sealed_segment_ids=self.sealed_segment_ids,
+            using=self.alias,
+        )
         return res, True
 
     def prepare(self):
         """prepare load balance params"""
         from pymilvus import Collection
+
         collection = Collection(name=self.c_name, using=self.alias)
         res = collection.get_replicas()
         # find a group which has multi nodes
@@ -2342,6 +2527,7 @@ class LoadBalanceChecker(Checker):
         self.src_node_id = group_nodes[0]
         self.dst_node_ids = group_nodes[1:]
         from pymilvus import utility
+
         res = utility.get_query_segment_info(self.c_name, using=self.alias)
         segment_distribution = cf.get_segment_distribution(res)
         self.sealed_segment_ids = segment_distribution[self.src_node_id]["sealed"]
@@ -2361,8 +2547,17 @@ class LoadBalanceChecker(Checker):
 class BulkInsertChecker(Checker):
     """check bulk insert operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, files=[], use_one_collection=False, dim=ct.default_dim,
-                 schema=None, insert_data=False, minio_endpoint=None, bucket_name=None):
+    def __init__(
+        self,
+        collection_name=None,
+        files=[],
+        use_one_collection=False,
+        dim=ct.default_dim,
+        schema=None,
+        insert_data=False,
+        minio_endpoint=None,
+        bucket_name=None,
+    ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name, dim=dim, schema=schema, insert_data=insert_data)
@@ -2378,17 +2573,16 @@ class BulkInsertChecker(Checker):
 
     def prepare(self, data_size=100000):
         with RemoteBulkWriter(
-                schema=self.schema,
-                file_type=BulkFileType.NUMPY,
-                remote_path="bulk_data",
-                connect_param=RemoteBulkWriter.ConnectParam(
-                    endpoint=self.minio_endpoint,
-                    access_key="minioadmin",
-                    secret_key="minioadmin",
-                    bucket_name=self.bucket_name
-                )
+            schema=self.schema,
+            file_type=BulkFileType.NUMPY,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+                bucket_name=self.bucket_name,
+            ),
         ) as remote_writer:
-
             for _ in range(data_size):
                 row = cf.gen_row_data_by_schema(nb=1, schema=self.get_schema())[0]
                 remote_writer.append_row(row)
@@ -2405,6 +2599,7 @@ class BulkInsertChecker(Checker):
 
     def get_bulk_insert_task_state(self):
         from pymilvus import utility
+
         state_map = {}
         for task_id in self.failed_tasks_id:
             state = utility.get_bulk_insert_state(task_id=task_id, using=self.alias)
@@ -2415,6 +2610,7 @@ class BulkInsertChecker(Checker):
     def bulk_insert(self):
         log.info(f"bulk insert collection name: {self.c_name}")
         from pymilvus import utility
+
         task_ids = utility.do_bulk_insert(collection_name=self.c_name, files=self.files, using=self.alias)
         log.info(f"task ids {task_ids}")
         completed = utility.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720, using=self.alias)
@@ -2428,7 +2624,9 @@ class BulkInsertChecker(Checker):
                 log.debug(f"check failed task: {self.c_name}")
             else:
                 self.c_name = cf.gen_unique_str("BulkInsertChecker_")
-        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema, consistency_level="Strong")
+        self.milvus_client.create_collection(
+            collection_name=self.c_name, schema=self.schema, consistency_level="Strong"
+        )
         log.info(f"collection schema: {self.milvus_client.describe_collection(self.c_name)}")
         # bulk insert data
         num_entities = self.milvus_client.get_collection_stats(collection_name=self.c_name).get("row_count", 0)
@@ -2457,15 +2655,16 @@ class AlterCollectionChecker(Checker):
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
         log.info(f"before alter collection {self.c_name} schema: {res}")
         # alter collection attributes
-        self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-                                                       properties={"mmap.enabled": True})
-        self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-                                                       properties={"collection.ttl.seconds": 3600})
-        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
-                                                       properties={"dynamicfield.enabled": True})
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, properties={"mmap.enabled": True})
+        self.milvus_client.alter_collection_properties(
+            collection_name=self.c_name, properties={"collection.ttl.seconds": 3600}
+        )
+        self.milvus_client.alter_collection_properties(
+            collection_name=self.c_name, properties={"dynamicfield.enabled": True}
+        )
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
         log.info(f"after alter collection {self.c_name} schema: {res}")
-        
+
     @trace()
     def alter_check(self):
         try:
@@ -2475,7 +2674,7 @@ class AlterCollectionChecker(Checker):
                 return res, False
             if properties.get("collection.ttl.seconds") != "3600":
                 return res, False
-            if res["enable_dynamic_field"] != True:
+            if not res["enable_dynamic_field"]:
                 return res, False
             return res, True
         except Exception as e:
@@ -2492,6 +2691,621 @@ class AlterCollectionChecker(Checker):
             sleep(constants.WAIT_PER_OP)
 
 
+class SnapshotChecker(Checker):
+    """Check snapshot create/restore operations succeed on a shared collection.
+
+    This is a lightweight checker that only verifies snapshot operations complete
+    successfully, without checking data correctness. It can safely share a
+    collection with other checkers since it does not depend on data consistency.
+
+    Each cycle: create snapshot -> restore to new collection -> wait for completion -> cleanup
+    """
+
+    def __init__(self, collection_name=None, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("SnapshotChecker_")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.snapshot_name = None
+        self.restored_collection = None
+
+    @trace()
+    def snapshot(self):
+        try:
+            # 1. Create snapshot
+            self.snapshot_name = cf.gen_unique_str("snapshot_")
+            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            log.info(f"[SnapshotChecker] Created snapshot {self.snapshot_name} for {self.c_name}")
+
+            # 2. Restore to new collection
+            self.restored_collection = cf.gen_unique_str("restored_")
+            job_id = self.milvus_client.restore_snapshot(self.snapshot_name, self.restored_collection)
+            log.info(f"[SnapshotChecker] Started restore job {job_id}")
+
+            # 3. Wait for restore completion
+            start_time = time.time()
+            restore_timeout = 300
+            while time.time() - start_time < restore_timeout:
+                state = self.milvus_client.get_restore_snapshot_state(job_id)
+                log.debug(f"[SnapshotChecker] Restore state: {state.state}")
+                if state.state == "RestoreSnapshotCompleted":
+                    log.info(f"[SnapshotChecker] Restore completed in {time.time() - start_time:.1f}s")
+                    return None, True
+                if state.state == "RestoreSnapshotFailed":
+                    return f"Restore failed: {state.reason}", False
+                time.sleep(2)
+
+            return f"Restore timeout after {restore_timeout}s", False
+
+        except Exception as e:
+            log.error(f"[SnapshotChecker] Snapshot failed: {e}")
+            return str(e), False
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        try:
+            if self.restored_collection:
+                self.milvus_client.drop_collection(self.restored_collection)
+                log.debug(f"[SnapshotChecker] Dropped restored collection {self.restored_collection}")
+                self.restored_collection = None
+        except Exception as e:
+            log.warning(f"[SnapshotChecker] Failed to drop restored collection: {e}")
+        try:
+            if self.snapshot_name:
+                self.milvus_client.drop_snapshot(self.snapshot_name)
+                log.debug(f"[SnapshotChecker] Dropped snapshot {self.snapshot_name}")
+                self.snapshot_name = None
+        except Exception as e:
+            log.warning(f"[SnapshotChecker] Failed to drop snapshot: {e}")
+
+    @exception_handler()
+    def run_task(self):
+        return self.snapshot()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 3)
+
+
+class SnapshotRestoreChecker(Checker):
+    """Check snapshot restore with data verification using an independent collection.
+
+    This checker uses its own dedicated collection (not shared with other checkers)
+    and performs all DML operations internally, so no external locking is needed.
+
+    Each cycle:
+    1. Performs DML operations (insert/upsert/delete) on its own collection
+    2. Flushes and captures state
+    3. Creates snapshot and restores to a new collection
+    4. Verifies data correctness after restore
+    5. Cleans up snapshot and restored collection
+    """
+
+    def __init__(self, collection_name=None, schema=None):
+        # Always use a dedicated collection for snapshot testing
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("SnapshotRestoreChecker_")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.snapshot_name = None
+        self.restored_collection = None
+        self.snapshot_row_count = 0
+        self.snapshot_sample_pks = []
+
+    def _do_insert(self, nb=100):
+        """Insert rows into the checker's own collection."""
+        data = cf.gen_row_data_by_schema(nb=nb, schema=self.get_schema())
+        for i, d in enumerate(data):
+            pk = int(time.time() * 1000000) + i
+            d[self.int64_field_name] = pk
+        self.milvus_client.insert(self.c_name, data)
+        log.debug(f"[SnapshotRestoreChecker] Inserted {nb} rows")
+
+    def _do_upsert(self, nb=10):
+        """Upsert rows in the checker's own collection."""
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=f"{self.int64_field_name} >= 0",
+            output_fields=[self.int64_field_name],
+            limit=nb,
+        )
+        if not res:
+            return
+        pks = [r[self.int64_field_name] for r in res]
+        data = cf.gen_row_data_by_schema(nb=len(pks), schema=self.get_schema())
+        for i, d in enumerate(data):
+            d[self.int64_field_name] = pks[i]
+        self.milvus_client.upsert(self.c_name, data)
+        log.debug(f"[SnapshotRestoreChecker] Upserted {len(pks)} rows")
+
+    def _do_delete(self, nb=5):
+        """Delete rows from the checker's own collection, keeping at least 100 rows."""
+        count_res = self.milvus_client.query(collection_name=self.c_name, filter="", output_fields=["count(*)"])
+        row_count = count_res[0]["count(*)"] if count_res else 0
+        if row_count <= 100:
+            return
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=f"{self.int64_field_name} >= 0",
+            output_fields=[self.int64_field_name],
+            limit=nb,
+        )
+        if not res:
+            return
+        pks_to_delete = [r[self.int64_field_name] for r in res]
+        filter_expr = f"{self.int64_field_name} in {pks_to_delete}"
+        self.milvus_client.delete(self.c_name, filter=filter_expr)
+        log.debug(f"[SnapshotRestoreChecker] Deleted {len(pks_to_delete)} rows")
+
+    def _do_dml_operations(self):
+        """Execute a random DML operation on the checker's own collection."""
+        op = random.choice(["insert", "upsert", "delete"])
+        try:
+            if op == "insert":
+                self._do_insert(nb=10)
+            elif op == "upsert":
+                self._do_upsert(nb=5)
+            elif op == "delete":
+                self._do_delete(nb=5)
+        except Exception as e:
+            log.warning(f"[SnapshotRestoreChecker] DML operation {op} failed: {e}")
+
+    def _capture_snapshot_state(self):
+        """Capture current collection state after flush."""
+        try:
+            res = self.milvus_client.query(
+                collection_name=self.c_name, filter="", output_fields=["count(*)"], consistency_level="Strong"
+            )
+            self.snapshot_row_count = res[0]["count(*)"] if res else 0
+
+            if self.snapshot_row_count > 0:
+                sample_size = min(50, self.snapshot_row_count)
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f"{self.int64_field_name} >= 0",
+                    output_fields=[self.int64_field_name],
+                    limit=sample_size,
+                    consistency_level="Strong",
+                )
+                self.snapshot_sample_pks = [r[self.int64_field_name] for r in res]
+            else:
+                self.snapshot_sample_pks = []
+
+            log.info(
+                f"[SnapshotRestoreChecker] Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}"
+            )
+        except Exception as e:
+            log.warning(f"Failed to capture snapshot state: {e}")
+            self.snapshot_row_count = 0
+            self.snapshot_sample_pks = []
+
+    def _verify_restored_data(self, restored_name):
+        """Verify data correctness after restore."""
+        try:
+            self.milvus_client.load_collection(restored_name)
+        except Exception as e:
+            log.warning(f"Failed to load restored collection: {e}")
+            return False, f"Failed to load restored collection: {e}"
+
+        try:
+            res = self.milvus_client.query(
+                collection_name=restored_name, filter="", output_fields=["count(*)"], consistency_level="Strong"
+            )
+            actual_count = res[0]["count(*)"] if res else 0
+
+            log.info(
+                f"[SnapshotRestoreChecker] Verify restored data: expected={self.snapshot_row_count}, actual={actual_count}"
+            )
+
+            if actual_count != self.snapshot_row_count:
+                return False, f"Row count mismatch: expected {self.snapshot_row_count}, got {actual_count}"
+
+            if self.snapshot_sample_pks:
+                filter_expr = f"{self.int64_field_name} in {self.snapshot_sample_pks}"
+                res = self.milvus_client.query(
+                    collection_name=restored_name,
+                    filter=filter_expr,
+                    output_fields=[self.int64_field_name],
+                    consistency_level="Strong",
+                )
+                found_pks = {r[self.int64_field_name] for r in res}
+                expected_pks = set(self.snapshot_sample_pks)
+
+                if found_pks != expected_pks:
+                    missing = expected_pks - found_pks
+                    return False, f"Missing PKs after restore: {missing}"
+
+            return True, f"Data verified: row_count={actual_count}, sample_pks={len(self.snapshot_sample_pks)}"
+        except Exception as e:
+            return False, f"Verification failed: {e}"
+
+    @trace()
+    def restore_snapshot(self):
+        try:
+            # 1. Execute DML operations to modify collection state
+            for _ in range(3):
+                self._do_dml_operations()
+                time.sleep(0.1)
+
+            # 2. Flush and capture state (no lock needed - this is our own collection)
+            self.milvus_client.flush(collection_name=self.c_name)
+            log.debug(f"Flushed collection {self.c_name}")
+            time.sleep(1)
+
+            self._capture_snapshot_state()
+            row_count_before = self.snapshot_row_count
+            log.info(f"State before snapshot: row_count={row_count_before}, sample_pks={len(self.snapshot_sample_pks)}")
+
+            # 3. Create snapshot
+            self.snapshot_name = cf.gen_unique_str("snapshot_")
+            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
+
+            # 4. Restore to new collection
+            self.restored_collection = cf.gen_unique_str("restored_")
+            job_id = self.milvus_client.restore_snapshot(self.snapshot_name, self.restored_collection)
+            log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
+
+            # 5. Wait for restore completion
+            start_time = time.time()
+            restore_timeout = 300
+            while time.time() - start_time < restore_timeout:
+                state = self.milvus_client.get_restore_snapshot_state(job_id)
+                log.debug(f"Restore state: {state.state}")
+                if state.state == "RestoreSnapshotCompleted":
+                    log.info(f"Restore job {job_id} completed in {time.time() - start_time:.1f}s")
+                    break
+                if state.state == "RestoreSnapshotFailed":
+                    return f"Restore failed: {state.reason}", False
+                time.sleep(2)
+            else:
+                return f"Restore timeout after {restore_timeout}s", False
+
+            # 6. Verify data correctness
+            verified, msg = self._verify_restored_data(self.restored_collection)
+            if not verified:
+                return msg, False
+
+            log.info(f"Snapshot restore verified successfully: {msg}")
+            return None, True
+
+        except Exception as e:
+            log.error(f"Snapshot restore failed: {e}")
+            return str(e), False
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        """Cleanup snapshot and restored collection."""
+        try:
+            if self.restored_collection:
+                self.milvus_client.drop_collection(self.restored_collection)
+                log.debug(f"Dropped restored collection {self.restored_collection}")
+                self.restored_collection = None
+        except Exception as e:
+            log.warning(f"Failed to drop restored collection: {e}")
+
+        try:
+            if self.snapshot_name:
+                self.milvus_client.drop_snapshot(self.snapshot_name)
+                log.debug(f"Dropped snapshot {self.snapshot_name}")
+                self.snapshot_name = None
+        except Exception as e:
+            log.warning(f"Failed to drop snapshot: {e}")
+
+    @exception_handler()
+    def run_task(self):
+        return self.restore_snapshot()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 3)
+
+
+class NullVectorSearchChecker(Checker):
+    """check search operations on nullable vector fields, validate no NaN distances (null vector leak detection)"""
+
+    NAN_THRESHOLD = 3  # consecutive NaN detections before asserting failure
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("NullVectorSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+        # Collect nullable dense vector fields
+        self.nullable_vector_fields = []
+        for field in self.schema.fields:
+            if field.dtype in ct.all_dense_vector_types and getattr(field, "nullable", False):
+                self.nullable_vector_fields.append(
+                    {"name": field.name, "dim": getattr(field, "dim", ct.default_dim), "dtype": field.dtype}
+                )
+        self.data = None
+        self.anns_field_name = None
+        self.search_param = None
+        self._nan_consecutive = 0
+
+    @trace()
+    def search(self):
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=self.data,
+                anns_field=self.anns_field_name,
+                search_params=self.search_param,
+                limit=5,
+                partition_names=self.p_names,
+                timeout=search_timeout,
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        if not self.nullable_vector_fields:
+            log.warning("[NullVectorSearchChecker] No nullable vector fields available")
+            return None, True
+
+        field_item = random.choice(self.nullable_vector_fields)
+        self.anns_field_name = field_item["name"]
+        dim = field_item["dim"]
+        dtype = field_item["dtype"]
+
+        self.data = cf.gen_vectors(1, dim, vector_data_type=dtype)
+        if dtype == DataType.INT8_VECTOR:
+            self.search_param = constants.DEFAULT_INT8_SEARCH_PARAM
+        else:
+            self.search_param = constants.DEFAULT_SEARCH_PARAM
+
+        res, result = self.search()
+        if not result:
+            self._nan_consecutive = 0
+            return res, result
+
+        # Validate no NaN distances (null vector leak indicator)
+        has_nan = False
+        try:
+            for hits in res:
+                for hit in hits:
+                    if math.isnan(hit.get("distance", 0)):
+                        has_nan = True
+                        break
+                if has_nan:
+                    break
+        except Exception as e:
+            log.debug(f"[NullVectorSearchChecker] NaN check skipped: {e}")
+
+        if has_nan:
+            self._nan_consecutive += 1
+            log.warning(
+                f"[NullVectorSearchChecker] NaN distance on '{self.anns_field_name}' "
+                f"(consecutive={self._nan_consecutive}/{self.NAN_THRESHOLD})"
+            )
+            if self._nan_consecutive >= self.NAN_THRESHOLD:
+                self._nan_consecutive = 0
+                return "null vector leaked into search index (NaN distance)", False
+        else:
+            self._nan_consecutive = 0
+
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class NullVectorQueryChecker(Checker):
+    """check query operations on nullable vector fields.
+
+    Dynamically-added new_vec_* fields are excluded because older sealed
+    segments legitimately contain all-null values for those fields. For original
+    nullable vector fields, sample PKs with non-null values and verify those
+    values stay queryable under chaos.
+    """
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("NullVectorQueryChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
+        self.insert_data()
+        # Collect nullable dense vector field names from the original schema.
+        self.nullable_vector_fields = []
+        for field in self.schema.fields:
+            if field.dtype in ct.all_dense_vector_types and getattr(field, "nullable", False):
+                if not field.name.startswith("new_vec_"):
+                    self.nullable_vector_fields.append(field.name)
+        self.term_expr = f"{self.int64_field_name} > 0"
+        self._non_null_pk_samples = self._collect_non_null_pk_samples()
+
+    def _collect_non_null_pk_samples(self, sample_size=20):
+        samples = {}
+        for field_name in self.nullable_vector_fields:
+            try:
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=self.term_expr,
+                    output_fields=[self.int64_field_name, field_name],
+                    limit=500,
+                    timeout=query_timeout,
+                )
+                non_null_pks = [r[self.int64_field_name] for r in res if r.get(field_name) is not None]
+                samples[field_name] = non_null_pks[:sample_size]
+                log.info(
+                    f"[NullVectorQueryChecker] field='{field_name}': sampled {len(samples[field_name])} non-null PKs"
+                )
+            except Exception as e:
+                log.warning(f"[NullVectorQueryChecker] failed to sample non-null PKs for '{field_name}': {e}")
+                samples[field_name] = []
+        return samples
+
+    @trace()
+    def query(self):
+        try:
+            vec_field = random.choice(self.nullable_vector_fields)
+            pks = self._non_null_pk_samples.get(vec_field, [])
+
+            if pks:
+                sample_pks = random.sample(pks, min(10, len(pks)))
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f"{self.int64_field_name} in {sample_pks}",
+                    output_fields=[self.int64_field_name, vec_field],
+                    timeout=query_timeout,
+                )
+                if not res:
+                    # Empty result: sampled PKs may have been deleted by concurrent DeleteChecker.
+                    self._non_null_pk_samples = self._collect_non_null_pk_samples()
+                    log.debug(
+                        f"[NullVectorQueryChecker] field='{vec_field}': no sampled PKs returned; sample refreshed"
+                    )
+                    return res, True
+                null_rows = [r for r in res if r.get(vec_field) is None]
+                if null_rows:
+                    # UpsertChecker can legitimately overwrite sampled rows with null vector
+                    # values. Treat the sample as stale, refresh, and continue.
+                    self._non_null_pk_samples = self._collect_non_null_pk_samples()
+                    log.debug(
+                        f"[NullVectorQueryChecker] field='{vec_field}': "
+                        f"{len(null_rows)}/{len(res)} sampled rows are now null; sample refreshed"
+                    )
+                    return res, True
+                log.debug(
+                    f"[NullVectorQueryChecker] field='{vec_field}': {len(res)}/{len(sample_pks)} non-null rows verified"
+                )
+                return res, True
+
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                output_fields=[self.int64_field_name, vec_field],
+                limit=50,
+                timeout=query_timeout,
+            )
+            non_null_rows = [r for r in res if r.get(vec_field) is not None]
+            log.debug(
+                f"[NullVectorQueryChecker] fallback field='{vec_field}': {len(non_null_rows)}/{len(res)} non-null"
+            )
+            if res and not non_null_rows:
+                return (f"all {len(res)} vectors are null for field '{vec_field}', possible data corruption"), False
+            return res, True
+        except Exception as e:
+            log.info(f"[NullVectorQueryChecker] query error: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        if not self.nullable_vector_fields:
+            log.warning("[NullVectorQueryChecker] No nullable vector fields available")
+            return None, True
+        res, result = self.query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class AddVectorFieldChecker(Checker):
+    """check add nullable vector field operations: add field, create index, insert, query to verify"""
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("AddVectorFieldChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
+
+    @trace()
+    def add_vector_field(self):
+        """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
+        try:
+            # Check vector field limit before adding
+            schema_info = self.milvus_client.describe_collection(self.c_name)
+            fields = schema_info.get("fields", [])
+            current_vector_fields = sum(
+                1
+                for f in fields
+                if f.get("type")
+                in (
+                    DataType.FLOAT_VECTOR,
+                    DataType.BINARY_VECTOR,
+                    DataType.FLOAT16_VECTOR,
+                    DataType.BFLOAT16_VECTOR,
+                    DataType.INT8_VECTOR,
+                    DataType.SPARSE_FLOAT_VECTOR,
+                )
+            )
+            if current_vector_fields >= 10:
+                log.info(
+                    f"[AddVectorFieldChecker] vector field limit reached "
+                    f"({current_vector_fields}), fallback to insert only"
+                )
+                _, insert_result = self.insert_data()
+                return None, insert_result
+
+            new_vec_field = cf.gen_unique_str("new_vec_")
+            dim = 32
+            self.milvus_client.add_collection_field(
+                collection_name=self.c_name,
+                field_name=new_vec_field,
+                data_type=DataType.FLOAT_VECTOR,
+                dim=dim,
+                nullable=True,
+            )
+            log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
+            time.sleep(1)
+
+            # Create HNSW index for new vector field
+            index_params = IndexParams()
+            index_params.add_index(
+                field_name=new_vec_field,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 16, "efConstruction": 200},
+            )
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+            log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
+
+            # Insert data (gen_row_data_by_schema handles nullable vectors)
+            _, insert_result = self.insert_data()
+            if not insert_result:
+                return "insert failed after add vector field", False
+
+            # Query old rows: new field should be None for pre-existing rows
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=f"{self.int64_field_name} > 0",
+                output_fields=[new_vec_field],
+                limit=10,
+                timeout=query_timeout,
+            )
+            if len(res) == 0:
+                return "query returned 0 rows after add vector field", False
+            null_count = sum(1 for r in res if r.get(new_vec_field) is None)
+            log.debug(f"[AddVectorFieldChecker] query: {len(res)} rows, {null_count} null for {new_vec_field}")
+
+            return None, True
+        except Exception as e:
+            log.error(f"[AddVectorFieldChecker] error: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.add_vector_field()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 6)
+
+
 class TestResultAnalyzer(unittest.TestCase):
     def test_get_stage_success_rate(self):
         ra = ResultAnalyzer()
@@ -2499,5 +3313,5 @@ class TestResultAnalyzer(unittest.TestCase):
         print(res)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

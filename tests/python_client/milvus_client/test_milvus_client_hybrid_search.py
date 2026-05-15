@@ -1,15 +1,14 @@
-import pytest
+# ruff: noqa: F403, F405
+import math
 
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from common.constants import *
-from pymilvus import DataType
-from pymilvus import AnnSearchRequest
-from pymilvus import WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
+from utils.util_pymilvus import *
 
 prefix = "client_hybrid_search"
 epsilon = ct.epsilon
@@ -20,10 +19,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -37,7 +36,7 @@ default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
-    """ Test case of hybrid search interface """
+    """Test case of hybrid search interface"""
 
     """
     ******************************************************************
@@ -62,10 +61,16 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection={name}]"}
-        self.hybrid_search(client, name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
+        self.hybrid_search(
+            client,
+            name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -86,10 +91,16 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection={name}]"}
-        self.hybrid_search(client, name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
+        self.hybrid_search(
+            client,
+            name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -106,11 +117,10 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. hybrid search
-        ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection=1]"}
-        self.hybrid_search(client, collection_name, reqs, ranker, limit=default_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: "collection not found[database=default][collection=1]"}
+        self.hybrid_search(
+            client, collection_name, reqs, ranker, limit=default_limit, check_task=CheckTasks.err_res, check_items=error
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -130,15 +140,20 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
-        ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection=1]"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], invalid_ranker, limit=default_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 100, ct.err_msg: "collection not found[database=default][collection=1]"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            invalid_ranker,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_limit", [-1, ct.min_limit-1, "1", "12-s", "中文", "%$#"])
+    @pytest.mark.parametrize("invalid_limit", [-1, ct.min_limit - 1, "1", "12-s", "中文", "%$#"])
     def test_milvus_client_hybrid_search_invalid_limit(self, invalid_limit):
         """
         target: test hybrid search with invalid limit
@@ -154,14 +169,20 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`limit` value {invalid_limit} is illegal"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=invalid_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`limit` value {invalid_limit} is illegal"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=invalid_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_limit", [ct.max_limit+1])
+    @pytest.mark.parametrize("invalid_limit", [ct.max_limit + 1])
     def test_milvus_client_hybrid_search_limit_out_of_range(self, invalid_limit):
         """
         target: test hybrid search with invalid limit (out of range)
@@ -177,10 +198,19 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384], but got 16385"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=invalid_limit,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384], but got 16385",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=invalid_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -200,10 +230,17 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`output_fields` value {invalid_output_fields} is illegal"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                           output_fields=invalid_output_fields, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`output_fields` value {invalid_output_fields} is illegal"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            output_fields=invalid_output_fields,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -224,10 +261,17 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`partition_name_array` value {invalid_partition_names} is illegal"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                           partition_names=invalid_partition_names, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`partition_name_array` value {invalid_partition_names} is illegal"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            partition_names=invalid_partition_names,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -247,11 +291,17 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 65535,
-                ct.err_msg: f"partition name {invalid_partition_names} not found"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                           partition_names=[invalid_partition_names], check_task=CheckTasks.err_res,
-                           check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: f"partition name {invalid_partition_names} not found"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            partition_names=[invalid_partition_names],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -271,11 +321,20 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         not_exist_vector_field = "not_exist_vector_field"
         sub_search1 = AnnSearchRequest(vectors_to_search, not_exist_vector_field, {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: failed to get field schema by name: "
-                             f"fieldName({not_exist_vector_field}) not found: invalid parameter"}
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search1], ranker, limit=default_limit,
-                           check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"failed to create query plan: failed to get field schema by name: "
+            f"fieldName({not_exist_vector_field}) not found: invalid parameter",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search1],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -292,24 +351,38 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i)} for i in range(default_nb)]
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_vector_field_name + "new": list(rng.random((1, default_dim))[0]),
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 2. hybrid search
         vectors_to_search = rng.random((1, default_dim))
         sub_search1 = AnnSearchRequest(vectors_to_search, "vector", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "the length of weights param mismatch with ann search requests: "
-                             "invalid parameter[expected=1][actual=2]"}
-        self.hybrid_search(client, collection_name, [sub_search1], ranker, limit=default_limit,
-                           check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "the length of weights param mismatch with ann search requests: "
+            "invalid parameter[expected=1][actual=2]",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
-    """ Test case of hybrid search interface """
+    """Test case of hybrid search interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -346,43 +419,58 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(default_vector_field_name + "new", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        index_params.add_index(default_vector_field_name+"new", metric_type="L2")
+        index_params.add_index(default_vector_field_name + "new", metric_type="L2")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = cf.gen_row_data_by_schema(ct.default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         # 3. hybrid search
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, dim=dim)
         insert_ids = [i for i in range(default_nb)]
         sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20, expr="id>=0")
-        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new", {"level": 1}, 20, expr="id>=0")
+        sub_search2 = AnnSearchRequest(
+            vectors_to_search, default_vector_field_name + "new", {"level": 1}, 20, expr="id>=0"
+        )
         ranker = WeightedRanker(0.2, 0.8)
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "nq": len(vectors_to_search),
-                                        "ids": insert_ids,
-                                        "limit": default_limit,
-                                        "pk_name": default_primary_key_field_name})
-        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
-                                  nullable=True, max_length=100)
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
-                           filter="field_new is null",
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "nq": len(vectors_to_search),
-                                        "ids": insert_ids,
-                                        "limit": default_limit,
-                                        "pk_name": default_primary_key_field_name})
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search2],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
+        self.add_collection_field(
+            client, collection_name, field_name="field_new", data_type=DataType.INT64, nullable=True, max_length=100
+        )
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search2],
+            ranker,
+            limit=default_limit,
+            filter="field_new is null",
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -400,7 +488,8 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0])}
-            for i in range(default_nb)]
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 3. hybrid search
         rng = np.random.default_rng(seed=19530)
@@ -408,20 +497,147 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         sub_search1 = AnnSearchRequest(vectors_to_search, "vector", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(1)
-        self.hybrid_search(client, collection_name, [sub_search1], ranker, limit=default_limit,
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "nq": len(vectors_to_search),
-                                        "ids": insert_ids,
-                                        "pk_name": default_primary_key_field_name,
-                                        "limit": default_limit})
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_hybrid_search_nullable_vector_fields(self):
+        """
+        target: test hybrid search with nullable dense and sparse vector fields
+        method: insert mixed null/non-null vectors and search with per-request expr filters
+        expected: hybrid search returns valid distances and filters out null scalar rows
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 64
+        nullable_dense_field = "nullable_dense"
+        sparse_field = "sparse"
+        nullable_sparse_field = "nullable_sparse"
+        nullable_float_field = "nullable_float"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(nullable_dense_field, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(sparse_field, DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(nullable_sparse_field, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        schema.add_field(nullable_float_field, DataType.FLOAT, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE", index_type="FLAT")
+        index_params.add_index(nullable_dense_field, metric_type="COSINE", index_type="FLAT")
+        index_params.add_index(sparse_field, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
+        index_params.add_index(nullable_sparse_field, metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        nb = default_nb
+        dense_vectors = cf.gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        nullable_dense_vectors = cf.gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        sparse_vectors = cf.gen_sparse_vectors(nb)
+        nullable_sparse_vectors = cf.gen_sparse_vectors(nb)
+        rows = []
+        for i in range(nb):
+            is_null = i % 5 == 0
+            rows.append(
+                {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: dense_vectors[i],
+                    nullable_dense_field: None if is_null else nullable_dense_vectors[i],
+                    sparse_field: sparse_vectors[i],
+                    nullable_sparse_field: None if is_null else nullable_sparse_vectors[i],
+                    nullable_float_field: None if is_null else float(i),
+                }
+            )
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        dense_queries = cf.gen_vectors(default_nq, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        dense_reqs = [
+            AnnSearchRequest(
+                dense_queries,
+                default_vector_field_name,
+                {"metric_type": "COSINE"},
+                default_limit,
+                expr=f"{nullable_float_field} > 100",
+            ),
+            AnnSearchRequest(
+                dense_queries,
+                nullable_dense_field,
+                {"metric_type": "COSINE"},
+                default_limit,
+                expr=f"{nullable_float_field} > 100",
+            ),
+        ]
+        valid_ids = [i for i in range(nb) if i > 100 and i % 5 != 0]
+        dense_res = self.hybrid_search(
+            client,
+            collection_name,
+            dense_reqs,
+            WeightedRanker(0.5, 0.5),
+            limit=default_limit,
+            output_fields=[default_primary_key_field_name, nullable_float_field],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "ids": valid_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )[0]
+        for hits in dense_res:
+            for hit in hits:
+                assert not math.isnan(hit["distance"])
+                assert hit[nullable_float_field] is not None
+                assert hit[nullable_float_field] > 100
+
+        sparse_queries = cf.gen_sparse_vectors(default_nq)
+        sparse_reqs = [
+            AnnSearchRequest(sparse_queries, sparse_field, {"metric_type": "IP"}, default_limit),
+            AnnSearchRequest(sparse_queries, nullable_sparse_field, {"metric_type": "IP"}, default_limit),
+        ]
+        sparse_res = self.hybrid_search(
+            client,
+            collection_name,
+            sparse_reqs,
+            RRFRanker(),
+            limit=default_limit,
+            output_fields=[default_primary_key_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "ids": list(range(nb)),
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )[0]
+        for hits in sparse_res:
+            for hit in hits:
+                assert not math.isnan(hit["distance"])
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("is_flush", [True, False])
     @pytest.mark.parametrize("is_release", [True, False])
-    def test_milvus_client_hybrid_search_after_json_path_index(self, supported_varchar_scalar_index,
-                                                               supported_json_cast_type, is_flush, is_release):
+    def test_milvus_client_hybrid_search_after_json_path_index(
+        self, supported_varchar_scalar_index, supported_json_cast_type, is_flush, is_release
+    ):
         """
         target: test hybrid search after json path index created
         method: create connection, collection, insert and hybrid search
@@ -440,39 +656,50 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_vector_field_name + "new", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
         schema.add_field(json_field_name, DataType.JSON)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        index_params.add_index(default_vector_field_name+"new", metric_type="L2")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]"})
+        index_params.add_index(default_vector_field_name + "new", metric_type="L2")
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]"},
+        )
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i),
-             json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_vector_field_name + "new": list(rng.random((1, default_dim))[0]),
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         if is_flush:
             self.flush(client, collection_name)
@@ -483,26 +710,50 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20, expr="id>=0")
-        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new", {"level": 1}, 20, expr="id>=0")
+        sub_search2 = AnnSearchRequest(
+            vectors_to_search, default_vector_field_name + "new", {"level": 1}, 20, expr="id>=0"
+        )
         ranker = WeightedRanker(0.2, 0.8)
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "nq": len(vectors_to_search),
-                                        "ids": insert_ids,
-                                        "pk_name": default_primary_key_field_name,
-                                        "limit": default_limit})
-        sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20,
-                                       expr=f"{json_field_name}['a']['b']>=10")
-        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name + "new", {"level": 1}, 20,
-                                       expr=f"{json_field_name}['a']['b']>=10")
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search2],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
+        sub_search1 = AnnSearchRequest(
+            vectors_to_search, default_vector_field_name, {"level": 1}, 20, expr=f"{json_field_name}['a']['b']>=10"
+        )
+        sub_search2 = AnnSearchRequest(
+            vectors_to_search,
+            default_vector_field_name + "new",
+            {"level": 1},
+            20,
+            expr=f"{json_field_name}['a']['b']>=10",
+        )
         ranker = WeightedRanker(0.2, 0.8)
         insert_ids = [i for i in range(10, default_nb)]
-        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "nq": len(vectors_to_search),
-                                        "ids": insert_ids,
-                                        "pk_name": default_primary_key_field_name,
-                                        "limit": default_limit})
+        self.hybrid_search(
+            client,
+            collection_name,
+            [sub_search1, sub_search2],
+            ranker,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
         self.drop_collection(client, collection_name)

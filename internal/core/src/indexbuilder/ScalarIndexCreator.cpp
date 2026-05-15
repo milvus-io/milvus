@@ -83,7 +83,11 @@ ScalarIndexCreator::ScalarIndexCreator(
 }
 
 void
-ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
+ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset,
+                          const bool* valid_data,
+                          const int64_t valid_data_len) {
+    (void)valid_data;
+    (void)valid_data_len;
     auto size = dataset->GetRows();
     auto data = dataset->GetTensor();
     index_->BuildWithRawDataForUT(size, data);
