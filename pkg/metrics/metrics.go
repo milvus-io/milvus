@@ -48,7 +48,16 @@ const (
 	CacheMissLabel   = "miss"
 	TimetickLabel    = "timetick"
 	AllLabel         = "all"
+)
 
+const (
+	PreferredNodeHitLabel         = "hit"
+	PreferredNodeMissLabel        = "miss"
+	PreferredNodeUnavailableLabel = "unavailable"
+	PreferredNodeRejectedLabel    = "rejected"
+)
+
+const (
 	UnissuedIndexTaskLabel   = "unissued"
 	InProgressIndexTaskLabel = "in-progress"
 	FinishedIndexTaskLabel   = "finished"
