@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -234,6 +235,9 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 
 func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+		return err
+	}
 	// Also prepare metric updates.
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), result)
 	if err != nil {

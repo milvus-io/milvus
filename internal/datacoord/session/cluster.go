@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -245,10 +244,6 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		for _, rst := range result.GetResults() {
 			if rst.GetPlanID() != in.GetPlanID() {
 				continue
-			}
-			err = binlog.CompressCompactionBinlogs(rst.GetSegments())
-			if err != nil {
-				return nil, err
 			}
 			ret = rst
 			break

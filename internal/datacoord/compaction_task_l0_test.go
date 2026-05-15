@@ -185,6 +185,8 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaCommitsManifestBeforeMetaUpda
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, operators ...UpdateOperator) error {
 			s.Equal(newManifest, output[0].GetManifest())
+			s.Empty(output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+			s.EqualValues(9001, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 			s.Len(operators, 6)
 			return nil
 		},
