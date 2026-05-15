@@ -8,7 +8,6 @@ import tempfile
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 from common import common_func as cf
 from common import common_type as ct
 from minio import Minio
@@ -541,10 +540,11 @@ def _full_matrix_arrow_columns(
         columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
 
     # Vectors. Layout per type:
-    #   FloatVector / Int8Vector        -> FixedSizeList<element, dim>
-    #   Float16/BFloat16/BinaryVector   -> fixed_size_binary raw bytes
-    # Vortex 0.56 cannot write FixedSizeBinary, so Vortex data uses
-    # FixedSizeList<UInt8> with the same byte payload.
+    #   FloatVector / Float16Vector / Int8Vector -> FixedSizeList<element, dim>
+    #   BFloat16/BinaryVector                    -> fixed_size_binary raw bytes
+    # Vortex 0.56 cannot write FixedSizeBinary; callers using Vortex must
+    # exclude BF16 and binary vectors until the writer or Milvus reader accepts
+    # an equivalent list representation.
     fv_arr = _float_vectors(ids, dim).flatten()
     f16_arr = _float16_vectors(ids, dim)
     bf16_arr = _bfloat16_vectors(ids, dim)
@@ -562,7 +562,7 @@ def _full_matrix_arrow_columns(
         elif vtype == DataType.FLOAT16_VECTOR:
             byte_width = _vector_byte_width(vtype, vdim)
             columns[name] = (
-                _fixed_size_uint8_vector_array(f16_arr, byte_width)
+                pa.FixedSizeListArray.from_arrays(pa.array(f16_arr.flatten(), type=pa.float16()), list_size=vdim)
                 if vortex_compatible
                 else _fixed_size_binary_vector_array(f16_arr, byte_width)
             )
@@ -713,7 +713,7 @@ def require_format_dependencies(fmt):
     elif fmt == "iceberg-table":
         from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
     elif fmt == "vortex":
-        pytest.importorskip("vortex.io", reason="vortex external table dependency unavailable")
+        import vortex.io as vortex_io  # noqa: F401
 
 
 def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=ct.default_dim):

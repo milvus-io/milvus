@@ -339,7 +339,7 @@ def _write_iceberg_dataset(cfg, key_prefix, batches):
 
 
 def _write_vortex_tables(minio_client, cfg, key_prefix, tables):
-    vortex_io = pytest.importorskip("vortex.io", reason="vortex external collection dependency unavailable")
+    import vortex.io as vortex_io
 
     for idx, table in enumerate(tables):
         with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:

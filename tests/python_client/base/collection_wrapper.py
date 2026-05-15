@@ -1,6 +1,6 @@
 import sys
 import time
-from numpy import nan as NaN
+from numpy import NaN
 
 from pymilvus import Collection
 
