@@ -1411,6 +1411,18 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def optimize(self, client, collection_name, target_size=None, wait=True, timeout=None,
+                 check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.optimize, collection_name],
+                                 target_size=target_size, wait=wait, timeout=timeout, **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def get_compaction_state(self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
