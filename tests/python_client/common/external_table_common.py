@@ -542,9 +542,8 @@ def _full_matrix_arrow_columns(
     # Vectors. Layout per type:
     #   FloatVector / Float16Vector / Int8Vector -> FixedSizeList<element, dim>
     #   BFloat16/BinaryVector                    -> fixed_size_binary raw bytes
-    # Vortex 0.56 cannot write FixedSizeBinary; callers using Vortex must
-    # exclude BF16 and binary vectors until the writer or Milvus reader accepts
-    # an equivalent list representation.
+    # Vortex 0.56 cannot write FixedSizeBinary; Vortex data uses
+    # FixedSizeList<UInt8> for BF16 and binary byte-vector payloads.
     fv_arr = _float_vectors(ids, dim).flatten()
     f16_arr = _float16_vectors(ids, dim)
     bf16_arr = _bfloat16_vectors(ids, dim)

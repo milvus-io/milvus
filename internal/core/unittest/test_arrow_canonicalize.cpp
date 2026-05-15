@@ -598,7 +598,30 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
                  std::exception);
 }
 
-TEST(NormalizeVectorArraysToFixedSizeBinary, BinaryVectorRejectsFixedSizeList) {
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BinaryVectorAcceptsUInt8FixedSizeList) {
+    arrow::UInt8Builder values_builder;
+    std::vector<uint8_t> raw_values = {0x12, 0x34, 0xab, 0xcd};
+    ASSERT_TRUE(values_builder.AppendValues(raw_values).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::uint8(), 2), 2, values);
+    auto out = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+        NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_BINARY, 16));
+
+    ASSERT_EQ(out->byte_width(), 2);
+    ASSERT_EQ(out->length(), 2);
+    EXPECT_EQ(out->Value(0)[0], 0x12);
+    EXPECT_EQ(out->Value(0)[1], 0x34);
+    EXPECT_EQ(out->Value(1)[0], 0xab);
+    EXPECT_EQ(out->Value(1)[1], 0xcd);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BinaryVectorRejectsNonUInt8FixedSizeList) {
     arrow::Int8Builder values_builder;
     ASSERT_TRUE(values_builder.AppendValues({1, 0, 1, 0, 1, 0, 1, 0}).ok());
     std::shared_ptr<arrow::Array> values;
@@ -612,7 +635,44 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, BinaryVectorRejectsFixedSizeList) {
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary,
-     BFloat16VectorRejectsFixedSizeList) {
+     BinaryVectorRejectsUInt8FixedSizeListSizeMismatch) {
+    arrow::UInt8Builder values_builder;
+    std::vector<uint8_t> raw_values = {1, 2};
+    ASSERT_TRUE(values_builder.AppendValues(raw_values).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::uint8(), 2), 1, values);
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
+                     {input}, milvus::DataType::VECTOR_BINARY, 8),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BFloat16VectorAcceptsUInt8FixedSizeList) {
+    arrow::UInt8Builder values_builder;
+    std::vector<uint8_t> raw_values = {0x01, 0x02, 0x03, 0x04};
+    ASSERT_TRUE(values_builder.AppendValues(raw_values).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::uint8(), 4), 1, values);
+    auto out = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+        NormalizeVectorArraysToFixedSizeBinaryForTest(
+            {input}, milvus::DataType::VECTOR_BFLOAT16, 2));
+
+    ASSERT_EQ(out->byte_width(), 4);
+    ASSERT_EQ(out->length(), 1);
+    EXPECT_EQ(out->Value(0)[0], 0x01);
+    EXPECT_EQ(out->Value(0)[1], 0x02);
+    EXPECT_EQ(out->Value(0)[2], 0x03);
+    EXPECT_EQ(out->Value(0)[3], 0x04);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BFloat16VectorRejectsNonUInt8FixedSizeList) {
     arrow::Int16Builder values_builder;
     ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
     std::shared_ptr<arrow::Array> values;
@@ -620,6 +680,21 @@ TEST(NormalizeVectorArraysToFixedSizeBinary,
 
     auto input = std::make_shared<arrow::FixedSizeListArray>(
         arrow::fixed_size_list(arrow::int16(), 2), 1, values);
+    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
+                     {input}, milvus::DataType::VECTOR_BFLOAT16, 2),
+                 std::exception);
+}
+
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     BFloat16VectorRejectsUInt8FixedSizeListSizeMismatch) {
+    arrow::UInt8Builder values_builder;
+    std::vector<uint8_t> raw_values = {1, 2};
+    ASSERT_TRUE(values_builder.AppendValues(raw_values).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+
+    auto input = std::make_shared<arrow::FixedSizeListArray>(
+        arrow::fixed_size_list(arrow::uint8(), 2), 1, values);
     EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
                      {input}, milvus::DataType::VECTOR_BFLOAT16, 2),
                  std::exception);

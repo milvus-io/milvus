@@ -1789,10 +1789,7 @@ ExpectedVectorListElementArrowType(DataType data_type,
             return arrow::Type::HALF_FLOAT;
         case DataType::VECTOR_BINARY:
         case DataType::VECTOR_BFLOAT16:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "vector list input{} is not supported for {}",
-                      FieldErrorSuffix(field_meta),
-                      data_type);
+            return arrow::Type::UINT8;
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "unsupported vector list input{} for {}",
@@ -1808,6 +1805,8 @@ ArrowTypeName(arrow::Type::type type) {
             return "float";
         case arrow::Type::INT8:
             return "int8";
+        case arrow::Type::UINT8:
+            return "uint8";
         case arrow::Type::HALF_FLOAT:
             return "halffloat";
         default:
@@ -1827,6 +1826,17 @@ ValidateVectorListElementType(
                FieldErrorSuffix(field_meta),
                ArrowTypeName(expected_type),
                actual_type->ToString());
+}
+
+int64_t
+ExpectedVectorListSize(DataType data_type, int dim) {
+    switch (data_type) {
+        case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_BFLOAT16:
+            return GetDataTypeSize(data_type, dim);
+        default:
+            return dim;
+    }
 }
 
 arrow::ArrayVector
@@ -1872,21 +1882,31 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                        FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
+            auto expected_list_size = ExpectedVectorListSize(data_type, dim);
+            AssertInfo(expected_list_size * elem_byte_size == byte_width,
+                       "vector list byte width mismatch{}, expected {}, "
+                       "actual {}",
+                       FieldErrorSuffix(field_meta),
+                       byte_width,
+                       expected_list_size * elem_byte_size);
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
                 if (array->IsValid(i)) {
                     auto offset = list_array->value_offset(i);
                     auto actual_dim = list_array->value_offset(i + 1) - offset;
-                    AssertInfo(actual_dim == dim,
-                               "vector dimension mismatch{}, expected {}, "
+                    AssertInfo(actual_dim == expected_list_size,
+                               "vector list size mismatch{}, expected {}, "
                                "actual {} at row {}",
                                FieldErrorSuffix(field_meta),
-                               dim,
+                               expected_list_size,
                                actual_dim,
                                i);
                     ValidateNoNullValuesInRange(
-                        values, offset, offset + actual_dim, "vector list");
+                        values,
+                        offset,
+                        offset + expected_list_size,
+                        "vector list");
                     memcpy(dst + i * byte_width,
                            raw + offset * elem_byte_size,
                            byte_width);
@@ -1905,10 +1925,17 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                        FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
-            AssertInfo(fsl_array->value_length() == dim,
-                       "vector dimension mismatch{}, expected {}, actual {}",
+            auto expected_list_size = ExpectedVectorListSize(data_type, dim);
+            AssertInfo(expected_list_size * elem_byte_size == byte_width,
+                       "vector list byte width mismatch{}, expected {}, "
+                       "actual {}",
                        FieldErrorSuffix(field_meta),
-                       dim,
+                       byte_width,
+                       expected_list_size * elem_byte_size);
+            AssertInfo(fsl_array->value_length() == expected_list_size,
+                       "vector list size mismatch{}, expected {}, actual {}",
+                       FieldErrorSuffix(field_meta),
+                       expected_list_size,
                        fsl_array->value_length());
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
@@ -1916,7 +1943,10 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                 if (array->IsValid(i)) {
                     auto offset = fsl_array->value_offset(i);
                     ValidateNoNullValuesInRange(
-                        values, offset, offset + dim, "vector list");
+                        values,
+                        offset,
+                        offset + expected_list_size,
+                        "vector list");
                     memcpy(dst + i * byte_width,
                            raw + offset * elem_byte_size,
                            byte_width);
