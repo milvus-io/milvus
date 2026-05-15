@@ -7,6 +7,7 @@ import struct
 import tempfile
 from uuid import uuid4
 
+import lance
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -14,6 +15,9 @@ import pytest
 import requests
 from base.testbase import TestBase
 from minio import Minio
+from pyiceberg.catalog.sql import SqlCatalog
+from pyiceberg.schema import Schema as IcebergSchema
+from pyiceberg.types import FixedType, FloatType, LongType, NestedField
 from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.utils import gen_collection_name
 
@@ -234,8 +238,6 @@ def _write_parquet_tables(minio_client, cfg, key_prefix, tables):
 
 
 def _write_lance_tables(minio_client, cfg, key_prefix, tables):
-    lance = pytest.importorskip("lance", reason="lance external collection dependency unavailable")
-
     with tempfile.TemporaryDirectory(prefix="rest_ext_lance_") as tmpdir:
         local_path = os.path.join(tmpdir, "dataset.lance")
         for idx, table in enumerate(tables):
@@ -284,21 +286,6 @@ def _table_to_iceberg_arrow(table):
 
 
 def _write_iceberg_tables(cfg, key_prefix, tables):
-    catalog_sql = pytest.importorskip(
-        "pyiceberg.catalog.sql", reason="iceberg external collection dependency unavailable"
-    )
-    iceberg_schema_module = pytest.importorskip(
-        "pyiceberg.schema",
-        reason="iceberg external collection dependency unavailable",
-    )
-    iceberg_types = pytest.importorskip("pyiceberg.types", reason="iceberg external collection dependency unavailable")
-    SqlCatalog = catalog_sql.SqlCatalog
-    IcebergSchema = iceberg_schema_module.Schema
-    FixedType = iceberg_types.FixedType
-    FloatType = iceberg_types.FloatType
-    LongType = iceberg_types.LongType
-    NestedField = iceberg_types.NestedField
-
     with tempfile.TemporaryDirectory(prefix="rest_ext_iceberg_") as tmpdir:
         catalog = SqlCatalog(
             "milvus_rest_test",
@@ -1559,10 +1546,8 @@ class TestRestExternalCollection(TestBase):
         responses = [
             self._external_job_post_with_token(action, payload, self.invalid_api_key) for action, payload in payloads
         ]
-        if all(rsp.get("code") != 1800 for rsp in responses):
-            pytest.skip("authorization is not enforced for this deployment")
-        for rsp in responses:
-            assert rsp["code"] == 1800, rsp
+        for action, rsp in zip(("refresh", "describe", "list"), responses):
+            assert rsp["code"] == 1800, f"{action} did not reject invalid token: {rsp}"
             assert "message" in rsp and rsp["message"], rsp
 
     @pytest.mark.L1
