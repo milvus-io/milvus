@@ -4421,8 +4421,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
         error = {
-            ct.err_code: 999,
-            ct.err_msg: f"nullable is not supported for fields in struct array now, fieldName = {nullable_field}",
+            ct.err_code: 1100,
+            ct.err_msg: f"sub-field in non-nullable struct cannot be nullable individually, "
+            f"set nullable on the struct instead: structName=clips, subFieldName={nullable_field}",
         }
         self.create_collection(
             client,
