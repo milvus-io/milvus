@@ -11,19 +11,19 @@ L3 tests require Milvus configuration changes to trigger actual force merge:
 With maxSize=64MB and auto compaction disabled, small data volumes can trigger
 force merge compaction manually without interference from auto compaction.
 """
-import pytest
-import time
-import numpy as np
 
+import time
+
+import numpy as np
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *  # noqa: F403
 from common.constants import *  # noqa: F403
 from pymilvus import DataType
-
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_force_merge"
 epsilon = ct.epsilon
@@ -369,9 +369,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         log.info(f"Search results: {search_res}")
         assert len(search_res) == 1
         assert len(search_res[0]) == 10
-        log.info(
-            f"Search after ForceMerge completed successfully with {len(search_res[0])} results"
-        )
+        log.info(f"Search after ForceMerge completed successfully with {len(search_res[0])} results")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_with_clustering_key(self):
@@ -422,9 +420,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. compact with is_clustering=True and target_size
         target_size = 2048
-        compact_id = self.compact(
-            client, collection_name, is_clustering=True, target_size=target_size
-        )[0]
+        compact_id = self.compact(client, collection_name, is_clustering=True, target_size=target_size)[0]
         # 4. wait for compaction to complete
         cost = 180
         start = time.time()
@@ -497,9 +493,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         assert segment_count_after <= segment_count_before, (
             f"Expected fewer segments after ForceMerge, got {segment_count_after} >= {segment_count_before}"
         )
-        log.info(
-            f"ForceMerge reduced segments from {segment_count_before} to {segment_count_after}"
-        )
+        log.info(f"ForceMerge reduced segments from {segment_count_before} to {segment_count_after}")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_max_int64_overflow(self):

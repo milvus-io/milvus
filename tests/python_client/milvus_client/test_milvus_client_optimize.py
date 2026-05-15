@@ -12,19 +12,19 @@ L3 tests require Milvus configuration changes:
       compaction:
         enableAutoCompaction: false
 """
-import pytest
-import time
-import numpy as np
 
+import time
+
+import numpy as np
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *  # noqa: F403
 from common.constants import *  # noqa: F403
 from pymilvus import DataType
-
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "client_optimize"
 epsilon = ct.epsilon
