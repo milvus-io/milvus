@@ -766,7 +766,7 @@ func (t *addCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
-	t.AddCollectionStructFieldRequest.StructArrayFieldSchema = t.structFieldSchema
+	t.StructArrayFieldSchema = t.structFieldSchema
 
 	log.Info("PreExecute addStructField task done", zap.Any("struct field schema", t.structFieldSchema))
 	return nil

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -55,7 +56,7 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 
 	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
-	require.Len(t, coll.Fields, 1)
+	require.Len(t, getUserFields(coll.Fields), 1)
 	require.Len(t, coll.StructArrayFields, 1)
 
 	structField := coll.StructArrayFields[0]
@@ -88,6 +89,17 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 		Schema:         getFieldSchema("profile"),
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func getUserFields(fields []*model.Field) []*model.Field {
+	ret := make([]*model.Field, 0, len(fields))
+	for _, field := range fields {
+		if field.Name == RowIDFieldName || field.Name == TimeStampFieldName {
+			continue
+		}
+		ret = append(ret, field)
+	}
+	return ret
 }
 
 func newRootAddStructFieldSchema(name string) *schemapb.StructArrayFieldSchema {
