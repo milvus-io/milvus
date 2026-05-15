@@ -1460,7 +1460,6 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 				break
 			}
 		}
-		// Fall through to struct array sub-fields if no top-level vector field matched.
 		if vectorField == nil {
 			for _, sf := range collSchema.GetStructArrayFields() {
 				for _, sub := range sf.GetFields() {
@@ -1498,14 +1497,6 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 	var phv *commonpb.PlaceholderValue
 	if vectorField.GetDataType() == schemapb.DataType_ArrayOfVector {
-		// Struct sub-vector search. The user may supply either:
-		//   - element-level: one query vector per nq (shape matches a normal
-		//     vector search) → use the regular PlaceholderType of the element
-		//     type.
-		//   - embedding list: one list of vectors per nq, packed into a single
-		//     flat byte buffer → use the EmbList* PlaceholderType variant.
-		// We infer the shape from the `data` JSON: a nested-array / nested-
-		// string first element means EmbList, otherwise element-level.
 		if isEmbeddingListData(body) {
 			phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
 		} else {
@@ -2075,12 +2066,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.StructArrayFields = append(collSchema.StructArrayFields, structProto)
 			fieldNames[structField.FieldName] = true
-			// Register sub-field qualified names (structName[subName]) so
-			// indexParams in /collections/create can target a struct sub-vector
-			// directly, matching the pymilvus
-			// `index_params.add_index(field_name="struct[sub]")` convention.
-			// Short sub-field names are intentionally not registered because
-			// they are not globally unique across structs.
 			for _, sub := range structProto.GetFields() {
 				qualified := typeutil.ConcatStructFieldName(structField.FieldName, sub.GetName())
 				fieldNames[qualified] = true
