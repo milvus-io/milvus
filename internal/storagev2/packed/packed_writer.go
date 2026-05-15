@@ -131,6 +131,13 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 }
 
 func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
+	if recordBatch == nil || recordBatch.NumCols() == 0 {
+		return nil
+	}
+	if pw.cPackedWriter == nil {
+		return errors.New("packed writer is closed")
+	}
+
 	cArrays := make([]CArrowArray, recordBatch.NumCols())
 	cSchemas := make([]CArrowSchema, recordBatch.NumCols())
 
@@ -155,7 +162,12 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 }
 
 func (pw *PackedWriter) Close() error {
-	status := C.CloseWriter(pw.cPackedWriter)
+	if pw.cPackedWriter == nil {
+		return nil
+	}
+	cPackedWriter := pw.cPackedWriter
+	pw.cPackedWriter = nil
+	status := C.CloseWriter(cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}
