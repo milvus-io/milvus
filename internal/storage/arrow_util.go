@@ -391,12 +391,8 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 		if field.DataType == schemapb.DataType_ArrayOfVector {
 			elementType = field.GetElementType()
 		}
-		if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
-		} else {
-			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
-			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
-		}
+		arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
+		builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 	}
 
 	return &RecordBuilder{

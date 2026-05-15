@@ -307,9 +307,7 @@ CopyAndWrapSparseRow(const void* data,
 template <typename Iterable>
 std::unique_ptr<knowhere::sparse::SparseRow<SparseValueType>[]>
 SparseBytesToRows(const Iterable& rows, const bool validate = false) {
-    if (rows.size() == 0) {
-        return nullptr;
-    }
+    AssertInfo(rows.size() > 0, "at least 1 sparse row should be provided");
     auto res = std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(
         rows.size());
     for (size_t i = 0; i < rows.size(); ++i) {

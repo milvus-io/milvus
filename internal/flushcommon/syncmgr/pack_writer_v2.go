@@ -206,16 +206,6 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	}
 
 	var manifestPath string
-	getFieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
-		result := make(map[int64]int64, len(columnGroup.Fields))
-		for _, fieldID := range columnGroup.Fields {
-			if col := rec.Column(fieldID); col != nil {
-				result[fieldID] = int64(col.NullN())
-			}
-		}
-		return result
-	}
-
 	if bw.manifestPath != "" {
 		basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
 		if err != nil {
@@ -235,13 +225,12 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 				ChildFields: columnGroup.Fields,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-						MemorySize:      int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
-						LogPath:         w.GetWrittenPaths(columnGroupID),
-						EntriesNum:      w.GetWrittenRowNum(),
-						TimestampFrom:   tsFrom,
-						TimestampTo:     tsTo,
-						FieldNullCounts: getFieldNullCounts(columnGroup),
+						LogSize:       int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
+						MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+						LogPath:       w.GetWrittenPaths(columnGroupID),
+						EntriesNum:    w.GetWrittenRowNum(),
+						TimestampFrom: tsFrom,
+						TimestampTo:   tsTo,
 					},
 				},
 			}
@@ -272,13 +261,12 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 				ChildFields: columnGroup.Fields,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-						MemorySize:      int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
-						LogPath:         w.GetWrittenPaths(columnGroupID),
-						EntriesNum:      w.GetWrittenRowNum(),
-						TimestampFrom:   tsFrom,
-						TimestampTo:     tsTo,
-						FieldNullCounts: getFieldNullCounts(columnGroup),
+						LogSize:       int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
+						MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+						LogPath:       w.GetWrittenPaths(columnGroupID),
+						EntriesNum:    w.GetWrittenRowNum(),
+						TimestampFrom: tsFrom,
+						TimestampTo:   tsTo,
 					},
 				},
 			}

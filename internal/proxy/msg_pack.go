@@ -65,15 +65,11 @@ func genInsertMsgsByPartition(ctx context.Context,
 		return msg
 	}
 
-	fieldsData := insertMsg.GetFieldsData()
-	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-
 	repackedMsgs := make([]msgstream.TsMsg, 0)
 	requestSize := 0
 	msg := createInsertMsg(segmentID, channelName)
 	for _, offset := range rowOffsets {
-		fieldIdxs := idxComputer.Compute(int64(offset))
-		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
+		curRowMessageSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), offset)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +81,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 			requestSize = 0
 		}
 
-		typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
+		typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
 		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
 		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])

@@ -325,11 +325,6 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	idTsMap := make(map[interface{}]int64)
 	cursors := make([]int64, len(validRetrieveResults))
 
-	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
-	for i, vr := range validRetrieveResults {
-		idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.Result.GetFieldsData(), param.schema)
-	}
-
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
@@ -340,11 +335,9 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-		fieldsData := validRetrieveResults[sel].Result.GetFieldsData()
-		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
 			j++
 		} else {
@@ -353,7 +346,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			if ts != 0 && ts > idTsMap[pk] {
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
-				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 			}
 		}
 
@@ -518,17 +511,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span2.End()
 		ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(len(selections)))
-
-		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
-		for i, vr := range validRetrieveResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(vr.Result.GetFieldsData(), param.schema)
-		}
-
+		// cursors = make([]int64, len(validRetrieveResults))
 		for _, selection := range selections {
 			// cannot use `cursors[sel]` directly, since some of them may be skipped.
-			fieldsData := validRetrieveResults[selection.batchIndex].Result.GetFieldsData()
-			fieldIdxs := idxComputers[selection.batchIndex].Compute(selection.resultIndex)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, selection.resultIndex, fieldIdxs...)
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[selection.batchIndex].Result.GetFieldsData(), selection.resultIndex)
 
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
@@ -578,18 +564,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span3.End()
-
-		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(segmentResults))
-		for i, r := range segmentResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputerWithSchema(r.GetFieldsData(), param.schema)
-		}
-
 		// retrieve result is compacted, use 0,1,2...end
 		segmentResOffset := make([]int64, len(segmentResults))
 		for _, selection := range selections {
-			fieldsData := segmentResults[selection.batchIndex].GetFieldsData()
-			fieldIdxs := idxComputers[selection.batchIndex].Compute(segmentResOffset[selection.batchIndex])
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, segmentResOffset[selection.batchIndex], fieldIdxs...)
+			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), segmentResOffset[selection.batchIndex])
 			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {

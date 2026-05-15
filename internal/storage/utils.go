@@ -568,17 +568,10 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetFloatVector().GetData()
-			validData := srcField.GetValidData()
-			fd := &FloatVectorFieldData{
-				Data:      srcData,
-				Dim:       dim,
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
+			fieldData = &FloatVectorFieldData{
+				Data: srcData,
+				Dim:  dim,
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_BinaryVector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -588,17 +581,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetBinaryVector()
-			validData := srcField.GetValidData()
-			fd := &BinaryVectorFieldData{
-				Data:      srcData,
-				Dim:       dim,
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
+
+			fieldData = &BinaryVectorFieldData{
+				Data: srcData,
+				Dim:  dim,
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_Float16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -608,17 +595,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetFloat16Vector()
-			validData := srcField.GetValidData()
-			fd := &Float16VectorFieldData{
-				Data:      srcData,
-				Dim:       dim,
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
+
+			fieldData = &Float16VectorFieldData{
+				Data: srcData,
+				Dim:  dim,
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_BFloat16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -628,39 +609,16 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetBfloat16Vector()
-			validData := srcField.GetValidData()
-			fd := &BFloat16VectorFieldData{
-				Data:      srcData,
-				Dim:       dim,
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
+
+			fieldData = &BFloat16VectorFieldData{
+				Data: srcData,
+				Dim:  dim,
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_SparseFloatVector:
-			sparseArray := srcFields[field.FieldID].GetVectors().GetSparseFloatVector()
-			validData := srcField.GetValidData()
-			var contents [][]byte
-			var dim int64
-			if sparseArray != nil {
-				contents = sparseArray.GetContents()
-				dim = sparseArray.GetDim()
+			fieldData = &SparseFloatVectorFieldData{
+				SparseFloatArray: *srcFields[field.FieldID].GetVectors().GetSparseFloatVector(),
 			}
-			fd := &SparseFloatVectorFieldData{
-				SparseFloatArray: schemapb.SparseFloatArray{
-					Contents: contents,
-					Dim:      dim,
-				},
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
-			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_Int8Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -670,17 +628,10 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetInt8Vector()
-			validData := srcField.GetValidData()
-			fd := &Int8VectorFieldData{
-				Data:      lo.Map(srcData, func(v byte, _ int) int8 { return int8(v) }),
-				Dim:       dim,
-				ValidData: validData,
-				Nullable:  field.GetNullable(),
+			fieldData = &Int8VectorFieldData{
+				Data: lo.Map(srcData, func(v byte, _ int) int8 { return int8(v) }),
+				Dim:  dim,
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 
 		case schemapb.DataType_Bool:
 			srcData := srcField.GetScalars().GetBoolData().GetData()
@@ -1036,80 +987,54 @@ func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
 func mergeBinaryVectorField(data *InsertData, fid FieldID, field *BinaryVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BinaryVectorFieldData{
-			Data:      nil,
-			Dim:       field.Dim,
-			ValidData: nil,
-			Nullable:  field.Nullable,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*BinaryVectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
-	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
 func mergeFloatVectorField(data *InsertData, fid FieldID, field *FloatVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &FloatVectorFieldData{
-			Data:      nil,
-			Dim:       field.Dim,
-			ValidData: nil,
-			Nullable:  field.Nullable,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*FloatVectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
-	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
 func mergeFloat16VectorField(data *InsertData, fid FieldID, field *Float16VectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Float16VectorFieldData{
-			Data:      nil,
-			Dim:       field.Dim,
-			ValidData: nil,
-			Nullable:  field.Nullable,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Float16VectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
-	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
 func mergeBFloat16VectorField(data *InsertData, fid FieldID, field *BFloat16VectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BFloat16VectorFieldData{
-			Data:      nil,
-			Dim:       field.Dim,
-			ValidData: nil,
-			Nullable:  field.Nullable,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*BFloat16VectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
-	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
 func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFloatVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
-		data.Data[fid] = &SparseFloatVectorFieldData{
-			Nullable: field.Nullable,
-		}
+		data.Data[fid] = &SparseFloatVectorFieldData{}
 	}
 	fieldData := data.Data[fid].(*SparseFloatVectorFieldData)
 	fieldData.AppendAllRows(field)
@@ -1118,19 +1043,13 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int8VectorFieldData{
-			Data:      nil,
-			Dim:       field.Dim,
-			ValidData: nil,
-			Nullable:  field.Nullable,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Int8VectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
-	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
 // MergeFieldData merge field into data.
@@ -1486,7 +1405,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *BinaryVectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1500,7 +1418,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Float16VectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1514,7 +1431,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *BFloat16VectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1528,7 +1444,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *SparseFloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1541,7 +1456,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int8VectorFieldData:
 			dataBytes := arrow.Int8Traits.CastToBytes(rawData.Data)
@@ -1556,7 +1470,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *VectorArrayFieldData:
 			fieldData = &schemapb.FieldData{

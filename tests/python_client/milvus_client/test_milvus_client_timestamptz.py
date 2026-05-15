@@ -1,4 +1,4 @@
-# ruff: noqa: F403, F405
+# ruff: noqa: F403, F405, F811
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf

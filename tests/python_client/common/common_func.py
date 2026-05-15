@@ -35,7 +35,6 @@ from utils.util_log import test_log as log
 
 fake = Faker()
 
-
 """" Methods of processing data """
 
 
@@ -906,27 +905,6 @@ def gen_all_datatype_collection_schema(
     analyzer_params = {
         "tokenizer": "standard",
     }
-    fields = [  # noqa: F841
-        gen_int64_field(),
-        gen_float_field(nullable=nullable),
-        gen_string_field(nullable=nullable),
-        gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
-        gen_string_field(
-            name="text", max_length=2000, enable_analyzer=True, enable_match=True, analyzer_params=analyzer_params
-        ),
-        gen_json_field(nullable=nullable),
-        gen_geometry_field(nullable=nullable),
-        gen_timestamptz_field(nullable=nullable),
-        gen_array_field(name="array_int", element_type=DataType.INT64),
-        gen_array_field(name="array_float", element_type=DataType.FLOAT),
-        gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
-        gen_array_field(name="array_bool", element_type=DataType.BOOL),
-        gen_float_vec_field(dim=dim),
-        gen_int8_vec_field(name="image_emb", dim=dim),
-        gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
-        gen_float_vec_field(name="voice_emb", dim=dim),
-        # gen_timestamptz_field(name="timestamptz", nullable=nullable),
-    ]
 
     # Create schema using MilvusClient
     schema = MilvusClient.create_schema(
@@ -949,7 +927,6 @@ def gen_all_datatype_collection_schema(
         enable_analyzer=True,
         enable_match=True,
         analyzer_params=analyzer_params,
-        nullable=True,
     )
     schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
     schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
@@ -964,11 +941,9 @@ def gen_all_datatype_collection_schema(
         max_capacity=ct.default_max_capacity,
     )
     schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
-    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
-    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim, nullable=True)
-    schema.add_field(
-        "text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False
-    )  # function output field cannot be nullable
+    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim)
+    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
 
     # Add struct array field
@@ -2833,17 +2808,11 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         else:
             dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params["dim"]
         if nb is None:
-            return (
-                gen_vectors(1, dim, vector_data_type=data_type)[0]
-                if random.random() < 0.8 or nullable is False
-                else None
-            )
+            return gen_vectors(1, dim, vector_data_type=data_type)[0]
         if nullable is False:
             return gen_vectors(nb, dim, vector_data_type=data_type)
         else:
-            # gen 20% none data for nullable vector field
-            vectors = gen_vectors(nb, dim, vector_data_type=data_type)
-            return [None if i % 2 == 0 and random.random() < 0.4 else vectors[i] for i in range(nb)]
+            raise MilvusException(message="gen data failed, vector field does not support nullable")
     elif data_type == DataType.ARRAY:
         if isinstance(field, dict):
             max_capacity = field.get("params")["max_capacity"]
@@ -4849,13 +4818,27 @@ def get_field_dtype_by_field_name(schema, field_name):
 
 
 def get_activate_func_from_metric_type(metric_type):
+    def activate_function(x):
+        return x
+
     if metric_type == "COSINE":
-        return lambda x: (1 + x) * 0.5
+
+        def activate_function(x):
+            return (1 + x) * 0.5
     elif metric_type == "IP":
-        return lambda x: 0.5 + math.atan(x) / math.pi
+
+        def activate_function(x):
+            return 0.5 + math.atan(x) / math.pi
     elif metric_type == "BM25":
-        return lambda x: 2 * math.atan(x) / math.pi
-    return lambda x: 1.0 - 2 * math.atan(x) / math.pi
+
+        def activate_function(x):
+            return 2 * math.atan(x) / math.pi
+    else:
+
+        def activate_function(x):
+            return 1.0 - 2 * math.atan(x) / math.pi
+
+    return activate_function
 
 
 def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):

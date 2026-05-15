@@ -56,12 +56,6 @@ std::unique_ptr<DataArray>
 CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateEmptyVectorDataArray(int64_t count,
-                           int64_t valid_count,
-                           const void* valid_data,
-                           const FieldMeta& field_meta);
-
-std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
                           const void* valid_data,
                           int64_t count,
@@ -70,13 +64,6 @@ CreateScalarDataArrayFrom(const void* data_raw,
 std::unique_ptr<DataArray>
 CreateVectorDataArrayFrom(const void* data_raw,
                           int64_t count,
-                          const FieldMeta& field_meta);
-
-std::unique_ptr<DataArray>
-CreateVectorDataArrayFrom(const void* data_raw,
-                          const void* valid_data,
-                          int64_t count,
-                          int64_t valid_count,
                           const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
@@ -90,7 +77,6 @@ struct MergeBase {
  private:
     std::map<FieldId, std::unique_ptr<milvus::DataArray>>* output_fields_data_;
     size_t offset_;
-    std::map<FieldId, size_t> valid_data_offsets_;
 
  public:
     MergeBase() {
@@ -104,20 +90,6 @@ struct MergeBase {
 
     size_t
     getOffset() const {
-        return offset_;
-    }
-
-    void
-    setValidDataOffset(FieldId fieldId, size_t valid_offset) {
-        valid_data_offsets_[fieldId] = valid_offset;
-    }
-
-    size_t
-    getValidDataOffset(FieldId fieldId) const {
-        auto it = valid_data_offsets_.find(fieldId);
-        if (it != valid_data_offsets_.end()) {
-            return it->second;
-        }
         return offset_;
     }
 
