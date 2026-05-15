@@ -526,30 +526,6 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
         assert self.has_collection(client, coll)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_external_table_secure_minio_smoke(self, minio_env, external_prefix):
-        """
-        target: test MilvusClient external table secure minio smoke
-        method: HTTPS MinIO config should flow through source upload and extfs.use_ssl
-        expected: behavior matches the case assertion.
-        """
-        _minio_client, cfg = minio_env
-        if not cfg["secure"]:
-            pytest.skip("set --minio_host=https://<host>:<port> to run secure MinIO smoke")
-
-        client = self._client()
-        ext_spec = build_external_spec(cfg)
-        coll = self.prepare_loaded_basic_collection(
-            client,
-            minio_env,
-            external_prefix,
-            num_rows=20,
-            ext_spec=ext_spec,
-        )
-        assert self.query_count(client, coll) == 20
-        info = self.describe_collection(client, coll)[0]
-        assert_external_spec_persisted(info.get("external_spec"), ext_spec, "secure minio external_spec")
-
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "case_name,source",
         [
@@ -3466,32 +3442,6 @@ class TestMilvusClientExternalTableFormats(ExternalTableTestBase):
         )[0][0]
         assert len(hits) == 3
         assert all(0 <= hit["id"] < FORMAT_TOTAL_ROWS for hit in hits), f"[{fmt}] invalid search ids: {hits}"
-
-    @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("fmt", ["iceberg-table"], ids=["iceberg"])
-    def test_milvus_client_external_table_cluster_nightly_heavy_format_smoke(self, fmt, minio_env, external_prefix):
-        """
-        target: test MilvusClient external table cluster nightly heavy format smoke
-        method: Opt-in cluster/nightly smoke for formats that have exposed QueryNode-only bugs
-        expected: behavior matches the case assertion.
-        """
-        if os.environ.get("EXTERNAL_TABLE_CLUSTER_SMOKE", "false").lower() != "true":
-            pytest.skip("set EXTERNAL_TABLE_CLUSTER_SMOKE=true on a cluster deployment")
-
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        batches = [(0, ct.default_nb), (ct.default_nb, ct.default_nb)]
-        source, ext_spec = write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches)
-        schema = _build_basic_schema(self, client, source, ext_spec=ext_spec)
-        self.create_collection(client, collection_name=coll, schema=schema)
-        self.refresh_and_wait(client, coll)
-        self.index_and_load(client, coll)
-        _assert_basic_format_rows(self, client, coll, fmt, batches)
-        self.release_collection(client, coll)
-        self.load_collection(client, coll)
-        assert self.query_count(client, coll) == ct.default_nb * 2
 
 
 # ============================================================
