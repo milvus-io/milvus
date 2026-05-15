@@ -2,21 +2,8 @@
 
 SCRIPTS_DIR=$(dirname "$0")
 THIRD_PARTY_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty
-API_MODULE=github.com/milvus-io/milvus-proto/go-api/v3
-API_VERSION=$(go list -m "$API_MODULE" | awk -F' ' '{print $2}')
-API_REPLACE_DIR=$(go list -m -f '{{if .Replace}}{{.Replace.Dir}}{{end}}' "$API_MODULE")
+API_VERSION=$(go list -m github.com/milvus-io/milvus-proto/go-api/v3 | awk -F' ' '{print $2}')
 PROTO_REPO=https://github.com/milvus-io/milvus-proto.git
-
-if [[ -n $API_REPLACE_DIR && -d "$API_REPLACE_DIR/.." ]]; then
-  PROTO_REPO_DIR=$(cd "$API_REPLACE_DIR/.." && pwd)
-  if [[ -d "$PROTO_REPO_DIR/proto" ]]; then
-    mkdir -p "$THIRD_PARTY_DIR"
-    rm -rf "$THIRD_PARTY_DIR/milvus-proto"
-    cp -a "$PROTO_REPO_DIR" "$THIRD_PARTY_DIR/milvus-proto"
-    echo "Use local milvus-proto replace: $PROTO_REPO_DIR"
-    exit 0
-  fi
-fi
 
 # Try tagged version first.
 COMMIT_ID=$(git ls-remote "$PROTO_REPO" refs/tags/${API_VERSION} | cut -f 1)
