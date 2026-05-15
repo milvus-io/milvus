@@ -25,6 +25,36 @@ done
 PYTHON_ENV_ROOT="$(cd -P "$(dirname "$PYTHON_ENV_SOURCE")/../.." && pwd)"
 ROOT="${ROOT:-$PYTHON_ENV_ROOT}"
 
+function ensure_uv_available() {
+  if command -v uv >/dev/null 2>&1; then
+    return
+  fi
+
+  local bootstrap_python="${PYTEST_UV_BOOTSTRAP_PYTHON:-}"
+  if [[ -z "${bootstrap_python}" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      bootstrap_python="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+      bootstrap_python="$(command -v python)"
+    fi
+  fi
+
+  if [[ -z "${bootstrap_python}" ]]; then
+    echo "uv is required to create Python virtualenv, but no bootstrap Python was found."
+    exit 1
+  fi
+
+  "${bootstrap_python}" -m pip install --user --no-cache-dir --force-reinstall uv \
+    --timeout "${PYTEST_UV_INSTALL_TIMEOUT:-300}" \
+    --retries "${PYTEST_UV_INSTALL_RETRIES:-6}"
+  export PATH="${HOME}/.local/bin:${PATH}"
+
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv installation succeeded but uv is not available in PATH."
+    exit 1
+  fi
+}
+
 function activate_pytest_python_env() {
   local python_version_file="${ROOT}/tests/.python-version"
   local python_version="${PYTEST_PYTHON_VERSION:-3.12}"
@@ -45,8 +75,8 @@ function activate_pytest_python_env() {
     elif command -v "python${python_version}" >/dev/null 2>&1; then
       "python${python_version}" -m venv --system-site-packages "${venv_path}"
     else
-      echo "Python ${python_version} is required. Install python${python_version}, install uv, or set PYTEST_PYTHON_BIN."
-      exit 1
+      ensure_uv_available
+      uv venv --python "${python_version}" --system-site-packages "${venv_path}"
     fi
   fi
 
