@@ -339,7 +339,7 @@ def _write_iceberg_dataset(cfg, key_prefix, batches):
 
 
 def _write_vortex_tables(minio_client, cfg, key_prefix, tables):
-    import vortex.io as vortex_io
+    vortex_io = pytest.importorskip("vortex.io", reason="vortex external collection dependency unavailable")
 
     for idx, table in enumerate(tables):
         with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:
@@ -1474,9 +1474,6 @@ class TestRestExternalCollection(TestBase):
         _assert_basic_row_body(rows_by_id[2], 2)
 
     @pytest.mark.L1
-    @pytest.mark.xfail(
-        reason="milvus#49783 REST v2 entities/query shifts nullable vector output for external collections",
-    )
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_vector_by_format(self, fmt, external_store):
         """

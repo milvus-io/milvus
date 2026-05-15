@@ -8,6 +8,7 @@ import tempfile
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from common import common_func as cf
 from common import common_type as ct
 from minio import Minio
@@ -712,7 +713,7 @@ def require_format_dependencies(fmt):
     elif fmt == "iceberg-table":
         from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
     elif fmt == "vortex":
-        import vortex.io  # noqa: F401
+        pytest.importorskip("vortex.io", reason="vortex external table dependency unavailable")
 
 
 def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=ct.default_dim):

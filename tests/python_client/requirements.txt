@@ -33,7 +33,7 @@ python-benedict==0.24.3
 
 # for bulk insert test
 minio==7.2.0
-npy-append-array==0.9.15
+npy-append-array==0.9.19
 Faker==19.2.0
 
 # for benchmark
@@ -45,7 +45,7 @@ loguru==0.7.0
 # util
 psutil==5.9.8
 pandas==2.2.3
-numpy==1.26.4
+numpy==2.2.6
 tenacity==8.2.3
 rich==13.7.0
 # for standby test
@@ -85,10 +85,9 @@ python-dotenv<=2.0.0
 shapely==2.1.1
 
 # for external table formats
-pylance==1.0.4
-lance-namespace==0.6.0
-vortex-data==0.56.0
-substrait==0.26.0
+pylance==6.0.0
+vortex-data==0.56.0; python_version >= "3.11"
+substrait==0.26.0; python_version >= "3.11"
 pyiceberg[sql-sqlite]==0.8.1
 
 # for time zone

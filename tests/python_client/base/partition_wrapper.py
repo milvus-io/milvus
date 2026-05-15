@@ -1,5 +1,5 @@
 import sys
-from numpy import NaN
+from numpy import nan as NaN
 
 from pymilvus import Partition
 
