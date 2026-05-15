@@ -38,9 +38,33 @@ type RetryableReader interface {
 }
 
 type (
-	ReopenReaderFunc func(context.Context, string) (storage.FileReader, error)
+	ReopenReaderFunc func(context.Context, string, int64) (storage.FileReader, error)
 	ReaderSizeFunc   func(context.Context, string) (int64, error)
 )
+
+type offsetReader interface {
+	ReaderAtOffset(context.Context, string, int64) (storage.FileReader, error)
+}
+
+// NewChunkManagerReopenReaderFunc creates a reopen function that resumes reading at the given offset.
+func NewChunkManagerReopenReaderFunc(cm storage.ChunkManager) ReopenReaderFunc {
+	return func(ctx context.Context, path string, offset int64) (storage.FileReader, error) {
+		if reader, ok := cm.(offsetReader); ok {
+			return reader.ReaderAtOffset(ctx, path, offset)
+		}
+		reader, err := cm.Reader(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if offset > 0 {
+			if _, err = reader.Seek(offset, io.SeekStart); err != nil {
+				_ = reader.Close()
+				return nil, err
+			}
+		}
+		return reader, nil
+	}
+}
 
 // retryableReader is the implementation of RetryableReader.
 type retryableReader struct {
@@ -111,15 +135,9 @@ func (r *retryableReader) reopenAtOffset() error {
 		_ = r.Close()
 		r.FileReader = nil
 	}
-	reader, err := r.reopen(r.ctx, r.path)
+	reader, err := r.reopen(r.ctx, r.path, r.offset)
 	if err != nil {
 		return storage.ToMilvusIoError(r.path, err)
-	}
-	if r.offset > 0 {
-		if _, err = reader.Seek(r.offset, io.SeekStart); err != nil {
-			_ = reader.Close()
-			return storage.ToMilvusIoError(r.path, err)
-		}
 	}
 	r.FileReader = reader
 	return nil
@@ -142,6 +160,8 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		n, err = r.FileReader.Read(p)
 		if n > 0 {
 			r.offset += int64(n)
+			// Preserve io.Reader semantics: return buffered bytes first.
+			// Any accompanying error is handled by a following Read, which may reopen.
 			return false, nil
 		}
 		if err == nil {

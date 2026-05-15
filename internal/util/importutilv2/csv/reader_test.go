@@ -59,39 +59,6 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.vecDataType = schemapb.DataType_FloatVector
 }
 
-type prematureEOFFileReader struct {
-	*strings.Reader
-	limit int
-	read  int
-}
-
-func newPrematureEOFFileReader(content string, limit int) storage.FileReader {
-	return &prematureEOFFileReader{
-		Reader: strings.NewReader(content),
-		limit:  limit,
-	}
-}
-
-func (r *prematureEOFFileReader) Read(p []byte) (int, error) {
-	if r.read >= r.limit {
-		return 0, io.EOF
-	}
-	if remaining := r.limit - r.read; len(p) > remaining {
-		p = p[:remaining]
-	}
-	n, err := r.Reader.Read(p)
-	r.read += n
-	return n, err
-}
-
-func (r *prematureEOFFileReader) Close() error {
-	return nil
-}
-
-func (r *prematureEOFFileReader) Size() (int64, error) {
-	return int64(r.Len()) + int64(r.read), nil
-}
-
 func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -397,14 +364,19 @@ func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
 			},
 		},
 	}
-	content := "pk,int32\n1,10\n2,20\n3,30\n"
+	var contentBuilder strings.Builder
+	contentBuilder.WriteString("pk,int32\n")
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&contentBuilder, "%d,%d\n", i, i*10)
+	}
+	content := contentBuilder.String()
 	openCount := 0
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, "dummy path").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
 		openCount++
 		if openCount == 1 {
-			return newPrematureEOFFileReader(content, len(content)-2), nil
+			return importcommon.NewPrematureEOFReader(content, 18), nil
 		}
 		return importcommon.NewMockReader(content), nil
 	})
@@ -415,9 +387,9 @@ func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
 
 	data, err := reader.Read()
 	suite.NoError(err)
-	suite.Equal(3, data.GetRowNum())
+	suite.Equal(100, data.GetRowNum())
 	suite.Equal(int64(1), data.Data[100].GetRow(0))
-	suite.Equal(int32(30), data.Data[101].GetRow(2))
+	suite.Equal(int32(1000), data.Data[101].GetRow(99))
 	suite.GreaterOrEqual(openCount, 2)
 }
 

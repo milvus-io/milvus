@@ -126,39 +126,6 @@ func createReader(fieldData storage.FieldData, dataType schemapb.DataType) (io.R
 	return strings.NewReader(buf.String()), nil
 }
 
-type prematureEOFFileReader struct {
-	*strings.Reader
-	limit int
-	read  int
-}
-
-func newPrematureEOFFileReader(content string, limit int) storage.FileReader {
-	return &prematureEOFFileReader{
-		Reader: strings.NewReader(content),
-		limit:  limit,
-	}
-}
-
-func (r *prematureEOFFileReader) Read(p []byte) (int, error) {
-	if r.read >= r.limit {
-		return 0, io.EOF
-	}
-	if remaining := r.limit - r.read; len(p) > remaining {
-		p = p[:remaining]
-	}
-	n, err := r.Reader.Read(p)
-	r.read += n
-	return n, err
-}
-
-func (r *prematureEOFFileReader) Close() error {
-	return nil
-}
-
-func (r *prematureEOFFileReader) Size() (int64, error) {
-	return int64(r.Len()) + int64(r.read), nil
-}
-
 func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -489,36 +456,62 @@ func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
 				IsPrimaryKey: true,
 				DataType:     schemapb.DataType_Int64,
 			},
+			{
+				FieldID:    101,
+				Name:       "varchar",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+			},
+			{
+				FieldID:    102,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)}},
+			},
 		},
 	}
 	insertData, err := testutil.CreateInsertData(schema, 3)
 	suite.NoError(err)
-	npyReader, err := createReader(insertData.Data[100], schemapb.DataType_Int64)
-	suite.NoError(err)
-	contentBytes, err := io.ReadAll(npyReader)
-	suite.NoError(err)
-	content := string(contentBytes)
-	openCount := 0
+	files := map[int64]string{
+		100: "pk.npy",
+		101: "varchar.npy",
+		102: "vec.npy",
+	}
+	contents := make(map[string]string)
+	for _, field := range schema.GetFields() {
+		npyReader, err := createReader(insertData.Data[field.GetFieldID()], field.GetDataType())
+		suite.NoError(err)
+		contentBytes, err := io.ReadAll(npyReader)
+		suite.NoError(err)
+		contents[files[field.GetFieldID()]] = string(contentBytes)
+	}
+	openCount := make(map[string]int)
 
 	cm := mocks.NewChunkManager(suite.T())
-	cm.EXPECT().Reader(mock.Anything, "pk.npy").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
-		openCount++
-		if openCount == 1 {
-			return newPrematureEOFFileReader(content, len(content)-2), nil
-		}
-		return importcommon.NewMockReader(content), nil
-	})
+	for _, path := range files {
+		path := path
+		cm.EXPECT().Reader(mock.Anything, path).RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+			openCount[path]++
+			if openCount[path] == 1 {
+				return importcommon.NewPrematureEOFReader(contents[path], len(contents[path])-2), nil
+			}
+			return importcommon.NewMockReader(contents[path]), nil
+		})
+	}
 
-	reader, err := NewReader(context.Background(), cm, schema, []string{"pk.npy"}, math.MaxInt)
+	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
 	suite.NoError(err)
 	defer reader.Close()
 
 	data, err := reader.Read()
 	suite.NoError(err)
 	suite.Equal(3, data.GetRowNum())
-	suite.Equal(insertData.Data[100].GetRow(0), data.Data[100].GetRow(0))
-	suite.Equal(insertData.Data[100].GetRow(2), data.Data[100].GetRow(2))
-	suite.GreaterOrEqual(openCount, 2)
+	for _, field := range schema.GetFields() {
+		for i := 0; i < data.GetRowNum(); i++ {
+			suite.Equal(insertData.Data[field.GetFieldID()].GetRow(i), data.Data[field.GetFieldID()].GetRow(i))
+		}
+		suite.GreaterOrEqual(openCount[files[field.GetFieldID()]], 2)
+	}
 }
 
 func TestNumpyCreateReaders(t *testing.T) {

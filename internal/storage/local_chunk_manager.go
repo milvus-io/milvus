@@ -80,6 +80,23 @@ func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (File
 	}, nil
 }
 
+func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	if offset < 0 {
+		return nil, io.EOF
+	}
+	reader, err := lcm.Reader(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	if offset > 0 {
+		if _, err = reader.Seek(offset, io.SeekStart); err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+	}
+	return reader, nil
+}
+
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	dir := path.Dir(filePath)

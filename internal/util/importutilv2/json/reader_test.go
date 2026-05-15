@@ -19,9 +19,7 @@ package json
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -56,39 +54,6 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.numRows = 100
 	suite.pkDataType = schemapb.DataType_Int64
 	suite.vecDataType = schemapb.DataType_FloatVector
-}
-
-type prematureEOFFileReader struct {
-	*strings.Reader
-	limit int
-	read  int
-}
-
-func newPrematureEOFFileReader(content string, limit int) storage.FileReader {
-	return &prematureEOFFileReader{
-		Reader: strings.NewReader(content),
-		limit:  limit,
-	}
-}
-
-func (r *prematureEOFFileReader) Read(p []byte) (int, error) {
-	if r.read >= r.limit {
-		return 0, io.EOF
-	}
-	if remaining := r.limit - r.read; len(p) > remaining {
-		p = p[:remaining]
-	}
-	n, err := r.Reader.Read(p)
-	r.read += n
-	return n, err
-}
-
-func (r *prematureEOFFileReader) Close() error {
-	return nil
-}
-
-func (r *prematureEOFFileReader) Size() (int64, error) {
-	return int64(r.Len()) + int64(r.read), nil
 }
 
 func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
@@ -508,7 +473,7 @@ func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
 	cm.EXPECT().Reader(mock.Anything, "mockPath").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
 		openCount++
 		if openCount == 1 {
-			return newPrematureEOFFileReader(jsonContent, 10), nil
+			return importcommon.NewPrematureEOFReader(jsonContent, 10), nil
 		}
 		return importcommon.NewMockReader(jsonContent), nil
 	})

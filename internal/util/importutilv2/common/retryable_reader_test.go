@@ -20,7 +20,6 @@ import (
 	"context"
 	"io"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -123,45 +122,6 @@ func (m *customMockReader) ReadAt(p []byte, off int64) (int, error) {
 	return 0, nil
 }
 
-type prematureEOFReader struct {
-	*strings.Reader
-	limit        int
-	read         int
-	reportedSize int64
-}
-
-func newPrematureEOFReader(content string, limit int) storage.FileReader {
-	return newPrematureEOFReaderWithSize(content, limit, int64(len(content)))
-}
-
-func newPrematureEOFReaderWithSize(content string, limit int, reportedSize int64) storage.FileReader {
-	return &prematureEOFReader{
-		Reader:       strings.NewReader(content),
-		limit:        limit,
-		reportedSize: reportedSize,
-	}
-}
-
-func (r *prematureEOFReader) Read(p []byte) (int, error) {
-	if r.read >= r.limit {
-		return 0, io.EOF
-	}
-	if remaining := r.limit - r.read; len(p) > remaining {
-		p = p[:remaining]
-	}
-	n, err := r.Reader.Read(p)
-	r.read += n
-	return n, err
-}
-
-func (r *prematureEOFReader) Close() error {
-	return nil
-}
-
-func (r *prematureEOFReader) Size() (int64, error) {
-	return r.reportedSize, nil
-}
-
 type closeAwareReader struct {
 	storage.FileReader
 	closed         bool
@@ -187,17 +147,30 @@ func newSizeFunc(size int64) ReaderSizeFunc {
 	}
 }
 
+func newReopenFunc(content string, openCount *int, offsets *[]int64) ReopenReaderFunc {
+	return func(_ context.Context, _ string, offset int64) (storage.FileReader, error) {
+		if openCount != nil {
+			*openCount = *openCount + 1
+		}
+		if offsets != nil {
+			*offsets = append(*offsets, offset)
+		}
+		if offset < 0 || offset > int64(len(content)) {
+			return nil, io.EOF
+		}
+		return NewMockReader(content[offset:]), nil
+	}
+}
+
 func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
 	ctx := context.Background()
 	path := "/test/path"
 	content := "hello world"
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		openCount++
-		return NewMockReader(content), nil
-	}
+	offsets := make([]int64, 0, 1)
+	reopen := newReopenFunc(content, &openCount, &offsets)
 
-	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReader(content, 5), reopen, newSizeFunc(int64(len(content))))
+	reader := NewRetryableReaderWithReopen(ctx, path, NewPrematureEOFReader(content, 5), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := io.ReadFull(reader, buf)
 
@@ -205,6 +178,7 @@ func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
 	assert.Equal(t, len(content), n)
 	assert.Equal(t, content, string(buf))
 	assert.Equal(t, 1, openCount)
+	assert.Equal(t, []int64{5}, offsets)
 }
 
 func TestRetryableReader_FinalEOFIsNotRetried(t *testing.T) {
@@ -212,10 +186,7 @@ func TestRetryableReader_FinalEOFIsNotRetried(t *testing.T) {
 	path := "/test/path"
 	content := "done"
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		openCount++
-		return NewMockReader(content), nil
-	}
+	reopen := newReopenFunc(content, &openCount, nil)
 
 	reader := NewRetryableReaderWithReopen(ctx, path, NewMockReader(content), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
@@ -234,10 +205,7 @@ func TestRetryableReader_ReopenOnRetryableError(t *testing.T) {
 	path := "/test/path"
 	content := "data after retry"
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		openCount++
-		return NewMockReader(content), nil
-	}
+	reopen := newReopenFunc(content, &openCount, nil)
 
 	reader := NewRetryableReaderWithReopen(ctx, path, newErrorMockReader(content, errors.New("network timeout"), 1), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
@@ -253,12 +221,15 @@ func TestRetryableReader_ExhaustedPrematureEOFReturnsUnexpectedEOF(t *testing.T)
 	ctx := context.Background()
 	path := "/test/path"
 	content := "hello world"
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		return newPrematureEOFReader(content, 0), nil
+	reopen := func(_ context.Context, _ string, offset int64) (storage.FileReader, error) {
+		if offset < 0 || offset > int64(len(content)) {
+			return nil, io.EOF
+		}
+		return NewPrematureEOFReader(content[offset:], 0), nil
 	}
 
 	reader := &retryableReader{
-		FileReader:    newPrematureEOFReader(content, 5),
+		FileReader:    NewPrematureEOFReader(content, 5),
 		ctx:           ctx,
 		path:          path,
 		retryAttempts: 2,
@@ -279,12 +250,9 @@ func TestRetryableReader_UsesSizeFuncForPrematureEOF(t *testing.T) {
 	path := "/test/path"
 	content := "hello world"
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		openCount++
-		return NewMockReader(content), nil
-	}
+	reopen := newReopenFunc(content, &openCount, nil)
 
-	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReaderWithSize(content, 5, 0), reopen, newSizeFunc(int64(len(content))))
+	reader := NewRetryableReaderWithReopen(ctx, path, NewPrematureEOFReaderWithSize(content, 5, 0), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := io.ReadFull(reader, buf)
 
@@ -299,12 +267,9 @@ func TestRetryableReader_UsesSizeFuncForImmediateEOF(t *testing.T) {
 	path := "/test/path"
 	content := "hello world"
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
-		openCount++
-		return NewMockReader(content), nil
-	}
+	reopen := newReopenFunc(content, &openCount, nil)
 
-	reader := NewRetryableReaderWithReopen(ctx, path, newPrematureEOFReaderWithSize(content, 0, 0), reopen, newSizeFunc(int64(len(content))))
+	reader := NewRetryableReaderWithReopen(ctx, path, NewPrematureEOFReaderWithSize(content, 0, 0), reopen, newSizeFunc(int64(len(content))))
 	buf := make([]byte, len(content))
 	n, err := io.ReadFull(reader, buf)
 
@@ -318,14 +283,14 @@ func TestRetryableReader_DoesNotReadClosedReaderAfterFailedReopen(t *testing.T) 
 	ctx := context.Background()
 	path := "/test/path"
 	content := "hello world"
-	initialReader := &closeAwareReader{FileReader: newPrematureEOFReader(content, 0)}
+	initialReader := &closeAwareReader{FileReader: NewPrematureEOFReader(content, 0)}
 	openCount := 0
-	reopen := func(context.Context, string) (storage.FileReader, error) {
+	reopen := func(_ context.Context, _ string, offset int64) (storage.FileReader, error) {
 		openCount++
 		if openCount == 1 {
 			return nil, errors.New("temporary reopen failure")
 		}
-		return NewMockReader(content), nil
+		return NewMockReader(content[offset:]), nil
 	}
 
 	reader := &retryableReader{
