@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -46,7 +47,8 @@ type l0CompactionTask struct {
 	allocator allocator.Allocator
 	meta      CompactionMeta
 
-	times *taskcommon.Times
+	times                *taskcommon.Times
+	committedV3Manifests map[int64]string
 }
 
 func (t *l0CompactionTask) GetTaskID() int64 {
@@ -218,9 +220,10 @@ func (t *l0CompactionTask) GetTaskProto() *datapb.CompactionTask {
 
 func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta) *l0CompactionTask {
 	task := &l0CompactionTask{
-		allocator: allocator,
-		meta:      meta,
-		times:     taskcommon.NewTimes(),
+		allocator:            allocator,
+		meta:                 meta,
+		times:                taskcommon.NewTimes(),
+		committedV3Manifests: make(map[int64]string),
 	}
 	task.taskProto.Store(t)
 	return task
@@ -444,7 +447,66 @@ func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
+func (t *l0CompactionTask) commitV3ManifestDeltas(ctx context.Context, outputSegs []*datapb.CompactionSegment) error {
+	if t.committedV3Manifests == nil {
+		t.committedV3Manifests = make(map[int64]string)
+	}
+	for _, seg := range outputSegs {
+		if seg.GetManifest() != "" {
+			t.committedV3Manifests[seg.GetSegmentID()] = seg.GetManifest()
+			continue
+		}
+
+		if manifest, ok := t.committedV3Manifests[seg.GetSegmentID()]; ok {
+			seg.Manifest = manifest
+			continue
+		}
+
+		target := t.meta.GetSegment(ctx, seg.GetSegmentID())
+		if target == nil || target.GetManifestPath() == "" {
+			continue
+		}
+
+		entries, err := buildL0V3DeltaLogEntries(seg.GetSegmentID(), seg.GetDeltalogs())
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			continue
+		}
+
+		newManifest, err := packed.AddDeltaLogsToManifestOverwrite(target.GetManifestPath(), compaction.CreateStorageConfig(), entries)
+		if err != nil {
+			return err
+		}
+		seg.Manifest = newManifest
+		t.committedV3Manifests[seg.GetSegmentID()] = newManifest
+	}
+	return nil
+}
+
+func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) ([]packed.DeltaLogEntry, error) {
+	entries := make([]packed.DeltaLogEntry, 0)
+	for _, fieldBinlog := range deltalogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			path := binlog.GetLogPath()
+			if path == "" {
+				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("L0 V3 compaction result missing deltalog path for segment %d, logID %d", segmentID, binlog.GetLogID()))
+			}
+			entries = append(entries, packed.DeltaLogEntry{
+				Path:       path,
+				NumEntries: binlog.GetEntriesNum(),
+			})
+		}
+	}
+	return entries, nil
+}
+
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
+	if err := t.commitV3ManifestDeltas(context.TODO(), outputSegs); err != nil {
+		return err
+	}
+
 	var operators []UpdateOperator
 	for _, seg := range outputSegs {
 		if seg.GetManifest() != "" {
