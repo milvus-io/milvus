@@ -41,14 +41,13 @@ import (
 type ExecuteFunc func(context.Context, UniqueID, types.QueryNodeClient, string) error
 
 type ChannelWorkload struct {
-	Db                   string
-	CollectionName       string
-	CollectionID         int64
-	Channel              string
-	Nq                   int64
-	Exec                 ExecuteFunc
-	PreferredNodeID      int64
-	PreferredNodeEnabled bool
+	Db              string
+	CollectionName  string
+	CollectionID    int64
+	Channel         string
+	Nq              int64
+	Exec            ExecuteFunc
+	PreferredNodeID int64
 }
 
 type CollectionWorkLoad struct {
@@ -134,15 +133,23 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
-func recordPreferredNodeSelection(workload ChannelWorkload, status string) {
-	if !workload.PreferredNodeEnabled {
-		return
-	}
+func recordPreferredNodeSelection(collectionID int64, channel string, status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		strconv.FormatInt(workload.CollectionID, 10),
-		workload.Channel,
+		strconv.FormatInt(collectionID, 10),
+		channel,
 		status,
 	).Inc()
+}
+
+func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
+	if workload.PreferredNodes == nil {
+		return 0
+	}
+	nodeID := workload.PreferredNodes[channel]
+	if nodeID == 0 {
+		recordPreferredNodeSelection(workload.CollectionID, channel, metrics.PreferredNodeMissLabel)
+	}
+	return nodeID
 }
 
 // try to select the best node from the available nodes
@@ -209,18 +216,15 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
-		if workload.PreferredNodeID == 0 {
-			recordPreferredNodeSelection(workload, metrics.PreferredNodeMissLabel)
-		}
 		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
 			targetNodeID, err := balancer.SelectNode(ctx, []int64{preferredNode.NodeID}, workload.Nq)
 			if err == nil && targetNodeID == preferredNode.NodeID {
-				recordPreferredNodeSelection(workload, metrics.PreferredNodeHitLabel)
+				recordPreferredNodeSelection(workload.CollectionID, workload.Channel, metrics.PreferredNodeHitLabel)
 				return preferredNode, nil
 			}
-			recordPreferredNodeSelection(workload, metrics.PreferredNodeRejectedLabel)
+			recordPreferredNodeSelection(workload.CollectionID, workload.Channel, metrics.PreferredNodeRejectedLabel)
 		} else if workload.PreferredNodeID != 0 {
-			recordPreferredNodeSelection(workload, metrics.PreferredNodeUnavailableLabel)
+			recordPreferredNodeSelection(workload.CollectionID, workload.Channel, metrics.PreferredNodeUnavailableLabel)
 		}
 
 		// prefer serviceable nodes
@@ -342,14 +346,13 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:                   workload.Db,
-			CollectionName:       workload.CollectionName,
-			CollectionID:         workload.CollectionID,
-			Channel:              channelList[0],
-			Nq:                   workload.Nq,
-			Exec:                 workload.Exec,
-			PreferredNodeID:      workload.PreferredNodes[channelList[0]],
-			PreferredNodeEnabled: workload.PreferredNodes != nil,
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channelList[0],
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: preferredNodeID(workload, channelList[0]),
 		})
 	}
 
@@ -358,14 +361,13 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				Db:                   workload.Db,
-				CollectionName:       workload.CollectionName,
-				CollectionID:         workload.CollectionID,
-				Channel:              channel,
-				Nq:                   workload.Nq,
-				Exec:                 workload.Exec,
-				PreferredNodeID:      workload.PreferredNodes[channel],
-				PreferredNodeEnabled: workload.PreferredNodes != nil,
+				Db:              workload.Db,
+				CollectionName:  workload.CollectionName,
+				CollectionID:    workload.CollectionID,
+				Channel:         channel,
+				Nq:              workload.Nq,
+				Exec:            workload.Exec,
+				PreferredNodeID: preferredNodeID(workload, channel),
 			})
 		})
 	}
@@ -383,14 +385,13 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// let every request could retry at least twice, which could retry after update shard leader cache
 	for _, channel := range channelList {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:                   workload.Db,
-			CollectionName:       workload.CollectionName,
-			CollectionID:         workload.CollectionID,
-			Channel:              channel,
-			Nq:                   workload.Nq,
-			Exec:                 workload.Exec,
-			PreferredNodeID:      workload.PreferredNodes[channel],
-			PreferredNodeEnabled: workload.PreferredNodes != nil,
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channel,
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: preferredNodeID(workload, channel),
 		})
 	}
 	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)

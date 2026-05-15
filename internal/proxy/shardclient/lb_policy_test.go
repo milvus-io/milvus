@@ -272,13 +272,12 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
 	excludeNodes := typeutil.NewUniqueSet()
 	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
-		Db:                   s.dbName,
-		CollectionName:       s.collectionName,
-		CollectionID:         collectionID,
-		Channel:              channel,
-		Nq:                   1,
-		PreferredNodeID:      3,
-		PreferredNodeEnabled: true,
+		Db:              s.dbName,
+		CollectionName:  s.collectionName,
+		CollectionID:    collectionID,
+		Channel:         channel,
+		Nq:              1,
+		PreferredNodeID: 3,
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.NodeID)
@@ -321,6 +320,45 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() 
 		metrics.PreferredNodeMissLabel,
 	))
 	s.Equal(float64(0), after-before)
+}
+
+func (s *LBPolicySuite) TestPreferredNodeFailureFallsBackToOtherReplica() {
+	ctx := context.Background()
+	channel := "preferred-node-fallback-channel"
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost:9000", Serviceable: true},
+		{NodeID: 2, Address: "localhost:9001", Serviceable: true},
+	}
+	s.lbPolicy.retryOnReplica = 1
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShardLeaderList(mock.Anything, s.dbName, s.collectionName, s.collectionID, true).Return([]string{channel}, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(1)}, int64(1)).Return(int64(1), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(2)}, int64(1)).Return(int64(2), nil).Once()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	executedNodes := make([]int64, 0, 2)
+	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Nq:             1,
+		PreferredNodes: map[string]int64{channel: 1},
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			executedNodes = append(executedNodes, nodeID)
+			if nodeID == 1 {
+				return merr.ErrServiceUnavailable
+			}
+			return nil
+		},
+	})
+	s.NoError(err)
+	s.Equal([]int64{1, 2}, executedNodes)
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetry() {
