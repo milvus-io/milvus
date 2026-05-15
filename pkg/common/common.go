@@ -112,7 +112,7 @@ const (
 	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
 	//   INVERTED to STL_SORT
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(3)
+	CurrentScalarIndexEngineVersion = int32(2)
 	MaximumScalarIndexEngineVersion = int32(3)
 )
 
