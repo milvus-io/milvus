@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -253,6 +255,72 @@ func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
 	})
 	s.NoError(err)
 	s.Equal(int64(3), executedNodeID)
+}
+
+func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
+	ctx := context.Background()
+	collectionID := int64(99001)
+	channel := "preferred-metric-channel-hit"
+	before := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
+		"99001",
+		channel,
+		metrics.PreferredNodeHitLabel,
+	))
+
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, collectionID, channel).Return(s.nodes, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:                   s.dbName,
+		CollectionName:       s.collectionName,
+		CollectionID:         collectionID,
+		Channel:              channel,
+		Nq:                   1,
+		PreferredNodeID:      3,
+		PreferredNodeEnabled: true,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(3), targetNode.NodeID)
+
+	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
+		"99001",
+		channel,
+		metrics.PreferredNodeHitLabel,
+	))
+	s.Equal(float64(1), after-before)
+}
+
+func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() {
+	ctx := context.Background()
+	collectionID := int64(99002)
+	channel := "preferred-metric-channel-disabled"
+	before := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
+		"99002",
+		channel,
+		metrics.PreferredNodeMissLabel,
+	))
+
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, collectionID, channel).Return(s.nodes, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, int64(1)).Return(int64(1), nil)
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   collectionID,
+		Channel:        channel,
+		Nq:             1,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(1), targetNode.NodeID)
+
+	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
+		"99002",
+		channel,
+		metrics.PreferredNodeMissLabel,
+	))
+	s.Equal(float64(0), after-before)
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetry() {
