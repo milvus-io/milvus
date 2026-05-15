@@ -431,7 +431,7 @@ func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {
 		CollectionName:   collectionName,
 		Expr:             fmt.Sprintf("%s >= 0", integration.Int64Field),
 		OutputFields:     []string{arrayFieldName, integration.FloatVecField},
-		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(), queryResult.GetStatus().GetReason())

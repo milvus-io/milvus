@@ -1254,16 +1254,6 @@ func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	return nil
 }
 
-func checkNullableVectorAlignWithDim(offsets []int32, listReader *array.List, dim int32) error {
-	for i := 1; i < len(offsets); i++ {
-		length := offsets[i] - offsets[i-1]
-		if !listReader.IsNull(i-1) && length != dim {
-			return fmt.Errorf("expected %d but got %d", dim, length)
-		}
-	}
-	return nil
-}
-
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
 		return errors.New("empty offsets")
@@ -1283,61 +1273,6 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	default:
 		return fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}
-}
-
-func checkNullableVectorAligned(offsets []int32, listReader *array.List, dim int, dataType schemapb.DataType) error {
-	if len(offsets) < 1 {
-		return errors.New("empty offsets")
-	}
-	switch dataType {
-	case schemapb.DataType_BinaryVector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim/8))
-	case schemapb.DataType_FloatVector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim*2))
-	case schemapb.DataType_SparseFloatVector:
-		return nil
-	case schemapb.DataType_Int8Vector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
-	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
-	}
-}
-
-func getArrayData[T any](offsets []int32, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
-	for i := 1; i < len(offsets); i++ {
-		start, end := offsets[i-1], offsets[i]
-		arrData := make([]T, 0, end-start)
-		for j := start; j < end; j++ {
-			elementVal, err := getElement(int(j))
-			if err != nil {
-				return err
-			}
-			arrData = append(arrData, elementVal)
-		}
-		isValid := (start != end)
-		outputArray(arrData, isValid)
-	}
-	return nil
-}
-
-func getArrayDataNullable[T any](offsets []int32, listReader *array.List, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
-	for i := 1; i < len(offsets); i++ {
-		isValid := !listReader.IsNull(i - 1)
-
-		start, end := offsets[i-1], offsets[i]
-		arrData := make([]T, 0, end-start)
-		for j := start; j < end; j++ {
-			elementVal, err := getElement(int(j))
-			if err != nil {
-				return err
-			}
-			arrData = append(arrData, elementVal)
-		}
-		outputArray(arrData, isValid)
-	}
-	return nil
 }
 
 func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {

@@ -143,6 +143,15 @@ func TestImportFixedSizeList_NullElementRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "array element is not allowed to be null")
 }
 
+func TestImportFixedSizeList_NullableArrayNullElementRejected(t *testing.T) {
+	schema := fixedSizeListArraySchema(schemapb.DataType_Int32, 3, true)
+	rows := []fixedSizeInt32Row{{valid: true, values: []*int32{int32Ptr(1), nil, int32Ptr(3)}}}
+
+	_, err := tryReadFixedSizeListParquet(t, schema, fixedSizeInt32ListArrayWithNullableElements(t, 3, rows))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "array element is not allowed to be null")
+}
+
 func TestImportFixedSizeList_VectorNullElementRejected(t *testing.T) {
 	schema := fixedSizeListFloatVectorSchema(4, true)
 	rows := []fixedSizeFloat32Row{{valid: true, values: []*float32{float32Ptr(1), nil, float32Ptr(3), float32Ptr(4)}}}
