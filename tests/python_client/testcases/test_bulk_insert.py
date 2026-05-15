@@ -415,6 +415,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
 
         null_ids = []
         non_null_ids = []
+        writer_config = {"nullkey": "null"} if file_type == BulkFileType.CSV else None
         with RemoteBulkWriter(
             schema=schema,
             remote_path="bulk_data",
@@ -425,6 +426,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
                 secret_key="minioadmin",
             ),
             file_type=file_type,
+            config=writer_config,
             chunk_size=2048 if file_type == BulkFileType.PARQUET else 1024 * 1024 * 1024,
         ) as remote_writer:
             for i in range(entities):
