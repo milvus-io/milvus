@@ -1150,7 +1150,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 		logger := log.With(zap.String("prefix", prefix), zap.String("key", key))
 
 		// This recycler only walks index_files/ (v0). Its first path level is buildID;
-		// v1 collectionID directories live under index_files_v1/ and are handled below.
+		// v1 collectionID directories live under index_v1/ and are handled below.
 		buildID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
 			logger.Warn("garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", zap.Error(err))
@@ -1246,7 +1246,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 }
 
 // getAllIndexFilesOfIndex returns all expected index files using the path version
-// recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_files_v1 paths.
+// recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_v1 paths.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
 	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
@@ -1260,7 +1260,7 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 }
 
 // recycleUnusedIndexFilesV1 cleans index files for v1 format entries (collection-partitioned paths).
-// v1 uses the separate index_files_v1 prefix and puts collectionID before buildID,
+// v1 uses the separate index_v1 prefix and puts collectionID before buildID,
 // so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
 func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV1"))
@@ -1291,21 +1291,36 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 
 			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
 				log.Warn("recycleUnusedIndexFilesV1 remove failed",
-					zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					zap.String("prefix", prefix),
 					zap.Error(err))
 				return struct{}{}, err
 			}
 			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
 				log.Warn("recycleUnusedIndexFilesV1 remove segment index meta failed",
-					zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					zap.String("prefix", prefix),
 					zap.Error(err))
 				return struct{}{}, err
 			}
 			log.Info("recycleUnusedIndexFilesV1 removed index files and meta",
+				zap.Int64("collectionID", segIdx.CollectionID),
+				zap.Int64("partitionID", segIdx.PartitionID),
+				zap.Int64("segmentID", segIdx.SegmentID),
 				zap.Int64("buildID", segIdx.BuildID),
-				zap.Int64("collectionID", segIdx.CollectionID))
+				zap.Int64("indexID", segIdx.IndexID),
+				zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+				zap.String("prefix", prefix))
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)

@@ -2488,7 +2488,7 @@ func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
 	}
 
 	// Add: deleted v0, deleted v1, not-deleted v1.
-	// Only deleted v1 indexes need metadata-driven cleanup under index_files_v1;
+	// Only deleted v1 indexes need metadata-driven cleanup under index_v1;
 	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
 	m.segmentBuildInfo.Add(&model.SegmentIndex{
 		BuildID:               1000,

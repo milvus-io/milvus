@@ -55,7 +55,7 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 
 // BuildPrefix returns the directory prefix containing all files for this index build.
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
-// v1: {root}/index_files_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+// v1: {root}/index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
 func (b *IndexPathBuilder) BuildPrefix() string {
 	if IsCollectionRooted(b.pathVersion) {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)

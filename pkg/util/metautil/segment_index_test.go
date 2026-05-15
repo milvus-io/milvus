@@ -17,7 +17,7 @@ func TestIndexPathBuilder_V0_SingleFile(t *testing.T) {
 func TestIndexPathBuilder_V1_SingleFile(t *testing.T) {
 	b := NewIndexPathBuilder("files", 1, 100, 200, 300, 1000, 1)
 	path := b.BuildFilePath("index_data")
-	assert.Equal(t, "files/index_files_v1/100/200/300/1000/1/index_data", path)
+	assert.Equal(t, "files/index_v1/100/200/300/1000/1/index_data", path)
 }
 
 func TestIndexPathBuilder_V0_MultipleFiles(t *testing.T) {
@@ -34,9 +34,9 @@ func TestIndexPathBuilder_V1_MultipleFiles(t *testing.T) {
 	b := NewIndexPathBuilder("files", 1, 100, 200, 300, 1000, 1)
 	paths := b.BuildFilePaths([]string{"a", "b", "c"})
 	assert.Equal(t, []string{
-		"files/index_files_v1/100/200/300/1000/1/a",
-		"files/index_files_v1/100/200/300/1000/1/b",
-		"files/index_files_v1/100/200/300/1000/1/c",
+		"files/index_v1/100/200/300/1000/1/a",
+		"files/index_v1/100/200/300/1000/1/b",
+		"files/index_v1/100/200/300/1000/1/c",
 	}, paths)
 }
 
@@ -61,13 +61,13 @@ func TestIndexPathBuilder_V0_Prefix(t *testing.T) {
 func TestIndexPathBuilder_V1_Prefix(t *testing.T) {
 	b := NewIndexPathBuilder("root", 1, 100, 200, 300, 1000, 1)
 	prefix := b.BuildPrefix()
-	assert.Equal(t, "root/index_files_v1/100/200/300/1000/1", prefix)
+	assert.Equal(t, "root/index_v1/100/200/300/1000/1", prefix)
 }
 
 func TestIndexPathBuilder_FutureVersion_TreatedAsV1(t *testing.T) {
 	b := NewIndexPathBuilder("files", 2, 100, 200, 300, 1000, 1)
 	path := b.BuildFilePath("data")
-	assert.Equal(t, "files/index_files_v1/100/200/300/1000/1/data", path)
+	assert.Equal(t, "files/index_v1/100/200/300/1000/1/data", path)
 }
 
 func TestIsCollectionRooted(t *testing.T) {

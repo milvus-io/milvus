@@ -311,7 +311,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		TypeParams:                mapToKVPairs(it.newTypeParams),
 		StorePath:                 it.req.GetStorePath(),
 		StoreVersion:              it.req.GetStoreVersion(),
-		IndexStorePath:            it.req.GetIndexStorePath(),
+		IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
 		OptFields:                 optFields,
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 		LackBinlogRows:            it.req.GetLackBinlogRows(),

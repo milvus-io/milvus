@@ -40,6 +40,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
+#include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -282,21 +283,26 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        // Prefer the DataCoord-built prefix when present. The fallback is only
-        // for v0 basename-only index file inputs.
-        if (!index_meta_.index_store_path.empty()) {
-            return NormalizePath(index_meta_.index_store_path);
-        }
         boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
-        boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1 =
-            std::to_string(index_meta_.build_id) + "/" +
-            std::to_string(index_meta_.index_version) + "/" +
-            std::to_string(field_meta_.partition_id) + "/" +
-            std::to_string(field_meta_.segment_id);
-        return NormalizePath(prefix / path / path1);
+        if (index_meta_.index_store_path_version >=
+            ::milvus::proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+            // {root}/index_v1/{coll}/{part}/{seg}/{build}/{ver}
+            return NormalizePath(prefix / std::string(INDEX_ROOT_PATH_V1) /
+                                 std::to_string(field_meta_.collection_id) /
+                                 std::to_string(field_meta_.partition_id) /
+                                 std::to_string(field_meta_.segment_id) /
+                                 std::to_string(index_meta_.build_id) /
+                                 std::to_string(index_meta_.index_version));
+        }
+        // {root}/index_files/{build}/{ver}/{part}/{seg}
+        return NormalizePath(prefix / std::string(INDEX_ROOT_PATH) /
+                             std::to_string(index_meta_.build_id) /
+                             std::to_string(index_meta_.index_version) /
+                             std::to_string(field_meta_.partition_id) /
+                             std::to_string(field_meta_.segment_id));
     }
 
     virtual std::string

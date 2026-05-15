@@ -99,7 +99,6 @@ message CreateJobRequest {
   schema.DataType field_type = 18;
   string store_path = 19;
   int64 store_version = 20;
-  string index_store_path = 21;
   int64 dim = 22;
   repeated int64 data_ids = 23;
   repeated index.OptionalFieldInfo optional_scalar_fields = 24;

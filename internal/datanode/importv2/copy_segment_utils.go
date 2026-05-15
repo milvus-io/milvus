@@ -340,7 +340,7 @@ func generateMappingsFromFiles(
 		return nil, err
 	}
 	// Vector/scalar index copy uses the v0 type as the logical input; the
-	// per-file IndexStorePathVersion switches storage matching to index_files_v1 when needed.
+	// per-file IndexStorePathVersion switches storage matching to index_v1 when needed.
 	if err := addMappings(files.VectorScalarIndex, IndexTypeVectorScalarV0); err != nil {
 		return nil, err
 	}
@@ -817,7 +817,7 @@ const (
 	BinlogTypeDelta         = "delta_log"
 	BinlogTypeBM25          = "bm25_stats"
 	IndexTypeVectorScalarV0 = "index_files"
-	IndexTypeVectorScalarV1 = "index_files_v1"
+	IndexTypeVectorScalarV1 = "index_v1"
 	IndexTypeText           = "text_log"
 	IndexTypeJSONKey        = "json_key_index_log" // Legacy: JSON Key Inverted Index
 	IndexTypeJSONStats      = "json_stats"         // New: JSON Stats with Shredding Design
@@ -831,8 +831,8 @@ const (
 //   - IndexTypeVectorScalarV0: Vector/Scalar v0 path format (legacy index_files prefix)
 //     {rootPath}/index_files/{build_id}/{index_version}/{partition_id}/{segment_id}/file
 //     Note: collectionID is NOT in the path, only partitionID and segmentID are replaced
-//   - IndexTypeVectorScalarV1: Vector/Scalar v1 path format (index_files_v1 prefix)
-//     {rootPath}/index_files_v1/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
+//   - IndexTypeVectorScalarV1: Vector/Scalar v1 path format (index_v1 prefix)
+//     {rootPath}/index_v1/{collection_id}/{partition_id}/{segment_id}/{build_id}/{index_version}/file
 //   - IndexTypeText: Text Index path format
 //     {rootPath}/text_log/{build_id}/{version}/{collection_id}/{partition_id}/{segment_id}/{field_id}/file
 //   - IndexTypeJSONKey: JSON Key Index path format (legacy)

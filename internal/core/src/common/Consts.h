@@ -45,6 +45,7 @@ const char EDEK[] = "edek";
 const char EZID[] = "encryption_zone";
 
 const char INDEX_ROOT_PATH[] = "index_files";
+const char INDEX_ROOT_PATH_V1[] = "index_v1";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
 const char ANALYZE_ROOT_PATH[] = "analyze_stats";
 const char CENTROIDS_NAME[] = "centroids";
