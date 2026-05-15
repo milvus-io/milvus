@@ -58,7 +58,9 @@ from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.util_log import test_log as log
 
 REFRESH_POLL_INTERVAL_SECONDS = 2
-VORTEX_FULL_MATRIX_EXCLUDED_FIELDS = ()
+# Milvus currently rejects Vortex FixedSizeList<UInt8> byte-vector payloads.
+# TODO(https://github.com/milvus-io/milvus/issues/49828): enable these fields.
+VORTEX_FULL_MATRIX_EXCLUDED_FIELDS = ("bf16v", "binv_flat", "binv_ivf")
 
 ALLOWED_EXTERNAL_SOURCE_SCHEMES = (pytest.param("minio", id="minio"),)
 _PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
