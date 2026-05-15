@@ -89,6 +89,8 @@ constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
 constexpr const char* EMB_LIST_META_PATH = "emb_list_meta_file_path";
 constexpr const char* EMB_LIST_META_FILE_NAME = "emb_list_meta";
+constexpr const char* EMB_LIST_RAW_INDEX_PATH = "emb_list_raw_index_file_path";
+constexpr const char* EMB_LIST_RAW_INDEX_FILE_NAME = "emb_list_raw_index";
 constexpr const char* EMB_LIST_OFFSETS_PATH = "emb_list_offset_file_path";
 constexpr const char* VALID_DATA_PATH_KEY = "valid_data_file_path";
 
