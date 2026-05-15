@@ -102,7 +102,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(5), nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -124,7 +124,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(3), nil).Once()
 	excludeNodes = typeutil.NewUniqueSet()
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -142,7 +142,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.ErrNodeNotAvailable)
 	excludeNodes = typeutil.NewUniqueSet()
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -159,7 +159,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.ErrNodeNotAvailable)
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -174,7 +174,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nil, merr.ErrCollectionNotLoaded).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nil, merr.ErrCollectionNotLoaded).Once()
 	excludeNodes = typeutil.NewUniqueSet()
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -188,10 +188,8 @@ func (s *LBPolicySuite) TestPreferredNodeHint() {
 	ctx := context.Background()
 
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
-	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    s.collectionID,
@@ -201,6 +199,7 @@ func (s *LBPolicySuite) TestPreferredNodeHint() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.NodeID)
+	s.False(selectedByBalancer)
 }
 
 func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
@@ -217,7 +216,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 		return !lo.Contains(nodes, int64(2)) && lo.Contains(nodes, int64(1)) && lo.Contains(nodes, int64(3))
 	}), int64(1)).Return(int64(1), nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    s.collectionID,
@@ -227,6 +226,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(1), targetNode.NodeID)
+	s.True(selectedByBalancer)
 }
 
 func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
@@ -237,9 +237,6 @@ func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.MatchedBy(func(node NodeInfo) bool {
 		return node.NodeID == 3
 	})).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(int64(3), int64(1))
 
 	var executedNodeID int64
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
@@ -268,10 +265,8 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	))
 
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, collectionID, channel).Return(s.nodes, nil)
-	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(3)}, int64(1)).Return(int64(3), nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    collectionID,
@@ -281,6 +276,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.NodeID)
+	s.False(selectedByBalancer)
 
 	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
 		"99001",
@@ -304,7 +300,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() 
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, int64(1)).Return(int64(1), nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   collectionID,
@@ -338,7 +334,6 @@ func (s *LBPolicySuite) TestPreferredNodeFailureFallsBackToOtherReplica() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(1)}, int64(1)).Return(int64(1), nil).Once()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(2)}, int64(1)).Return(int64(2), nil).Once()
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 
@@ -844,7 +839,7 @@ func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return([]NodeInfo{}, nil).Once()
 
 	excludeNodes := typeutil.NewUniqueSet(s.nodeIDs...)
-	_, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	_, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -863,7 +858,7 @@ func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude the single node
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -890,7 +885,7 @@ func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
 	}), mock.Anything).Return(int64(3), nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude node 1, node 3 should be available
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -951,7 +946,7 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
 
 	excludeNodes := typeutil.NewUniqueSet(int64(1), int64(2)) // Exclude all available nodes
-	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -976,7 +971,7 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Only exclude node 1
-	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
@@ -995,7 +990,7 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return([]NodeInfo{}, nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1))
-	_, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	_, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
 		CollectionID:   s.collectionID,
