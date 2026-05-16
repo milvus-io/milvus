@@ -118,7 +118,7 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 	}
 
 	// Convert nodes to node items with row count scores
-	nodeItems := p.convertToNodeItemsBySegment(nodes)
+	nodeItems := p.convertToNodeItemsBySegment(collectionID, nodes)
 	if len(nodeItems) == 0 {
 		return nil
 	}
@@ -218,8 +218,9 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 }
 
 // convertToNodeItemsBySegment creates node items with row count scores
-func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64) map[int64]*NodeItem {
+func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
 	status := p.getWorkloadStatus()
+	delta := p.scheduler.GetSegmentTaskDeltaSnapshot(nodeIDs, collectionID)
 
 	ret := make(map[int64]*NodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
@@ -227,7 +228,7 @@ func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64)
 		rowcnt := status.nodeGlobalRowCount[node] + status.nodeGlobalChannelRowCount[node]
 
 		// Calculate executing task cost in scheduler
-		rowcnt += p.scheduler.GetSegmentTaskDelta(node, -1)
+		rowcnt += delta.GetByNode(node)
 
 		// More row count means less priority
 		NodeItem := NewNodeItem(rowcnt, node)

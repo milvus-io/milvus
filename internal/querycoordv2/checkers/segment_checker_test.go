@@ -84,7 +84,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker

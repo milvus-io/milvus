@@ -49,6 +49,8 @@ type workloadStatus struct {
 	nodeGlobalRowCount        map[int64]int
 	nodeGlobalChannelRowCount map[int64]int
 	nodeGlobalChannels        map[int64][]*meta.DmChannel
+	nodeCollectionRowCount    map[int64]map[int64]int
+	nodeDelegatorCount        map[int64]map[int64]int
 }
 
 // getWorkloadStatus refreshes and returns the workload status if the underlying distribution version has changed.
@@ -65,18 +67,34 @@ func (p *ScoreBasedAssignPolicy) getWorkloadStatus() *workloadStatus {
 		nodeGlobalRowCount:        make(map[int64]int),
 		nodeGlobalChannelRowCount: make(map[int64]int),
 		nodeGlobalChannels:        make(map[int64][]*meta.DmChannel),
+		nodeCollectionRowCount:    make(map[int64]map[int64]int),
+		nodeDelegatorCount:        make(map[int64]map[int64]int),
 	}
 
 	allSegments := p.dist.SegmentDistManager.GetByFilter()
 	for _, s := range allSegments {
 		status.nodeGlobalRowCount[s.Node] += int(s.GetNumOfRows())
+		collectionID := s.GetCollectionID()
+		if status.nodeCollectionRowCount[s.Node] == nil {
+			status.nodeCollectionRowCount[s.Node] = make(map[int64]int)
+		}
+		status.nodeCollectionRowCount[s.Node][collectionID] += int(s.GetNumOfRows())
 	}
 
 	allChannels := p.dist.ChannelDistManager.GetByFilter()
 	for _, ch := range allChannels {
 		status.nodeGlobalChannels[ch.Node] = append(status.nodeGlobalChannels[ch.Node], ch)
+		collectionID := ch.GetCollectionID()
+		if status.nodeDelegatorCount[ch.Node] == nil {
+			status.nodeDelegatorCount[ch.Node] = make(map[int64]int)
+		}
+		status.nodeDelegatorCount[ch.Node][collectionID]++
 		if ch.View != nil {
 			status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+			if status.nodeCollectionRowCount[ch.Node] == nil {
+				status.nodeCollectionRowCount[ch.Node] = make(map[int64]int)
+			}
+			status.nodeCollectionRowCount[ch.Node][collectionID] += int(ch.View.NumOfGrowingRows)
 		}
 	}
 
@@ -203,6 +221,7 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 // ConvertToNodeItemsBySegment creates node items with comprehensive scores
 func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
 	status := p.getWorkloadStatus()
+	delta := p.scheduler.GetSegmentTaskDeltaSnapshot(nodeIDs, collectionID)
 
 	totalScore := 0
 	nodeScoreMap := make(map[int64]*NodeItem)
@@ -211,7 +230,7 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 	allNodeHasMemInfo := true
 
 	for _, node := range nodeIDs {
-		score := p.calculateScoreBySegment(collectionID, node, status)
+		score := p.calculateScoreBySegment(collectionID, node, status, delta)
 		NodeItem := NewNodeItem(score, node)
 		nodeScoreMap[node] = &NodeItem
 		totalScore += score
@@ -249,12 +268,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 		}
 
 		// Add delegator overhead
-		collDelegator := p.dist.ChannelDistManager.GetByFilter(
-			meta.WithCollectionID2Channel(collectionID),
-			meta.WithNodeID2Channel(node),
-		)
-		if len(collDelegator) > 0 {
-			delegatorDelta := nodeScoreMap[node].GetAssignedScore() * delegatorOverloadFactor * float64(len(collDelegator))
+		delegatorCount := status.nodeDelegatorCount[node][collectionID]
+		if delegatorCount > 0 {
+			delegatorDelta := nodeScoreMap[node].GetAssignedScore() * delegatorOverloadFactor * float64(delegatorCount)
 			nodeScoreMap[node].AddCurrentScoreDelta(delegatorDelta)
 		}
 	}
@@ -263,33 +279,19 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 }
 
 // calculateScoreBySegment calculates comprehensive score for a node
-func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(collectionID, nodeID int64, status *workloadStatus) int {
+func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(
+	collectionID int64,
+	nodeID int64,
+	status *workloadStatus,
+	delta *task.SegmentTaskDeltaSnapshot,
+) int {
 	nodeRowCount := status.nodeGlobalRowCount[nodeID] + status.nodeGlobalChannelRowCount[nodeID]
 
 	// Calculate executing task cost in scheduler
-	nodeRowCount += p.scheduler.GetSegmentTaskDelta(nodeID, -1)
-
-	// Calculate collection sealed segment row count
-	collectionSegments := p.dist.SegmentDistManager.GetByFilter(
-		meta.WithCollectionID(collectionID),
-		meta.WithNodeID(nodeID),
-	)
-	collectionRowCount := 0
-	for _, s := range collectionSegments {
-		collectionRowCount += int(s.GetNumOfRows())
-	}
-
-	// Calculate collection growing segment row count
-	collDelegatorList := p.dist.ChannelDistManager.GetByFilter(
-		meta.WithCollectionID2Channel(collectionID),
-		meta.WithNodeID2Channel(nodeID),
-	)
-	for _, d := range collDelegatorList {
-		collectionRowCount += int(d.View.NumOfGrowingRows)
-	}
+	nodeRowCount += delta.GetByNode(nodeID)
 
 	// Calculate executing task cost for collection
-	collectionRowCount += p.scheduler.GetSegmentTaskDelta(nodeID, collectionID)
+	collectionRowCount := status.nodeCollectionRowCount[nodeID][collectionID] + delta.GetByNodeAndCollection(nodeID)
 
 	// Final score: collection row count + global row count * factor
 	return collectionRowCount + int(float64(nodeRowCount)*

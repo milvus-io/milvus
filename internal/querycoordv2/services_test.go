@@ -242,7 +242,7 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
-	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.jobScheduler.Start()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
@@ -1361,7 +1361,7 @@ func (suite *ServiceSuite) TestLoadBalance() {
 			SealedSegmentIDs: segments,
 		}
 		suite.taskScheduler.ExpectedCalls = nil
-		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
@@ -1408,7 +1408,7 @@ func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
 			SealedSegmentIDs: segments,
 		}
 		suite.taskScheduler.ExpectedCalls = nil
-		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
 			actions := task.Actions()
@@ -1491,7 +1491,7 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			DstNodeIDs:    []int64{dstNode},
 		}
 		suite.taskScheduler.ExpectedCalls = nil
-		suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+		suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 		suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(t task.Task) {
 			actions := t.Actions()

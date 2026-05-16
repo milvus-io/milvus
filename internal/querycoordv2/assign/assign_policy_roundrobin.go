@@ -74,12 +74,13 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	nodesCopy := make([]int64, len(nodes))
 	copy(nodesCopy, nodes)
 	nodes = nodesCopy
+	segmentDelta := p.scheduler.GetSegmentTaskDeltaSnapshot(nodes, collectionID)
 
 	// Sort nodes by current segment load (ascending)
 	// Consider: segment count + growing rows + scheduler task delta
 	sort.Slice(nodes, func(i, j int) bool {
-		load1 := p.calculateSegmentLoad(nodes[i])
-		load2 := p.calculateSegmentLoad(nodes[j])
+		load1 := p.calculateSegmentLoad(nodes[i], segmentDelta)
+		load2 := p.calculateSegmentLoad(nodes[j], segmentDelta)
 		if load1 != load2 {
 			return load1 < load2
 		}
@@ -166,7 +167,7 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 
 // calculateSegmentLoad calculates the total segment load for a node
 // Load = segment count + scheduler task delta
-func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
+func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64, delta *task.SegmentTaskDeltaSnapshot) int {
 	load := 0
 
 	nodeInfo := p.nodeManager.Get(nodeID)
@@ -175,7 +176,7 @@ func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
 	}
 
 	// Add scheduler task delta (pending segment tasks)
-	load += p.scheduler.GetSegmentTaskDelta(nodeID, -1)
+	load += delta.GetByNode(nodeID)
 
 	return load
 }

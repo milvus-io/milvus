@@ -88,7 +88,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	suite.meta = testMeta
 	suite.balancer = NewScoreBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
 
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -670,12 +670,15 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 
 			// set node delta count
 			suite.mockScheduler.ExpectedCalls = nil
+			nodeDeltas := make(map[int64]int, len(c.nodes))
 			for i := range c.nodes {
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
+				nodeDeltas[c.nodes[i]] = c.deltaCounts[i]
 				suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
 				suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 				suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 			}
+			suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
+				Return(task.NewSegmentTaskDeltaSnapshot(nodeDeltas, nodeDeltas)).Maybe()
 
 			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
@@ -1099,7 +1102,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	segmentPlans, _ := suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(segmentPlans), 2)
@@ -1108,7 +1111,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	segmentPlans, _ = suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(segmentPlans), 2)
@@ -1124,7 +1127,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	_, channelPlans := suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(channelPlans), 2)
@@ -1133,7 +1136,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(channelPlans), 2)

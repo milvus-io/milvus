@@ -34,7 +34,7 @@ import (
 func TestScoreBasedAssignPolicy_AssignSegment_BasicFunctionality(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -77,7 +77,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_BasicFunctionality(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignSegment_PrefersLowScoreNode(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -123,7 +123,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_PrefersLowScoreNode(t *testing.T) 
 func TestScoreBasedAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -144,7 +144,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -172,7 +172,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignSegment_ForceAssign(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -208,7 +208,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_ForceAssign(t *testing.T) {
 func TestScoreBasedAssignPolicy_CalculateSegmentScore(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -233,7 +233,7 @@ func TestScoreBasedAssignPolicy_CalculateSegmentScore(t *testing.T) {
 func TestScoreBasedAssignPolicy_ConvertToNodeItemsBySegment(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -271,11 +271,57 @@ func TestScoreBasedAssignPolicy_ConvertToNodeItemsBySegment(t *testing.T) {
 	assert.Greater(t, nodeItems[2].GetAssignedScore(), float64(0))
 }
 
+func TestScoreBasedAssignPolicy_WorkloadStatusWithCollectionRows(t *testing.T) {
+	nodeManager := session.NewNodeManager()
+	mockScheduler := task.NewMockScheduler(t)
+	dist := meta.NewDistributionManager(nodeManager)
+	metaMgr := meta.NewMeta(nil, nil, nodeManager)
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Version:  common.Version,
+		Address:  "localhost",
+		Hostname: "node",
+	}))
+	nodeManager.Get(1).UpdateStats(session.WithMemCapacity(100))
+	nodeManager.Get(1).SetState(session.NodeStateNormal)
+
+	dist.SegmentDistManager.Update(1,
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 100, NumOfRows: 10},
+			Node:        1,
+		},
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 200, NumOfRows: 30},
+			Node:        1,
+		},
+	)
+	dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "ch-100"},
+		Node:         1,
+		View: &meta.LeaderView{
+			ID:               1,
+			CollectionID:     100,
+			Channel:          "ch-100",
+			NumOfGrowingRows: 5,
+		},
+	})
+
+	policy := newScoreBasedAssignPolicy(nodeManager, mockScheduler, dist, metaMgr)
+	status := policy.getWorkloadStatus()
+
+	assert.Equal(t, 40, status.nodeGlobalRowCount[1])
+	assert.Equal(t, 5, status.nodeGlobalChannelRowCount[1])
+	assert.Equal(t, 15, status.nodeCollectionRowCount[1][100])
+	assert.Equal(t, 30, status.nodeCollectionRowCount[1][200])
+	assert.Equal(t, 1, status.nodeDelegatorCount[1][100])
+}
+
 // TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality tests basic channel assignment
 func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -326,7 +372,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignChannel_PrefersLowScoreNode(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -398,7 +444,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_PrefersLowScoreNode(t *testing.T) 
 func TestScoreBasedAssignPolicy_CalculateChannelScore(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -425,7 +471,7 @@ func TestScoreBasedAssignPolicy_CalculateChannelScore(t *testing.T) {
 func TestScoreBasedAssignPolicy_ConvertToNodeItemsByChannel(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -483,7 +529,7 @@ func TestScoreBasedAssignPolicy_ConvertToNodeItemsByChannel(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -511,7 +557,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 func TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
@@ -537,7 +583,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes(t *testing.T) {
 func TestScoreBasedAssignPolicy_WorkloadStatusOnDemandUpdate(t *testing.T) {
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 	metaMgr := meta.NewMeta(nil, nil, nodeManager)
