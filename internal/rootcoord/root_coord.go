@@ -1025,6 +1025,32 @@ func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectio
 	return merr.Success(), nil
 }
 
+// AddCollectionStructField add struct field
+func (c *Core) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AddCollectionStructField")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to add collection struct field")
+
+	if err := c.broadcastAlterCollectionForAddStructField(ctx, in); err != nil {
+		log.Info("failed to add collection struct field", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionStructField").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to add collection struct field")
+	return merr.Success(), nil
+}
+
 func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.AlterCollectionSchemaResponse{

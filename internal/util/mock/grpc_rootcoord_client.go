@@ -93,6 +93,10 @@ func (m *GrpcRootCoordClient) AddCollectionField(ctx context.Context, in *milvus
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
 	return &internalpb.ListPolicyResponse{}, m.Err
 }

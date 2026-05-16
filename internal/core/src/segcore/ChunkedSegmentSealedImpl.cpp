@@ -3418,12 +3418,31 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::VECTOR_ARRAY: {
-            bulk_subscript_vector_array_impl(
-                op_ctx,
-                column.get(),
-                valid_offsets,
-                valid_count,
-                ret->mutable_vectors()->mutable_vector_array()->mutable_data());
+            auto dst =
+                ret->mutable_vectors()->mutable_vector_array()->mutable_data();
+            if (field_meta.is_nullable() && valid_data != nullptr) {
+                if (valid_count == 0) {
+                    break;
+                }
+                std::vector<int64_t> valid_logical_offsets;
+                valid_logical_offsets.reserve(valid_count);
+                for (int64_t i = 0; i < count; ++i) {
+                    if (valid_data[i]) {
+                        valid_logical_offsets.push_back(i);
+                    }
+                }
+                column->BulkVectorArrayAt(
+                    op_ctx,
+                    [dst, &valid_logical_offsets](VectorFieldProto&& array,
+                                                  size_t i) {
+                        dst->at(valid_logical_offsets[i]) = std::move(array);
+                    },
+                    valid_offsets,
+                    valid_count);
+            } else {
+                bulk_subscript_vector_array_impl(
+                    op_ctx, column.get(), seg_offsets, count, dst);
+            }
             break;
         }
         default: {

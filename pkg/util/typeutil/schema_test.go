@@ -5974,3 +5974,24 @@ func TestAppendFieldData_ArrayOfVectorNullRowAppendsPlaceholder(t *testing.T) {
 	assert.EqualValues(t, 1, got.GetDim())
 	assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
 }
+
+func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64},
+			{Name: "scalar", DataType: schemapb.DataType_Bool},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "profile",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "profile[ints]", DataType: schemapb.DataType_Array},
+					{Name: "profile[vectors]", DataType: schemapb.DataType_ArrayOfVector},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, 5, GetTotalFieldsNum(schema))
+	assert.Len(t, GetAllFieldSchemas(schema), 4)
+}

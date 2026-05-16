@@ -1257,6 +1257,142 @@ func TestAddFieldTask(t *testing.T) {
 	})
 }
 
+func TestAddCollectionStructFieldTaskPreExecute(t *testing.T) {
+	ctx := context.Background()
+	oldSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+		},
+	}
+	structField := newAddStructFieldSchema("profile")
+
+	task := &addCollectionStructFieldTask{
+		Condition: NewTaskCondition(ctx),
+		AddCollectionStructFieldRequest: &milvuspb.AddCollectionStructFieldRequest{
+			DbName:                 "",
+			CollectionName:         oldSchema.GetName(),
+			StructArrayFieldSchema: structField,
+		},
+		ctx:       ctx,
+		mixCoord:  NewMixCoordMock(),
+		oldSchema: oldSchema,
+	}
+
+	require.NoError(t, task.OnEnqueue())
+	assert.Equal(t, commonpb.MsgType_AddCollectionField, task.Type())
+
+	require.NoError(t, task.PreExecute(ctx))
+
+	got := task.GetStructArrayFieldSchema()
+	require.NotSame(t, structField, got)
+	require.Len(t, got.GetFields(), 2)
+	assert.Equal(t, "profile[ints]", got.GetFields()[0].GetName())
+	assert.Equal(t, "profile[vectors]", got.GetFields()[1].GetName())
+	assert.True(t, got.GetFields()[0].GetNullable())
+	assert.True(t, got.GetFields()[1].GetNullable())
+
+	// PreExecute works on a cloned schema, so callers do not observe partial mutation on failure.
+	assert.Equal(t, "ints", structField.GetFields()[0].GetName())
+	assert.Equal(t, "vectors", structField.GetFields()[1].GetName())
+}
+
+func TestValidateAddStructFieldRequest(t *testing.T) {
+	baseSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), newAddStructFieldSchema("profile"))
+		require.NoError(t, err)
+	})
+
+	t.Run("struct must be nullable", func(t *testing.T) {
+		structField := newAddStructFieldSchema("profile")
+		structField.Nullable = false
+
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), structField)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "added struct field must be nullable")
+	})
+
+	t.Run("duplicate parent name", func(t *testing.T) {
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), newAddStructFieldSchema("pk"))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated field name pk")
+	})
+
+	t.Run("duplicate transformed sub field name", func(t *testing.T) {
+		schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "profile[ints]",
+			DataType: schemapb.DataType_Int64,
+		})
+
+		err := validateAddStructFieldRequest(schema, newAddStructFieldSchema("profile"))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated field name profile[ints]")
+	})
+
+	t.Run("max field count includes struct parent", func(t *testing.T) {
+		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, "3")
+		defer Params.Reset(Params.ProxyCfg.MaxFieldNum.Key)
+
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), newAddStructFieldSchema("profile"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "maximum field's number should be limited to 3")
+	})
+
+	t.Run("vector count includes array of vector sub field", func(t *testing.T) {
+		Params.Save(Params.ProxyCfg.MaxVectorFieldNum.Key, "0")
+		defer Params.Reset(Params.ProxyCfg.MaxVectorFieldNum.Key)
+
+		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), newAddStructFieldSchema("profile"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "maximum vector field's number should be limited to 0")
+	})
+}
+
+func newAddStructFieldSchema(name string) *schemapb.StructArrayFieldSchema {
+	return &schemapb.StructArrayFieldSchema{
+		Name:     name,
+		Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:        "ints",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "16"},
+				},
+			},
+			{
+				Name:        "vectors",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+					{Key: common.MaxCapacityKey, Value: "16"},
+				},
+			},
+		},
+	}
+}
+
 func TestCreateCollectionTask(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()

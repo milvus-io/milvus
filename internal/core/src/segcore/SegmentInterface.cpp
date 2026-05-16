@@ -774,7 +774,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         AssertInfo(field_meta.is_nullable(),
                    "Non-nullable vector field should not reach here");
 
-        auto result = CreateEmptyVectorDataArray(0, field_meta);
+        auto create_count = IsVectorArrayDataType(data_type) ? count : 0;
+        auto result = CreateEmptyVectorDataArray(create_count, field_meta);
 
         auto valid_data = result->mutable_valid_data();
         for (int64_t i = 0; i < count; ++i) {
