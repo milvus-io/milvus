@@ -2129,7 +2129,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			for _, subField := range structArrays.StructArrays.Fields {
 				for j, v := range subField.ValidData {
 					if v {
-						return fmt.Errorf("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
+						return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
 							subField.FieldName, structName, j)
 					}
 				}
@@ -2140,7 +2140,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			continue
 		}
 		if hasDataCount != totalSubFields {
-			return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
+			return merr.WrapErrParameterInvalidMsg("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
 				structName, hasDataCount, totalSubFields)
 		}
 
@@ -2158,12 +2158,12 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					continue
 				}
 				if len(subField.ValidData) != len(refValidData) {
-					return fmt.Errorf("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
+					return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
 						structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
 				}
 				for j := range refValidData {
 					if subField.ValidData[j] != refValidData[j] {
-						return fmt.Errorf("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
+						return merr.WrapErrParameterInvalidMsg("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
 							structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
 					}
 				}
