@@ -807,9 +807,12 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     }
     EXPECT_EQ(segment->get_row_count(), data_n);
 
-    // When interim index has raw data, field data is dropped to save memory
-    EXPECT_EQ(segment->HasFieldData(vec_field_id),
-              !should_have_index || !intermin_index_has_raw_data);
+    // Nullable vector field data is kept for offset mapping even when the
+    // interim index has raw data.
+    bool expected_has_field_data = !should_have_index ||
+                                   !intermin_index_has_raw_data ||
+                                   (nullable && supports_interim_index);
+    EXPECT_EQ(segment->HasFieldData(vec_field_id), expected_has_field_data);
 
     // 2. search binlog index
     auto num_queries = 10;
@@ -1078,9 +1081,12 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         EXPECT_FALSE(segment->HasIndex(vec_field_id));
     }
     EXPECT_EQ(segment->get_row_count(), data_n);
-    // When interim index has raw data, field data is dropped to save memory
-    EXPECT_EQ(segment->HasFieldData(vec_field_id),
-              !should_have_index || !intermin_index_has_raw_data);
+    // Nullable vector field data is kept for offset mapping even when the
+    // interim index has raw data.
+    bool expected_has_field_data = !should_have_index ||
+                                   !intermin_index_has_raw_data ||
+                                   (nullable && supports_interim_index);
+    EXPECT_EQ(segment->HasFieldData(vec_field_id), expected_has_field_data);
 
     // 2. search binlog index
     auto num_queries = std::min(10, (int)valid_count);
