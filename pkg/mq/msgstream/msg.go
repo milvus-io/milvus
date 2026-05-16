@@ -283,12 +283,9 @@ func (it *InsertMsg) rowBasedIndexRequest(index int) *msgpb.InsertRequest {
 }
 
 func (it *InsertMsg) columnBasedIndexRequest(index int) *msgpb.InsertRequest {
-	srcFieldsData := it.GetFieldsData()
-	fieldsData := make([]*schemapb.FieldData, len(srcFieldsData))
-	idxComputer := typeutil.NewFieldDataIdxComputer(srcFieldsData)
-	vectorIdx := idxComputer.Compute(int64(index))
-
-	typeutil.AppendFieldData(fieldsData, srcFieldsData, int64(index), vectorIdx...)
+	colNum := len(it.GetFieldsData())
+	fieldsData := make([]*schemapb.FieldData, colNum)
+	typeutil.AppendFieldData(fieldsData, it.GetFieldsData(), int64(index))
 	return &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),

@@ -39,9 +39,7 @@ class VecIndexCreator : public IndexCreatorBase {
                     const storage::FileManagerContext& file_manager_context);
 
     void
-    Build(const milvus::DatasetPtr& dataset,
-          const bool* valid_data = nullptr,
-          const int64_t valid_data_len = 0) override;
+    Build(const milvus::DatasetPtr& dataset) override;
 
     void
     Build() override;

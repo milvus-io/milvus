@@ -521,7 +521,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 3. search
         vectors_to_search = rng.random((1, dim))
         null_expr = default_vector_field_name + " " + null_expr_op
-        error = {ct.err_code: 1100, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: 65535, ct.err_msg: "unsupported data type: VECTOR_FLOAT"}
         self.search(
             client,
             collection_name,

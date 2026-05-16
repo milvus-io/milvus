@@ -56,7 +56,7 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.vecDataType = schemapb.DataType_FloatVector
 }
 
-func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
+func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -81,7 +81,6 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 						Value: "8",
 					},
 				},
-				Nullable: nullable,
 			},
 			{
 				FieldID:     102,
@@ -122,7 +121,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 		})
 	}
 
-	insertData, err := testutil.CreateInsertData(schema, suite.numRows, nullPercent)
+	insertData, err := testutil.CreateInsertData(schema, suite.numRows)
 	suite.NoError(err)
 
 	rows, err := testutil.CreateInsertDataRowsForJSON(schema, insertData)
@@ -262,16 +261,12 @@ func (suite *ReaderSuite) TestReadScalarFields() {
 	for _, dataType := range scalarTypes {
 		if dataType == schemapb.DataType_Array {
 			for _, elementType := range elementTypes {
-				suite.run(dataType, elementType, false, 0)
-				for _, nullPercent := range []int{0, 50, 100} {
-					suite.run(dataType, elementType, true, nullPercent)
-				}
+				suite.run(dataType, elementType, false)
+				suite.run(dataType, elementType, true)
 			}
 		} else {
-			suite.run(dataType, schemapb.DataType_None, false, 0)
-			for _, nullPercent := range []int{0, 50, 100} {
-				suite.run(dataType, schemapb.DataType_None, true, nullPercent)
-			}
+			suite.run(dataType, schemapb.DataType_None, false)
+			suite.run(dataType, schemapb.DataType_None, true)
 		}
 	}
 }
@@ -296,29 +291,22 @@ func (suite *ReaderSuite) TestReadScalarFieldsWithDefaultValue() {
 
 func (suite *ReaderSuite) TestStringPK() {
 	suite.pkDataType = schemapb.DataType_VarChar
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	for _, nullPercent := range []int{0, 50, 100} {
-		suite.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
-	}
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
 func (suite *ReaderSuite) TestVector() {
-	dataTypes := []schemapb.DataType{
-		schemapb.DataType_BinaryVector,
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_Float16Vector,
-		schemapb.DataType_BFloat16Vector,
-		schemapb.DataType_SparseFloatVector,
-		schemapb.DataType_Int8Vector,
-	}
-
-	for _, dataType := range dataTypes {
-		suite.vecDataType = dataType
-		suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-		for _, nullPercent := range []int{0, 50, 100} {
-			suite.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
-		}
-	}
+	suite.vecDataType = schemapb.DataType_BinaryVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_FloatVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Float16Vector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_BFloat16Vector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_SparseFloatVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Int8Vector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
 func (suite *ReaderSuite) TestDecodeError() {

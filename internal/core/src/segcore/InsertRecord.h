@@ -1025,6 +1025,7 @@ class InsertRecordGrowing {
     }
 
     // append a column of vector type
+    // vector not support nullable, not pass valid data ptr
     template <typename VectorType>
     void
     append_data(FieldId field_id,
@@ -1032,15 +1033,9 @@ class InsertRecordGrowing {
                 int64_t size_per_chunk,
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        bool use_mapping_storage = is_valid_data_exist(field_id);
-        data_.emplace(
-            field_id,
-            std::make_unique<ConcurrentVector<VectorType>>(
-                dim,
-                size_per_chunk,
-                mmap_descriptor,
-                use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                use_mapping_storage));
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVector<VectorType>>(
+                          dim, size_per_chunk, mmap_descriptor));
     }
 
     // append a column of scalar or sparse float vector type
@@ -1050,23 +1045,13 @@ class InsertRecordGrowing {
                 int64_t size_per_chunk,
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        bool use_mapping_storage = is_valid_data_exist(field_id);
-        if constexpr (IsSparse<Type>) {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                    use_mapping_storage));
-        } else {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr));
-        }
+        data_.emplace(
+            field_id,
+            std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor,
+                is_valid_data_exist(field_id) ? get_valid_data(field_id)
+                                              : nullptr));
     }
 
     void

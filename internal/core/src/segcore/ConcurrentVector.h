@@ -17,7 +17,6 @@
 #include <atomic>
 #include <cassert>
 #include <deque>
-#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -30,7 +29,6 @@
 #include "common/FieldMeta.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
-#include "common/OffsetMapping.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -81,29 +79,17 @@ class ThreadSafeValidData {
     }
 
     bool
-    is_valid(size_t offset) const {
+    is_valid(size_t offset) {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(offset < length_,
-                   "offset out of range, offset={}, length_={}",
-                   offset,
-                   length_);
+        Assert(offset < length_);
         return data_[offset];
     }
 
     bool*
     get_chunk_data(size_t offset) {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(offset < length_,
-                   "offset out of range, offset={}, length_={}",
-                   offset,
-                   length_);
+        Assert(offset < length_);
         return &data_[offset];
-    }
-
-    FixedVector<bool>
-    get_data() const {
-        std::shared_lock<std::shared_mutex> lck(mutex_);
-        return data_;
     }
 
  private:
@@ -169,39 +155,6 @@ class VectorBase {
     virtual void
     clear() = 0;
 
-    virtual bool
-    is_mapping_storage() const {
-        return false;
-    }
-
-    // Get physical offset from logical offset. Returns -1 if not found.
-    virtual int64_t
-    get_physical_offset(int64_t logical_offset) const {
-        return logical_offset;  // default: no mapping
-    }
-
-    // Get logical offset from physical offset. Returns -1 if not found.
-    virtual int64_t
-    get_logical_offset(int64_t physical_offset) const {
-        return physical_offset;  // default: no mapping
-    }
-
-    virtual int64_t
-    get_valid_count() const {
-        return 0;
-    }
-
-    virtual FixedVector<bool>
-    get_valid_data() const {
-        return FixedVector<bool>{};
-    }
-
-    virtual const OffsetMapping&
-    get_offset_mapping() const {
-        static const OffsetMapping empty;
-        return empty;
-    }
-
  protected:
     const int64_t size_per_chunk_;
 };
@@ -238,12 +191,10 @@ class ConcurrentVectorImpl : public VectorBase {
         ssize_t elements_per_row,
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-        bool use_mapping_storage = false)
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : VectorBase(size_per_chunk),
           elements_per_row_(is_type_entire_row ? 1 : elements_per_row),
-          valid_data_ptr_(valid_data_ptr),
-          use_mapping_storage_(use_mapping_storage) {
+          valid_data_ptr_(valid_data_ptr) {
         chunks_ptr_ = SelectChunkVectorPtr<Type>(mmap_descriptor);
     }
 
@@ -270,7 +221,19 @@ class ConcurrentVectorImpl : public VectorBase {
     void
     fill_chunk_data(const std::vector<FieldDataPtr>& datas) override {
         AssertInfo(chunks_ptr_->size() == 0, "non empty concurrent vector");
-        set_data_raw(0, datas);
+
+        int64_t element_count = 0;
+        for (auto& field_data : datas) {
+            element_count += field_data->get_num_rows();
+        }
+        chunks_ptr_->emplace_to_at_least(1, elements_per_row_ * element_count);
+        int64_t offset = 0;
+        for (auto& field_data : datas) {
+            auto num_rows = field_data->get_num_rows();
+            set_data(
+                offset, static_cast<const Type*>(field_data->Data()), num_rows);
+            offset += num_rows;
+        }
     }
 
     void
@@ -287,39 +250,16 @@ class ConcurrentVectorImpl : public VectorBase {
     set_data_raw(ssize_t element_offset,
                  const void* source,
                  ssize_t element_count) override {
-        ssize_t valid_count = 0;
-        ssize_t storage_offset = 0;
-        if (use_mapping_storage_) {
-            if constexpr (!std::is_same_v<Type, bool>) {
-                storage_offset = offset_mapping_.GetValidCount();
-                // Build valid_data array for offset mapping
-                std::unique_ptr<bool[]> valid_data(new bool[element_count]);
-                for (ssize_t i = 0; i < element_count; ++i) {
-                    bool is_valid =
-                        valid_data_ptr_->is_valid(element_offset + i);
-                    valid_data[i] = is_valid;
-                    if (is_valid) {
-                        valid_count++;
-                    }
-                }
-                offset_mapping_.Append(valid_data.get(),
-                                       element_count,
-                                       element_offset,
-                                       storage_offset);
-            }
-        } else {
-            valid_count = element_count;
-            storage_offset = element_offset;
+        if (element_count == 0) {
+            return;
         }
-        if (valid_count > 0) {
-            auto size = size_per_chunk_ == MAX_ROW_COUNT ? valid_count
-                                                         : size_per_chunk_;
-            chunks_ptr_->emplace_to_at_least(
-                upper_div(storage_offset + valid_count, size),
-                elements_per_row_ * size);
-            set_data(
-                storage_offset, static_cast<const Type*>(source), valid_count);
-        }
+        auto size =
+            size_per_chunk_ == MAX_ROW_COUNT ? element_count : size_per_chunk_;
+        chunks_ptr_->emplace_to_at_least(
+            upper_div(element_offset + element_count, size),
+            elements_per_row_ * size);
+        set_data(
+            element_offset, static_cast<const Type*>(source), element_count);
     }
 
     const void*
@@ -357,24 +297,8 @@ class ConcurrentVectorImpl : public VectorBase {
     // just for fun, don't use it directly
     const Type*
     get_element(ssize_t element_index) const {
-        auto physical_index = offset_mapping_.GetPhysicalOffset(element_index);
-        if (physical_index == -1) {
-            return nullptr;
-        }
-        auto chunk_id = physical_index / size_per_chunk_;
-        auto chunk_offset = physical_index % size_per_chunk_;
-        auto data =
-            static_cast<const Type*>(chunks_ptr_->get_chunk_data(chunk_id));
-        return data + chunk_offset * elements_per_row_;
-    }
-
-    const Type*
-    get_physical_element(ssize_t physical_index) const {
-        if (physical_index == -1) {
-            return nullptr;
-        }
-        auto chunk_id = physical_index / size_per_chunk_;
-        auto chunk_offset = physical_index % size_per_chunk_;
+        auto chunk_id = element_index / size_per_chunk_;
+        auto chunk_offset = element_index % size_per_chunk_;
         auto data =
             static_cast<const Type*>(chunks_ptr_->get_chunk_data(chunk_id));
         return data + chunk_offset * elements_per_row_;
@@ -418,39 +342,6 @@ class ConcurrentVectorImpl : public VectorBase {
     bool
     is_mmap() const {
         return chunks_ptr_->is_mmap();
-    }
-
-    bool
-    is_mapping_storage() const override {
-        return use_mapping_storage_;
-    }
-
-    int64_t
-    get_physical_offset(int64_t logical_offset) const override {
-        return offset_mapping_.GetPhysicalOffset(logical_offset);
-    }
-
-    int64_t
-    get_logical_offset(int64_t physical_offset) const override {
-        return offset_mapping_.GetLogicalOffset(physical_offset);
-    }
-
-    int64_t
-    get_valid_count() const override {
-        return offset_mapping_.GetValidCount();
-    }
-
-    const milvus::OffsetMapping&
-    get_offset_mapping() const override {
-        return offset_mapping_;
-    }
-
-    FixedVector<bool>
-    get_valid_data() const override {
-        if (valid_data_ptr_ != nullptr) {
-            return valid_data_ptr_->get_data();
-        }
-        return FixedVector<bool>{};
     }
 
  private:
@@ -504,10 +395,9 @@ class ConcurrentVectorImpl : public VectorBase {
             fmt::format("chunk_id out of chunk num, chunk_id={}, chunk_num={}",
                         chunk_id,
                         chunk_num));
+        size_t chunk_id_offset = chunk_id * size_per_chunk_ * elements_per_row_;
         std::optional<CheckDataValid> check_data_valid = std::nullopt;
-        if (valid_data_ptr_ != nullptr && !use_mapping_storage_) {
-            size_t chunk_id_offset =
-                chunk_id * size_per_chunk_ * elements_per_row_;
+        if (valid_data_ptr_ != nullptr) {
             check_data_valid = [valid_data_ptr = valid_data_ptr_,
                                 beg_id = chunk_id_offset](size_t offset) {
                 return valid_data_ptr->is_valid(beg_id + offset);
@@ -524,9 +414,6 @@ class ConcurrentVectorImpl : public VectorBase {
     const ssize_t elements_per_row_;
     ChunkVectorPtr<Type> chunks_ptr_ = nullptr;
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
-
-    const bool use_mapping_storage_;
-    milvus::OffsetMapping offset_mapping_;
 };
 
 template <typename Type>
@@ -609,14 +496,9 @@ class ConcurrentVector<VectorArray>
         int64_t dim /* not use it*/,
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-        bool use_mapping_storage = false)
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<VectorArray, true>::ConcurrentVectorImpl(
-              1,
-              size_per_chunk,
-              std::move(mmap_descriptor),
-              valid_data_ptr,
-              use_mapping_storage) {
+              1, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 
@@ -628,15 +510,13 @@ class ConcurrentVector<SparseFloatVector>
     explicit ConcurrentVector(
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-        bool use_mapping_storage = false)
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
                                true>::ConcurrentVectorImpl(1,
                                                            size_per_chunk,
                                                            std::move(
                                                                mmap_descriptor),
-                                                           valid_data_ptr,
-                                                           use_mapping_storage),
+                                                           valid_data_ptr),
           dim_(0) {
     }
 
@@ -647,16 +527,7 @@ class ConcurrentVector<SparseFloatVector>
         auto* src =
             static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                 source);
-        ssize_t source_count = element_count;
-        if (this->use_mapping_storage_) {
-            source_count = 0;
-            for (ssize_t i = 0; i < element_count; ++i) {
-                if (this->valid_data_ptr_->is_valid(element_offset + i)) {
-                    source_count++;
-                }
-            }
-        }
-        for (ssize_t i = 0; i < source_count; ++i) {
+        for (int i = 0; i < element_count; ++i) {
             dim_ = std::max(dim_, src[i].dim());
         }
         ConcurrentVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
@@ -681,14 +552,9 @@ class ConcurrentVector<FloatVector>
     ConcurrentVector(int64_t dim,
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-                     ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-                     bool use_mapping_storage = false)
+                     ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl(
-              dim,
-              size_per_chunk,
-              std::move(mmap_descriptor),
-              valid_data_ptr,
-              use_mapping_storage) {
+              dim, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 
@@ -700,13 +566,11 @@ class ConcurrentVector<BinaryVector>
         int64_t dim,
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-        bool use_mapping_storage = false)
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl(dim / 8,
                                size_per_chunk,
                                std::move(mmap_descriptor),
-                               valid_data_ptr,
-                               use_mapping_storage) {
+                               valid_data_ptr) {
         AssertInfo(dim % 8 == 0,
                    fmt::format("dim is not a multiple of 8, dim={}", dim));
     }
@@ -719,14 +583,9 @@ class ConcurrentVector<Float16Vector>
     ConcurrentVector(int64_t dim,
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-                     ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-                     bool use_mapping_storage = false)
+                     ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<float16, false>::ConcurrentVectorImpl(
-              dim,
-              size_per_chunk,
-              std::move(mmap_descriptor),
-              valid_data_ptr,
-              use_mapping_storage) {
+              dim, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 
@@ -737,14 +596,9 @@ class ConcurrentVector<BFloat16Vector>
     ConcurrentVector(int64_t dim,
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-                     ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-                     bool use_mapping_storage = false)
+                     ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<bfloat16, false>::ConcurrentVectorImpl(
-              dim,
-              size_per_chunk,
-              std::move(mmap_descriptor),
-              valid_data_ptr,
-              use_mapping_storage) {
+              dim, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 
@@ -754,14 +608,9 @@ class ConcurrentVector<Int8Vector> : public ConcurrentVectorImpl<int8, false> {
     ConcurrentVector(int64_t dim,
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-                     ThreadSafeValidDataPtr valid_data_ptr = nullptr,
-                     bool use_mapping_storage = false)
+                     ThreadSafeValidDataPtr valid_data_ptr = nullptr)
         : ConcurrentVectorImpl<int8, false>::ConcurrentVectorImpl(
-              dim,
-              size_per_chunk,
-              std::move(mmap_descriptor),
-              valid_data_ptr,
-              use_mapping_storage) {
+              dim, size_per_chunk, std::move(mmap_descriptor)) {
     }
 };
 

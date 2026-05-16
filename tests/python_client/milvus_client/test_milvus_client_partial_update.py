@@ -1,11 +1,10 @@
-# ruff: noqa: F403, F405
+# ruff: noqa: F403, F405, F811
 import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import Function, FunctionType
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *
 
@@ -68,7 +67,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
@@ -230,7 +229,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         for i in range(len(schema.fields)):
             field_name = schema.fields[i].name
-            # print(f"field_name: {field_name}")
+            print(f"field_name: {field_name}")
             if field_name == "json_field":
                 index_params.add_index(field_name, index_type="AUTOINDEX", params={"json_cast_type": "json"})
             elif field_name == "text_sparse_emb":
@@ -252,36 +251,13 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
         log.info(f"Inserted {nb} initial records")
 
-        primary_key_field_name = schema.primary_field.name
-        i = 0
-        for field in schema.fields:
-            if field.name in [primary_key_field_name, "text_sparse_emb"]:
-                continue
-            log.info(f"try to partial update field: {field.name}")
-            new_rows = cf.gen_row_data_by_schema(
-                nb=nb, schema=schema, desired_field_names=[primary_key_field_name, field.name]
+        primary_key_field_name = schema.fields[0].name
+        for i in range(len(schema.fields)):
+            update_field_name = schema.fields[i if i != 0 else 1].name
+            new_row = cf.gen_row_data_by_schema(
+                nb=nb, schema=schema, desired_field_names=[primary_key_field_name, update_field_name]
             )
-            self.upsert(client, collection_name, new_rows, partial_update=True)
-            if i % 3 == 0:
-                self.flush(client, collection_name)
-            # 4. query output all fields and assert all the field values
-            if field.dtype == DataType.TIMESTAMPTZ:
-                new_rows = cf.convert_timestamptz(new_rows, field.name, "UTC")
-            self.query(
-                client,
-                collection_name,
-                filter=f"{primary_key_field_name} >= 0",
-                output_fields=[primary_key_field_name, field.name],
-                check_task=CheckTasks.check_query_results,
-                check_items={
-                    exp_res: new_rows,
-                    "with_vec": True,
-                    "vector_type": field.dtype,
-                    "vector_field": field.name,
-                    "pk_name": default_primary_key_field_name,
-                },
-            )
-            i += 1
+            client.upsert(collection_name, new_row, partial_update=True)
 
         log.info("Partial update test for all field types passed successfully")
 
@@ -458,7 +434,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         log.info("Simple partial update demo test completed successfully")
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_partial_update_null_to_null(self):  # noqa: F811
+    def test_milvus_client_partial_update_null_to_null(self):
         """
         Target: test PU can successfully update a null to null
         Method:
@@ -1146,7 +1122,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_partial_update_null_to_null(self):  # noqa: F811
+    def test_milvus_client_partial_update_null_to_null(self):
         """
         Target: test PU can successfully update a null to null
         Method:
@@ -1614,52 +1590,6 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         )
 
         self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_partial_update_bm25_sparse_vector_field(self):
-        """
-        target: test upsert with functional sparse vector field
-        method: create collection with functional sparse vector field,
-        insert data with functional sparse vector field,
-        partial update bm25 sparse vector field
-        expected: upsert failed with errors
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("text", DataType.VARCHAR, max_length=256, enable_analyzer=True, nullable=True)
-        schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False)
-        schema.add_field("int32_field", DataType.INT32, nullable=True)
-
-        bm25_function = Function(
-            name="text",
-            function_type=FunctionType.BM25,
-            input_field_names=["text"],
-            output_field_names=["text_sparse_emb"],
-            params={},
-        )
-        schema.add_function(bm25_function)
-        self.create_collection(client, collection_name, schema=schema)
-        # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.insert(client, collection_name, rows)
-        # 3. upsert data
-        new_rows = [
-            {
-                default_primary_key_field_name: i,
-                "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
-            }
-            for i in range(10)
-        ]
-        error = {
-            ct.err_code: 999,
-            ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection",
-        }
-        self.upsert(
-            client, collection_name, new_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
-        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_pk_in_wrong_partition(self):

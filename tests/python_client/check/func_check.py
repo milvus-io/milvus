@@ -442,8 +442,9 @@ class ResponseChecker:
                 pc.output_field_value_check(search_res, original_entities, pk_name=pk_name)
         if len(search_res) != check_items["nq"]:
             log.error(
-                f"search_results_check: Numbers of query searched(nq) ({len(search_res)}) "
-                f"is not equal with expected ({check_items['nq']})"
+                "search_results_check: Numbers of query searched(nq) (%d) is not equal with expected (%d)",
+                len(search_res),
+                check_items["nq"],
             )
             assert len(search_res) == check_items["nq"]
         else:
@@ -459,17 +460,16 @@ class ResponseChecker:
             else:
                 ids = list(hits.ids)
                 distances = list(hits.distances)
-            if len(hits) == 0:
-                continue
             if check_items.get("limit", None) is not None and (
-                (len(hits) != check_items["limit"]) or (len(set(ids)) != check_items["limit"])
+                (len(hits) != check_items["limit"]) or (len(ids) != check_items["limit"])
             ):
                 log.error(
-                    f"search_results_check: limit(topK) searched ({len(hits)}) "
-                    f"is not equal with expected ({check_items['limit']})"
+                    "search_results_check: limit(topK) searched (%d) is not equal with expected (%d)",
+                    len(hits),
+                    check_items["limit"],
                 )
                 assert len(hits) == check_items["limit"]
-                assert len(set(ids)) == check_items["limit"]
+                assert len(ids) == check_items["limit"]
             if check_items.get("ids", None) is not None:
                 ids_match = pc.list_contain_check(ids, list(check_items["ids"]))
                 if not ids_match:
@@ -489,7 +489,7 @@ class ResponseChecker:
             else:
                 pass  # just check nq and topk, not specific ids need check
 
-        log.info(f"search_results_check: limit (topK) and ids searched for {len(search_res)} queries are correct")
+        log.info("search_results_check: limit (topK) and ids searched for %d queries are correct", len(search_res))
         return True
 
     @staticmethod
@@ -585,22 +585,19 @@ class ResponseChecker:
                 vector_field = check_items.get("vector_field", "vector")
                 if vector_type == DataType.FLOAT16_VECTOR:
                     for single_query_result in query_res:
-                        if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(
-                                single_query_result[vector_field][0], dtype=np.float16
-                            ).tolist()
+                        single_query_result[vector_field] = np.frombuffer(
+                            single_query_result[vector_field][0], dtype=np.float16
+                        ).tolist()
                 if vector_type == DataType.BFLOAT16_VECTOR:
                     for single_query_result in query_res:
-                        if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(
-                                single_query_result[vector_field][0], dtype=bfloat16
-                            ).tolist()
+                        single_query_result[vector_field] = np.frombuffer(
+                            single_query_result[vector_field][0], dtype=bfloat16
+                        ).tolist()
                 if vector_type == DataType.INT8_VECTOR:
                     for single_query_result in query_res:
-                        if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(
-                                single_query_result[vector_field][0], dtype=np.int8
-                            ).tolist()
+                        single_query_result[vector_field] = np.frombuffer(
+                            single_query_result[vector_field][0], dtype=np.int8
+                        ).tolist()
             if isinstance(query_res, list):
                 debug_mode = check_items.get("debug_mode", False)
                 if debug_mode is True:
@@ -645,7 +642,7 @@ class ResponseChecker:
             assert len(pk_list) == check_items["count"]
         if check_items.get("exp_ids", None):
             assert pk_list == check_items["exp_ids"]
-        log.info(f"check: total {len(pk_list)} results")
+        log.info("check: total %d results", len(pk_list))
 
         return True
 

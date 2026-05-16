@@ -60,9 +60,8 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
         return;
     }
 
-    auto new_index_meta = std::make_shared<CollectionIndexMeta>(indexMeta);
-    LOG_INFO("index meta info: {}", new_index_meta->ToString());
-    set_index_meta(new_index_meta);
+    index_meta_ = std::make_shared<CollectionIndexMeta>(indexMeta);
+    LOG_INFO("index meta info: {}", index_meta_->ToString());
 }
 
 void
