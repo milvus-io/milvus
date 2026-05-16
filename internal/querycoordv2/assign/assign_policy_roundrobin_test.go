@@ -37,7 +37,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key, "100")
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key)
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -86,7 +86,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignSegment_EmptySegments tests with empty segment list
 func TestRoundRobinAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -111,7 +111,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignSegment_EmptyNodes tests with empty node list
 func TestRoundRobinAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -130,7 +130,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal tests when all nodes are not in normal state
 func TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -210,7 +210,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testin
 // TestRoundRobinAssignPolicy_AssignSegment_SingleNode tests with single node
 func TestRoundRobinAssignPolicy_AssignSegment_SingleNode(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -250,7 +250,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_SingleNode(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution tests channel distribution
 func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -300,7 +300,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels tests with empty channel list
 func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
@@ -326,7 +326,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 // TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom tests that From field is correctly set
 func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()

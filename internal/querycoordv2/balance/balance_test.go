@@ -61,7 +61,7 @@ func (suite *BalanceTestSuite) SetupTest() {
 
 	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
 
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
@@ -118,11 +118,14 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			suite.mockScheduler.ExpectedCalls = nil
 
 			// Setup mock scheduler to return the correct delta for each node
+			nodeDeltas := make(map[int64]int, len(c.nodeIDs))
 			for i := range c.nodeIDs {
 				nodeID := c.nodeIDs[i]
 				delta := c.deltaCnts[i]
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(nodeID, int64(-1)).Return(delta).Maybe()
+				nodeDeltas[nodeID] = delta
 			}
+			suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
+				Return(task.NewSegmentTaskDeltaSnapshot(nodeDeltas, nil)).Maybe()
 			suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 			for i := range c.nodeIDs {
@@ -196,7 +199,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 				delta := c.deltaCnts[i]
 				suite.mockScheduler.EXPECT().GetChannelTaskDelta(nodeID, int64(-1)).Return(delta).Maybe()
 			}
-			suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+			suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 
 			for i := range c.nodeIDs {
 				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{

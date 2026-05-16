@@ -1063,11 +1063,14 @@ func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterReleaseRPC() {
 }
 
 func (suite *TaskSuite) TestSegmentTaskChecksTimeoutWhileWaitingDist() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+
 	action := NewSegmentAction(3, ActionTypeGrow, "test-channel", suite.loadSegments[0])
 	action.rpcReturned.Store(true)
 	task, err := NewSegmentTask(
-		context.Background(),
-		time.Nanosecond,
+		ctx,
+		time.Second,
 		WrapIDSource(0),
 		suite.collection,
 		suite.replica,
@@ -2058,37 +2061,42 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	err = scheduler.Add(task4)
 	suite.NoError(err)
 
+	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll)
+	snapshot2 := scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll2)
+
 	// check task delta with collectionID and nodeID
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	suite.Equal(100, snapshot.GetByNodeAndCollection(nodeID))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, coll))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(100, snapshot2.GetByNodeAndCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 
 	// check task delta with collectionID=-1
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, -1))
+	suite.Equal(100, snapshot.GetByNode(nodeID))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, -1))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, -1))
+	suite.Equal(100, snapshot.GetByNode(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, -1))
 
 	// check task delta with nodeID=-1
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(100, snapshot.GetByNodeAndCollection(nodeID)+snapshot.GetByNodeAndCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(100, snapshot.GetByNodeAndCollection(nodeID)+snapshot.GetByNodeAndCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
 
 	// check task delta with nodeID=-1 and collectionID=-1
-	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(200, snapshot.GetByNode(nodeID)+snapshot.GetByNode(nodeID2))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
-	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(200, snapshot.GetByNode(nodeID)+snapshot.GetByNode(nodeID2))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
 
 	scheduler.remove(task1)
 	scheduler.remove(task2)
 	scheduler.remove(task3)
 	scheduler.remove(task4)
-	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll)
+	snapshot2 = scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll2)
+	suite.Equal(0, snapshot.GetByNodeAndCollection(nodeID))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
-	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(0, snapshot2.GetByNodeAndCollection(nodeID2))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 
 	task5, err := NewChannelTask(
@@ -2107,8 +2115,84 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
-func (suite *TaskSuite) TestTaskDeltaCache() {
-	etd := NewExecutingTaskDelta()
+func (suite *TaskSuite) TestSegmentTaskDeltaWithDistFilter() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	coll := int64(1001)
+	partition := int64(100)
+	channel := "channel-1"
+	sourceNode := int64(1)
+	targetNode := int64(2)
+	growSegmentID := int64(101)
+	reduceSegmentID := int64(102)
+	rowCount := 100
+
+	growTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", growSegmentID, querypb.DataScope_Historical, rowCount),
+	)
+	suite.NoError(err)
+	growTask.SetID(1)
+	scheduler.incExecutingTaskDelta(growTask)
+
+	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode}, coll)
+	suite.Equal(rowCount, snapshot.GetByNode(targetNode))
+	suite.Equal(rowCount, snapshot.GetByNodeAndCollection(targetNode))
+
+	suite.dist.SegmentDistManager.Update(targetNode,
+		utils.CreateTestSegment(coll, partition, growSegmentID, targetNode, 1, channel))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode}, coll)
+	suite.Equal(0, snapshot.GetByNode(targetNode))
+	suite.Equal(0, snapshot.GetByNodeAndCollection(targetNode))
+
+	scheduler.decExecutingTaskDelta(growTask)
+
+	suite.dist.SegmentDistManager.Update(sourceNode,
+		utils.CreateTestSegment(coll, partition, reduceSegmentID, sourceNode, 1, channel))
+	reduceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(sourceNode, ActionTypeReduce, "", reduceSegmentID, querypb.DataScope_Historical, rowCount),
+	)
+	suite.NoError(err)
+	reduceTask.SetID(2)
+	scheduler.incExecutingTaskDelta(reduceTask)
+
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(-rowCount, snapshot.GetByNode(sourceNode))
+	suite.Equal(-rowCount, snapshot.GetByNodeAndCollection(sourceNode))
+
+	suite.dist.SegmentDistManager.Update(sourceNode)
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(0, snapshot.GetByNode(sourceNode))
+	suite.Equal(0, snapshot.GetByNodeAndCollection(sourceNode))
+
+	channelTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewChannelAction(targetNode, ActionTypeGrow, channel),
+	)
+	suite.NoError(err)
+	channelTask.SetID(3)
+	scheduler.incExecutingTaskDelta(channelTask)
+	suite.Equal(1, scheduler.GetChannelTaskDelta(targetNode, coll))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaCache() {
+	delta := NewChannelTaskDelta()
 
 	taskDelta := []int{1, 2, 3, 4, 5, -6, -7, -8, -9, -10}
 
@@ -2131,16 +2215,16 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 
 	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Add(tasks[i])
+		delta.Add(tasks[i].(*ChannelTask))
 	}
 
 	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Sub(tasks[i])
+		delta.Sub(tasks[i].(*ChannelTask))
 	}
-	suite.Equal(0, etd.Get(nodeID, collectionID))
-	suite.Equal(0, etd.Get(nodeID, -1))
-	suite.Equal(0, etd.Get(-1, -1))
+	suite.Equal(0, delta.Get(nodeID, collectionID))
+	suite.Equal(0, delta.Get(nodeID, -1))
+	suite.Equal(0, delta.Get(-1, -1))
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {
