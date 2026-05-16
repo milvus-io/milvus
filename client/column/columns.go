@@ -573,15 +573,14 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		return NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector), nil
 
 	case schemapb.DataType_SparseFloatVector:
-		sparseVectors := fd.GetVectors().GetSparseFloatVector()
-		if sparseVectors == nil {
-			return nil, errFieldDataTypeNotMatch
-		}
-		data := sparseVectors.Contents
-
 		if len(validData) > 0 {
 			if end < 0 {
 				end = len(validData)
+			}
+			sparseVectors := fd.GetVectors().GetSparseFloatVector()
+			var data [][]byte
+			if sparseVectors != nil {
+				data = sparseVectors.Contents
 			}
 			vectors := make([]entity.SparseEmbedding, 0, end-begin)
 			dataIdx := 0
@@ -592,6 +591,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 			}
 			for i := begin; i < end; i++ {
 				if validData[i] {
+					if dataIdx >= len(data) {
+						return nil, errFieldDataTypeNotMatch
+					}
 					vector, err := entity.DeserializeSliceSparseEmbedding(data[dataIdx])
 					if err != nil {
 						return nil, err
@@ -608,6 +610,12 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 			col.sparseMode = true
 			return col, nil
 		}
+
+		sparseVectors := fd.GetVectors().GetSparseFloatVector()
+		if sparseVectors == nil {
+			return nil, errFieldDataTypeNotMatch
+		}
+		data := sparseVectors.Contents
 
 		if end < 0 {
 			end = len(data)
