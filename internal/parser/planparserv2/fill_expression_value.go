@@ -31,6 +31,8 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillBinaryRangeExpressionValue(e.BinaryRangeExpr, templateValues)
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
 		return FillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues)
+	case *planpb.Expr_BinaryArithOpEvalRangeExprWithFields:
+		return FillBinaryArithOpEvalRangeWithFieldsExpressionValue(e.BinaryArithOpEvalRangeExprWithFields, templateValues)
 	case *planpb.Expr_BinaryArithExpr:
 		if err := FillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues); err != nil {
 			return err
@@ -276,6 +278,29 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 
 	value := expr.GetValue()
 	if expr.GetValue() == nil || expr.GetValueTemplateVariableName() != "" {
+		value, ok = templateValues[expr.GetValueTemplateVariableName()]
+		if !ok {
+			return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetValueTemplateVariableName())
+		}
+	}
+	castedValue, err := castValue(dataType, value)
+	if err != nil {
+		return err
+	}
+	expr.Value = castedValue
+
+	return nil
+}
+
+func FillBinaryArithOpEvalRangeWithFieldsExpressionValue(expr *planpb.BinaryArithOpEvalRangeExprWithFields, templateValues map[string]*planpb.GenericValue) error {
+	dataType, err := getTargetType(expr.GetLeftColumnInfo().GetDataType(), expr.GetRightColumnInfo().GetDataType())
+	if err != nil {
+		return err
+	}
+
+	value := expr.GetValue()
+	if value == nil || expr.GetValueTemplateVariableName() != "" {
+		var ok bool
 		value, ok = templateValues[expr.GetValueTemplateVariableName()]
 		if !ok {
 			return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetValueTemplateVariableName())
