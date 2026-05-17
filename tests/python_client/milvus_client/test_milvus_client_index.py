@@ -237,8 +237,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
         # 4. create another index
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
-                             f"invalid parameter[expected=valid index params][actual=invalid index params]"}
+                 ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -821,9 +820,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
-                                                "[missing_param=json_cast_type]: invalid parameter"
-                                                "[expected=valid index params][actual=invalid index params]"}
+        error = {ct.err_code: 1101, ct.err_msg: "json index must specify cast type: missing parameter"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         # 4. prepare index params with no json_cast_type
@@ -831,9 +828,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_path": "my_json['a']['b']"})
         # 5. create index
-        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
-                                                "[missing_param=json_cast_type]: invalid parameter"
-                                                "[expected=valid index params][actual=invalid index params]"}
+        error = {ct.err_code: 1101, ct.err_msg: "json index must specify cast type: missing parameter"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         # 6. prepare index params with no json_path
@@ -908,8 +903,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             not_supported_varchar_scalar_index = "bitmap index"
             got_json_suffix = ""
         error = {ct.err_code: 1100, ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
-                                                f"{supported_field_type} field{got_json_suffix}: invalid parameter[expected=valid "
-                                                f"index params][actual=invalid index params]"}
+                                                f"{supported_field_type} field{got_json_suffix}"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
@@ -944,7 +938,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                params={"json_cast_type": invalid_json_cast_type,
                                        "json_path": f"{json_field_name}['a']['b']"})
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+        error = {ct.err_code: 1100, ct.err_msg: "is not supported"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
@@ -979,7 +973,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                    params={"json_cast_type": cast_type,
                                            "json_path": f"{json_field_name}['a']['b']"})
             # 3. create index
-            error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+            error = {ct.err_code: 1100, ct.err_msg: "is not supported"}
             self.create_index(client, collection_name, index_params,
                               check_task=CheckTasks.err_res, check_items=error)
 

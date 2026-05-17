@@ -548,26 +548,26 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 		metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 		if !metricTypeExist {
-			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "metric type not set for vector index")
+			return merr.WrapErrParameterInvalidMsg("%s", "metric type not set for vector index")
 		}
 		if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.FloatVectorMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
+				return merr.WrapErrParameterInvalidMsg("%s", "float vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.SparseFloatVectorMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP&BM25 is the supported metric type for sparse index")
+				return merr.WrapErrParameterInvalidMsg("%s", "only IP&BM25 is the supported metric type for sparse index")
 			}
 			if metricType == metric.BM25 && cit.functionSchema.GetType() != schemapb.FunctionType_BM25 {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
+				return merr.WrapErrParameterInvalidMsg("%s", "only BM25 Function output field support BM25 metric type")
 			}
 		} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
+				return merr.WrapErrParameterInvalidMsg("%s", "binary vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
+				return merr.WrapErrParameterInvalidMsg("%s", "int vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 			if err := indexparamcheck.ValidateArrayOfVectorMetricType(cit.fieldSchema.ElementType, metricType); err != nil {
@@ -589,7 +589,14 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 	err := checkTrain(ctx, cit.fieldSchema, indexParamsMap)
 	if err != nil {
-		return merr.WrapErrParameterInvalid("valid index params", "invalid index params", err.Error())
+		// checkTrain may propagate errors from indexparamcheck (not yet
+		// merr-standardized). Already-merr errors (leaves / fillDimension /
+		// the merr-returning checkers) pass through with their real code;
+		// only legacy plain errors get wrapped once into ParameterInvalid.
+		if merr.IsMilvusError(err) {
+			return err
+		}
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 
 	typeParams := cit.fieldSchema.GetTypeParams()
