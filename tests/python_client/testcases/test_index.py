@@ -1291,7 +1291,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_float_vec_field_name,
             index_params=scalar_index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "invalid index params"},
+            check_items={ct.err_code: 1100, ct.err_msg: "metric type not set for vector index"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)

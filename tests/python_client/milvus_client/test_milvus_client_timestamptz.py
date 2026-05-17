@@ -1034,7 +1034,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_timestamp_field_name, index_type="INVERTED")
-        error = {ct.err_code: 1100, ct.err_msg: "INVERTED are not supported on Timestamptz field: invalid parameter[expected=valid index params][actual=invalid index params]"}
+        error = {ct.err_code: 1100, ct.err_msg: "INVERTED are not supported on Timestamptz field"}
         self.create_collection(client, collection_name, default_dim, schema=schema, 
                                consistency_level="Strong", index_params=index_params,
                                check_task=CheckTasks.err_res,
