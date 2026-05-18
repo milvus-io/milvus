@@ -154,13 +154,91 @@ func TestWrapReaderWithTimestampOverwrite_NonZero(t *testing.T) {
 
 	out, err := wrapped.Next()
 	require.NoError(t, err)
-	defer out.Release()
 
 	tsCol := out.Column(common.TimeStampField).(*array.Int64)
 	for i := 0; i < 3; i++ {
 		assert.Equal(t, int64(5000), tsCol.Value(i))
 	}
 
+	// Subsequent Next() returns EOF and triggers Release of the previous
+	// wrapper held by the reader; closing flushes any tail wrapper. Do not
+	// Release `out` ourselves — the reader owns the wrapper's lifecycle.
 	_, err = wrapped.Next()
 	assert.Equal(t, io.EOF, err)
+	require.NoError(t, wrapped.Close())
+}
+
+// TestOverwriteReader_DrainsAndReleases verifies the reader-owned contract:
+// downstream callers (storage.MergeSort, storage.Sort) do not release records
+// returned from Next(), so timestampOverwriteReader must release each wrapper
+// it creates on the next Next() advance and on Close(). Without this, every
+// batch leaks one int64 tsArray plus a Retain'd reference on the inner record.
+func TestOverwriteReader_DrainsAndReleases(t *testing.T) {
+	recs := []*mockRecord{
+		newMockRecord([]int64{100, 200}),
+		newMockRecord([]int64{300}),
+		newMockRecord([]int64{400, 500, 600}),
+	}
+	innerRecs := make([]storage.Record, len(recs))
+	for i, r := range recs {
+		innerRecs[i] = r
+	}
+	inner := &mockReader{records: innerRecs}
+	wrapped := wrapReaderWithTimestampOverwrite(inner, 5000)
+
+	// Drain to EOF without releasing returned records — mimics MergeSort/Sort.
+	for {
+		_, err := wrapped.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+	}
+	require.NoError(t, wrapped.Close())
+
+	// After drain + Close, every wrapper must have released its extra ref on
+	// the inner record. Each mockRecord starts at refCount == 1, the wrapper
+	// bumps to 2 during Next, the next Next/Close drops back to 1.
+	for i, r := range recs {
+		assert.Equal(t, 1, r.refCount, "record %d leaked a reference", i)
+	}
+}
+
+// TestOverwriteReader_CloseEarly verifies that calling Close() without draining
+// to EOF still releases the last wrapper returned by Next().
+func TestOverwriteReader_CloseEarly(t *testing.T) {
+	rec := newMockRecord([]int64{100, 200})
+	inner := &mockReader{records: []storage.Record{rec}}
+	wrapped := wrapReaderWithTimestampOverwrite(inner, 5000)
+
+	_, err := wrapped.Next()
+	require.NoError(t, err)
+	// Wrapper Retain'd the inner: refCount == 2.
+	require.Equal(t, 2, rec.refCount)
+
+	require.NoError(t, wrapped.Close())
+	// Close must release the in-flight wrapper.
+	assert.Equal(t, 1, rec.refCount)
+}
+
+// TestOverwriteReader_CommitTsZero verifies that when commitTs == 0 the reader
+// is bypassed entirely (no wrapper is created and refcounts on the underlying
+// records are untouched by our layer). Regression guard against accidentally
+// tracking and releasing inner-reader-owned records.
+func TestOverwriteReader_CommitTsZero(t *testing.T) {
+	rec := newMockRecord([]int64{100})
+	inner := &mockReader{records: []storage.Record{rec}}
+
+	wrapped := wrapReaderWithTimestampOverwrite(inner, 0)
+	assert.Equal(t, inner, wrapped, "commitTs=0 should bypass the wrapper")
+
+	out, err := wrapped.Next()
+	require.NoError(t, err)
+	assert.Equal(t, rec, out)
+	assert.Equal(t, 1, rec.refCount, "no implicit Retain/Release when commitTs=0")
+
+	_, err = wrapped.Next()
+	assert.Equal(t, io.EOF, err)
+	require.NoError(t, wrapped.Close())
+	assert.Equal(t, 1, rec.refCount)
 }
