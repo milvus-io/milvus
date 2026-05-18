@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -2144,6 +2145,8 @@ func (suite *TaskSuite) TestSegmentTaskDeltaWithDistFilter() {
 	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode}, coll)
 	suite.Equal(rowCount, snapshot.GetByNode(targetNode))
 	suite.Equal(rowCount, snapshot.GetByNodeAndCollection(targetNode))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode + 1}, coll)
+	suite.Equal(0, snapshot.GetByNode(targetNode))
 
 	suite.dist.SegmentDistManager.Update(targetNode,
 		utils.CreateTestSegment(coll, partition, growSegmentID, targetNode, 1, channel))
@@ -2281,6 +2284,137 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
+}
+
+func TestSegmentActionFinishStates(t *testing.T) {
+	dist := meta.NewDistributionManager(nil)
+	action := NewSegmentActionWithScope(1, ActionTypeGrow, "ch", 10, querypb.DataScope_Historical, 100)
+
+	assert.False(t, action.IsFinished(dist))
+
+	action.rpcReturned.Store(true)
+	assert.False(t, action.IsFinished(dist))
+
+	dist.SegmentDistManager.Update(1, utils.CreateTestSegment(100, 1, 10, 1, 1, "ch"))
+	assert.True(t, action.IsFinished(dist))
+
+	updateAction := NewSegmentActionWithScope(1, ActionTypeUpdate, "ch", 10, querypb.DataScope_Historical, 0)
+	updateAction.rpcReturned.Store(true)
+	assert.True(t, updateAction.IsFinished(dist))
+}
+
+func TestSegmentTaskDeltaSnapshotDefaults(t *testing.T) {
+	snapshot := NewSegmentTaskDeltaSnapshot(nil, nil)
+	assert.Equal(t, 0, snapshot.GetByNode(1))
+	assert.Equal(t, 0, snapshot.GetByNodeAndCollection(1))
+
+	var nilSnapshot *SegmentTaskDeltaSnapshot
+	assert.Equal(t, 0, nilSnapshot.GetByNode(1))
+	assert.Equal(t, 0, nilSnapshot.GetByNodeAndCollection(1))
+}
+
+func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
+	replica := newReplicaDefaultRG(10)
+	segmentTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, "ch", 10, querypb.DataScope_Historical, 100),
+	)
+	assert.NoError(t, err)
+	segmentTask.SetID(1)
+
+	delta := NewSegmentTaskDelta()
+	delta.Add(segmentTask)
+	delta.printDetailInfos()
+	delta.Add(segmentTask)
+	assert.Len(t, delta.records[segmentTask.ID()], 1)
+
+	delta.Sub(segmentTask)
+	delta.Sub(segmentTask)
+	assert.Empty(t, delta.records)
+
+	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
+	base.SetID(2)
+	base.actions = []Action{NewChannelAction(1, ActionTypeGrow, "ch")}
+	malformedTask := &SegmentTask{baseTask: base, segmentID: 10}
+
+	delta.Add(malformedTask)
+	assert.Empty(t, delta.records[malformedTask.ID()])
+
+	dist := meta.NewDistributionManager(nil)
+	assert.False(t, segmentDeltaRecord{segmentID: 0}.isSegmentDistMatched(dist))
+	assert.False(t, segmentDeltaRecord{nodeID: 1, segmentID: 10, actionType: ActionTypeUpdate}.isSegmentDistMatched(dist))
+}
+
+func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
+	replica := newReplicaDefaultRG(10)
+	channelTask, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		replica,
+		NewChannelAction(1, ActionTypeGrow, "ch"),
+	)
+	assert.NoError(t, err)
+	channelTask.SetID(1)
+
+	delta := NewChannelTaskDelta()
+	delta.Add(channelTask)
+	delta.printDetailInfos()
+	delta.Add(channelTask)
+	assert.Equal(t, 1, delta.Get(1, 100))
+
+	delta.Sub(channelTask)
+	delta.Sub(channelTask)
+	assert.Equal(t, 0, delta.Get(1, 100))
+
+	delta.taskIDRecords.Insert(channelTask.ID())
+	delete(delta.data, int64(1))
+	delta.Sub(channelTask)
+	assert.Equal(t, -1, delta.Get(1, 100))
+}
+
+func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {
+	nodes := []int64{1, 2}
+	expected := NewSegmentTaskDeltaSnapshot(map[int64]int{1: 10}, map[int64]int{1: 5})
+
+	mockScheduler := NewMockScheduler(t)
+	mockScheduler.EXPECT().
+		GetSegmentTaskDeltaSnapshot(nodes, int64(100)).
+		Run(func(nodeIDs []int64, collectionID int64) {
+			assert.Equal(t, nodes, nodeIDs)
+			assert.Equal(t, int64(100), collectionID)
+		}).
+		Return(expected).
+		Once()
+	assert.Same(t, expected, mockScheduler.GetSegmentTaskDeltaSnapshot(nodes, 100))
+
+	mockScheduler.EXPECT().
+		GetSegmentTaskDeltaSnapshot(mock.Anything, int64(101)).
+		RunAndReturn(func(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot {
+			assert.Equal(t, nodes, nodeIDs)
+			assert.Equal(t, int64(101), collectionID)
+			return NewSegmentTaskDeltaSnapshot(map[int64]int{2: 20}, map[int64]int{2: 15})
+		}).
+		Once()
+
+	snapshot := mockScheduler.GetSegmentTaskDeltaSnapshot(nodes, 101)
+	assert.Equal(t, 20, snapshot.GetByNode(2))
+	assert.Equal(t, 15, snapshot.GetByNodeAndCollection(2))
+}
+
+func TestMockSchedulerGetSegmentTaskDeltaSnapshotPanicsWithoutReturn(t *testing.T) {
+	mockScheduler := NewMockScheduler(t)
+	mockScheduler.On("GetSegmentTaskDeltaSnapshot", mock.Anything, int64(100))
+
+	assert.Panics(t, func() {
+		mockScheduler.GetSegmentTaskDeltaSnapshot([]int64{1}, 100)
+	})
 }
 
 func newReplicaDefaultRG(replicaID int64) *meta.Replica {
