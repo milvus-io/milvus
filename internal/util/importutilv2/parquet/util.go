@@ -269,7 +269,7 @@ func isArrowArithmeticType(dataType arrow.Type) bool {
 	return isArrowIntegerType(dataType) || isArrowFloatingType(dataType)
 }
 
-func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *schemapb.FieldSchema) bool {
+func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *schemapb.FieldSchema, allowFixedSizeList bool) bool {
 	srcType := src.ID()
 	dstType := dst.ID()
 	switch srcType {
@@ -296,7 +296,11 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 	case arrow.BINARY:
 		return dstType == arrow.LIST && dst.(*arrow.ListType).Elem().ID() == arrow.UINT8
 	case arrow.LIST:
-		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), field)
+		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem(), field, false)
+	case arrow.FIXED_SIZE_LIST:
+		return allowFixedSizeList && isFixedSizeListImportTarget(field) &&
+			dstType == arrow.LIST &&
+			isArrowDataTypeConvertible(src.(*arrow.FixedSizeListType).Elem(), dst.(*arrow.ListType).Elem(), field, false)
 	case arrow.NULL:
 		// if nullable==true or has set default_value, can use null type
 		return field.GetNullable() || field.GetDefaultValue() != nil
@@ -308,6 +312,34 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 		return false
 	case arrow.FIXED_SIZE_BINARY:
 		return dstType == arrow.FIXED_SIZE_BINARY
+	default:
+		return false
+	}
+}
+
+func isFixedSizeListImportTarget(field *schemapb.FieldSchema) bool {
+	switch field.GetDataType() {
+	case schemapb.DataType_Array:
+		switch field.GetElementType() {
+		case schemapb.DataType_Bool,
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_Float,
+			schemapb.DataType_Double,
+			schemapb.DataType_VarChar,
+			schemapb.DataType_String:
+			return true
+		default:
+			return false
+		}
+	case schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector:
+		return true
 	default:
 		return false
 	}
@@ -551,7 +583,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		if err != nil {
 			return err
 		}
-		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
+		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field, true) {
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
 				field.Name, toArrDataType.String(), arrField.Type.String()))
 		}
@@ -619,7 +651,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			}
 
 			// Check if the arrow type is convertible to the expected type
-			if !isArrowDataTypeConvertible(arrowSubField.Type, expectedArrowType, subField) {
+			if !isArrowDataTypeConvertible(arrowSubField.Type, expectedArrowType, subField, false) {
 				return merr.WrapErrImportFailed(fmt.Sprintf("sub-field '%s' in struct '%s' type mis-match, expect arrow type '%s', got '%s'",
 					fieldName, structField.Name, expectedArrowType.String(), arrowSubField.Type.String()))
 			}
