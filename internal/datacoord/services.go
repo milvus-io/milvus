@@ -2190,6 +2190,21 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 	defer broadcaster.Close()
 
+	// Re-check collection availability while holding the collection resource
+	// lock. DropCollection may win the race between the pre-lock collection
+	// resolution above and lock acquisition; in that case this request must
+	// terminate before broadcasting a CreateSnapshot message whose ack callback
+	// can no longer generate a valid snapshot.
+	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("CreateSnapshot: failed to re-check collection existence after lock", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if !hasCollection {
+		log.Warn("CreateSnapshot: collection not found after lock")
+		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
+	}
+
 	// Double-check after acquiring lock — another goroutine may have created it.
 	// Same error-handling discipline as the pre-lock check above: only treat
 	// ErrSnapshotNotFound as "good to proceed"; surface every other error.
