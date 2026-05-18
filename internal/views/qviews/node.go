@@ -3,7 +3,7 @@ package qviews
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // WorkNodeKey uniquely identifies a work node. Used as map key.
