@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -94,4 +95,26 @@ func TestStateTransition(t *testing.T) {
 	st = NewStateTransition(QueryViewStatePreparing)
 	st.Done(QueryViewStatePreparing)
 	assert.False(t, st.IsStateTransition())
+
+	require.Panics(t, func() {
+		NewStateTransition(QueryViewStatePreparing).IsStateTransition()
+	})
+}
+
+func TestQueryViewIdentifiersString(t *testing.T) {
+	state := QueryViewStatePreparing
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing.String(), state.String())
+	assert.Equal(t, "unknown", NodeType(0).String())
+
+	key := QueryViewKey{
+		ShardID: ShardID{
+			ReplicaID: 10,
+			VChannel:  "by-dev-rootcoord-dml_0_1v0",
+		},
+		QueryViewVersion: QueryViewVersion{
+			DataVersion:  DataVersion{StreamingVersion: 2, CompactVersion: 3},
+			QueryVersion: 4,
+		},
+	}
+	assert.Equal(t, "10-by-dev-rootcoord-dml_0_1v0-(2,3)/4", key.String())
 }

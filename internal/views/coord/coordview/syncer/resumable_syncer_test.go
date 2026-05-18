@@ -293,3 +293,35 @@ func TestResumable_ConcurrentSyncAndRecv(t *testing.T) {
 
 	assert.True(t, waitForCond(func() bool { return respCount.Load() >= numViews }, 2*time.Second))
 }
+
+func TestResumable_SendBatchedEmptyAndSendError(t *testing.T) {
+	rs := &resumableSyncer{node: qviews.NewQueryNode(1)}
+	stream := newMockStream(context.Background())
+
+	require.NoError(t, rs.sendBatched(stream, nil))
+	assert.Empty(t, stream.collectSent())
+
+	stream.setSendErr(io.ErrUnexpectedEOF)
+	err := rs.sendBatched(stream, []*viewpb.QueryViewOfShard{newTestQNView(1, 1).IntoProto()})
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	assert.Empty(t, stream.collectSent())
+}
+
+func TestResumable_RecvLoopIgnoresNonViewResponse(t *testing.T) {
+	rs := &resumableSyncer{node: qviews.NewQueryNode(1), pending: newPendingSyncQueryViews()}
+	stream := newMockStream(context.Background())
+	stream.recvCh <- &viewpb.SyncResponse{}
+	close(stream.recvCh)
+
+	rs.recvLoop(stream)
+}
+
+func TestResumable_SendLoopReturnsWhenContextDone(t *testing.T) {
+	rs := &resumableSyncer{node: qviews.NewQueryNode(1), pending: newPendingSyncQueryViews()}
+	stream := newMockStream(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rs.sendLoop(ctx, stream)
+	assert.Empty(t, stream.collectSent())
+}

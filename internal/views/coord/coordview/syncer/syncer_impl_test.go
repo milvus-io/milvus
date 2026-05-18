@@ -345,3 +345,38 @@ func TestReliable_NodeRemovedDuringSync(t *testing.T) {
 	// The view should be drained via OnNodeLost.
 	assert.True(t, waitForCond(lostCalled.Load, 2*time.Second))
 }
+
+func TestReliable_SyncViewsContextCanceled(t *testing.T) {
+	setup := newReliableTestSetup(t)
+	defer setup.syncer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := setup.syncer.SyncViews(ctx, newTestSyncGroup())
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestReliable_EmptyViewListDoesNotCreateSyncer(t *testing.T) {
+	node := qviews.NewQueryNode(1)
+	setup := newReliableTestSetup(t, node)
+	defer setup.syncer.Close()
+
+	err := setup.syncer.SyncViews(context.Background(), SyncGroup{
+		ViewsByNode: map[qviews.WorkNodeKey][]SyncView{
+			node.Key(): nil,
+		},
+	})
+	require.NoError(t, err)
+
+	inner := setup.syncer.(*reliableSyncer)
+	inner.mu.Lock()
+	defer inner.mu.Unlock()
+	assert.Empty(t, inner.resumableSyncers)
+}
+
+func TestReliable_CloseIsIdempotent(t *testing.T) {
+	setup := newReliableTestSetup(t)
+	require.NoError(t, setup.syncer.Close())
+	require.NoError(t, setup.syncer.Close())
+}

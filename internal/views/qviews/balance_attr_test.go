@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -32,4 +33,19 @@ func TestNewBalanceAttrAtWorkNodeFromProto(t *testing.T) {
 	result.(*BalanceAttrAtStreamingNode).BalanceAttrOfStreamingNode()
 	assert.IsType(t, &BalanceAttrAtStreamingNode{}, result)
 	assert.Equal(t, NewStreamingNodeFromVChannel("v1"), result.WorkNode())
+}
+
+func TestNewBalanceAttrAtWorkNodeFromProto_InvalidInputPanics(t *testing.T) {
+	queryNodeResp := &viewpb.SyncQueryViewsResponse{
+		BalanceAttributes: &viewpb.SyncQueryViewsResponse_QueryNode{
+			QueryNode: &viewpb.QueryNodeBalanceAttributes{},
+		},
+	}
+	require.Panics(t, func() {
+		NewBalanceAttrAtWorkNodeFromProto(NewStreamingNodeFromVChannel("v1"), queryNodeResp)
+	})
+
+	require.Panics(t, func() {
+		NewBalanceAttrAtWorkNodeFromProto(NewQueryNode(1), &viewpb.SyncQueryViewsResponse{})
+	})
 }

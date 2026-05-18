@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -39,6 +40,9 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 		SetSettings(settings).
 		SetAssignments(assignments).
 		Build()
+
+	assert.Equal(t, DataVersion{StreamingVersion: 2, CompactVersion: 1},
+		NewQueryViewAtCoordBuilder(1, dataView, "v1").DataVersion())
 
 	// Verify meta.
 	assert.Equal(t, int64(10), result.Meta.CollectionId)
@@ -97,4 +101,16 @@ func TestQueryViewAtCoordBuilder_Empty(t *testing.T) {
 	assert.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, result.Meta.State)
 	assert.Len(t, result.QueryNode, 0)
 	assert.NotNil(t, result.StreamingNode)
+}
+
+func TestQueryViewAtCoordBuilder_MissingVChannelPanics(t *testing.T) {
+	dataView := &viewpb.DataViewOfCollection{
+		CollectionId: 10,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
+		Shards:       []*viewpb.DataViewOfShard{{Vchannel: "v1"}},
+	}
+
+	require.Panics(t, func() {
+		NewQueryViewAtCoordBuilder(1, dataView, "v2")
+	})
 }
