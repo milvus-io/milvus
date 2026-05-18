@@ -862,16 +862,34 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			for i := 0; i < rows; i++ {
 				data = append(data, binaryReader.Value(i)...)
 			}
-		case arrow.LIST:
-			listReader := chunk.(*array.List)
-			if err = checkVectorAligned(listReader.Offsets(), pcr.dim, dataType); err != nil {
+		case arrow.LIST, arrow.FIXED_SIZE_LIST:
+			if chunk.NullN() > 0 {
+				return nil, WrapNullRowErr(pcr.field)
+			}
+			listReader, err := newListLikeArray(chunk, pcr.field)
+			if err != nil {
+				return nil, err
+			}
+			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
 				return nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
 			}
-			data = append(data, uint8Reader.Uint8Values()...)
+			if canBulkCopyUint8ListValues(listReader, uint8Reader) {
+				data = append(data, uint8Reader.Uint8Values()...)
+				continue
+			}
+			for i := 0; i < listReader.Len(); i++ {
+				start, end := listReader.ValueOffsets(i)
+				for j := start; j < end; j++ {
+					if uint8Reader.IsNull(int(j)) {
+						return nil, WrapNullElementErr(pcr.field)
+					}
+					data = append(data, uint8Reader.Value(int(j)))
+				}
+			}
 		default:
 			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
 		}
@@ -909,21 +927,42 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 					validData = append(validData, true)
 				}
 			}
-		case arrow.LIST:
-			listReader := chunk.(*array.List)
-			if err = checkNullableVectorAligned(listReader.Offsets(), listReader, pcr.dim, dataType); err != nil {
+		case arrow.LIST, arrow.FIXED_SIZE_LIST:
+			listReader, err := newListLikeArray(chunk, pcr.field)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
 				return nil, nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
 			}
+			if canBulkCopyUint8ListValues(listReader, uint8Reader) {
+				values := uint8Reader.Uint8Values()
+				for i := 0; i < rows; i++ {
+					if listReader.IsNull(i) {
+						validData = append(validData, false)
+					} else {
+						start, end := listReader.ValueOffsets(i)
+						data = append(data, values[int(start):int(end)]...)
+						validData = append(validData, true)
+					}
+				}
+				continue
+			}
 			for i := 0; i < rows; i++ {
 				if listReader.IsNull(i) {
 					validData = append(validData, false)
 				} else {
 					start, end := listReader.ValueOffsets(i)
-					data = append(data, uint8Reader.Uint8Values()[start:end]...)
+					for j := start; j < end; j++ {
+						if uint8Reader.IsNull(int(j)) {
+							return nil, nil, WrapNullElementErr(pcr.field)
+						}
+						data = append(data, uint8Reader.Value(int(j)))
+					}
 					validData = append(validData, true)
 				}
 			}
@@ -1214,16 +1253,6 @@ func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	return nil
 }
 
-func checkNullableVectorAlignWithDim(offsets []int32, listReader *array.List, dim int32) error {
-	for i := 1; i < len(offsets); i++ {
-		length := offsets[i] - offsets[i-1]
-		if !listReader.IsNull(i-1) && length != dim {
-			return fmt.Errorf("expected %d but got %d", dim, length)
-		}
-	}
-	return nil
-}
-
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
 		return errors.New("empty offsets")
@@ -1245,61 +1274,6 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	}
 }
 
-func checkNullableVectorAligned(offsets []int32, listReader *array.List, dim int, dataType schemapb.DataType) error {
-	if len(offsets) < 1 {
-		return errors.New("empty offsets")
-	}
-	switch dataType {
-	case schemapb.DataType_BinaryVector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim/8))
-	case schemapb.DataType_FloatVector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim*2))
-	case schemapb.DataType_SparseFloatVector:
-		return nil
-	case schemapb.DataType_Int8Vector:
-		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
-	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
-	}
-}
-
-func getArrayData[T any](offsets []int32, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
-	for i := 1; i < len(offsets); i++ {
-		start, end := offsets[i-1], offsets[i]
-		arrData := make([]T, 0, end-start)
-		for j := start; j < end; j++ {
-			elementVal, err := getElement(int(j))
-			if err != nil {
-				return err
-			}
-			arrData = append(arrData, elementVal)
-		}
-		isValid := (start != end)
-		outputArray(arrData, isValid)
-	}
-	return nil
-}
-
-func getArrayDataNullable[T any](offsets []int32, listReader *array.List, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
-	for i := 1; i < len(offsets); i++ {
-		isValid := !listReader.IsNull(i - 1)
-
-		start, end := offsets[i-1], offsets[i]
-		arrData := make([]T, 0, end-start)
-		for j := start; j < end; j++ {
-			elementVal, err := getElement(int(j))
-			if err != nil {
-				return err
-			}
-			arrData = append(arrData, elementVal)
-		}
-		outputArray(arrData, isValid)
-	}
-	return nil
-}
-
 func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -1311,22 +1285,11 @@ func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {
 			// Array field is not nullable, but some arrays are null
 			return nil, WrapNullRowErr(pcr.field)
 		}
-		listReader, ok := chunk.(*array.List)
-		if !ok {
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, err
 		}
-		boolReader, ok := listReader.ListValues().(*array.Boolean)
-		if !ok {
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-		}
-		offsets := listReader.Offsets()
-		err = getArrayData(offsets, func(i int) (bool, error) {
-			if boolReader.IsNull(i) {
-				// array contains null values is not allowed
-				return false, WrapNullElementErr(pcr.field)
-			}
-			return boolReader.Value(i), nil
-		}, func(arr []bool, valid bool) {
+		err = readBoolListLikeData(pcr.field, listReader, func(arr []bool, valid bool) {
 			data = append(data, arr)
 		})
 		if err != nil {
@@ -1347,28 +1310,17 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 	data := make([][]bool, 0, count)
 	validData := make([]bool, 0, count)
 	for _, chunk := range chunked.Chunks() {
-		listReader, ok := chunk.(*array.List)
-		if !ok {
+		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([][]bool, dataNums)...)
 		} else {
-			boolReader, ok := listReader.ListValues().(*array.Boolean)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			listReader, err := newListLikeArray(chunk, pcr.field)
+			if err != nil {
+				return nil, nil, err
 			}
-			offsets := listReader.Offsets()
-			err = getArrayData(offsets, func(i int) (bool, error) {
-				if boolReader.IsNull(i) {
-					return false, WrapNullElementErr(pcr.field)
-				}
-				return boolReader.Value(i), nil
-			}, func(arr []bool, valid bool) {
+			err = readBoolListLikeData(pcr.field, listReader, func(arr []bool, valid bool) {
 				data = append(data, arr)
 				validData = append(validData, valid)
 			})
@@ -1398,105 +1350,20 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 			// Array field is not nullable, but some arrays are null
 			return nil, WrapNullRowErr(pcr.field)
 		}
-		listReader, ok := chunk.(*array.List)
-		if !ok {
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, err
 		}
-		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
 		if typeutil.IsVectorType(dataType) {
-			if err = checkVectorAligned(offsets, pcr.dim, dataType); err != nil {
+			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 			}
 		}
-		valueReader := listReader.ListValues()
-		switch valueReader.DataType().ID() {
-		case arrow.INT8:
-			int8Reader := valueReader.(*array.Int8)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if int8Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0, WrapNullElementErr(pcr.field)
-				}
-				return T(int8Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		case arrow.INT16:
-			int16Reader := valueReader.(*array.Int16)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if int16Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0, WrapNullElementErr(pcr.field)
-				}
-				return T(int16Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		case arrow.INT32:
-			int32Reader := valueReader.(*array.Int32)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if int32Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0, WrapNullElementErr(pcr.field)
-				}
-				return T(int32Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		case arrow.INT64:
-			int64Reader := valueReader.(*array.Int64)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if int64Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0, WrapNullElementErr(pcr.field)
-				}
-				return T(int64Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		case arrow.FLOAT32:
-			float32Reader := valueReader.(*array.Float32)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if float32Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0.0, WrapNullElementErr(pcr.field)
-				}
-				return T(float32Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		case arrow.FLOAT64:
-			float64Reader := valueReader.(*array.Float64)
-			err = getArrayData(offsets, func(i int) (T, error) {
-				if float64Reader.IsNull(i) {
-					// array contains null values is not allowed
-					return 0.0, WrapNullElementErr(pcr.field)
-				}
-				return T(float64Reader.Value(i)), nil
-			}, func(arr []T, valid bool) {
-				data = append(data, arr)
-			})
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		if err = readIntegerOrFloatListLikeData(pcr.field, listReader, func(arr []T, valid bool) {
+			data = append(data, arr)
+		}); err != nil {
+			return nil, err
 		}
 	}
 	if len(data) == 0 {
@@ -1514,118 +1381,27 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 	validData := make([]bool, 0, count)
 
 	for _, chunk := range chunked.Chunks() {
-		listReader, ok := chunk.(*array.List)
-		if !ok {
+		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([][]T, dataNums)...)
 		} else {
-			offsets := listReader.Offsets()
+			listReader, err := newListLikeArray(chunk, pcr.field)
+			if err != nil {
+				return nil, nil, err
+			}
 			dataType := pcr.field.GetDataType()
 			if typeutil.IsVectorType(dataType) {
-				if err = checkVectorAligned(offsets, pcr.dim, dataType); err != nil {
+				if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 					return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 				}
 			}
-			valueReader := listReader.ListValues()
-			switch valueReader.DataType().ID() {
-			case arrow.INT8:
-				int8Reader := valueReader.(*array.Int8)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if int8Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0, WrapNullElementErr(pcr.field)
-					}
-					return T(int8Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			case arrow.INT16:
-				int16Reader := valueReader.(*array.Int16)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if int16Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0, WrapNullElementErr(pcr.field)
-					}
-					return T(int16Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			case arrow.INT32:
-				int32Reader := valueReader.(*array.Int32)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if int32Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0, WrapNullElementErr(pcr.field)
-					}
-					return T(int32Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			case arrow.INT64:
-				int64Reader := valueReader.(*array.Int64)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if int64Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0, WrapNullElementErr(pcr.field)
-					}
-					return T(int64Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			case arrow.FLOAT32:
-				float32Reader := valueReader.(*array.Float32)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if float32Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0.0, WrapNullElementErr(pcr.field)
-					}
-					return T(float32Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			case arrow.FLOAT64:
-				float64Reader := valueReader.(*array.Float64)
-				err = getArrayData(offsets, func(i int) (T, error) {
-					if float64Reader.IsNull(i) {
-						// array contains null values is not allowed
-						return 0.0, WrapNullElementErr(pcr.field)
-					}
-					return T(float64Reader.Value(i)), nil
-				}, func(arr []T, valid bool) {
-					data = append(data, arr)
-					validData = append(validData, valid)
-				})
-				if err != nil {
-					return nil, nil, err
-				}
-			default:
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			if err = readIntegerOrFloatListLikeData(pcr.field, listReader, func(arr []T, valid bool) {
+				data = append(data, arr)
+				validData = append(validData, valid)
+			}); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -1647,21 +1423,19 @@ func ReadNullableFloatVectorData(pcr *FieldReader, count int64) (any, []bool, er
 	validData := make([]bool, 0, count)
 
 	for _, chunk := range chunked.Chunks() {
-		listReader, ok := chunk.(*array.List)
-		if !ok {
+		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			continue
 		}
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, nil, err
+		}
 
 		dataType := pcr.field.GetDataType()
-		offsets := listReader.Offsets()
-		if err = checkNullableVectorAligned(offsets, listReader, pcr.dim, dataType); err != nil {
+		if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 		}
 
@@ -1676,8 +1450,11 @@ func ReadNullableFloatVectorData(pcr *FieldReader, count int64) (any, []bool, er
 		for i := 0; i < rows; i++ {
 			validData = append(validData, !listReader.IsNull(i))
 			if !listReader.IsNull(i) {
-				start, end := offsets[i], offsets[i+1]
+				start, end := listReader.ValueOffsets(i)
 				for j := start; j < end; j++ {
+					if float32Reader.IsNull(int(j)) {
+						return nil, nil, WrapNullElementErr(pcr.field)
+					}
 					data = append(data, float32Reader.Value(int(j)))
 				}
 			}
@@ -1698,21 +1475,19 @@ func ReadNullableInt8VectorData(pcr *FieldReader, count int64) (any, []bool, err
 	validData := make([]bool, 0, count)
 
 	for _, chunk := range chunked.Chunks() {
-		listReader, ok := chunk.(*array.List)
-		if !ok {
+		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			continue
 		}
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, nil, err
+		}
 
 		dataType := pcr.field.GetDataType()
-		offsets := listReader.Offsets()
-		if err = checkNullableVectorAligned(offsets, listReader, pcr.dim, dataType); err != nil {
+		if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
 			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
 		}
 
@@ -1727,8 +1502,11 @@ func ReadNullableInt8VectorData(pcr *FieldReader, count int64) (any, []bool, err
 		for i := 0; i < rows; i++ {
 			validData = append(validData, !listReader.IsNull(i))
 			if !listReader.IsNull(i) {
-				start, end := offsets[i], offsets[i+1]
+				start, end := listReader.ValueOffsets(i)
 				for j := start; j < end; j++ {
+					if int8Reader.IsNull(int(j)) {
+						return nil, nil, WrapNullElementErr(pcr.field)
+					}
 					data = append(data, int8Reader.Value(int(j)))
 				}
 			}
@@ -1755,25 +1533,12 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 			// Array field is not nullable, but some arrays are null
 			return nil, WrapNullRowErr(pcr.field)
 		}
-		listReader, ok := chunk.(*array.List)
-		if !ok {
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, err
 		}
-		stringReader, ok := listReader.ListValues().(*array.String)
-		if !ok {
-			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-		}
-		offsets := listReader.Offsets()
-		err = getArrayData(offsets, func(i int) (string, error) {
-			if stringReader.IsNull(i) {
-				// array contains null values is not allowed
-				return "", WrapNullElementErr(pcr.field)
-			}
-			val := stringReader.Value(i)
-			if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
-				return val, err
-			}
-			return val, nil
+		err = readStringListLikeData(pcr.field, listReader, func(val string) error {
+			return common.CheckValidString(val, maxLength, pcr.field)
 		}, func(arr []string, valid bool) {
 			data = append(data, arr)
 		})
@@ -1799,32 +1564,18 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 	data := make([][]string, 0, count)
 	validData := make([]bool, 0, count)
 	for _, chunk := range chunked.Chunks() {
-		listReader, ok := chunk.(*array.List)
-		if !ok {
+		if _, ok := chunk.(*array.Null); ok {
 			// the chunk type may be *array.Null if the data in chunk is all null
-			_, ok := chunk.(*array.Null)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
-			}
 			dataNums := chunk.Data().Len()
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([][]string, dataNums)...)
 		} else {
-			stringReader, ok := listReader.ListValues().(*array.String)
-			if !ok {
-				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			listReader, err := newListLikeArray(chunk, pcr.field)
+			if err != nil {
+				return nil, nil, err
 			}
-			offsets := listReader.Offsets()
-			err = getArrayData(offsets, func(i int) (string, error) {
-				if stringReader.IsNull(i) {
-					// array contains null values is not allowed
-					return "", WrapNullElementErr(pcr.field)
-				}
-				val := stringReader.Value(i)
-				if err = common.CheckValidString(val, maxLength, pcr.field); err != nil {
-					return val, err
-				}
-				return val, nil
+			err = readStringListLikeData(pcr.field, listReader, func(val string) error {
+				return common.CheckValidString(val, maxLength, pcr.field)
 			}, func(arr []string, valid bool) {
 				data = append(data, arr)
 				validData = append(validData, valid)
