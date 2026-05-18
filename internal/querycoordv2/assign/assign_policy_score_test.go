@@ -317,6 +317,42 @@ func TestScoreBasedAssignPolicy_WorkloadStatusWithCollectionRows(t *testing.T) {
 	assert.Equal(t, 1, status.nodeDelegatorCount[1][100])
 }
 
+func TestScoreBasedAssignPolicy_ChannelOnlyCollectionRowsAndDelegatorOverhead(t *testing.T) {
+	nodeManager := session.NewNodeManager()
+	mockScheduler := task.NewMockScheduler(t)
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	dist := meta.NewDistributionManager(nodeManager)
+	metaMgr := meta.NewMeta(nil, nil, nodeManager)
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Version:  common.Version,
+		Address:  "localhost",
+		Hostname: "node",
+	}))
+	nodeManager.Get(1).SetState(session.NodeStateNormal)
+
+	dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "ch-100"},
+		Node:         1,
+		View: &meta.LeaderView{
+			ID:               1,
+			CollectionID:     100,
+			Channel:          "ch-100",
+			NumOfGrowingRows: 10,
+		},
+	})
+
+	policy := newScoreBasedAssignPolicy(nodeManager, mockScheduler, dist, metaMgr)
+	status := policy.getWorkloadStatus()
+	assert.Equal(t, 10, status.nodeCollectionRowCount[1][100])
+	assert.Equal(t, 1, status.nodeDelegatorCount[1][100])
+
+	nodeItems := policy.ConvertToNodeItemsBySegment(100, []int64{1})
+	assert.Greater(t, nodeItems[1].GetCurrentScore(), float64(11))
+}
+
 // TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality tests basic channel assignment
 func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
 	nodeManager := session.NewNodeManager()
