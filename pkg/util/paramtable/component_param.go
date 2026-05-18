@@ -2200,7 +2200,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "1024",
+		DefaultValue: "256",
 		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}

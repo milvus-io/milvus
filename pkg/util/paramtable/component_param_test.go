@@ -218,6 +218,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum.GetAsInt64())
+		assert.Equal(t, int64(256), Params.MaxTaskNum.GetAsInt64())
 
 		t.Logf("AccessLog.Enable: %t", Params.AccessLog.Enable.GetAsBool())
 

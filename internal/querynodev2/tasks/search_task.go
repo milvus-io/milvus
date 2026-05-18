@@ -387,8 +387,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
 		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||
 		minNQ <= 0 ||
-		nqMergeRatioLimit > 0 && nqMergeRatio > nqMergeRatioLimit ||
-		diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat() ||
+		(nqMergeRatioLimit > 0 && nqMergeRatio > nqMergeRatioLimit) ||
+		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
