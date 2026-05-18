@@ -21,18 +21,20 @@ constexpr int kRemoteInputStreamMaxReadRetries = 2;
 constexpr const char* kFailedFlushResponseStreamError =
     "Failed to flush response stream";
 
+// currently only retry failed flush response stream error
 bool
 IsRetryableReadError(const arrow::Status& status) {
     return status.ToString().find(kFailedFlushResponseStreamError) !=
            std::string::npos;
 }
 
-template <typename ReadFunc>
+template <typename ReadFunc, typename ResetFunc>
 arrow::Result<int64_t>
 ReadWithRetry(const char* operation,
               size_t size,
               size_t file_size,
-              ReadFunc&& read_func) {
+              ReadFunc&& read_func,
+              ResetFunc&& reset_func) {
     auto result = read_func();
     for (int retry = 1; !result.ok() && IsRetryableReadError(result.status()) &&
                         retry <= kRemoteInputStreamMaxReadRetries;
@@ -46,6 +48,10 @@ ReadWithRetry(const char* operation,
             size,
             file_size,
             result.status().ToString());
+        auto reset_status = reset_func();
+        if (!reset_status.ok()) {
+            return reset_status;
+        }
         result = read_func();
     }
     return result;
@@ -63,9 +69,13 @@ RemoteInputStream::RemoteInputStream(
 
 size_t
 RemoteInputStream::Read(void* data, size_t size) {
-    auto status = ReadWithRetry("read", size, file_size_, [this, size, data]() {
-        return remote_file_->Read(size, data);
-    });
+    auto offset = static_cast<int64_t>(Tell());
+    auto status = ReadWithRetry(
+        "read",
+        size,
+        file_size_,
+        [this, size, data]() { return remote_file_->Read(size, data); },
+        [this, offset]() { return remote_file_->Seek(offset); });
     AssertInfo(
         status.ok(),
         "Failed to read from remote input stream, size: {}, file size: {}",
@@ -77,9 +87,13 @@ RemoteInputStream::Read(void* data, size_t size) {
 size_t
 RemoteInputStream::ReadAt(void* data, size_t offset, size_t size) {
     auto status = ReadWithRetry(
-        "read at offset", size, file_size_, [this, offset, size, data]() {
+        "read at offset",
+        size,
+        file_size_,
+        [this, offset, size, data]() {
             return remote_file_->ReadAt(offset, size, data);
-        });
+        },
+        []() { return arrow::Status::OK(); });
     AssertInfo(status.ok(), "Failed to read from input stream");
     return static_cast<size_t>(status.ValueOrDie());
 }
@@ -93,10 +107,15 @@ RemoteInputStream::Read(int fd, size_t size) {
 
     while (rest_size > 0) {
         size_t read_size = std::min(rest_size, read_batch_size);
+        auto offset = static_cast<int64_t>(Tell());
         auto status = ReadWithRetry(
-            "read to file", read_size, file_size_, [this, read_size, &data]() {
+            "read to file",
+            read_size,
+            file_size_,
+            [this, read_size, &data]() {
                 return remote_file_->Read(read_size, data.data());
-            });
+            },
+            [this, offset]() { return remote_file_->Seek(offset); });
         AssertInfo(status.ok(), "Failed to read from input stream");
         ssize_t ret = ::write(fd, data.data(), read_size);
         AssertInfo(ret == static_cast<ssize_t>(read_size),
