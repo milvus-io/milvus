@@ -30,11 +30,17 @@
 // SetCommitTimestamp + LoadGeneratedDataIntoSegment in that order.
 
 #include <gtest/gtest.h>
+#include <cstring>
+#include "cachinglayer/Manager.h"
+#include "common/Chunk.h"
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "mmap/ChunkedColumn.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -237,6 +243,235 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
         seg->mask_with_timestamps(view, T_commit, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), 0UL)
             << "query_ts=" << T_commit << " == commit_ts: all rows visible";
+    }
+}
+
+// ===========================================================================
+// V2/V3 column-group fixture
+//
+// On v2/v3 import segments the raw timestamp column (original row_ts) is
+// emplaced into fields_ by load_field_data_common, while the timestamp index
+// is built from commit_ts via init_storage_v1_timestamp_index. The V1 fixture
+// above (CreateImportSegment / LoadGeneratedDataIntoSegment) never reproduces
+// this state because the V1 path stores timestamps in insert_record_ instead
+// of fields_. CommitTimestampV2TestAccess pokes the private fields_ map to
+// simulate exactly the v2/v3 shape, so we can verify that EffectiveCommitTs()
+// short-circuits every timestamp reader regardless of which storage path
+// populated fields_.
+// ===========================================================================
+
+namespace milvus::segcore {
+
+class CommitTimestampV2TestAccess {
+ public:
+    // Emplace a ChunkedColumn at TimestampFieldID that points at `buf`,
+    // mirroring load_field_data_common on the v2/v3 column-group path. Caller
+    // must have already run CreateImportSegment so insert_record_.timestamps_
+    // and the timestamp index already carry commit_ts — this method only
+    // injects the *raw* column whose presence used to bypass the overwrite.
+    //
+    // `buf` must outlive `segment`: the FixedWidthChunk stores a raw pointer
+    // into it and ChunkMmapGuard does not manage heap allocations.
+    static void
+    InjectRawTimestampColumn(ChunkedSegmentSealedImpl* segment,
+                             char* buf,
+                             int32_t n_rows) {
+        static const FieldMeta ts_field_meta(FieldName("Timestamp"),
+                                             TimestampFieldID,
+                                             DataType::INT64,
+                                             /*nullable=*/false,
+                                             /*default_value=*/std::nullopt);
+
+        const auto buf_size = static_cast<uint64_t>(n_rows) * sizeof(Timestamp);
+        auto mmap_guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(n_rows,
+                                              /*dim=*/1,
+                                              buf,
+                                              buf_size,
+                                              sizeof(Timestamp),
+                                              /*nullable=*/false,
+                                              mmap_guard));
+
+        auto translator = std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{n_rows}, "ts_v2_test", std::move(chunks));
+        auto slot =
+            cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+                std::move(translator), nullptr);
+        auto column =
+            std::make_shared<ChunkedColumn>(std::move(slot), ts_field_meta);
+        segment->fields_.wlock()->insert_or_assign(TimestampFieldID, column);
+    }
+};
+
+}  // namespace milvus::segcore
+
+using milvus::segcore::CommitTimestampV2TestAccess;
+
+// Holds a sealed segment in v2/v3-shape together with the raw timestamp buffer
+// it points at. The chunk inside `segment` references `ts_buf.data()`, so
+// `segment` must be destroyed before `ts_buf`. Members are destroyed in reverse
+// declaration order, so `ts_buf` is declared first (destroyed last).
+struct ImportSegmentV2Handle {
+    std::vector<char> ts_buf;
+    std::unique_ptr<SegmentSealed> segment;
+};
+
+static ImportSegmentV2Handle
+CreateImportSegmentV2(SchemaPtr schema,
+                      const GeneratedData& dataset,
+                      Timestamp T_commit,
+                      Timestamp T_old) {
+    ImportSegmentV2Handle handle;
+    handle.segment = CreateImportSegment(schema, dataset, T_commit);
+    auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(handle.segment.get());
+    EXPECT_NE(impl, nullptr);
+
+    // DataGen emits ts_offset, ts_offset+1, ... — reproduce that raw shape.
+    const auto n = static_cast<int32_t>(dataset.row_ids_.size());
+    handle.ts_buf.resize(static_cast<size_t>(n) * sizeof(Timestamp));
+    auto* ts_view = reinterpret_cast<Timestamp*>(handle.ts_buf.data());
+    for (int32_t i = 0; i < n; ++i) {
+        ts_view[i] = T_old + static_cast<Timestamp>(i);
+    }
+    CommitTimestampV2TestAccess::InjectRawTimestampColumn(
+        impl, handle.ts_buf.data(), n);
+    return handle;
+}
+
+// V2.1: MVCC — query_ts < commit_ts must mask every row, even though the
+// raw timestamp column in fields_ would say the rows are old enough to be
+// visible. This was the latent gap: mask_with_timestamps::do_scan used to
+// scan the raw column inside the index-narrowed range.
+TEST(CommitTimestamp, V2_MVCC_RowsInvisibleBeforeCommitTs) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t N = 10;
+    constexpr Timestamp T_old = 100;
+    constexpr Timestamp T_commit = 5000;
+    constexpr Timestamp T_before = 2000;
+    constexpr Timestamp T_after = 6000;
+
+    auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
+    auto handle = CreateImportSegmentV2(schema, dataset, T_commit, T_old);
+    auto& seg = handle.segment;
+
+    {
+        BitsetType bs(N, false);
+        BitsetTypeView view(bs);
+        seg->mask_with_timestamps(view, T_before, /*collection_ttl=*/0);
+        EXPECT_EQ(bs.count(), static_cast<size_t>(N))
+            << "v2: query_ts=" << T_before << " < commit_ts=" << T_commit
+            << ": all rows must be invisible";
+    }
+    {
+        BitsetType bs(N, false);
+        BitsetTypeView view(bs);
+        seg->mask_with_timestamps(view, T_after, /*collection_ttl=*/0);
+        EXPECT_EQ(bs.count(), 0UL)
+            << "v2: query_ts=" << T_after << " >= commit_ts=" << T_commit
+            << ": all rows must be visible";
+    }
+}
+
+// V2.2: TTL — raw row_ts (T_old) is below TTL_THRESHOLD, but commit_ts is
+// above it, so no row may be TTL-expired. This is the case the reviewer
+// explicitly called out: do_scan would read the raw column and erroneously
+// mark rows as expired.
+TEST(CommitTimestamp, V2_TTL_RowsNotExpiredWhenCommitTsAboveTtl) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t N = 10;
+    constexpr Timestamp T_old = 100;
+    constexpr Timestamp T_commit = 5000;
+    constexpr Timestamp TTL_THRESHOLD = 3000;
+
+    auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
+    auto handle = CreateImportSegmentV2(schema, dataset, T_commit, T_old);
+    auto& seg = handle.segment;
+
+    BitsetType bs(N, false);
+    BitsetTypeView view(bs);
+    seg->mask_with_timestamps(view, T_commit + 1000, TTL_THRESHOLD);
+    EXPECT_EQ(bs.count(), 0UL)
+        << "v2: import segment with commit_ts=" << T_commit
+        << " must NOT be TTL-expired at threshold=" << TTL_THRESHOLD
+        << " even with raw row_ts=" << T_old << " in fields_";
+}
+
+// V2.3: Pre-commit delete must not apply on v2 import segments. The bug was
+// that search_batch_pks::read_ts read from the raw column and saw row_ts
+// (less than del_ts), letting the delete callback fire.
+TEST(CommitTimestamp, V2_Delete_PreCommitDeleteNotApplied) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t N = 10;
+    constexpr Timestamp T_old = 1000;
+    constexpr Timestamp T_commit = 3000;
+    constexpr Timestamp T_delete = 2000;
+    constexpr Timestamp T_query_visible = 4000;
+
+    auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto handle = CreateImportSegmentV2(schema, dataset, T_commit, T_old);
+    auto& seg = handle.segment;
+
+    auto del_ids = GenPKs(pks.begin(), pks.begin() + 1);
+    std::vector<Timestamp> del_tss(1, T_delete);
+    auto status = seg->Delete(1, del_ids.get(), del_tss.data());
+    ASSERT_TRUE(status.ok());
+
+    BitsetType bs_del(N, false);
+    BitsetTypeView view_del(bs_del);
+    seg->mask_with_delete(view_del, N, T_query_visible);
+    EXPECT_EQ(bs_del.count(), 0UL)
+        << "v2: delete at ts=" << T_delete << " < commit_ts=" << T_commit
+        << " must NOT apply on a column-group import segment";
+}
+
+// V2.4: bulk_subscript(Timestamp) must return commit_ts for every requested
+// offset, not the raw row_ts that lives in the column. Used by retrieval
+// and any caller that materialises the system timestamp field.
+TEST(CommitTimestamp, V2_BulkSubscript_ReturnsCommitTs) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t N = 10;
+    constexpr Timestamp T_old = 100;
+    constexpr Timestamp T_commit = 5000;
+
+    auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
+    auto handle = CreateImportSegmentV2(schema, dataset, T_commit, T_old);
+    auto& seg = handle.segment;
+
+    std::vector<int64_t> offsets = {0, 1, 3, 5, 9};
+    std::vector<Timestamp> out(offsets.size(), 0);
+    seg->bulk_subscript(/*op_ctx=*/nullptr,
+                        SystemFieldType::Timestamp,
+                        offsets.data(),
+                        static_cast<int64_t>(offsets.size()),
+                        out.data());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(out[i], T_commit)
+            << "v2: bulk_subscript at offset " << offsets[i]
+            << " must return commit_ts=" << T_commit << ", got " << out[i];
     }
 }
 

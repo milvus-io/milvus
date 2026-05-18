@@ -97,7 +97,14 @@ class PkIndexCell;
 
 using namespace milvus::cachinglayer;
 
+// Test-only accessor that pokes private members to simulate v2/v3 segment
+// state (raw timestamp column emplaced into fields_ alongside an overwritten
+// timestamp index). Defined in internal/core/unittest/test_commit_timestamp.cpp.
+class CommitTimestampV2TestAccess;
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
+    friend class CommitTimestampV2TestAccess;
+
  public:
     using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
     explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
@@ -283,6 +290,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     uint64_t
     GetCommitTimestamp() const override;
+
+    // When non-zero commit_ts_ is active, every row in this segment carries
+    // commit_ts_ as its effective row timestamp (load-time overwrite). Returns
+    // nullopt otherwise. All timestamp consumers — read_ts (search_batch_pks),
+    // bulk_subscript(Timestamp), mask_with_timestamps — must route through
+    // this so the override applies uniformly on v1 AND v2/v3 storage paths.
+    std::optional<Timestamp>
+    EffectiveCommitTs() const {
+        return commit_ts_ != 0 ? std::optional<Timestamp>{commit_ts_}
+                               : std::nullopt;
+    }
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
