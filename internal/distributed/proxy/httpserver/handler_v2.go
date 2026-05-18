@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -1008,9 +1009,46 @@ func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		return h.proxy.Flush(reqCtx, req.(*milvuspb.FlushRequest))
 	})
 	if err == nil {
+		err = h.waitForFlush(ctx, dbName, httpReq.CollectionName, resp.(*milvuspb.FlushResponse))
+		if err != nil {
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return resp, err
+		}
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) waitForFlush(ctx context.Context, dbName string, collectionName string, flushResp *milvuspb.FlushResponse) error {
+	segmentIDs := flushResp.GetCollSegIDs()[collectionName].GetData()
+	flushTs, ok := flushResp.GetCollFlushTs()[collectionName]
+	if !ok {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get flush timestamp for collection %s", collectionName))
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		stateResp, err := h.proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			SegmentIDs:     segmentIDs,
+			FlushTs:        flushTs,
+		})
+		if err := merr.CheckRPCCall(stateResp, err); err != nil {
+			return err
+		}
+		if stateResp.GetFlushed() {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

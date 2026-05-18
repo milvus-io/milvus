@@ -833,7 +833,21 @@ func TestFlush(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{}, nil).Once()
+	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{
+		Status: merr.Success(),
+		CollSegIDs: map[string]*schemapb.LongArray{
+			"test": {Data: []int64{1}},
+		},
+		CollFlushTs: map[string]uint64{
+			"test": 100,
+		},
+	}, nil).Once()
+	mp.EXPECT().GetFlushState(mock.Anything, mock.MatchedBy(func(req *milvuspb.GetFlushStateRequest) bool {
+		return req.GetCollectionName() == "test" && req.GetFlushTs() == 100 && assert.ObjectsAreEqual([]int64{1}, req.GetSegmentIDs())
+	})).Return(&milvuspb.GetFlushStateResponse{
+		Status:  merr.Success(),
+		Flushed: true,
+	}, nil).Once()
 	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(
 		&milvuspb.FlushResponse{
 			Status: &commonpb.Status{

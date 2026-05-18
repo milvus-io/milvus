@@ -1985,7 +1985,6 @@ class TestCollectionAddFieldNegative(TestBase):
 class TestCollectionMaintenance(TestBase):
     """Test collection maintenance operations"""
 
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39546")
     def test_collection_flush(self):
         """
         target: test collection flush
