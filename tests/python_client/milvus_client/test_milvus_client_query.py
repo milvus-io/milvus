@@ -1631,9 +1631,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        # overwrite int8 field with explicit np.int8 values
+        # Cycle through the full INT8 range without relying on numpy overflow casting.
         for i, row in enumerate(rows):
-            row[ct.default_int8_field_name] = np.int8(i)
+            row[ct.default_int8_field_name] = ((i + 128) % 256) - 128
 
         self.insert(client, collection_name, rows)
         assert len(rows) == default_nb
@@ -1681,7 +1681,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # query with not in expression
         fields = [ct.default_int64_field_name, ct.default_float_field_name]
         for field in fields:
-            values = [row[field] for row in rows]
+            values = [int(row[field]) if field == ct.default_int64_field_name else float(row[field]) for row in rows]
             pos = 100
             term_expr = f"{field} not in {values[pos:]}"
             df = pd.DataFrame(rows)
@@ -2352,15 +2352,15 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_int8_field_name, DataType.INT8)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
-        # 2. insert data with overflow values
+        # 2. insert valid bounded integer values
         start = default_nb // 2
         rows = []
         for i in range(default_nb):
             row = {
                 ct.default_int64_field_name: start + i,
-                ct.default_int32_field_name: np.int32((start + i) * 2200000),
-                ct.default_int16_field_name: np.int16((start + i) * 40),
-                ct.default_int8_field_name: np.int8((start + i) % 128),
+                ct.default_int32_field_name: start + i,
+                ct.default_int16_field_name: (start + i) % 32768,
+                ct.default_int8_field_name: (start + i) % 128,
                 ct.default_float_vec_field_name: cf.gen_vectors(nb=1, dim=default_dim)[0],
             }
             rows.append(row)
@@ -2374,10 +2374,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expression = expression.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i in range(default_nb):
-            int8 = np.int8((start + i) % 128)  # noqa: F841 - referenced by eval(expression)
-            int16 = np.int16((start + i) * 40)  # noqa: F841 - referenced by eval(expression)
-            int32 = np.int32((start + i) * 2200000)  # noqa: F841 - referenced by eval(expression)
-            if not expression or eval(expression):
+            local_values = {
+                "int8": (start + i) % 128,
+                "int16": (start + i) % 32768,
+                "int32": start + i,
+            }
+            if not expression or eval(expression, {}, local_values):
                 filter_ids.append(start + i)
         # 5. query and verify result
         res = self.query(client, collection_name, filter=expression, output_fields=["int8"])[0]
@@ -6628,12 +6630,13 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 2. manually generate data to match the expression requirements
         rows = []
         vectors = cf.gen_vectors(default_nb, default_dim)
+        matched_id = default_nb // 2
         for i in range(default_nb):
             row = {
                 ct.default_int64_field_name: np.int64(i),
                 ct.default_int32_field_name: np.int32(i),
                 ct.default_int16_field_name: np.int16(i),
-                ct.default_int8_field_name: np.int8(i),
+                ct.default_int8_field_name: 0 if i == matched_id else 1,
                 ct.default_float_field_name: np.float32(i),
                 ct.default_double_field_name: np.float64(i),
                 ct.default_float_vec_field_name: vectors[i],
@@ -6648,7 +6651,10 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. count with expr using all data types
-        expr = "int64 >= 0 and int32 >= 1999 and int16 >= 0 and int8 <= 0 and float <= 1999.0 and double >= 0"
+        expr = (
+            f"int64 >= 0 and int32 >= {matched_id} and int16 >= 0 and int8 <= 0 "
+            f"and float <= {float(matched_id)} and double >= 0"
+        )
         self.query(
             client,
             collection_name,
