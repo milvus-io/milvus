@@ -189,13 +189,13 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		// vector not support default_value
 		if c.field.GetNullable() {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+			return ReadNullableBinaryData(c, count)
 		}
 		data, err := ReadBinaryData(c, count)
 		return data, nil, err
 	case schemapb.DataType_FloatVector:
 		if c.field.GetNullable() {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+			return ReadNullableFloatVectorData(c, count)
 		}
 		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
 		if err != nil {
@@ -208,13 +208,13 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		return vectors, nil, nil
 	case schemapb.DataType_SparseFloatVector:
 		if c.field.GetNullable() {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+			return ReadNullableSparseFloatVectorData(c, count)
 		}
 		data, err := ReadSparseFloatVectorData(c, count)
 		return data, nil, err
 	case schemapb.DataType_Int8Vector:
 		if c.field.GetNullable() {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+			return ReadNullableInt8VectorData(c, count)
 		}
 		arrayData, err := ReadIntegerOrFloatArrayData[int8](c, count)
 		if err != nil {
@@ -493,9 +493,6 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 // Value type of "indices" is array.List, element type is array.Uint32
 // Value type of "values" is array.List, element type is array.Float32
 // The length of the list is equal to the length of chunked.Chunks()
-//
-// Note: now the ReadStructData() is used by SparseVector type and SparseVector is not nullable,
-// create a new method ReadNullableStructData() if we have nullable struct type in future.
 func ReadStructData(pcr *FieldReader, count int64) ([]map[string]arrow.Array, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -522,6 +519,40 @@ func ReadStructData(pcr *FieldReader, count int64) ([]map[string]arrow.Array, er
 		return nil, nil
 	}
 	return data, nil
+}
+
+func ReadNullableStructData(pcr *FieldReader, count int64) ([]map[string]arrow.Array, []bool, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([]map[string]arrow.Array, 0, count)
+	validData := make([]bool, 0, count)
+
+	for _, chunk := range chunked.Chunks() {
+		structReader, ok := chunk.(*array.Struct)
+		if !ok {
+			return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		}
+
+		structType := structReader.DataType().(*arrow.StructType)
+		rows := structReader.Len()
+		// Sparse storage: only store valid rows' data
+		for i := 0; i < rows; i++ {
+			validData = append(validData, !structReader.IsNull(i))
+			if !structReader.IsNull(i) {
+				st := make(map[string]arrow.Array)
+				for k, field := range structType.Fields() {
+					st[field.Name] = structReader.Field(k)
+				}
+				data = append(data, st)
+			}
+		}
+	}
+	if len(data) == 0 && len(validData) == 0 {
+		return nil, nil, nil
+	}
+	return data, validData, nil
 }
 
 func ReadStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, error) {
@@ -851,6 +882,61 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) {
+	dataType := pcr.field.GetDataType()
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([]byte, 0, count)
+	validData := make([]bool, 0, count)
+
+	// Sparse storage: only store valid rows' data
+	for _, chunk := range chunked.Chunks() {
+		rows := chunk.Data().Len()
+		switch chunk.DataType().ID() {
+		case arrow.NULL:
+			for i := 0; i < rows; i++ {
+				validData = append(validData, false)
+			}
+		case arrow.BINARY:
+			binaryReader := chunk.(*array.Binary)
+			for i := 0; i < rows; i++ {
+				if binaryReader.IsNull(i) {
+					validData = append(validData, false)
+				} else {
+					data = append(data, binaryReader.Value(i)...)
+					validData = append(validData, true)
+				}
+			}
+		case arrow.LIST:
+			listReader := chunk.(*array.List)
+			if err = checkNullableVectorAligned(listReader.Offsets(), listReader, pcr.dim, dataType); err != nil {
+				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			}
+			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
+			if !ok {
+				return nil, nil, WrapTypeErr(pcr.field, listReader.ListValues().DataType().Name())
+			}
+			for i := 0; i < rows; i++ {
+				if listReader.IsNull(i) {
+					validData = append(validData, false)
+				} else {
+					start, end := listReader.ValueOffsets(i)
+					data = append(data, uint8Reader.Uint8Values()[start:end]...)
+					validData = append(validData, true)
+				}
+			}
+		default:
+			return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		}
+	}
+	if len(data) == 0 && len(validData) == 0 {
+		return nil, nil, nil
+	}
+	return data, validData, nil
+}
+
 func parseSparseFloatRowVector(str string) ([]byte, uint32, error) {
 	rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
 	if err != nil {
@@ -1045,10 +1131,94 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	}, nil
 }
 
+func ReadNullableSparseFloatVectorData(pcr *FieldReader, count int64) (any, []bool, error) {
+	if pcr.sparseIsString {
+		data, validData, err := ReadNullableStringData(pcr, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if data == nil {
+			return nil, nil, nil
+		}
+
+		// Sparse storage: only store valid rows' data
+		byteArr := make([][]byte, 0, count)
+		maxDim := uint32(0)
+
+		for i, str := range data.([]string) {
+			if validData[i] {
+				rowVec, rowMaxIdx, err := parseSparseFloatRowVector(str)
+				if err != nil {
+					return nil, nil, err
+				}
+				byteArr = append(byteArr, rowVec)
+				if rowMaxIdx > maxDim {
+					maxDim = rowMaxIdx
+				}
+			}
+		}
+
+		return &storage.SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim:      int64(maxDim),
+				Contents: byteArr,
+			},
+			ValidData: validData,
+			Nullable:  true,
+		}, validData, nil
+	}
+
+	data, validData, err := ReadNullableStructData(pcr, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	if data == nil {
+		return nil, nil, nil
+	}
+
+	// Sparse storage: only store valid rows' data
+	byteArr := make([][]byte, 0, count)
+	maxDim := uint32(0)
+
+	for i, structData := range data {
+		if validData[i] {
+			singleByteArr, singleMaxDim, err := parseSparseFloatVectorStructs([]map[string]arrow.Array{structData})
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(singleByteArr) > 0 {
+				byteArr = append(byteArr, singleByteArr[0])
+				if singleMaxDim > maxDim {
+					maxDim = singleMaxDim
+				}
+			}
+		}
+	}
+
+	return &storage.SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim:      int64(maxDim),
+			Contents: byteArr,
+		},
+		ValidData: validData,
+		Nullable:  true,
+	}, validData, nil
+}
+
 func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
 			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
+		}
+	}
+	return nil
+}
+
+func checkNullableVectorAlignWithDim(offsets []int32, listReader *array.List, dim int32) error {
+	for i := 1; i < len(offsets); i++ {
+		length := offsets[i] - offsets[i-1]
+		if !listReader.IsNull(i-1) && length != dim {
+			return fmt.Errorf("expected %d but got %d", dim, length)
 		}
 	}
 	return nil
@@ -1075,6 +1245,26 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	}
 }
 
+func checkNullableVectorAligned(offsets []int32, listReader *array.List, dim int, dataType schemapb.DataType) error {
+	if len(offsets) < 1 {
+		return errors.New("empty offsets")
+	}
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim/8))
+	case schemapb.DataType_FloatVector:
+		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim*2))
+	case schemapb.DataType_SparseFloatVector:
+		return nil
+	case schemapb.DataType_Int8Vector:
+		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
+	default:
+		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+	}
+}
+
 func getArrayData[T any](offsets []int32, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
 	for i := 1; i < len(offsets); i++ {
 		start, end := offsets[i-1], offsets[i]
@@ -1087,6 +1277,24 @@ func getArrayData[T any](offsets []int32, getElement func(int) (T, error), outpu
 			arrData = append(arrData, elementVal)
 		}
 		isValid := (start != end)
+		outputArray(arrData, isValid)
+	}
+	return nil
+}
+
+func getArrayDataNullable[T any](offsets []int32, listReader *array.List, getElement func(int) (T, error), outputArray func(arr []T, valid bool)) error {
+	for i := 1; i < len(offsets); i++ {
+		isValid := !listReader.IsNull(i - 1)
+
+		start, end := offsets[i-1], offsets[i]
+		arrData := make([]T, 0, end-start)
+		for j := start; j < end; j++ {
+			elementVal, err := getElement(int(j))
+			if err != nil {
+				return err
+			}
+			arrData = append(arrData, elementVal)
+		}
 		outputArray(arrData, isValid)
 	}
 	return nil
@@ -1425,6 +1633,108 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
 	}
 	if len(data) == 0 {
+		return nil, nil, nil
+	}
+	return data, validData, nil
+}
+
+func ReadNullableFloatVectorData(pcr *FieldReader, count int64) (any, []bool, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([]float32, 0, int(count)*pcr.dim)
+	validData := make([]bool, 0, count)
+
+	for _, chunk := range chunked.Chunks() {
+		listReader, ok := chunk.(*array.List)
+		if !ok {
+			// the chunk type may be *array.Null if the data in chunk is all null
+			_, ok := chunk.(*array.Null)
+			if !ok {
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			}
+			dataNums := chunk.Data().Len()
+			validData = append(validData, make([]bool, dataNums)...)
+			continue
+		}
+
+		dataType := pcr.field.GetDataType()
+		offsets := listReader.Offsets()
+		if err = checkNullableVectorAligned(offsets, listReader, pcr.dim, dataType); err != nil {
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+		}
+
+		valueReader := listReader.ListValues()
+		rows := listReader.Len()
+
+		// Sparse storage: only store valid rows' data
+		float32Reader, ok := valueReader.(*array.Float32)
+		if !ok {
+			return nil, nil, WrapTypeErr(pcr.field, valueReader.DataType().Name())
+		}
+		for i := 0; i < rows; i++ {
+			validData = append(validData, !listReader.IsNull(i))
+			if !listReader.IsNull(i) {
+				start, end := offsets[i], offsets[i+1]
+				for j := start; j < end; j++ {
+					data = append(data, float32Reader.Value(int(j)))
+				}
+			}
+		}
+	}
+	if len(data) == 0 && len(validData) == 0 {
+		return nil, nil, nil
+	}
+	return data, validData, typeutil.VerifyFloats32(data)
+}
+
+func ReadNullableInt8VectorData(pcr *FieldReader, count int64) (any, []bool, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([]int8, 0, int(count)*pcr.dim)
+	validData := make([]bool, 0, count)
+
+	for _, chunk := range chunked.Chunks() {
+		listReader, ok := chunk.(*array.List)
+		if !ok {
+			// the chunk type may be *array.Null if the data in chunk is all null
+			_, ok := chunk.(*array.Null)
+			if !ok {
+				return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+			}
+			dataNums := chunk.Data().Len()
+			validData = append(validData, make([]bool, dataNums)...)
+			continue
+		}
+
+		dataType := pcr.field.GetDataType()
+		offsets := listReader.Offsets()
+		if err = checkNullableVectorAligned(offsets, listReader, pcr.dim, dataType); err != nil {
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+		}
+
+		valueReader := listReader.ListValues()
+		rows := listReader.Len()
+
+		// Sparse storage: only store valid rows' data
+		int8Reader, ok := valueReader.(*array.Int8)
+		if !ok {
+			return nil, nil, WrapTypeErr(pcr.field, valueReader.DataType().Name())
+		}
+		for i := 0; i < rows; i++ {
+			validData = append(validData, !listReader.IsNull(i))
+			if !listReader.IsNull(i) {
+				start, end := offsets[i], offsets[i+1]
+				for j := start; j < end; j++ {
+					data = append(data, int8Reader.Value(int(j)))
+				}
+			}
+		}
+	}
+	if len(data) == 0 && len(validData) == 0 {
 		return nil, nil, nil
 	}
 	return data, validData, nil

@@ -447,7 +447,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        collection_info = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
         fields = collection_info.get("fields", None)
         field_names = [field.get("name") for field in fields]
 
@@ -489,7 +489,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        collection_info = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
         partition_name = self.partition_names[0]
 
         # Generate vectors to search
@@ -1596,7 +1596,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         dim = 32
         schema = self.create_schema(client)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("vector", vector_dtype, dim=dim)
+        schema.add_field("vector", vector_dtype, dim=dim, nullable=True)
+        schema.add_field("float_vector2", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
         schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=200)
         schema.add_field("json_field", DataType.JSON, max_length=200)
         schema.add_field("string_field", DataType.VARCHAR, max_length=200)
@@ -1614,7 +1615,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
             rows = [
                 {
                     "id": i + start_pk,
-                    "vector": random_vectors[i + start_pk],
+                    "vector": None if random.random() < 0.3 else random_vectors[i + start_pk],
+                    "float_vector2": None if random.random() < 0.9 else cf.gen_vectors(1, dim)[0],
                     "float_array": [random.random() for _ in range(10)],
                     "json_field": {"name": "abook", "words": i},
                     "string_field": "Hello, Milvus!",
@@ -1639,6 +1641,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 client, collection_name, index_params=index_params, check_task=CheckTasks.err_res, check_items=error
             )
         else:
+            index_params.add_index(field_name="float_vector2", index_type="HNSW", metric_type="L2")
             self.create_index(client, collection_name, index_params=index_params)
 
             # load the collection with index
@@ -1648,6 +1651,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
             # search with output field vector
             search_params = {}
             vectors = random_vectors[: ct.default_nq]
+            limit = 100
             # search output all fields
             self.search(
                 client,
@@ -1655,15 +1659,15 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 vectors,
                 anns_field="vector",
                 search_params=search_params,
-                limit=ct.default_limit,
+                limit=limit,
                 output_fields=["*"],
                 check_task=CheckTasks.check_search_results,
                 check_items={
                     "enable_milvus_client_api": True,
                     "pk_name": "id",
                     "nq": ct.default_nq,
-                    "limit": ct.default_limit,
-                    "output_fields": ["id", "vector", "float_array", "json_field", "string_field"],
+                    "limit": limit,
+                    "output_fields": ["id", "vector", "float_vector2", "float_array", "json_field", "string_field"],
                 },
             )
             # search output specify all fields
@@ -1673,15 +1677,15 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 vectors,
                 anns_field="vector",
                 search_params=search_params,
-                limit=ct.default_limit,
-                output_fields=["id", "vector", "float_array", "json_field", "string_field"],
+                limit=limit,
+                output_fields=["id", "vector", "float_vector2", "float_array", "json_field", "string_field"],
                 check_task=CheckTasks.check_search_results,
                 check_items={
                     "enable_milvus_client_api": True,
                     "pk_name": "id",
                     "nq": ct.default_nq,
-                    "limit": ct.default_limit,
-                    "output_fields": ["id", "vector", "float_array", "json_field", "string_field"],
+                    "limit": limit,
+                    "output_fields": ["id", "vector", "float_vector2", "float_array", "json_field", "string_field"],
                 },
             )
             # search output specify some fields
@@ -1691,15 +1695,15 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 vectors,
                 anns_field="vector",
                 search_params=search_params,
-                limit=ct.default_limit,
-                output_fields=["id", "vector", "json_field"],
+                limit=limit,
+                output_fields=["id", "vector", "float_vector2", "json_field"],
                 check_task=CheckTasks.check_search_results,
                 check_items={
                     "enable_milvus_client_api": True,
                     "pk_name": "id",
                     "nq": ct.default_nq,
-                    "limit": ct.default_limit,
-                    "output_fields": ["id", "vector", "json_field"],
+                    "limit": limit,
+                    "output_fields": ["id", "vector", "float_vector2", "json_field"],
                 },
             )
 
@@ -1731,7 +1735,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema, _ = self.create_schema(client)
         schema.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("vector", datatype=vector_dtype, dim=dim)
+        schema.add_field("vector", datatype=vector_dtype, dim=dim, nullable=True)
         self.create_collection(client, collection_name, schema=schema)
 
         # Insert data in 3 batches with unique primary keys using a loop
@@ -1743,7 +1747,10 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         )
         for j in range(insert_times):
             start_pk = j * ct.default_nb
-            rows = [{"id": i + start_pk, "vector": random_vectors[i + start_pk]} for i in range(ct.default_nb)]
+            rows = [
+                {"id": i + start_pk, "vector": None if random.random() < 0.3 else random_vectors[i + start_pk]}
+                for i in range(ct.default_nb)
+            ]
             self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 

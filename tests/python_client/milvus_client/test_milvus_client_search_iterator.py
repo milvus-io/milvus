@@ -1,4 +1,6 @@
-# ruff: noqa: F403, F405, F811
+# ruff: noqa: F403, F405
+import random
+
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -175,7 +177,6 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str("nonexistent")
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        [i for i in range(default_nb)]
         self.search_iterator(
             client, collection_name, vectors_to_search, batch_size=5, check_task=CheckTasks.err_res, check_items=error
         )
@@ -1189,7 +1190,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         if not enable_dynamic_field:
@@ -1228,7 +1229,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         rows = [
             {
                 default_primary_key_field_name: i,
-                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]) if random.random() >= 0.2 else None,
                 default_float_field_name: i * 1.0,
                 default_string_field_name: str(i),
                 json_field_name: {"a": {"b": i}},

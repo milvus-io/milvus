@@ -444,6 +444,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 type organizeOperator struct {
 	traceCtx           context.Context
 	primaryFieldSchema *schemapb.FieldSchema
+	schema             *schemapb.CollectionSchema
 	collectionID       int64
 }
 
@@ -455,6 +456,7 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &organizeOperator{
 		traceCtx:           t.TraceCtx(),
 		primaryFieldSchema: pkField,
+		schema:             t.schema.CollectionSchema,
 		collectionID:       t.GetCollectionID(),
 	}, nil
 }
@@ -520,7 +522,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 			allFieldData[idx] = emptyFields
 			continue
 		}
-		if fieldData, err := pickFieldData(ids, offsets, fields, op.collectionID); err != nil {
+		if fieldData, err := pickFieldData(ids, offsets, fields, op.schema, op.collectionID); err != nil {
 			return nil, err
 		} else {
 			allFieldData[idx] = fieldData
@@ -529,7 +531,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 	return []any{allFieldData}, nil
 }
 
-func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, collectionID int64) ([]*schemapb.FieldData, error) {
+func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, schema *schemapb.CollectionSchema, collectionID int64) ([]*schemapb.FieldData, error) {
 	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
 	// We should reorganize query results to keep the order of original queried ids. For example:
 	// ===========================================
@@ -546,13 +548,16 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
 	fieldsData := make([]*schemapb.FieldData, len(fields))
+	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
 			return nil, merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(pkOffset), collectionID))
 		}
-		typeutil.AppendFieldData(fieldsData, fields, int64(pkOffset[id]))
+		rowIdx := int64(pkOffset[id])
+		fieldIdxs := idxComputer.Compute(rowIdx)
+		typeutil.AppendFieldData(fieldsData, fields, rowIdx, fieldIdxs...)
 	}
 
 	return fieldsData, nil
