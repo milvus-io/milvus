@@ -1557,7 +1557,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
         int64_values = pd.Series(data=random.sample(range(start, start + nb), nb))
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
-    int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
+    int8_bound = np.iinfo(np.int8).max + 1
+    int8_values = pd.Series(data=[i % int8_bound for i in range(start, start + nb)], dtype="int8")
     bool_values = pd.Series(data=[np.bool_(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
@@ -1619,7 +1620,8 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         int16_data = int16_data[:nb - null_number] + null_data
         int16_values = pd.Series(data=int16_data, dtype=object)
 
-    int8_data = [np.int8(i) for i in range(start, start + nb)]
+    int8_bound = np.iinfo(np.int8).max + 1
+    int8_data = [i % int8_bound for i in range(start, start + nb)]
     int8_values = pd.Series(data=int8_data, dtype="int8")
     if ct.default_int8_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int8_field_name])
@@ -1696,11 +1698,12 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                                         multiple_dim_array=[], multiple_vector_field_name=[], partition_id=0,
                                         auto_id=False, primary_field=ct.default_int64_field_name, language=None):
     array = []
+    int8_bound = np.iinfo(np.int8).max + 1
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
                 ct.default_int32_field_name: i,
                 ct.default_int16_field_name: i,
-                ct.default_int8_field_name: int(np.int8(i)),
+                ct.default_int8_field_name: i % int8_bound,
                 ct.default_bool_field_name: bool(i),
                 ct.default_float_field_name: i*1.0,
                 ct.default_double_field_name: i * 1.0,

@@ -1129,10 +1129,11 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
                 value = np.int16(i)
             elif rerank_fields == DataType.INT32:
@@ -1226,10 +1227,11 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
                 value = np.int16(i)
             elif rerank_fields == DataType.INT32:

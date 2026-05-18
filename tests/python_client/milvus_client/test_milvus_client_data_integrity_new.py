@@ -94,11 +94,12 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nb + 60, default_dim)
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = 50
+        int8_bound = np.iinfo(np.int8).max + 1
         rows_list = []
         for i in range(len(inserted_data_distribution)):
             rows = [{ct.default_primary_key_field_name: j, ct.default_vector_field_name: vectors[j],
                      ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
-                     ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
+                     ct.default_int8_field_name: j % int8_bound if (i % 2 == 0) else None,
                      ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
                      ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
                      ct.default_int64_field_name: j if (i % 2 == 0) else None,
@@ -106,7 +107,7 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
                      ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
                      ct.default_string_field_name: f'{j}' if (i % 2 == 0) else None,
                      ct.default_json_field_name: inserted_data_distribution[i],
-                     ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
+                     ct.default_int8_array_field_name: [j % int8_bound, j % int8_bound] if (i % 2 == 0) else None,
                      ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
                      ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
                      ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
@@ -240,7 +241,6 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
                 log.debug(compare_dict[f'{i}']["id_list"])
             assert id_list == compare_dict[f'{i}']["id_list"]
             log.info(f"PASS with expression {expression}")
-
 
 
 
