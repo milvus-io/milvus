@@ -889,6 +889,15 @@ func TestForbiddenItem(t *testing.T) {
 	assert.Equal(t, "by-dev", params.CommonCfg.ClusterPrefix.GetValue())
 }
 
+func TestFormatDurationWithMillisecondFallback(t *testing.T) {
+	assert.Equal(t, "", formatDurationWithMillisecondFallback(""))
+	assert.Equal(t, "", formatDurationWithMillisecondFallback("  "))
+	assert.Equal(t, "100ms", formatDurationWithMillisecondFallback("100"))
+	assert.Equal(t, "1.5ms", formatDurationWithMillisecondFallback("1.5"))
+	assert.Equal(t, "2s", formatDurationWithMillisecondFallback("2s"))
+	assert.Equal(t, "invalid", formatDurationWithMillisecondFallback("invalid"))
+}
+
 func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()

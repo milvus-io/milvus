@@ -362,6 +362,36 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.CancelLabel))
 }
 
+func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {
+	now := time.Now()
+	invalid := queuedTask{}
+	s.Zero(invalid.queueDuration(now))
+	s.False(invalid.cleanupReady(now))
+
+	taskWithoutEnqueueTime := newQueuedTask(newMockTask(mockTaskConfig{nq: 1}), time.Time{})
+	s.Zero(taskWithoutEnqueueTime.queueDuration(now))
+	s.False(taskWithoutEnqueueTime.cleanupReady(now))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	canceledTask := newQueuedTask(newMockTask(mockTaskConfig{ctx: ctx, nq: 1}), now.Add(-time.Millisecond))
+	s.True(canceledTask.cleanupReady(now))
+}
+
+func (s *SchedulerSuite) TestRecordReadTaskQueueDurationSkipsInvalidTask() {
+	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
+
+	scheduler := &scheduler{}
+	scheduler.recordReadTaskQueueDuration(queuedTask{}, time.Now(), readTaskQueueOutcomeScheduled)
+
+	observer := metrics.QueryNodeReadTaskQueueDuration.WithLabelValues(paramtable.GetStringNodeID(), readTaskQueueOutcomeScheduled)
+	metric := &dto.Metric{}
+	s.NoError(observer.(interface{ Write(*dto.Metric) error }).Write(metric))
+	s.Equal(uint64(0), metric.GetHistogram().GetSampleCount())
+}
+
 func readTaskExecuteDurationCount(outcome string) uint64 {
 	observer := metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(paramtable.GetStringNodeID(), outcome)
 	metric := &dto.Metric{}

@@ -656,6 +656,23 @@ func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestTimeoutMiddlewarePropagatesPanic(t *testing.T) {
+	ginHandler := gin.New()
+	app := ginHandler.Group("")
+	path := "/middleware/timeout/panic"
+	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		panic("mock panic")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+
+	assert.Panics(t, func() {
+		ginHandler.ServeHTTP(w, req)
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
