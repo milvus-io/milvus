@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -186,6 +187,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			return
+		}
+
+		if err = binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+			log.Warn("compress compaction result binlogs failed", zap.Error(err))
 			return
 		}
 
