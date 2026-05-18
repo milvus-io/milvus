@@ -196,5 +196,4 @@ func TestRegistry_SnapshotSegmentNodeStates(t *testing.T) {
 	assert.Equal(t, map[int64]SegmentState{2: SegmentStatePreparing}, stats[shardB].Segments[102].Nodes)
 	assert.Equal(t, map[int64]SegmentState{1: SegmentStatePreparing}, stats[shardC].Segments[103].Nodes)
 	assert.Equal(t, map[int64]SegmentState{2: SegmentStatePreparing}, stats[shardC].Segments[104].Nodes)
-
 }

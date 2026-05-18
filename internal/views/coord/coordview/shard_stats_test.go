@@ -44,7 +44,6 @@ func TestStats_PreparingOnly(t *testing.T) {
 			assert.Equal(t, SegmentStatePreparing, state)
 		}
 	}
-
 }
 
 func TestStats_EmptyPreparingView(t *testing.T) {
