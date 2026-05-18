@@ -24,7 +24,6 @@ const (
 	maxReceiveChanBatchConsumeNum = 100
 
 	readTaskQueueOutcomeScheduled = "scheduled"
-	readTaskQueueOutcomeDropped   = "dropped"
 	readTaskQueueOutcomeExpired   = "expired"
 )
 
@@ -302,9 +301,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask queuedTask, now time.Time)
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
-		result := s.policy.Pop(now)
-		s.dropTasks(result.dropped, now)
-		lastWaitingTask = result.task
+		lastWaitingTask = s.policy.Pop(now)
 		if lastWaitingTask.valid() {
 			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
 		}
@@ -326,14 +323,6 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 		s.updateWaitingTaskCounter(-1, -task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
 		task.Done(cleanupTaskError(task))
-	}
-}
-
-func (s *scheduler) dropTasks(tasks []queuedTask, now time.Time) {
-	for _, task := range tasks {
-		s.updateWaitingTaskCounter(-1, -task.NQ())
-		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeDropped)
-		task.Done(merr.WrapErrTooManyRequests(0, "dropped by query node read schedule policy"))
 	}
 }
 

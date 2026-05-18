@@ -68,19 +68,14 @@ type schedulePolicy interface {
 	Cleanup(now time.Time) []queuedTask
 
 	// Push add a new task into scheduler.
-	// Return the count of new task added (task may be chunked, merged or dropped)
+	// Return the count of new task added (task may be chunked or merged)
 	// 0 and an error will be returned if scheduler reaches some limit.
 	Push(task queuedTask) (int, error)
 
 	// Pop get the task next ready to run.
-	Pop(now time.Time) popResult
+	Pop(now time.Time) queuedTask
 
 	Len() int
-}
-
-type popResult struct {
-	task    queuedTask
-	dropped []queuedTask
 }
 
 type queuedTask struct {

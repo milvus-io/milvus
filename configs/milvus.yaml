@@ -577,7 +577,7 @@ queryNode:
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
     maxNQ: 16
-    nqMergeRatio: 3
+    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     topKMergeRatio: 20
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.

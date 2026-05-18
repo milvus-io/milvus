@@ -41,7 +41,7 @@ func TestPolicyCleanupExpiredTasks(t *testing.T) {
 			expired := policy.Cleanup(base.Add(20 * time.Millisecond))
 			assert.Len(t, expired, 1)
 			assert.Equal(t, 0, policy.Len())
-			assert.False(t, policy.Pop(base.Add(20*time.Millisecond)).task.valid())
+			assert.False(t, policy.Pop(base.Add(20*time.Millisecond)).valid())
 		})
 	}
 }
@@ -65,7 +65,7 @@ func TestPolicyCleanupCanceledTasks(t *testing.T) {
 
 			assert.Len(t, removed, 1)
 			assert.Equal(t, 0, policy.Len())
-			assert.False(t, policy.Pop(base).task.valid())
+			assert.False(t, policy.Pop(base).valid())
 		})
 	}
 }
@@ -87,7 +87,7 @@ func testCrossUserMerge(t *testing.T, policy schedulePolicy) {
 	nAfterMerge := n / 2
 	assert.Equal(t, nAfterMerge, policy.Len())
 	for i := 1; i <= nAfterMerge; i++ {
-		assert.True(t, policy.Pop(time.Now()).task.valid())
+		assert.True(t, policy.Pop(time.Now()).valid())
 		assert.Equal(t, nAfterMerge-i, policy.Len())
 	}
 
@@ -108,7 +108,7 @@ func testCrossUserMerge(t *testing.T, policy schedulePolicy) {
 	nAfterMerge = n / 4
 	assert.Equal(t, nAfterMerge, policy.Len())
 	for i := 1; i <= nAfterMerge; i++ {
-		assert.True(t, policy.Pop(time.Now()).task.valid())
+		assert.True(t, policy.Pop(time.Now()).valid())
 		assert.Equal(t, nAfterMerge-i, policy.Len())
 	}
 }
@@ -117,7 +117,7 @@ func testCrossUserMerge(t *testing.T, policy schedulePolicy) {
 func testCommonPolicyOperation(t *testing.T, policy schedulePolicy) {
 	// Empty policy assertion.
 	assert.Equal(t, 0, policy.Len())
-	assert.False(t, policy.Pop(time.Now()).task.valid())
+	assert.False(t, policy.Pop(time.Now()).valid())
 	assert.Equal(t, 0, policy.Len())
 
 	// Test no merge push pop.
@@ -134,7 +134,7 @@ func testCommonPolicyOperation(t *testing.T, policy schedulePolicy) {
 	}
 	// Test Pop
 	for i := 1; i <= n; i++ {
-		assert.True(t, policy.Pop(time.Now()).task.valid())
+		assert.True(t, policy.Pop(time.Now()).valid())
 		assert.Equal(t, n-i, policy.Len())
 	}
 
@@ -152,7 +152,7 @@ func testCommonPolicyOperation(t *testing.T, policy schedulePolicy) {
 	}
 	assert.Equal(t, n, policy.Len())
 	for i := 1; i <= n; i++ {
-		assert.True(t, policy.Pop(time.Now()).task.valid())
+		assert.True(t, policy.Pop(time.Now()).valid())
 		assert.Equal(t, n-i, policy.Len())
 	}
 
@@ -170,7 +170,7 @@ func testCommonPolicyOperation(t *testing.T, policy schedulePolicy) {
 	nAfterMerge := n / 2
 	assert.Equal(t, nAfterMerge, policy.Len())
 	for i := 1; i <= nAfterMerge; i++ {
-		assert.True(t, policy.Pop(time.Now()).task.valid())
+		assert.True(t, policy.Pop(time.Now()).valid())
 		assert.Equal(t, nAfterMerge-i, policy.Len())
 	}
 }

@@ -462,6 +462,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(16), nprobe)
 
 		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
+		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)
 		assert.Equal(t, int64(16), Params.MaxGroupNQ.GetAsInt64())
 		assert.Equal(t, 3.0, Params.NQMergeRatio.GetAsFloat())
 		assert.Equal(t, "fifo", Params.SchedulePolicyName.GetValue())

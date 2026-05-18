@@ -65,9 +65,9 @@ func (p *userTaskPollingPolicy) Push(task queuedTask) (int, error) {
 }
 
 // Pop get the task next ready to run.
-func (p *userTaskPollingPolicy) Pop(now time.Time) popResult {
+func (p *userTaskPollingPolicy) Pop(now time.Time) queuedTask {
 	expire := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskQueueExpire.GetAsDuration(time.Second)
-	return popResult{task: p.queue.pop(expire)}
+	return p.queue.pop(expire)
 }
 
 // Len get ready task counts.

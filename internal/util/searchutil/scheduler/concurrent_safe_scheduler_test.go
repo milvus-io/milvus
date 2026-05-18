@@ -166,8 +166,8 @@ func (s *SchedulerSuite) TestConsumeRecvChanUsesLoopTimestampForBatch() {
 	s.NoError(<-firstErrCh)
 	s.NoError(<-secondErrCh)
 
-	first := scheduler.policy.Pop(now).task
-	second := scheduler.policy.Pop(now).task
+	first := scheduler.policy.Pop(now)
+	second := scheduler.policy.Pop(now)
 	s.True(first.valid())
 	s.True(second.valid())
 	s.Equal(now, first.enqueueTime)

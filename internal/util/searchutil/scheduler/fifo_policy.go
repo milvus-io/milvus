@@ -43,8 +43,8 @@ func (p *fifoPolicy) Push(task queuedTask) (int, error) {
 }
 
 // Pop get the task next ready to run.
-func (p *fifoPolicy) Pop(now time.Time) popResult {
-	return popResult{task: p.queue.pop()}
+func (p *fifoPolicy) Pop(now time.Time) queuedTask {
+	return p.queue.pop()
 }
 
 // Len get ready task counts.
