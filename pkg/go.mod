@@ -41,7 +41,7 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.14-0.20260427080535-9dc9b3189baa
+	github.com/zilliztech/woodpecker v0.1.14-0.20260511032205-79ed5b7752a4
 	go.etcd.io/etcd/api/v3 v3.5.23
 	go.etcd.io/etcd/client/v3 v3.5.23
 	go.etcd.io/etcd/server/v3 v3.5.23
