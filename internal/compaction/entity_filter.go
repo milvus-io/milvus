@@ -26,8 +26,9 @@ type EntityFilterImpl struct {
 	currentTime time.Time
 	// commitTs is SegmentInfo.commit_timestamp for import/CDC segments.
 	// When non-zero, row timestamps in binlogs are stale (they predate the
-	// actual write time). isEntityExpired uses max(row_ts, commitTs) so that
-	// no row is prematurely expired due to a stale timestamp.
+	// actual write time). isEntityExpired and isEntityDeleted both use
+	// max(row_ts, commitTs) so that no row is prematurely expired and no
+	// pre-commit delete is applied.
 	commitTs typeutil.Timestamp
 
 	expiredCount int
@@ -87,10 +88,13 @@ func (filter *EntityFilterImpl) GetMissingDeleteCount() int {
 
 func (filter *EntityFilterImpl) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {
 	if deleteTs, ok := filter.deletedPkTs[pk]; ok {
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if pkTs < deleteTs {
+		// For import/CDC segments the binlog row_ts predates the actual commit time.
+		// A delete with del_ts < commit_ts must NOT take effect (the row did not exist
+		// at that time), so compare against the same effective ts that visibility and
+		// expiry use. Strict < is preserved so upserts (insert_ts == delete_ts) still
+		// keep the inserted row.
+		effectiveTs := tsoutil.EffectiveTimestamp(pkTs, filter.commitTs)
+		if effectiveTs < deleteTs {
 			return true
 		}
 	}

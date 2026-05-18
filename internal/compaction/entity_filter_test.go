@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestEntityFilterTaskSuite(t *testing.T) {
@@ -140,6 +141,51 @@ func (s *EntityFilterSuite) TestEntityFilterByTTLWithCommitTs() {
 		got := filter.Filtered("pk1", recentTs, expiredTimeMicros)
 		s.True(got, "ttl_field should expire the row when commitTs is 0")
 	})
+}
+
+// TestEntityFilterByDeleteWithCommitTs verifies that on import/CDC segments
+// (commitTs != 0), the delete predicate compares against max(row_ts, commitTs)
+// so that a delete with del_ts < commit_ts does NOT take effect.
+func (s *EntityFilterSuite) TestEntityFilterByDeleteWithCommitTs() {
+	const (
+		rowTs    = typeutil.Timestamp(100)
+		commitTs = typeutil.Timestamp(5000)
+	)
+	nowTime := time.Now()
+
+	tests := []struct {
+		description string
+		commitTs    typeutil.Timestamp
+		rowTs       typeutil.Timestamp
+		deleteTs    typeutil.Timestamp
+		expect      bool // true = deleted, false = kept
+	}{
+		// import segment cases (commitTs != 0)
+		{"pre-commit delete (del_ts < commit_ts) is ignored", commitTs, rowTs, 3000, false},
+		{"post-commit delete (commit_ts < del_ts) applies", commitTs, rowTs, 8000, true},
+		{"boundary: del_ts == commit_ts is kept (strict <)", commitTs, rowTs, commitTs, false},
+		// normal segment cases (commitTs == 0)
+		{"normal: delete after insert applies", 0, rowTs, 200, true},
+		{"normal: upsert same ts is kept (strict <)", 0, rowTs, rowTs, false},
+		{"normal: delete before insert is ignored", 0, rowTs, 50, false},
+	}
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			deletedPkTs := map[interface{}]typeutil.Timestamp{
+				"pk1": test.deleteTs,
+			}
+			filter := newEntityFilter(deletedPkTs, 0, nowTime, test.commitTs)
+			got := filter.Filtered("pk1", test.rowTs, -1)
+			s.Equal(test.expect, got)
+			if got {
+				s.Equal(1, filter.GetDeletedCount())
+				s.Equal(0, filter.GetExpiredCount())
+			} else {
+				s.Equal(0, filter.GetDeletedCount())
+			}
+		})
+	}
 }
 
 func getMilvusBirthday() time.Time {
