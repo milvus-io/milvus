@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -246,6 +247,7 @@ func (suite *ReaderSuite) TestError() {
 				return r, nil
 			}
 		})
+		cm.EXPECT().Size(mock.Anything, "dummy path").Return(int64(len(content)), nil).Maybe()
 
 		reader, err := NewReader(context.Background(), cm, schema, "dummy path", bufferSize, ',', "")
 		suite.Error(err)
@@ -344,6 +346,51 @@ func (suite *ReaderSuite) TestReadLoop() {
 	data, err = reader.Read()
 	suite.EqualError(io.EOF, err.Error())
 	suite.Nil(data)
+}
+
+func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "int32",
+				DataType: schemapb.DataType_Int32,
+			},
+		},
+	}
+	var contentBuilder strings.Builder
+	contentBuilder.WriteString("pk,int32\n")
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&contentBuilder, "%d,%d\n", i, i*10)
+	}
+	content := contentBuilder.String()
+	openCount := 0
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, "dummy path").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return importcommon.NewPrematureEOFReader(content, 18), nil
+		}
+		return importcommon.NewMockReader(content), nil
+	})
+
+	reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+	suite.NoError(err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(100, data.GetRowNum())
+	suite.Equal(int64(1), data.Data[100].GetRow(0))
+	suite.Equal(int32(1000), data.Data[101].GetRow(99))
+	suite.GreaterOrEqual(openCount, 2)
 }
 
 func TestCsvReader(t *testing.T) {
