@@ -42,7 +42,8 @@ default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
 # ForceMerge specific constants
-max_int64 = (1 << 63) - 1  # For automatic target_size calculation
+max_int64 = (1 << 63) - 1
+auto_target_size_mb = max_int64 // (1024 * 1024) + 1  # Triggers server auto target-size mode.
 default_max_size_mb = 1024  # Default segment max size in MB
 
 
@@ -209,8 +210,8 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_auto_target_size(self):
         """
-        target: test ForceMerge with automatic target_size (max_int64)
-        method: create collection, insert data, flush, compact with target_size=max_int64
+        target: test ForceMerge with automatic target_size
+        method: create collection, insert data, flush, compact with target_size above int64-safe MB threshold
         expected: Compaction completes successfully with auto-calculated optimal size
         note: L3 - requires config change (segment.maxSize=64MB) to trigger actual force merge
         """
@@ -231,7 +232,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. compact with auto target_size
-        compact_id = self.compact(client, collection_name, target_size=max_int64)[0]
+        compact_id = self.compact(client, collection_name, target_size=auto_target_size_mb)[0]
         # 4. wait for compaction to complete
         cost = 180
         start = time.time()
@@ -462,7 +463,9 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
 
-        # 3. load and get segment count before compaction using MilvusClient method
+        # 3. reload and get stable segment count before compaction
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
+        self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         segments_before = client.list_loaded_segments(collection_name)
         segment_count_before = len(segments_before)
@@ -482,7 +485,8 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
             if time.time() - start > cost:
                 raise Exception(f"Compaction cost more than {cost}s")
 
-        # 6. release and reload to get updated segment info
+        # 6. wait for the compacted segment index, then reload to get updated segment info
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         segments_after = client.list_loaded_segments(collection_name)
@@ -498,8 +502,8 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_max_int64_overflow(self):
         """
-        target: test ForceMerge with max_int64 targetSize doesn't cause overflow
-        method: create collection, insert data, compact with target_size=max_int64
+        target: test ForceMerge with huge targetSize doesn't cause overflow
+        method: create collection, insert data, compact with target_size above int64-safe MB threshold
         expected: Compaction completes successfully (auto-calculate mode)
         note: L3 - This verifies PR #47327 fix for integer overflow when
               targetSizeBytes = targetSize * 1024 * 1024
@@ -523,10 +527,10 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
             log.info(f"Inserted batch {batch + 1}/3")
-        # 3. compact with max_int64 target_size (should trigger auto-calculate mode)
+        # 3. compact with huge target_size (should trigger auto-calculate mode)
         # Before fix: would fail with overflow error
         # After fix: should succeed
-        compact_id = self.compact(client, collection_name, target_size=max_int64)[0]
+        compact_id = self.compact(client, collection_name, target_size=auto_target_size_mb)[0]
         # 4. wait for compaction to complete
         cost = 180
         start = time.time()

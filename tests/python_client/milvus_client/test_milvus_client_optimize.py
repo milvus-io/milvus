@@ -454,7 +454,9 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
 
-        # Get segment count before optimize
+        # Get stable segment count before optimize
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
+        self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         segments_before = client.list_loaded_segments(collection_name)
         segment_count_before = len(segments_before)
@@ -465,6 +467,7 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
         assert result.status == "success"
 
         # Release and reload to get updated segment info
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=300)
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         segments_after = client.list_loaded_segments(collection_name)
