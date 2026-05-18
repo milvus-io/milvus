@@ -1037,7 +1037,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
