@@ -90,7 +90,7 @@ class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. compact with target_size less than maxSize
-        error = {ct.err_code: 1, ct.err_msg: "target_size"}
+        error = {ct.err_code: 1100, ct.err_msg: "targetSize"}
         self.compact(
             client,
             collection_name,
