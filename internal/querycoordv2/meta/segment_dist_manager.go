@@ -31,6 +31,7 @@ import (
 )
 
 type segDistCriterion struct {
+	// Callers should not combine multiple node-scoped filters in one query.
 	nodes          []int64
 	collectionID   int64
 	channel        string
@@ -264,17 +265,15 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 		return true
 	}
 
-	var candidates []nodeSegments
+	var ret []*Segment
 	if criterion.nodes != nil {
-		candidates = lo.Map(criterion.nodes, func(nodeID int64, _ int) nodeSegments {
-			return m.segments[nodeID]
-		})
-	} else {
-		candidates = lo.Values(m.segments)
+		for _, nodeID := range criterion.nodes {
+			ret = append(ret, m.segments[nodeID].Filter(criterion, mergedFilters)...)
+		}
+		return ret
 	}
 
-	var ret []*Segment
-	for _, nodeSegments := range candidates {
+	for _, nodeSegments := range m.segments {
 		ret = append(ret, nodeSegments.Filter(criterion, mergedFilters)...)
 	}
 	return ret
