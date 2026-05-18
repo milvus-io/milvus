@@ -15,6 +15,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -119,5 +120,7 @@ func (req *cLoadFieldDataRequest) Release() {
 }
 
 type ReopenRequest struct {
-	LoadInfo *querypb.SegmentLoadInfo
+	LoadInfo      *querypb.SegmentLoadInfo
+	Schema        *schemapb.CollectionSchema
+	SchemaVersion uint64
 }

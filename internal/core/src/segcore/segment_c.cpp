@@ -183,25 +183,51 @@ NewSegmentWithLoadInfo(CCollection collection,
     }
 }
 
+milvus::SchemaPtr
+ParseReopenSchema(const void* schema_blob,
+                  const int64_t schema_length,
+                  const uint64_t schema_version) {
+    AssertInfo(schema_blob != nullptr, "schema is null");
+    AssertInfo(schema_length > 0, "schema length must be positive");
+
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_blob, schema_length);
+    AssertInfo(suc, "parse schema proto failed");
+    auto schema = milvus::Schema::ParseFrom(collection_schema);
+    schema->set_schema_version(schema_version);
+    return schema;
+}
+
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,
                    const uint8_t* load_info_blob,
-                   const int64_t load_info_length) {
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version) {
     AssertInfo(load_info_blob, "load info is null");
     milvus::proto::segcore::SegmentLoadInfo load_info;
     auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
     AssertInfo(suc, "unmarshal load info failed");
+    auto schema = ParseReopenSchema(schema_blob, schema_length, schema_version);
 
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
     auto future = milvus::futures::Future<bool>::async(
         milvus::futures::getLoadCPUExecutor(),
         milvus::futures::ExecutePriority::NORMAL,
-        [c_trace, segment, load_info = std::move(load_info)](
+        [c_trace,
+         segment,
+         load_info = std::move(load_info),
+         schema = std::move(schema)](
             folly::CancellationToken cancel_token) -> bool* {
             milvus::OpContext op_ctx(cancel_token);
-            segment->Reopen(&op_ctx, load_info);
+            if (schema) {
+                segment->Reopen(&op_ctx, load_info, schema);
+            } else {
+                segment->Reopen(&op_ctx, load_info);
+            }
             return nullptr;
         },
         milvus::futures::PoolType::kLoad);

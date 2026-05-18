@@ -92,11 +92,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
+		if loadMeta.GetSchemaVersion() > collection.schemaVersion.Load() {
 			// the schema may be changed even the collection is loaded
 			collection.schema.Store(schema)
 			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
-			collection.schemaVersion = loadMeta.GetSchemaVersion()
+			collection.schemaVersion.Store(loadMeta.GetSchemaVersion())
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
@@ -140,6 +140,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return err
 	}
 	collection.schema.Store(schema)
+	collection.schemaVersion.Store(version)
 	return nil
 }
 
@@ -200,7 +201,7 @@ type Collection struct {
 	schema        atomic.Pointer[schemapb.CollectionSchema]
 	isGpuIndex    bool
 	loadFields    typeutil.Set[int64]
-	schemaVersion uint64
+	schemaVersion *atomic.Uint64
 
 	refCount *atomic.Uint32
 }
@@ -232,6 +233,10 @@ func (c *Collection) GetCCollection() *segcore.CCollection {
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema.Load()
+}
+
+func (c *Collection) SchemaVersion() uint64 {
+	return c.schemaVersion.Load()
 }
 
 // IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
@@ -330,7 +335,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		dbName:        loadMetaInfo.GetDbName(),
 		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		schemaVersion: loadMetaInfo.GetSchemaVersion(),
+		schemaVersion: atomic.NewUint64(loadMetaInfo.GetSchemaVersion()),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,

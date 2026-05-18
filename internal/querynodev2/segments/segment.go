@@ -1394,7 +1394,9 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	defer s.ptrLock.Unpin()
 
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo: newLoadInfo,
+		LoadInfo:      newLoadInfo,
+		Schema:        s.collection.Schema(),
+		SchemaVersion: s.collection.SchemaVersion(),
 	})
 	if err != nil {
 		return err

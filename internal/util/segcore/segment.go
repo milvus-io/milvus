@@ -346,13 +346,29 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return err
 	}
 
+	var schemaBlob []byte
+	if req.Schema != nil {
+		schemaBlob, err = proto.Marshal(req.Schema)
+		if err != nil {
+			return err
+		}
+	}
+	defer runtime.KeepAlive(schemaBlob)
+
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
+			var schemaPtr unsafe.Pointer
+			if len(schemaBlob) > 0 {
+				schemaPtr = unsafe.Pointer(&schemaBlob[0])
+			}
 			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
 				traceCtx.ctx,
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
 				C.int64_t(len(loadInfoBlob)),
+				schemaPtr,
+				C.int64_t(len(schemaBlob)),
+				C.uint64_t(req.SchemaVersion),
 			))
 		},
 		cgo.WithName("segment-reopen"),

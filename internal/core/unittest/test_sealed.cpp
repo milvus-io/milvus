@@ -3150,6 +3150,41 @@ TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
     EXPECT_TRUE(segment->HasFieldData(pk_id));
 }
 
+TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(FieldId(100));
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(200);
+
+    auto segment = CreateSealedSegment(old_schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(50001);
+    proto.set_num_of_rows(1);
+    auto* pk_binlog = proto.add_binlog_paths();
+    pk_binlog->set_fieldid(100);
+    auto* pk_log = pk_binlog->add_binlogs();
+    pk_log->set_log_path("/path/to/pk");
+    pk_log->set_entries_num(1);
+    sealed->SetLoadInfo(proto);
+
+    try {
+        sealed->Reopen(new_schema);
+    } catch (...) {
+    }
+
+    auto snapshot = sealed->TestGetSegmentLoadInfo();
+    EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));
+}
+
 // Reproducer for issue #49076.
 //
 // Reopen on a sealed segment does:

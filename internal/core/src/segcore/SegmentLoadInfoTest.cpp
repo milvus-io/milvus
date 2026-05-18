@@ -1073,6 +1073,72 @@ TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithDefaultFields) {
     EXPECT_TRUE(diff.HasChanges());
 }
 
+TEST_F(SegmentLoadInfoTest, CopyPreservesDefaultFilledFields) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
+
+    SegmentLoadInfo copied(current_info);
+    EXPECT_TRUE(copied.IsFieldFilledWithDefault(FieldId(101)));
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(101);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/field101");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = copied.ComputeDiff(new_info);
+
+    bool found_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        (void)binlog;
+        for (auto field_id : field_ids) {
+            found_replace = found_replace || field_id == FieldId(101);
+        }
+    }
+    EXPECT_TRUE(found_replace);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffClearsDefaultFilledWhenDataSourceAppears) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* field_binlog = new_proto.add_binlog_paths();
+    field_binlog->set_fieldid(101);
+    auto* field_log = field_binlog->add_binlogs();
+    field_log->set_log_path("/path/to/field101");
+    field_log->set_entries_num(1000);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id, FieldId(101));
+    }
+    EXPECT_FALSE(new_info.IsFieldFilledWithDefault(FieldId(101)));
+}
+
 // ==================== Text Index Tests ====================
 
 // Helper: create a schema with varchar field that has enable_match=true
@@ -2804,6 +2870,40 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropsManifestFieldRemovedFromSchema) {
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, SchemaReopenLoadsNewFieldWithBinlog) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* field_binlog = new_proto.add_binlog_paths();
+    field_binlog->set_fieldid(101);
+    auto* field_log = field_binlog->add_binlogs();
+    field_log->set_log_path("/path/to/field101");
+    field_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, MakeSchemaWithFieldIds({100}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100, 101}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool found_load = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_load) {
+        (void)binlog;
+        for (auto field_id : field_ids) {
+            found_load = found_load || field_id == FieldId(101);
+        }
+    }
+    EXPECT_TRUE(found_load);
+    for (auto field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id, FieldId(101));
+    }
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsUsesNewSchema) {

@@ -2133,6 +2133,16 @@ SegmentGrowingImpl::Reopen(
 }
 
 void
+SegmentGrowingImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SchemaPtr new_schema) {
+    ThrowInfo(milvus::UnexpectedError,
+              "Unexpected reopening growing segment {} with load info",
+              id_);
+}
+
+void
 SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
                          milvus::OpContext* op_ctx) {
     // Convert load_info_ (SegmentLoadInfo) to LoadFieldDataInfo

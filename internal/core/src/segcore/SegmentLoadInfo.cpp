@@ -671,6 +671,19 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
     std::set<FieldId> new_info_fields = collect_data_fields(new_info);
     std::set<FieldId> current_fields = collect_data_fields(*this);
 
+    new_info.fields_filled_with_default_ = fields_filled_with_default_;
+    for (const auto& field_id : new_info_fields) {
+        new_info.fields_filled_with_default_.erase(field_id);
+    }
+    for (auto it = new_info.fields_filled_with_default_.begin();
+         it != new_info.fields_filled_with_default_.end();) {
+        if (!new_info.HasFieldInSchema(*it)) {
+            it = new_info.fields_filled_with_default_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     // Build "current handled" set:
     // - Fields with data source in current
     // - Fields already filled with default values

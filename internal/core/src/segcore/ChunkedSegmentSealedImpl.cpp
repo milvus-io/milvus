@@ -2946,6 +2946,25 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 }
 
 void
+ChunkedSegmentSealedImpl::RecordDefaultFieldsFilled(
+    const std::vector<FieldId>& field_ids) {
+    if (field_ids.empty()) {
+        return;
+    }
+
+    auto current = std::atomic_load(&segment_load_info_);
+    std::shared_ptr<const SegmentLoadInfo> next;
+    do {
+        auto copy = std::make_shared<SegmentLoadInfo>(*current);
+        for (auto field_id : field_ids) {
+            copy->SetFieldFilledWithDefault(field_id);
+        }
+        next = std::const_pointer_cast<const SegmentLoadInfo>(copy);
+    } while (!std::atomic_compare_exchange_weak(
+        &segment_load_info_, &current, next));
+}
+
+void
 ChunkedSegmentSealedImpl::RecordTextIndexCreated(FieldId field_id) {
     auto current = std::atomic_load(&segment_load_info_);
     std::shared_ptr<const SegmentLoadInfo> next;
@@ -4292,30 +4311,66 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
 }
 
 void
-ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
+ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
+    if (!sch) {
+        return;
+    }
+
     std::unique_lock lck(mutex_);
+    if (sch->get_schema_version() <= schema_->get_schema_version()) {
+        return;
+    }
 
     field_data_ready_bitset_.resize(sch->size());
     index_ready_bitset_.resize(sch->size());
     binlog_index_bitset_.resize(sch->size());
+    schema_ = std::move(sch);
+}
 
-    auto absent_fields = sch->AbsentFields(*schema_);
-    for (const auto& field_meta : *absent_fields) {
-        fill_empty_field(field_meta);
+void
+ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
+    if (!sch) {
+        return;
     }
 
-    schema_ = sch;
-
-    auto row_count = num_rows_.value_or(0);
-    for (const auto& field_meta : *absent_fields) {
-        EnsureArrayOffsetsForStructField(field_meta, row_count);
+    milvus::OpContext op_ctx;
+    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    if (sch->get_schema_version() <= schema_->get_schema_version()) {
+        return;
     }
+
+    auto current = std::atomic_load(&segment_load_info_);
+    LoadDiff diff;
+    diff.fields_to_fill_default =
+        current->GetFieldsToFillDefaultForSchema(sch);
+    SegmentLoadInfo new_local(current->GetProto(), sch);
+    new_local.SetFieldsFilledWithDefault(
+        current->GetDefaultFilledFieldsForNewInfo(new_local));
+    LOG_INFO("Schema-only reopen segment {} with diff {}", id_, diff.ToString());
+
+    auto published = std::make_shared<const SegmentLoadInfo>(new_local);
+    std::atomic_store(&segment_load_info_, published);
+    use_take_for_output_.store(published->GetUseTakeForOutput(),
+                               std::memory_order_relaxed);
+
+    ApplySchemaForReopen(sch);
+    ApplyLoadDiff(&op_ctx, new_local, diff);
+
+    LOG_INFO("Schema-only reopen segment {} done", id_);
 }
 
 void
 ChunkedSegmentSealedImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
+    Reopen(op_ctx, new_load_info, nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SchemaPtr new_schema) {
     // reopen_mutex_ serializes top-level writers of segment_load_info_.
     // It is held across ApplyLoadDiff so two Reopens never interleave their
     // resource mutations. Readers are unaffected — they snapshot via
@@ -4323,26 +4378,25 @@ ChunkedSegmentSealedImpl::Reopen(
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
     auto current = std::atomic_load(&segment_load_info_);
+    auto target_schema = new_schema ? std::move(new_schema) : schema_;
 
-    SegmentLoadInfo new_local(new_load_info, schema_);
-    // Carry runtime-only state forward so subsequent Reopens don't
-    // re-schedule CreateTextIndex on a field whose temp index was built.
+    SegmentLoadInfo current_mutable(*current);
+    SegmentLoadInfo new_local(new_load_info, target_schema);
     for (auto fid : current->GetCreatedTextIndexes()) {
         new_local.SetTextIndexCreated(fid);
     }
 
-    // Publish an independent immutable copy. Subsequent mutations to
-    // `new_local` by ComputeDiff/ApplyLoadDiff do NOT propagate to the
-    // published snapshot.
+    auto diff = current_mutable.ComputeDiff(new_local);
+    new_local.SetFieldsFilledWithDefault(
+        current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
+
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     std::atomic_store(&segment_load_info_, published);
     use_take_for_output_.store(published->GetUseTakeForOutput(),
                                std::memory_order_relaxed);
 
-    // compute load diff (ComputeDiff requires non-const receiver; copy current).
-    SegmentLoadInfo current_mutable(*current);
-    auto diff = current_mutable.ComputeDiff(new_local);
-    LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
+    ApplySchemaForReopen(target_schema);
     ApplyLoadDiff(op_ctx, new_local, diff);
 
     LOG_INFO("Reopen segment {} done", id_);
@@ -4495,6 +4549,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     // fill default values for fields without data sources (schema evolution)
     if (!diff.fields_to_fill_default.empty()) {
         FillDefaultValueFields(diff.fields_to_fill_default);
+        RecordDefaultFieldsFilled(diff.fields_to_fill_default);
     }
 
     // create text indexes from raw data
@@ -5189,13 +5244,8 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 void
 ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
                                milvus::OpContext* op_ctx) {
-    // Serialize with Reopen(pb)/SetLoadInfo. ApplyLoadDiff operates on a
-    // mutable local copy; any updates it needs to publish to
-    // segment_load_info_ (currently only CreatedTextIndexes, via
-    // RecordTextIndexCreated) go through the atomic member directly. We do
-    // NOT re-publish mutable_copy at the end — doing so would clobber those
-    // in-flight RecordTextIndexCreated updates. This matches Reopen(pb)'s
-    // pattern.
+    // Serialize with Reopen(pb)/SetLoadInfo. Runtime-only updates produced by
+    // ApplyLoadDiff are committed through COW helpers after the data is loaded.
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
     auto snapshot = std::atomic_load(&segment_load_info_);
@@ -5203,8 +5253,12 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
+    for (auto fid : snapshot->GetCreatedTextIndexes()) {
+        mutable_copy.SetTextIndexCreated(fid);
+    }
     auto diff = mutable_copy.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
+
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);

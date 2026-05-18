@@ -238,19 +238,26 @@ void ChunkedSegmentSealedImpl::Load(
 **Reopen (Incremental Update):**
 ```cpp
 void ChunkedSegmentSealedImpl::Reopen(
-    const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SchemaPtr new_schema) {
 
-    SegmentLoadInfo new_seg_load_info(new_load_info, schema_);
+    auto current = std::atomic_load(&segment_load_info_);
+    SegmentLoadInfo current_mutable(*current);
+    SegmentLoadInfo new_seg_load_info(new_load_info, new_schema);
 
-    // Store old info and update to new
-    SegmentLoadInfo current(segment_load_info_);
-    segment_load_info_ = new_seg_load_info;
-
-    // Compute diff between old and new
-    auto diff = current.ComputeDiff(new_seg_load_info);
+    auto diff = current_mutable.ComputeDiff(new_seg_load_info);
+    std::atomic_store(&segment_load_info_,
+                      std::make_shared<const SegmentLoadInfo>(new_seg_load_info));
+    ApplySchemaForReopen(new_schema);
     ApplyLoadDiff(new_seg_load_info, diff);
 }
 ```
+
+**Schema-aware Reopen:**
+
+Schema changes no longer use a separate sealed-segment path that directly fills missing fields. QueryNode passes the latest collection schema together with `SegmentLoadInfo` into segcore, so `ComputeDiff()` can see newly added or removed fields while computing load/default-fill/drop actions.
+
+For schema-only lazy checks from query/retrieve plans, `Reopen(SchemaPtr)` reuses the current load info and computes a diff against the newer schema. Default-value filling, field data drops, and index drops are therefore represented through `LoadDiff` and executed by `ApplyLoadDiff()`.
 
 ## Storage Mode Support
 
@@ -392,13 +399,17 @@ message SegmentLoadInfo {
 
 The order of operations in `ApplyLoadDiff()` is critical:
 
-1. **Load new indexes** - Can run in parallel
-2. **Reload columns** - MUST happen before dropping indexes
-3. **Drop indexes** - MUST happen after reload to maintain data availability
-4. **Load column groups** - Eager and lazy loading
-5. **Load field binlogs** - For Storage V1/V2
-6. **Fill default values** - For schema evolution
-7. **Drop field data** - Clean up removed fields
+1. **Load/replace indexes** - Load new indexes or replacements first
+2. **Reload columns** - Restore fields that lost raw-data index coverage
+3. **Load/replace column groups** - Eager and lazy loading for Storage V3
+4. **Load/replace field binlogs** - For Storage V1/V2
+5. **Drop indexes** - Drop old indexes only after replacement data/indexes are available
+6. **Load text/JSON stats indexes** - Apply pre-built text and JSON stats changes
+7. **Fill default values** - For schema evolution fields without data sources
+8. **Create text indexes from raw data** - For enable_match fields without pre-built index files
+9. **Drop field data** - Clean up removed fields
+
+Current implementation loads or replaces raw field data before dropping old indexes, so queries can always fall back to a valid data source during index transitions.
 
 ## Testing
 

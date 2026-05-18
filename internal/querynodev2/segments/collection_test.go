@@ -59,6 +59,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
 	})
 
 	s.Run("not_exist_collection", func() {

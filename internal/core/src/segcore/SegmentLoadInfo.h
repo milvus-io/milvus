@@ -420,6 +420,7 @@ class SegmentLoadInfo {
         : info_(other.info_),
           schema_(other.schema_),
           column_groups_(other.column_groups_),
+          fields_filled_with_default_(other.fields_filled_with_default_),
           created_text_indexes_(other.created_text_indexes_) {
         BuildCache();
     }
@@ -435,6 +436,8 @@ class SegmentLoadInfo {
               std::move(other.converted_field_index_cache_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)),
+          fields_filled_with_default_(
+              std::move(other.fields_filled_with_default_)),
           created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
@@ -448,6 +451,7 @@ class SegmentLoadInfo {
             info_ = other.info_;
             schema_ = other.schema_;
             column_groups_ = other.column_groups_;
+            fields_filled_with_default_ = other.fields_filled_with_default_;
             created_text_indexes_ = other.created_text_indexes_;
             BuildCache();
         }
@@ -467,6 +471,8 @@ class SegmentLoadInfo {
                 std::move(other.converted_field_index_cache_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            fields_filled_with_default_ =
+                std::move(other.fields_filled_with_default_);
             created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
@@ -881,6 +887,40 @@ class SegmentLoadInfo {
         return info_.jsonkeystatslogs();
     }
 
+    // ==================== Default-Filled Fields Tracking ====================
+
+    void
+    SetFieldFilledWithDefault(FieldId field_id) {
+        fields_filled_with_default_.insert(field_id);
+    }
+
+    void
+    ClearFieldFilledWithDefault(FieldId field_id) {
+        fields_filled_with_default_.erase(field_id);
+    }
+
+    [[nodiscard]] bool
+    IsFieldFilledWithDefault(FieldId field_id) const {
+        return fields_filled_with_default_.find(field_id) !=
+               fields_filled_with_default_.end();
+    }
+
+    [[nodiscard]] const std::set<FieldId>&
+    GetFieldsFilledWithDefault() const {
+        return fields_filled_with_default_;
+    }
+
+    void
+    SetFieldsFilledWithDefault(const std::set<FieldId>& field_ids) {
+        fields_filled_with_default_ = field_ids;
+    }
+
+    [[nodiscard]] std::set<FieldId>
+    GetDefaultFilledFieldsForNewInfo(const SegmentLoadInfo& new_info) const;
+
+    [[nodiscard]] std::vector<FieldId>
+    GetFieldsToFillDefaultForSchema(const SchemaPtr& new_schema) const;
+
     // ==================== Created Text Indexes Tracking ====================
 
     void
@@ -1086,6 +1126,9 @@ class SegmentLoadInfo {
 
     void
     ComputeDiffJsonKeyStats(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    [[nodiscard]] std::set<FieldId>
+    CollectDataFields() const;
 
     ProtoType info_;
 
