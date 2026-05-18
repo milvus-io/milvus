@@ -54,7 +54,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
 	}
-	retryableReader := common.NewRetryableReader(ctx, path, cmReader)
+	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, cmReader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
