@@ -25,6 +25,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -1548,6 +1549,135 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 // balanceFragmentsToSegments correctly passes storageConfig and specExtfs
 // (built from parsedSpec) to SampleExternalFieldSizes. This is the core change
 // that eliminates the dependency on C++ LoonFFIPropertiesSingleton.
+func (s *RefreshExternalCollectionTaskSuite) TestEstimateFunctionOutputBytesPerRow_NoOutputs() {
+	bytes, err := estimateFunctionOutputBytesPerRow(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	})
+
+	s.NoError(err)
+	s.Equal(int64(0), bytes)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestEstimateFunctionOutputBytesPerRow_VectorOutputs() {
+	bytes, err := estimateFunctionOutputBytesPerRow(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:          101,
+				Name:             "float_vec",
+				DataType:         schemapb.DataType_FloatVector,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+			},
+			{
+				FieldID:          102,
+				Name:             "int8_vec",
+				DataType:         schemapb.DataType_Int8Vector,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+			},
+			{
+				FieldID:          103,
+				Name:             "binary_vec",
+				DataType:         schemapb.DataType_BinaryVector,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: "dim", Value: "64"}},
+			},
+		},
+	})
+
+	s.NoError(err)
+	s.Equal(int64(16+8+8), bytes)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestEstimateFunctionOutputBytesPerRow_ScalarOutputs() {
+	bytes, err := estimateFunctionOutputBytesPerRow(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "score", DataType: schemapb.DataType_Int64, IsFunctionOutput: true},
+			{
+				FieldID:          102,
+				Name:             "label",
+				DataType:         schemapb.DataType_VarChar,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: "max_length", Value: "20"}},
+			},
+		},
+	})
+
+	s.NoError(err)
+	s.Equal(int64(8+20), bytes)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestEstimateFunctionOutputBytesPerRow_InvalidOutputField() {
+	_, err := estimateFunctionOutputBytesPerRow(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "bad_text", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+		},
+	})
+
+	s.Error(err)
+	s.Contains(err.Error(), "estimate function output field bad_text")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_AddsFunctionOutputMemorySize() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+				{
+					FieldID:          101,
+					Name:             "embedding",
+					DataType:         schemapb.DataType_FloatVector,
+					IsFunctionOutput: true,
+					TypeParams:       []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+				},
+				{
+					FieldID:          102,
+					Name:             "scalar_output",
+					DataType:         schemapb.DataType_VarChar,
+					IsFunctionOutput: true,
+					TypeParams:       []*commonpb.KeyValuePair{{Key: "max_length", Value: "20"}},
+				},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 64}, nil).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{{FragmentID: 1, RowCount: 10}}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Len(result[0].GetBinlogs(), 1)
+	s.Len(result[0].GetBinlogs()[0].GetBinlogs(), 1)
+	s.Equal(int64((64+16+20)*10), result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PassesStorageConfigAndSpecExtfs() {
 	paramtable.Init()
 

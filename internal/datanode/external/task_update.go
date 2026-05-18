@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func ensureContext(ctx context.Context) error {
@@ -580,6 +581,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
 	segmentAvgBytes := make([]int64, len(works))
 	var fallbackAvg int64
+	functionOutputAvgBytes, err := estimateFunctionOutputBytesPerRow(t.req.GetSchema())
+	if err != nil {
+		return nil, err
+	}
 
 	sampleOne := func(manifestPath string) (int64, bool) {
 		fieldSizes, err := packed.SampleExternalFieldSizes(
@@ -657,7 +662,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	// Phase 4: Build result and mappings (sequential, lightweight)
 	result := make([]*datapb.SegmentInfo, 0, len(works))
 	for i, work := range works {
-		memorySize := segmentAvgBytes[i] * work.rowCount
+		memorySize := (segmentAvgBytes[i] + functionOutputAvgBytes) * work.rowCount
 		seg := &datapb.SegmentInfo{
 			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
@@ -752,6 +757,26 @@ func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.Collect
 			},
 		},
 	}
+}
+
+// estimateFunctionOutputBytesPerRow computes the per-row memory estimate for
+// fields generated during refresh. These fields are not present in external
+// source samples, so add them explicitly to the fake binlog memory size.
+func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64, error) {
+	var total int64
+	for _, field := range schema.GetFields() {
+		if !field.GetIsFunctionOutput() {
+			continue
+		}
+		size, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{field},
+		})
+		if err != nil {
+			return 0, fmt.Errorf("estimate function output field %s: %w", field.GetName(), err)
+		}
+		total += int64(size)
+	}
+	return total, nil
 }
 
 // sumFieldSizes computes total avgBytesPerRow from per-field sampling results.
