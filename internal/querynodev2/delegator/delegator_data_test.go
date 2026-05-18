@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1639,6 +1640,56 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delegator.deleteBuffer.UnRegister(uint64(21))
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
+}
+
+func (s *DelegatorDataSuite) TestProcessDeleteRecordsReturnsForwardStats() {
+	candidate := pkoracle.NewBloomFilterSet(100, 10, commonpb.SegmentState_Sealed)
+	records := []*deletebuffer.Item{
+		{
+			Ts: 100,
+			Data: []deletebuffer.BufferItem{
+				{
+					PartitionID: 10,
+					DeleteData: storage.DeleteData{
+						Pks: storage.NewInt64PrimaryKeys([]int64{1, 2}),
+						Tss: []uint64{101, 102},
+					},
+				},
+				{
+					PartitionID: 11,
+					DeleteData: storage.DeleteData{
+						Pks: storage.NewInt64PrimaryKeys([]int64{3}),
+						Tss: []uint64{103},
+					},
+				},
+			},
+		},
+		{
+			Ts: 200,
+			Data: []deletebuffer.BufferItem{
+				{
+					PartitionID: common.AllPartitionsID,
+					DeleteData: storage.DeleteData{
+						Pks: storage.NewInt64PrimaryKeys([]int64{4}),
+						Tss: []uint64{104},
+					},
+				},
+			},
+		},
+	}
+
+	var forwardedRows int64
+	forwarder := NewBufferedForwarder(1<<20, func(pks storage.PrimaryKeys, tss []uint64) error {
+		forwardedRows += int64(pks.Len())
+		return nil
+	})
+
+	stats, err := s.delegator.processDeleteRecords(candidate, records, forwarder)
+	s.NoError(err)
+	s.NoError(forwarder.Flush())
+	s.Equal(int64(4), stats.readDeleteRowCount)
+	s.Equal(int64(3), stats.forwardDeleteRowCount)
+	s.Equal(int64(3), forwardedRows)
 }
 
 // TestLoadSegmentsDoesNotBlockProcessDelete verifies that the 3-phase loadStreamDelete

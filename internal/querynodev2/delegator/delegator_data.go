@@ -848,18 +848,23 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 	).Set(float64(totalSize))
 }
 
+type deleteForwardStats struct {
+	readDeleteRowCount    int64
+	forwardDeleteRowCount int64
+}
+
 // processDeleteRecords performs BF checks on delete buffer records and forwards matching deletes
 // via the buffered forwarder. Does NOT require any lock to be held.
 // When candidate has no stats (PkCandidateExist() == false), all deletes are forwarded (broadcast mode).
-// Returns the number of timestamp-hit and bloom-filter-hit rows.
 func (sd *shardDelegator) processDeleteRecords(
 	candidate *pkoracle.BloomFilterSet,
 	records []*deletebuffer.Item,
 	forwarder *BufferForwarder,
-) (tsHit, bfHit int64, err error) {
+) (deleteForwardStats, error) {
+	stats := deleteForwardStats{}
 	for _, entry := range records {
 		for _, record := range entry.Data {
-			tsHit += int64(len(record.DeleteData.Pks))
+			stats.readDeleteRowCount += int64(len(record.DeleteData.Pks))
 			if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 				continue
 			}
@@ -874,9 +879,9 @@ func (sd *shardDelegator) processDeleteRecords(
 				// When BF not initialized (bloom filter disabled), forward all deletes
 				if !candidate.PkCandidateExist() {
 					for i := idx; i < endIdx; i++ {
-						bfHit++
-						if err = forwarder.Buffer(pks[i], record.DeleteData.Tss[i]); err != nil {
-							return tsHit, bfHit, err
+						stats.forwardDeleteRowCount++
+						if err := forwarder.Buffer(pks[i], record.DeleteData.Tss[i]); err != nil {
+							return stats, err
 						}
 					}
 					continue
@@ -886,16 +891,16 @@ func (sd *shardDelegator) processDeleteRecords(
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
 					if hit {
-						bfHit++
-						if err = forwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i]); err != nil {
-							return tsHit, bfHit, err
+						stats.forwardDeleteRowCount++
+						if err := forwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i]); err != nil {
+							return stats, err
 						}
 					}
 				}
 			}
 		}
 	}
-	return tsHit, bfHit, nil
+	return stats, nil
 }
 
 // segDeleteSnapshot holds the snapshotted delete buffer entries for a segment,
@@ -970,7 +975,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
 		start := time.Now()
-		tsHit, bfHit, err := sd.processDeleteRecords(candidate, snapshots[i].records, forwarders[i])
+		stats, err := sd.processDeleteRecords(candidate, snapshots[i].records, forwarders[i])
 		if err != nil {
 			return err
 		}
@@ -978,9 +983,9 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			zap.String("channel", info.InsertChannel),
 			zap.Int64("segmentID", info.GetSegmentID()),
 			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
-			zap.Int64("tsHitDeleteRowNum", tsHit),
-			zap.Int64("bfHitDeleteRowNum", bfHit),
-			zap.Int64("bfCost", time.Since(start).Milliseconds()),
+			zap.Int64("readDeleteRowNum", stats.readDeleteRowCount),
+			zap.Int64("forwardDeleteRowNum", stats.forwardDeleteRowCount),
+			zap.Int64("cost", time.Since(start).Milliseconds()),
 		)
 	}
 
@@ -1003,16 +1008,16 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		newRecords := sd.deleteBuffer.ListAfter(catchUpTs)
 		if len(newRecords) > 0 {
 			start := time.Now()
-			tsHit, bfHit, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
+			stats, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
 			if err != nil {
 				return err
 			}
 			log.Info("forward delete to worker (phase 3: catch-up)...",
 				zap.String("channel", info.InsertChannel),
 				zap.Int64("segmentID", info.GetSegmentID()),
-				zap.Int64("tsHitDeleteRowNum", tsHit),
-				zap.Int64("bfHitDeleteRowNum", bfHit),
-				zap.Int64("bfCost", time.Since(start).Milliseconds()),
+				zap.Int64("readDeleteRowNum", stats.readDeleteRowCount),
+				zap.Int64("forwardDeleteRowNum", stats.forwardDeleteRowCount),
+				zap.Int64("cost", time.Since(start).Milliseconds()),
 			)
 		}
 
