@@ -267,16 +267,6 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeReadTaskUnsolveLen = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "read_task_unsolved_len",
-			Help:      "number of unsolved read tasks in unsolvedQueue",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	QueryNodeReadTaskReadyLen = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -285,6 +275,40 @@ var (
 			Help:      "number of ready read tasks in readyQueue",
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskReadyNQ = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_ready_nq",
+			Help:      "total NQ of ready read tasks in scheduler queue",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskQueueDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_queue_duration",
+			Help:      "duration in milliseconds that read tasks stay in scheduler policy queue",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
+		})
+
+	QueryNodeReadTaskExecuteDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_execute_duration",
+			Help:      "duration in milliseconds that read tasks spend in scheduler execution pool",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
 		})
 
 	QueryNodeReadTaskConcurrency = prometheus.NewGaugeVec(
@@ -947,8 +971,10 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
-	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
+	registry.MustRegister(QueryNodeReadTaskReadyNQ)
+	registry.MustRegister(QueryNodeReadTaskQueueDuration)
+	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
 	registry.MustRegister(QueryNodeEstimateCPUUsage)
 	registry.MustRegister(QueryNodeSearchGroupNQ)

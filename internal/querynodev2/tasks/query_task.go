@@ -68,6 +68,10 @@ func (t *QueryTask) IsGpuIndex() bool {
 	return false
 }
 
+func (t *QueryTask) Context() context.Context {
+	return t.ctx
+}
+
 // PreExecute the task, only call once.
 func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute
@@ -180,10 +184,6 @@ func (t *QueryTask) Execute() error {
 
 func (t *QueryTask) Done(err error) {
 	t.notifier <- err
-}
-
-func (t *QueryTask) Canceled() error {
-	return t.ctx.Err()
 }
 
 func (t *QueryTask) Wait() error {

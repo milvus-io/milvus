@@ -22,22 +22,27 @@ type userTaskPollingPolicy struct {
 	queue *fairPollingTaskQueue
 }
 
+func (p *userTaskPollingPolicy) Cleanup(now time.Time) []queuedTask {
+	return p.queue.cleanup(now)
+}
+
 // Push add a new task into scheduler, an error will be returned if scheduler reaches some limit.
-func (p *userTaskPollingPolicy) Push(task Task) (int, error) {
+func (p *userTaskPollingPolicy) Push(task queuedTask) (int, error) {
 	pt := paramtable.Get()
 	username := task.Username()
 
 	// Try to merge task if task is mergeable.
-	if t := tryIntoMergeTask(task); t != nil {
+	if t := tryIntoMergeTask(task.Task); t != nil {
 		// Try to merge with same group first.
 		maxNQ := pt.QueryNodeCfg.MaxGroupNQ.GetAsInt64()
-		if p.queue.tryMergeWithSameGroup(username, t, maxNQ) {
+		nqMergeRatio := pt.QueryNodeCfg.NQMergeRatio.GetAsFloat()
+		if p.queue.tryMergeWithSameGroup(username, task, maxNQ, nqMergeRatio) {
 			return 0, nil
 		}
 
 		// Try to merge with other group if option is enabled.
 		enableCrossGroupMerge := pt.QueryNodeCfg.SchedulePolicyEnableCrossUserGrouping.GetAsBool()
-		if enableCrossGroupMerge && p.queue.tryMergeWithOtherGroup(username, t, maxNQ) {
+		if enableCrossGroupMerge && p.queue.tryMergeWithOtherGroup(username, task, maxNQ, nqMergeRatio) {
 			return 0, nil
 		}
 	}
@@ -60,9 +65,9 @@ func (p *userTaskPollingPolicy) Push(task Task) (int, error) {
 }
 
 // Pop get the task next ready to run.
-func (p *userTaskPollingPolicy) Pop() Task {
+func (p *userTaskPollingPolicy) Pop(now time.Time) popResult {
 	expire := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskQueueExpire.GetAsDuration(time.Second)
-	return p.queue.pop(expire)
+	return popResult{task: p.queue.pop(expire)}
 }
 
 // Len get ready task counts.

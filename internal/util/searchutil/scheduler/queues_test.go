@@ -11,9 +11,9 @@ import (
 func TestMergeTaskQueue(t *testing.T) {
 	q := newMergeTaskQueue("test_user")
 	assert.Equal(t, 0, q.len())
-	assert.Nil(t, q.front())
+	assert.False(t, q.front().valid())
 	q.pop()
-	assert.Nil(t, q.front())
+	assert.False(t, q.front().valid())
 	assert.Equal(t, 0, q.len())
 	assert.False(t, q.expire(5*time.Second))
 	time.Sleep(1 * time.Second)
@@ -25,7 +25,7 @@ func TestMergeTaskQueue(t *testing.T) {
 		task := newMockTask(mockTaskConfig{
 			username: "test_user",
 		})
-		q.push(task)
+		q.push(newQueuedTask(task, time.Now()))
 		assert.Equal(t, i, q.len())
 		assert.False(t, q.expire(time.Second))
 	}
@@ -45,14 +45,14 @@ func TestMergeTaskQueue(t *testing.T) {
 		mergeAble: true,
 		nq:        1,
 	})
-	q.push(task)
+	q.push(newQueuedTask(task, time.Now()))
 	for i := 1; i <= 20; i++ {
 		task := newMockTask(mockTaskConfig{
 			username:  "test_user",
 			mergeAble: true,
 			nq:        int64(i),
 		})
-		assert.Equal(t, i <= 10, q.tryMerge(tryIntoMergeTask(task), 56))
+		assert.Equal(t, i <= 10, q.tryMerge(newQueuedTask(task, time.Now()), 56, 0))
 	}
 	for i := 1; i <= 2; i++ {
 		task := newMockTask(mockTaskConfig{
@@ -60,7 +60,7 @@ func TestMergeTaskQueue(t *testing.T) {
 			mergeAble: true,
 			nq:        int64(1),
 		})
-		q.push(task)
+		q.push(newQueuedTask(task, time.Now()))
 	}
 	for i := 1; i <= 20; i++ {
 		task := newMockTask(mockTaskConfig{
@@ -70,15 +70,66 @@ func TestMergeTaskQueue(t *testing.T) {
 		})
 		// 2 + 1 + ... + 9 < 55
 		// 1 + 10 + 11 + 12 + 13 < 55
-		assert.Equal(t, i <= 13, q.tryMerge(tryIntoMergeTask(task), 55))
+		assert.Equal(t, i <= 13, q.tryMerge(newQueuedTask(task, time.Now()), 55, 0))
 	}
+}
+
+func TestMergeTaskQueueNQMergeRatio(t *testing.T) {
+	q := newMergeTaskQueue("test_user")
+	q.push(newQueuedTask(newMockTask(mockTaskConfig{
+		username:  "test_user",
+		mergeAble: true,
+		nq:        2,
+	}), time.Now()))
+
+	assert.True(t, q.tryMerge(newQueuedTask(newMockTask(mockTaskConfig{
+		username:  "test_user",
+		mergeAble: true,
+		nq:        4,
+	}), time.Now()), 16, 3))
+
+	assert.False(t, q.tryMerge(newQueuedTask(newMockTask(mockTaskConfig{
+		username:  "test_user",
+		mergeAble: true,
+		nq:        4,
+	}), time.Now()), 16, 3))
+	assert.Equal(t, int64(6), q.front().NQ())
+}
+
+func TestMergeTaskQueueCleanupSkipsRewriteWithoutExpiredTask(t *testing.T) {
+	q := newMergeTaskQueue("test_user")
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		task := newMockTask(mockTaskConfig{username: "test_user"})
+		q.push(newQueuedTask(task, now))
+	}
+
+	firstTask := q.tasks[0].Task
+	removed := q.cleanup(now)
+
+	assert.Empty(t, removed)
+	assert.Equal(t, 3, q.len())
+	assert.Same(t, firstTask, q.tasks[0].Task)
+}
+
+func TestMergeTaskQueuePopClearsPoppedSlot(t *testing.T) {
+	q := newMergeTaskQueue("test_user")
+	task := newMockTask(mockTaskConfig{username: "test_user"})
+	q.push(newQueuedTask(task, time.Now()))
+
+	tasks := q.tasks
+	popped := q.pop()
+
+	assert.True(t, popped.valid())
+	assert.False(t, tasks[0].valid())
+	assert.Equal(t, 0, q.len())
 }
 
 func TestFairPollingTaskQueue(t *testing.T) {
 	q := newFairPollingTaskQueue()
 	assert.Equal(t, 0, q.len())
 	assert.Equal(t, 0, q.groupLen(""))
-	assert.Nil(t, q.pop(time.Second))
+	assert.False(t, q.pop(time.Second).valid())
 	assert.Equal(t, 0, q.len())
 	assert.Equal(t, 0, q.groupLen(""))
 
@@ -90,7 +141,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 		task := newMockTask(mockTaskConfig{
 			username: username,
 		})
-		q.push(username, task)
+		q.push(username, newQueuedTask(task, time.Now()))
 		assert.Equal(t, i, q.len())
 		assert.Equal(t, (i-1)/10+1, q.groupLen(username))
 	}
@@ -99,7 +150,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 	// Test Pop
 	for i := 1; i <= n; i++ {
 		task := q.pop(time.Minute)
-		assert.NotNil(t, task)
+		assert.True(t, task.valid())
 		username := task.Username()
 		expectedUserName := fmt.Sprintf("user_%d", (i-1)%userN)
 		assert.Equal(t, n-i, q.len())
@@ -113,9 +164,9 @@ func TestFairPollingTaskQueue(t *testing.T) {
 	task := newMockTask(mockTaskConfig{
 		username: username,
 	})
-	q.push(username, task)
+	q.push(username, newQueuedTask(task, time.Now()))
 	assert.Equal(t, userN+1, len(q.route))
-	assert.NotNil(t, q.pop(time.Second))
+	assert.True(t, q.pop(time.Second).valid())
 	assert.Equal(t, 1, len(q.route))
 
 	// Test Merge.
@@ -124,8 +175,8 @@ func TestFairPollingTaskQueue(t *testing.T) {
 		username:  username,
 		mergeAble: true,
 	})
-	assert.False(t, q.tryMergeWithSameGroup(username, tryIntoMergeTask(task), 1))
-	assert.False(t, q.tryMergeWithOtherGroup(username, tryIntoMergeTask(task), 1))
+	assert.False(t, q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), 1, 0))
+	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), 1, 0))
 
 	// Add basic user info first.
 	for i := 1; i <= userN; i++ {
@@ -134,7 +185,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 			username:  username,
 			mergeAble: true,
 		})
-		q.push(username, task)
+		q.push(username, newQueuedTask(task, time.Now()))
 		assert.Equal(t, i, q.len())
 		assert.Equal(t, 1, q.groupLen(username))
 	}
@@ -146,7 +197,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 			username:  username,
 			mergeAble: true,
 		})
-		success := q.tryMergeWithSameGroup(username, tryIntoMergeTask(task), int64(n/userN))
+		success := q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0)
 		assert.Equal(t, i+userN <= n, success)
 		assert.Equal(t, userN, q.len())
 		assert.Equal(t, 1, q.groupLen(username))
@@ -157,7 +208,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 		username:  username,
 		mergeAble: true,
 	})
-	assert.False(t, q.tryMergeWithOtherGroup(username, tryIntoMergeTask(task), int64(n/userN)))
-	assert.True(t, q.tryMergeWithOtherGroup(username, tryIntoMergeTask(task), int64(n/userN)+1))
+	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0))
+	assert.True(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN)+1, 0))
 	assert.Equal(t, 0, q.groupLen(username))
 }

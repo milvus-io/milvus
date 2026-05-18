@@ -460,8 +460,16 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
-		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
-		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
+		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
+		assert.Equal(t, int64(16), Params.MaxGroupNQ.GetAsInt64())
+		assert.Equal(t, 3.0, Params.NQMergeRatio.GetAsFloat())
+		assert.Equal(t, "fifo", Params.SchedulePolicyName.GetValue())
+		assert.Equal(t, 50*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
+		defer params.Reset(Params.SchedulePolicyTaskDeadlineAdvance.Key)
+		assert.NoError(t, params.Save(Params.SchedulePolicyTaskDeadlineAdvance.Key, "100ms"))
+		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
+		assert.NoError(t, params.Save(Params.SchedulePolicyTaskDeadlineAdvance.Key, "100"))
+		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
 

@@ -8,14 +8,14 @@ import (
 func newMergeTaskQueue(group string) *mergeTaskQueue {
 	return &mergeTaskQueue{
 		name:             group,
-		tasks:            make([]Task, 0),
+		tasks:            make([]queuedTask, 0),
 		cleanupTimestamp: time.Now(),
 	}
 }
 
 type mergeTaskQueue struct {
 	name             string
-	tasks            []Task
+	tasks            []queuedTask
 	cleanupTimestamp time.Time
 }
 
@@ -25,27 +25,65 @@ func (q *mergeTaskQueue) len() int {
 }
 
 // push add a new task to the end of taskQueue.
-func (q *mergeTaskQueue) push(t Task) {
+func (q *mergeTaskQueue) push(t queuedTask) {
 	q.tasks = append(q.tasks, t)
 }
 
-// front returns the first element of taskQueue,
-// returns nil if task queue is empty.
-func (q *mergeTaskQueue) front() Task {
+// front returns the first element of taskQueue.
+func (q *mergeTaskQueue) front() queuedTask {
 	if q.len() > 0 {
 		return q.tasks[0]
 	}
-	return nil
+	return queuedTask{}
 }
 
-// pop pops the first element of taskQueue,
-func (q *mergeTaskQueue) pop() {
+// pop pops the first element of taskQueue.
+func (q *mergeTaskQueue) pop() queuedTask {
 	if q.len() > 0 {
+		task := q.tasks[0]
+		q.tasks[0] = queuedTask{}
 		q.tasks = q.tasks[1:]
 		if q.len() == 0 {
 			q.cleanupTimestamp = time.Now()
 		}
+		return task
 	}
+	return queuedTask{}
+}
+
+func (q *mergeTaskQueue) cleanup(now time.Time) []queuedTask {
+	if q.len() == 0 {
+		return nil
+	}
+
+	firstRemoved := -1
+	for i, task := range q.tasks {
+		if task.cleanupReady(now) {
+			firstRemoved = i
+			break
+		}
+	}
+	if firstRemoved < 0 {
+		return nil
+	}
+
+	removed := []queuedTask{q.tasks[firstRemoved]}
+	write := firstRemoved
+	for read := firstRemoved + 1; read < len(q.tasks); read++ {
+		task := q.tasks[read]
+		if task.cleanupReady(now) {
+			removed = append(removed, task)
+		} else {
+			q.tasks[write] = task
+			write++
+		}
+	}
+	clear(q.tasks[write:])
+	q.tasks = q.tasks[:write]
+	if q.len() == 0 {
+		q.cleanupTimestamp = now
+	}
+	return removed
 }
 
 // Return true if user based task is empty and empty for d time.
@@ -59,17 +97,35 @@ func (q *mergeTaskQueue) expire(d time.Duration) bool {
 	return false
 }
 
+func canMergeNQ(task MergeTask, other MergeTask, maxNQ int64, nqMergeRatio float64) bool {
+	totalNQ := task.NQ() + other.NQ()
+	if totalNQ > maxNQ {
+		return false
+	}
+	if nqMergeRatio <= 0 {
+		return true
+	}
+	minNQ := task.MinNQ()
+	if otherMinNQ := other.MinNQ(); otherMinNQ < minNQ {
+		minNQ = otherMinNQ
+	}
+	return minNQ > 0 && float64(totalNQ)/float64(minNQ) <= nqMergeRatio
+}
+
 // tryMerge try to a new task to any task in queue.
-func (q *mergeTaskQueue) tryMerge(task MergeTask, maxNQ int64) bool {
-	nqRest := maxNQ - task.NQ()
+func (q *mergeTaskQueue) tryMerge(task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+	mergeTask := tryIntoMergeTask(task.Task)
+	if mergeTask == nil {
+		return false
+	}
 	// No need to perform any merge if task.nq is greater than maxNQ.
-	if nqRest <= 0 {
+	if mergeTask.NQ() >= maxNQ {
 		return false
 	}
 	for i := q.len() - 1; i >= 0; i-- {
-		if taskInQueue := tryIntoMergeTask(q.tasks[i]); taskInQueue != nil {
+		if taskInQueue := tryIntoMergeTask(q.tasks[i].Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
-			if taskInQueue.NQ() <= nqRest && taskInQueue.MergeWith(task) {
+			if canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) && taskInQueue.MergeWith(mergeTask) {
 				return true
 			}
 		}
@@ -107,7 +163,7 @@ func (q *fairPollingTaskQueue) groupLen(group string) int {
 }
 
 // tryMergeWithOtherGroup try to merge given task into exists tasks in the other group.
-func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task MergeTask, maxNQ int64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
 	if q.count == 0 {
 		return false
 	}
@@ -120,7 +176,7 @@ func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task MergeTa
 		if queue.len() == 0 || queue.name == group {
 			continue
 		}
-		if queue.tryMerge(task, maxNQ) {
+		if queue.tryMerge(task, maxNQ, nqMergeRatio) {
 			return true
 		}
 		node = prev
@@ -129,14 +185,14 @@ func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task MergeTa
 }
 
 // tryMergeWithSameGroup try to merge given task into exists tasks in the same group.
-func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task MergeTask, maxNQ int64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
 	if q.count == 0 {
 		return false
 	}
 	// Applied to task with same group first.
 	if r, ok := q.route[group]; ok {
 		// Try to merge task into queue.
-		if r.Value.(*mergeTaskQueue).tryMerge(task, maxNQ) {
+		if r.Value.(*mergeTaskQueue).tryMerge(task, maxNQ, nqMergeRatio) {
 			return true
 		}
 	}
@@ -144,7 +200,7 @@ func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task MergeTas
 }
 
 // push add a new task into queue, try merge first.
-func (q *fairPollingTaskQueue) push(group string, task Task) {
+func (q *fairPollingTaskQueue) push(group string, task queuedTask) {
 	// Add a new task.
 	if r, ok := q.route[group]; ok {
 		// Add new task to the back of queue if queue exist.
@@ -167,11 +223,30 @@ func (q *fairPollingTaskQueue) push(group string, task Task) {
 	q.count++
 }
 
+func (q *fairPollingTaskQueue) cleanup(now time.Time) []queuedTask {
+	if q.count == 0 || q.checkpoint == nil {
+		return nil
+	}
+	removed := make([]queuedTask, 0)
+	checkpoint := q.checkpoint
+	queuesLen := q.checkpoint.Len()
+	for i := 0; i < queuesLen; i++ {
+		queue := checkpoint.Value.(*mergeTaskQueue)
+		tasks := queue.cleanup(now)
+		if len(tasks) > 0 {
+			q.count -= len(tasks)
+			removed = append(removed, tasks...)
+		}
+		checkpoint = checkpoint.Next()
+	}
+	return removed
+}
+
 // pop pop next ready task.
-func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) (task Task) {
+func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) queuedTask {
 	// Return directly if there's no task exists.
 	if q.count == 0 {
-		return
+		return queuedTask{}
 	}
 	checkpoint := q.checkpoint
 	queuesLen := q.checkpoint.Len()
@@ -196,14 +271,20 @@ func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) (task Task) {
 			checkpoint = next
 			continue
 		}
-		task = queue.front()
-		queue.pop()
-		q.count--
+		task := queue.pop()
+		if task.valid() {
+			q.count--
+		}
+		if !task.valid() {
+			checkpoint = next
+			continue
+		}
 		checkpoint = next
-		break
+		q.checkpoint = checkpoint
+		return task
 	}
 
 	// Update checkpoint.
 	q.checkpoint = checkpoint
-	return
+	return queuedTask{}
 }
