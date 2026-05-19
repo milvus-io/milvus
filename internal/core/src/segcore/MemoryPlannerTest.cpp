@@ -205,12 +205,16 @@ MakeMockReaderFactory() {
 // Helper to run LoadCellBatchAsync and return future count (= batch count).
 size_t
 RunAndCountBatches(std::vector<CellSpec> cell_specs, int64_t memory_limit) {
-    auto channel = std::make_shared<CellReaderChannel>(64);
+    auto channel = std::make_shared<CellReaderChannel>();
     auto futures = LoadCellBatchAsync(nullptr,
                                       std::move(cell_specs),
                                       MakeMockReaderFactory(),
                                       channel,
                                       memory_limit);
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ReleaseCellLoadResultBudget(cell_data);
+    }
     for (auto& f : futures) {
         f.get();
     }
@@ -332,12 +336,14 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
     ASSERT_TRUE(channel->pop(cell_data));
     ASSERT_NE(cell_data, nullptr);
     EXPECT_EQ(cell_data->cid, 0);
+    ReleaseCellLoadResultBudget(cell_data);
 
     source.requestCancellation();
 
     size_t received = 1;
     while (channel->pop(cell_data)) {
         ASSERT_NE(cell_data, nullptr);
+        ReleaseCellLoadResultBudget(cell_data);
         ++received;
     }
 

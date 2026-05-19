@@ -105,9 +105,13 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 // providing backpressure to producer threads while keeping them busy.
 constexpr double kChannelCapacityMultiplier = 1.5;
 
-// Safety margin for loading overhead upper bound estimation.
-// Covers Arrow Table alignment overhead, metadata, and other estimation errors.
-constexpr double kLoadingOverheadInflationRatio = 1.2;
+// StorageV2 field-data loading uses one process-wide transient memory budget,
+// so all field-data translators must share one MCL overhead group.
+constexpr const char* kFieldDataLoadOverheadGroup =
+    "StorageV2FieldDataLoadOverhead";
+
+constexpr int64_t kFieldDataLoadBatchTargetBytes =
+    DEFAULT_FIELD_MAX_MEMORY_LIMIT / 4;
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {
@@ -116,11 +120,14 @@ struct CellSpec {
     int64_t local_rg_offset;  // file-local row group start offset
     int64_t rg_count;         // number of row groups in this cell
     int64_t memory_size = 0;  // estimated Arrow memory in bytes; 0 = unknown
+    int64_t loading_overhead_size =
+        0;  // transient overhead budget; 0 = memory_size
 };
 
 // Result of loading a single cell: cid + the arrow tables read.
 struct CellLoadResult {
     int64_t cid;
+    size_t budget_bytes{0};
     std::vector<std::shared_ptr<arrow::Table>> tables;
 };
 
@@ -149,7 +156,8 @@ using BatchReaderFactory =
  * @param cell_specs cell specifications (sorted internally)
  * @param reader_factory factory that reads all row groups for a batch
  * @param channel channel to receive loaded cell data; closed when all done
- * @param memory_limit total memory limit for readers
+ * @param memory_limit batch split target and per-reader upper bound. A global
+ * transient memory budget gates concurrent batch loading across calls.
  * @param priority load priority
  * @return vector of futures for the batch loading tasks
  */
@@ -161,6 +169,10 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority =
                        milvus::proto::common::LoadPriority::HIGH);
+
+void
+ReleaseCellLoadResultBudget(
+    const std::shared_ptr<CellLoadResult>& cell_load_result);
 
 /**
  * Creates a BatchReaderFactory that reads from Parquet files via FileRowGroupReader.

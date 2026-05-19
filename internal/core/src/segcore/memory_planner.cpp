@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <exception>
 #include <future>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -39,10 +40,48 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/ChunkStreamUtils.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
+
+namespace {
+
+size_t
+CellLoadingBudgetBytes(const CellSpec& cell) {
+    auto overhead_size = cell.loading_overhead_size > 0
+                             ? cell.loading_overhead_size
+                             : cell.memory_size;
+    AssertInfo(overhead_size > 0,
+               "[StorageV2] Cell loading overhead size must be positive, "
+               "cid={}, got {}, memory_size={}",
+               cell.cid,
+               overhead_size,
+               cell.memory_size);
+    return static_cast<size_t>(overhead_size);
+}
+
+size_t
+BatchLoadingBudgetBytes(const std::vector<CellSpec>& cells) {
+    size_t total = 0;
+    for (const auto& cell : cells) {
+        auto bytes = CellLoadingBudgetBytes(cell);
+        if (bytes > std::numeric_limits<size_t>::max() - total) {
+            return std::numeric_limits<size_t>::max();
+        }
+        total += bytes;
+    }
+    return total;
+}
+
+int64_t
+BatchReaderMemoryLimit(int64_t batch_memory, int64_t memory_limit) {
+    auto capped = std::min(batch_memory, memory_limit);
+    return std::max<int64_t>(capped, FILE_SLICE_SIZE.load());
+}
+
+}  // namespace
 
 MemoryBasedSplitStrategy::MemoryBasedSplitStrategy(
     const milvus_storage::RowGroupMetadataVector& row_group_metadatas)
@@ -337,9 +376,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
 
     auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
     auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
-    auto reader_memory_limit =
-        std::max<int64_t>(memory_limit / static_cast<int64_t>(batches.size()),
-                          FILE_SLICE_SIZE.load());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
 
@@ -347,8 +383,12 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     futures.reserve(batches.size());
 
     for (auto& batch : batches) {
+        auto batch_budget_bytes = BatchLoadingBudgetBytes(batch.cells);
+        auto reader_memory_limit =
+            BatchReaderMemoryLimit(batch.batch_memory, memory_limit);
         futures.emplace_back(pool.Submit([batch = std::move(batch),
                                           shared_factory,
+                                          batch_budget_bytes,
                                           reader_memory_limit,
                                           channel,
                                           remaining,
@@ -359,6 +399,18 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 }
             });
             CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+
+            auto& budget = milvus::storage::TransientMemoryBudget::
+                GetFieldDataLoadBudget();
+            budget.Acquire(batch_budget_bytes);
+            size_t transferred_budget_bytes = 0;
+            auto release_guard = folly::makeGuard(
+                [&budget, batch_budget_bytes, &transferred_budget_bytes]() {
+                    if (transferred_budget_bytes < batch_budget_bytes) {
+                        budget.Release(batch_budget_bytes -
+                                       transferred_budget_bytes);
+                    }
+                });
 
             auto tables_result = (*shared_factory)(batch.file_idx,
                                                    batch.rg_offset,
@@ -380,6 +432,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
+                cell_result->budget_bytes = CellLoadingBudgetBytes(cell);
                 cell_result->tables.reserve(cell.rg_count);
                 for (int64_t i = 0; i < cell.rg_count; ++i) {
                     cell_result->tables.push_back(
@@ -387,11 +440,27 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 }
                 table_offset += cell.rg_count;
                 channel->push(std::move(cell_result));
+                transferred_budget_bytes += CellLoadingBudgetBytes(cell);
             }
         }));
     }
 
     return futures;
+}
+
+void
+ReleaseCellLoadResultBudget(
+    const std::shared_ptr<CellLoadResult>& cell_load_result) {
+    if (cell_load_result == nullptr) {
+        return;
+    }
+    cell_load_result->tables.clear();
+    if (cell_load_result->budget_bytes == 0) {
+        return;
+    }
+    milvus::storage::TransientMemoryBudget::GetFieldDataLoadBudget().Release(
+        cell_load_result->budget_bytes);
+    cell_load_result->budget_bytes = 0;
 }
 
 BatchReaderFactory

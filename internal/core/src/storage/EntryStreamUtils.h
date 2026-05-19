@@ -75,6 +75,12 @@ class TransientMemoryBudget {
         return instance;
     }
 
+    static TransientMemoryBudget&
+    GetFieldDataLoadBudget() {
+        static TransientMemoryBudget instance(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+        return instance;
+    }
+
     /// Block until enough budget is available. Safe to call when the calling
     /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
@@ -112,6 +118,9 @@ class TransientMemoryBudget {
 
     size_t
     CapacityBytes() const {
+        if (fixed_capacity_bytes_ > 0) {
+            return fixed_capacity_bytes_;
+        }
         return EntryStreamBudgetBytes();
     }
 
@@ -122,6 +131,10 @@ class TransientMemoryBudget {
 
  private:
     TransientMemoryBudget() = default;
+
+    explicit TransientMemoryBudget(size_t fixed_capacity_bytes)
+        : fixed_capacity_bytes_(std::max<size_t>(fixed_capacity_bytes, 1)) {
+    }
 
     static size_t
     EntryStreamBudgetBytes() {
@@ -144,6 +157,7 @@ class TransientMemoryBudget {
     std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
+    size_t fixed_capacity_bytes_{0};
 };
 
 inline size_t
