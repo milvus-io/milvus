@@ -238,60 +238,55 @@ func TestWithFieldsEmptyFields(t *testing.T) {
 	assert.Nil(t, props)
 }
 
-// Tests for field deduplication
+// Tests for field ordering and duplicate-key handling
 
-func TestWithFieldsDeduplicatesByKey(t *testing.T) {
+func TestWithFieldsPreservesDuplicateKeys(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("key", "value1"))
-	ctx = WithFields(ctx, String("key", "value2")) // same key, should override
+	ctx = WithFields(ctx, String("key", "value2"))
 
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 1, "duplicate key should be deduplicated")
-	fm := fieldsToMap(fields)
-	assert.Equal(t, "value2", fm["key"].String, "later value should win")
+	assert.Len(t, fields, 2, "duplicate keys should be preserved")
+	assert.Equal(t, zap.String("key", "value1"), fields[0])
+	assert.Equal(t, zap.String("key", "value2"), fields[1])
 }
 
-func TestWithFieldsDeduplicatesMultipleKeys(t *testing.T) {
+func TestWithFieldsPreservesOrderAcrossCalls(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("a", "1"), String("b", "2"))
-	ctx = WithFields(ctx, String("a", "3"), String("c", "4")) // a is duplicate
+	ctx = WithFields(ctx, String("a", "3"), String("c", "4"))
 
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 3, "should have 3 unique keys")
-
-	// Convert to map for easier assertion
-	fieldMap := make(map[string]string)
-	for _, f := range fields {
-		fieldMap[f.Key] = f.String
-	}
-	assert.Equal(t, "3", fieldMap["a"], "a should have updated value")
-	assert.Equal(t, "2", fieldMap["b"], "b should remain")
-	assert.Equal(t, "4", fieldMap["c"], "c should be added")
+	assert.Equal(t, []Field{
+		zap.String("a", "1"),
+		zap.String("b", "2"),
+		zap.String("a", "3"),
+		zap.String("c", "4"),
+	}, fields)
 }
 
-func TestWithFieldsPropagatedDeduplicatesByKey(t *testing.T) {
+func TestWithFieldsPropagatedPreservesDuplicateKeys(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, propagatedStringField("key", "value1"))
-	ctx = WithFields(ctx, propagatedStringField("key", "value2")) // same key
+	ctx = WithFields(ctx, propagatedStringField("key", "value2"))
 
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 1, "duplicate key should be deduplicated")
+	assert.Len(t, fields, 2, "duplicate keys should be preserved")
 
 	props := GetPropagated(ctx)
-	assert.Equal(t, "value2", props["key"], "later value should win")
+	assert.Equal(t, "value2", props["key"], "map projection keeps the last propagated value")
 }
 
-func TestMixedFieldsAndPropagatedDeduplication(t *testing.T) {
+func TestMixedFieldsAndPropagatedDuplicatesArePreserved(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("shared", "from_fields"))
 	ctx = WithFields(ctx, propagatedStringField("shared", "from_propagated"))
 
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 1, "same key from different sources should deduplicate")
+	assert.Len(t, fields, 2, "same key from different sources should be preserved")
 
-	// Propagated should override and be accessible
 	props := GetPropagated(ctx)
-	assert.Equal(t, "from_propagated", props["shared"], "propagated should override")
+	assert.Equal(t, "from_propagated", props["shared"], "propagated map should contain propagated field")
 }
 
 // Tests for cached logger
@@ -316,19 +311,16 @@ func TestCachedLoggerIncludesFields(t *testing.T) {
 	assert.NotSame(t, getLogger(), lc.logger, "cached logger should be different from global")
 }
 
-// Tests for fieldKeys type
+// Tests for stored field slices
 
-func TestFieldKeysStoresFieldPointers(t *testing.T) {
+func TestLogContextStoresFieldsInOrder(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("key", "value"))
 
 	lc := getLogContext(ctx)
-	assert.NotNil(t, lc.fieldKeys)
-	assert.Len(t, lc.fieldKeys, 1)
+	assert.Len(t, lc.fields, 1)
 
-	field, exists := lc.fieldKeys["key"]
-	assert.True(t, exists)
-	assert.NotNil(t, field)
+	field := lc.fields[0]
 	assert.Equal(t, "key", field.Key)
 	assert.Equal(t, zapcore.StringType, field.Type)
 	assert.Equal(t, "value", field.String)

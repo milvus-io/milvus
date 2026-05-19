@@ -13,12 +13,12 @@ var fieldsKey = contextKey{}
 
 // logContext holds all mlog-related data in context
 type logContext struct {
-	fieldKeys map[string]*Field // key -> Field pointer for deduplication
-	logger    *zap.Logger       // cached logger with fields applied
+	fields []Field     // ordered fields attached to the context
+	logger *zap.Logger // cached logger with fields applied
 }
 
 // WithFields attaches fields to context. Fields accumulate across calls.
-// Duplicate keys are deduplicated, with later values overriding earlier ones.
+// Duplicate keys are preserved in insertion order.
 // Fields created with OptPropagated() will be propagated via RPC.
 func WithFields(ctx context.Context, fields ...Field) context.Context {
 	if ctx == nil {
@@ -32,42 +32,22 @@ func WithFields(ctx context.Context, fields ...Field) context.Context {
 	return lc.withFields(ctx, fields)
 }
 
-// withFields adds fields to logContext, handling deduplication and logger caching.
+// withFields adds fields to logContext, preserving insertion order and logger caching.
 func (lc *logContext) withFields(ctx context.Context, fields []Field) context.Context {
-	// Build new fieldKeys map and detect duplicates in one pass
-	newFieldKeys := make(map[string]*Field, len(lc.fieldKeys)+len(fields))
-	for k, v := range lc.fieldKeys {
-		newFieldKeys[k] = v
-	}
-
-	hasDuplicate := false
-	for i := range fields {
-		if _, exists := newFieldKeys[fields[i].Key]; exists {
-			hasDuplicate = true
-		}
-		newFieldKeys[fields[i].Key] = &fields[i]
-	}
+	newFields := make([]Field, len(lc.fields)+len(fields))
+	copy(newFields, lc.fields)
+	copy(newFields[len(lc.fields):], fields)
 
 	var newLogger *zap.Logger
-	if hasDuplicate {
-		// Rebuild logger from global with all deduplicated fields
-		allFields := make([]Field, 0, len(newFieldKeys))
-		for _, f := range newFieldKeys {
-			allFields = append(allFields, *f)
-		}
-		newLogger = getLogger().WithLazy(allFields...)
+	if lc.logger != nil {
+		newLogger = lc.logger.WithLazy(fields...)
 	} else {
-		// Fast path: use cached logger with lazy field evaluation
-		if lc.logger != nil {
-			newLogger = lc.logger.WithLazy(fields...)
-		} else {
-			newLogger = getLogger().WithLazy(fields...)
-		}
+		newLogger = getLogger().WithLazy(newFields...)
 	}
 
 	return context.WithValue(ctx, fieldsKey, &logContext{
-		fieldKeys: newFieldKeys,
-		logger:    newLogger,
+		fields: newFields,
+		logger: newLogger,
 	})
 }
 
@@ -76,17 +56,18 @@ func (lc *logContext) withFields(ctx context.Context, fields []Field) context.Co
 // Values are serialized as strings.
 func GetPropagated(ctx context.Context) map[string]string {
 	lc := getLogContext(ctx)
-	if len(lc.fieldKeys) == 0 {
+	if len(lc.fields) == 0 {
 		return nil
 	}
 
 	var result map[string]string
-	for key, f := range lc.fieldKeys {
+	for i := range lc.fields {
+		f := &lc.fields[i]
 		if isPropagatedField(f) {
 			if result == nil {
 				result = make(map[string]string)
 			}
-			result[key] = getPropagatedValue(f)
+			result[f.Key] = getPropagatedValue(f)
 		}
 	}
 	return result
@@ -112,17 +93,15 @@ func FieldsFromContext(ctx context.Context) []Field {
 
 // fieldCount returns the number of fields in the logContext.
 func (lc *logContext) fieldCount() int {
-	return len(lc.fieldKeys)
+	return len(lc.fields)
 }
 
 // getFields returns all fields as a slice.
 func (lc *logContext) getFields() []Field {
-	if len(lc.fieldKeys) == 0 {
+	if len(lc.fields) == 0 {
 		return nil
 	}
-	fields := make([]Field, 0, len(lc.fieldKeys))
-	for _, f := range lc.fieldKeys {
-		fields = append(fields, *f)
-	}
+	fields := make([]Field, len(lc.fields))
+	copy(fields, lc.fields)
 	return fields
 }

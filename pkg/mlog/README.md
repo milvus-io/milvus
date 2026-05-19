@@ -54,12 +54,12 @@ The logging context stored in context.Context:
 
 ```go
 type logContext struct {
-    fieldKeys map[string]*Field  // Field deduplication map
-    logger    *zap.Logger        // Cached logger with accumulated fields
+    fields []Field       // Ordered fields attached to the context
+    logger *zap.Logger   // Cached logger with accumulated fields
 }
 ```
 
-- **fieldKeys**: Used for field deduplication, later values override earlier ones for the same key
+- **fields**: Preserves field insertion order across `WithFields` calls
 - **logger**: Cached logger with fields already added, avoiding repeated construction
 
 ### 2. Field Types
@@ -169,15 +169,20 @@ mlog.Info(ctx, "processing request")
 // Output: {"msg":"processing request", "request_id":"abc123", "user_id":42, ...}
 ```
 
-### Field Deduplication
+### Field Ordering and Duplicate Keys
 
 ```go
 ctx = mlog.WithFields(ctx, mlog.String("status", "pending"))
-ctx = mlog.WithFields(ctx, mlog.String("status", "completed"))  // Overrides previous value
+ctx = mlog.WithFields(ctx, mlog.String("status", "completed"))
 
 mlog.Info(ctx, "task done")
-// Output: {"msg":"task done", "status":"completed", ...}
+// Output keeps both fields in order:
+// {"msg":"task done", "status":"pending", "status":"completed", ...}
 ```
+
+`mlog` does not automatically deduplicate fields across context fields, component Logger fields, or call-site fields. This matches zap's field-list behavior and avoids hidden work on hot logging paths. Callers should avoid reusing the same key for different meanings in one log entry. If duplicate keys are emitted, downstream JSON consumers decide how to interpret them, and behavior can differ across tools.
+
+APIs that project fields into a map, such as `GetPropagated`, cannot preserve duplicate keys; for those map projections, later propagated fields with the same key overwrite earlier values.
 
 ### Cross-Service Field Propagation
 
@@ -281,22 +286,18 @@ Each `logContext` caches the constructed logger, avoiding repeated construction:
 
 ```go
 type logContext struct {
-    fieldKeys map[string]*Field
-    logger    *zap.Logger  // Cached logger
+    fields []Field
+    logger *zap.Logger  // Cached logger
 }
 ```
 
-### 4. Single-Pass Deduplication
+### 4. Ordered Field Accumulation
 
-Field deduplication is detected while building the map, avoiding extra traversals:
+Context fields are appended to an ordered slice so log output preserves the order in which fields are attached:
 
 ```go
-for i := range fields {
-    if _, exists := newFieldKeys[fields[i].Key]; exists {
-        hasDuplicate = true
-    }
-    newFieldKeys[fields[i].Key] = &fields[i]
-}
+ctx = mlog.WithFields(ctx, mlog.String("request_id", reqID))
+ctx = mlog.WithFields(ctx, mlog.FieldCollectionID(collectionID))
 ```
 
 ## Best Practices

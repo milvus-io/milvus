@@ -110,12 +110,13 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 // Keys are type-encoded: "mlog-s-<key>" for string, "mlog-i-<key>" for int64.
 func injectPropagated(ctx context.Context) context.Context {
 	lc := getLogContext(ctx)
-	if len(lc.fieldKeys) == 0 {
+	if len(lc.fields) == 0 {
 		return ctx
 	}
 
 	var pairs []string
-	for _, f := range lc.fieldKeys {
+	for i := range lc.fields {
+		f := &lc.fields[i]
 		if !isPropagatedField(f) {
 			continue
 		}

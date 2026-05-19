@@ -82,7 +82,7 @@ Each type has pointer variant `Xxxp` and slice variant `Xxxs`. See `field.go` fo
 ```
 Should the field follow the request chain (bind to ctx)?
 ├─ Yes → ctx = mlog.WithFields(ctx, fields...)
-│        Lazily encoded; duplicate keys are overridden by later values.
+│        Lazily encoded; fields keep insertion order and duplicate keys are preserved.
 │        To propagate across gRPC, add OptPropagated():
 │          mlog.WithFields(ctx, mlog.FieldCollectionID(id, mlog.OptPropagated()))
 │

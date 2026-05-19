@@ -862,9 +862,7 @@ func TestGlobalLogNoCachedLoggerWithFields(t *testing.T) {
 	// This simulates a potential edge case
 	field := String("manual_field", "manual_value")
 	lc := &logContext{
-		fieldKeys: map[string]*Field{
-			"manual_field": &field,
-		},
+		fields: []Field{field},
 		logger: nil, // explicitly nil
 	}
 	ctx := context.WithValue(context.Background(), fieldsKey, lc)
