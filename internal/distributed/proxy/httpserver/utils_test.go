@@ -3762,3 +3762,486 @@ func TestPrintStructArrayFieldsV2(t *testing.T) {
 	assert.Equal(t, "sub_vec", subs[1][HTTPReturnFieldName])
 	assert.Equal(t, schemapb.DataType_FloatVector.String(), subs[1][HTTPReturnFieldElementType])
 }
+
+func TestStructArrayScalarSubFieldTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		raw         string
+		assertFn    func(*testing.T, *schemapb.ScalarField)
+	}{
+		{
+			name:        "bool",
+			elementType: schemapb.DataType_Bool,
+			raw:         `[true,false]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []bool{true, false}, sf.GetBoolData().GetData())
+			},
+		},
+		{
+			name:        "int64",
+			elementType: schemapb.DataType_Int64,
+			raw:         `[10,20]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []int64{10, 20}, sf.GetLongData().GetData())
+			},
+		},
+		{
+			name:        "float",
+			elementType: schemapb.DataType_Float,
+			raw:         `[1.5,2.5]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []float32{1.5, 2.5}, sf.GetFloatData().GetData())
+			},
+		},
+		{
+			name:        "double",
+			elementType: schemapb.DataType_Double,
+			raw:         `[1.25,2.25]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []float64{1.25, 2.25}, sf.GetDoubleData().GetData())
+			},
+		},
+		{
+			name:        "string",
+			elementType: schemapb.DataType_VarChar,
+			raw:         `["red","blue"]`,
+			assertFn: func(t *testing.T, sf *schemapb.ScalarField) {
+				assert.Equal(t, []string{"red", "blue"}, sf.GetStringData().GetData())
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sub := &schemapb.FieldSchema{Name: test.name, ElementType: test.elementType}
+			got, err := buildStructSubArrayScalar(sub, gjson.Parse(test.raw).Array())
+			require.NoError(t, err)
+			test.assertFn(t, got)
+		})
+	}
+
+	_, err := buildStructSubArrayScalar(&schemapb.FieldSchema{Name: "bad", ElementType: schemapb.DataType_JSON}, gjson.Parse(`[{}]`).Array())
+	assert.Error(t, err)
+
+	_, err = buildStructSubArrayScalar(&schemapb.FieldSchema{Name: "bad_bool", ElementType: schemapb.DataType_Bool}, gjson.Parse(`[1]`).Array())
+	assert.Error(t, err)
+}
+
+func TestStructArrayVectorSubFieldTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         string
+		raw         string
+		assertFn    func(*testing.T, *schemapb.VectorField)
+	}{
+		{
+			name:        "float16",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         "2",
+			raw:         `[[0.1,0.2],"AQIDBA=="]`,
+			assertFn: func(t *testing.T, vf *schemapb.VectorField) {
+				assert.Len(t, vf.GetFloat16Vector(), 8)
+			},
+		},
+		{
+			name:        "bfloat16",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         "2",
+			raw:         `[[0.1,0.2],[0.3,0.4]]`,
+			assertFn: func(t *testing.T, vf *schemapb.VectorField) {
+				assert.Len(t, vf.GetBfloat16Vector(), 8)
+			},
+		},
+		{
+			name:        "binary",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         "16",
+			raw:         `["AQI=","AwQ="]`,
+			assertFn: func(t *testing.T, vf *schemapb.VectorField) {
+				assert.Equal(t, []byte{1, 2, 3, 4}, vf.GetBinaryVector())
+			},
+		},
+		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         "2",
+			raw:         `[[1,-2],[3,4]]`,
+			assertFn: func(t *testing.T, vf *schemapb.VectorField) {
+				assert.Equal(t, []byte{1, 254, 3, 4}, vf.GetInt8Vector())
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sub := &schemapb.FieldSchema{
+				Name:        test.name,
+				ElementType: test.elementType,
+				TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: test.dim}},
+			}
+			got, err := buildStructSubVectorField(sub, gjson.Parse(test.raw).Array())
+			require.NoError(t, err)
+			test.assertFn(t, got)
+		})
+	}
+
+	_, err := buildStructSubVectorField(&schemapb.FieldSchema{
+		Name:        "bad_dim",
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+	}, gjson.Parse(`[[0.1]]`).Array())
+	assert.Error(t, err)
+
+	_, err = buildStructSubVectorField(&schemapb.FieldSchema{
+		Name:        "bad_type",
+		ElementType: schemapb.DataType_JSON,
+		TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+	}, gjson.Parse(`[{}]`).Array())
+	assert.Error(t, err)
+}
+
+func TestEmbeddingListPlaceholderTypes(t *testing.T) {
+	tests := []struct {
+		name            string
+		elementType     schemapb.DataType
+		body            string
+		dim             int64
+		placeholderType commonpb.PlaceholderType
+		valueLen        int
+	}{
+		{
+			name:            "float",
+			elementType:     schemapb.DataType_FloatVector,
+			body:            `{"data": [[[0.1,0.2],[0.3,0.4]]]}`,
+			dim:             2,
+			placeholderType: commonpb.PlaceholderType_EmbListFloatVector,
+			valueLen:        16,
+		},
+		{
+			name:            "float16",
+			elementType:     schemapb.DataType_Float16Vector,
+			body:            `{"data": [[[0.1,0.2],[0.3,0.4]]]}`,
+			dim:             2,
+			placeholderType: commonpb.PlaceholderType_EmbListFloat16Vector,
+			valueLen:        8,
+		},
+		{
+			name:            "bfloat16",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			body:            `{"data": [[[0.1,0.2],[0.3,0.4]]]}`,
+			dim:             2,
+			placeholderType: commonpb.PlaceholderType_EmbListBFloat16Vector,
+			valueLen:        8,
+		},
+		{
+			name:            "binary",
+			elementType:     schemapb.DataType_BinaryVector,
+			body:            `{"data": [["AQI=","AwQ="]]}`,
+			dim:             16,
+			placeholderType: commonpb.PlaceholderType_EmbListBinaryVector,
+			valueLen:        4,
+		},
+		{
+			name:            "int8",
+			elementType:     schemapb.DataType_Int8Vector,
+			body:            `{"data": [[[1,2],[3,4]]]}`,
+			dim:             2,
+			placeholderType: commonpb.PlaceholderType_EmbListInt8Vector,
+			valueLen:        4,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertEmbListQueries2Placeholder(test.body, test.elementType, test.dim)
+			require.NoError(t, err)
+			assert.Equal(t, test.placeholderType, got.GetType())
+			require.Len(t, got.GetValues(), 1)
+			assert.Len(t, got.GetValues()[0], test.valueLen)
+		})
+	}
+
+	for _, test := range []struct {
+		name        string
+		body        string
+		elementType schemapb.DataType
+		dim         int64
+	}{
+		{name: "data_not_array", body: `{"data":"bad"}`, elementType: schemapb.DataType_FloatVector, dim: 2},
+		{name: "empty_data", body: `{"data":[]}`, elementType: schemapb.DataType_FloatVector, dim: 2},
+		{name: "query_not_array", body: `{"data":[1]}`, elementType: schemapb.DataType_FloatVector, dim: 2},
+		{name: "empty_embedding_list", body: `{"data":[[]]}`, elementType: schemapb.DataType_FloatVector, dim: 2},
+		{name: "unsupported_element", body: `{"data":[[true]]}`, elementType: schemapb.DataType_Bool, dim: 2},
+		{name: "float_dim_mismatch", body: `{"data":[[[0.1]]]}`, elementType: schemapb.DataType_FloatVector, dim: 2},
+		{name: "binary_not_string", body: `{"data":[[[1,2]]]}`, elementType: schemapb.DataType_BinaryVector, dim: 16},
+		{name: "int8_not_array", body: `{"data":[["AQI="]]}`, elementType: schemapb.DataType_Int8Vector, dim: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := convertEmbListQueries2Placeholder(test.body, test.elementType, test.dim)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestGeneratePlaceholderGroupStructArrayField(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+
+	standard, err := generatePlaceholderGroup(context.Background(), `{"data": [[0.1,0.2,0.3,0.4]]}`, schema, "sub_vec")
+	require.NoError(t, err)
+	group := &commonpb.PlaceholderGroup{}
+	require.NoError(t, proto.Unmarshal(standard, group))
+	require.Len(t, group.GetPlaceholders(), 1)
+	assert.Equal(t, commonpb.PlaceholderType_FloatVector, group.GetPlaceholders()[0].GetType())
+
+	embList, err := generatePlaceholderGroup(context.Background(), `{"data": [[[0.1,0.2,0.3,0.4]]]}`, schema, "sub_vec")
+	require.NoError(t, err)
+	group.Reset()
+	require.NoError(t, proto.Unmarshal(embList, group))
+	require.Len(t, group.GetPlaceholders(), 1)
+	assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, group.GetPlaceholders()[0].GetType())
+}
+
+func TestStructArrayFieldDataErrorPaths(t *testing.T) {
+	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
+
+	_, err := buildStructArrayFieldData(schema, nil)
+	assert.Error(t, err)
+
+	_, err = buildStructArrayFieldData(schema, []structArrayRow{{"sub_int": &schemapb.ScalarField{}}})
+	assert.Error(t, err)
+
+	_, err = buildStructArrayFieldData(schema, []structArrayRow{
+		{
+			"sub_int": int64(1),
+			"sub_vec": &schemapb.VectorField{},
+		},
+	})
+	assert.Error(t, err)
+
+	badTypeSchema := &schemapb.StructArrayFieldSchema{
+		Name:   "bad",
+		Fields: []*schemapb.FieldSchema{{Name: "sub", DataType: schemapb.DataType_Bool}},
+	}
+	_, err = buildStructArrayFieldData(badTypeSchema, []structArrayRow{{"sub": true}})
+	assert.Error(t, err)
+
+	noDimSchema := &schemapb.StructArrayFieldSchema{
+		Name: "bad_dim",
+		Fields: []*schemapb.FieldSchema{{
+			Name:     "sub_vec",
+			DataType: schemapb.DataType_ArrayOfVector,
+		}},
+	}
+	_, err = buildStructArrayFieldData(noDimSchema, []structArrayRow{{"sub_vec": &schemapb.VectorField{}}})
+	assert.Error(t, err)
+}
+
+func TestExtractStructArrayRowErrorPaths(t *testing.T) {
+	empty, err := extractStructArrayRow(&schemapb.FieldData{
+		Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{},
+		},
+	}, 0, buildStructArrayTestSchema())
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+
+	schema := buildStructArrayTestSchema()
+	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1, 0.2, 0.3, 0.4]}]`, schema.GetStructArrayFields()[0])
+	require.NoError(t, err)
+	fd, err := buildStructArrayFieldData(schema.GetStructArrayFields()[0], []structArrayRow{row})
+	require.NoError(t, err)
+
+	_, err = extractStructArrayRow(fd, 2, schema)
+	assert.Error(t, err)
+
+	mismatch := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "my_struct",
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Array,
+					FieldName: "sub_int",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							Data: []*schemapb.ScalarField{{
+								Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}},
+							}},
+						}},
+					}},
+				},
+				{
+					Type:      schemapb.DataType_ArrayOfVector,
+					FieldName: "sub_vec",
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+							ElementType: schemapb.DataType_FloatVector,
+							Data: []*schemapb.VectorField{{
+								Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3, 0.4}}},
+							}},
+						}},
+					}},
+				},
+			}},
+		},
+	}
+	_, err = extractStructArrayRow(mismatch, 0, schema)
+	assert.Error(t, err)
+
+	missingDimSchema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "my_struct"}},
+	}
+	_, err = extractStructArrayRow(mismatch, 0, missingDimSchema)
+	assert.Error(t, err)
+
+	unsupported := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "my_struct",
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Array,
+					FieldName: "sub_int",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							Data: []*schemapb.ScalarField{{
+								Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1}}},
+							}},
+						}},
+					}},
+				},
+				{Type: schemapb.DataType_Bool, FieldName: "bad"},
+			}},
+		},
+	}
+	_, err = extractStructArrayRow(unsupported, 0, schema)
+	assert.Error(t, err)
+}
+
+func TestStructArrayHelperValueConversions(t *testing.T) {
+	assert.Equal(t, "sub", structFieldShortName("my_struct[sub]"))
+	assert.Equal(t, "plain", structFieldShortName("plain"))
+
+	scalars := []*schemapb.ScalarField{
+		{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}}},
+		{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1}}}},
+		{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2}}}},
+		{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{3.5}}}},
+		{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{4.5}}}},
+		{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"five"}}}},
+	}
+	for _, scalar := range scalars {
+		assert.Len(t, scalarArrayToInterfaces(scalar), 1)
+	}
+	assert.Nil(t, scalarArrayToInterfaces(&schemapb.ScalarField{}))
+
+	vectorTests := []struct {
+		name        string
+		elementType schemapb.DataType
+		vector      *schemapb.VectorField
+		dim         int64
+		count       int
+	}{
+		{
+			name:        "float",
+			elementType: schemapb.DataType_FloatVector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3, 0.4}},
+			}},
+			dim:   2,
+			count: 2,
+		},
+		{
+			name:        "float16",
+			elementType: schemapb.DataType_Float16Vector,
+			vector:      &schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4}}},
+			dim:         2,
+			count:       1,
+		},
+		{
+			name:        "bfloat16",
+			elementType: schemapb.DataType_BFloat16Vector,
+			vector:      &schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4}}},
+			dim:         2,
+			count:       1,
+		},
+		{
+			name:        "binary",
+			elementType: schemapb.DataType_BinaryVector,
+			vector:      &schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}},
+			dim:         16,
+			count:       1,
+		},
+		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8Vector,
+			vector:      &schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 254}}},
+			dim:         2,
+			count:       1,
+		},
+	}
+	for _, test := range vectorTests {
+		t.Run(test.name, func(t *testing.T) {
+			count, err := vectorFieldElemCount(test.vector, test.elementType, test.dim)
+			require.NoError(t, err)
+			assert.Equal(t, test.count, count)
+			values, err := vectorFieldToInterfaces(test.vector, test.elementType, test.dim)
+			require.NoError(t, err)
+			assert.Len(t, values, test.count)
+		})
+	}
+
+	_, err := vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
+	assert.Error(t, err)
+	_, err = vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
+	assert.Error(t, err)
+	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
+	assert.Error(t, err)
+	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
+	assert.Error(t, err)
+}
+
+func TestStructArrayCheckAndSetPartialUpdate(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	body := []byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4]}]}`)
+	rows, validData, err := checkAndSetData(body, schema, true)
+	require.NoError(t, err)
+	assert.NotContains(t, rows[0], "my_struct")
+	fds, err := anyToColumns(rows, validData, schema, false, true)
+	require.NoError(t, err)
+	for _, fd := range fds {
+		assert.NotEqual(t, schemapb.DataType_ArrayOfStruct, fd.GetType())
+	}
+
+	_, _, err = checkAndSetData(body, schema, false)
+	assert.Error(t, err)
+}
+
+func TestStructArrayFieldDataValueCount(t *testing.T) {
+	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
+	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2,0.3,0.4]}]`, schema)
+	require.NoError(t, err)
+	fd, err := buildStructArrayFieldData(schema, []structArrayRow{row})
+	require.NoError(t, err)
+	count, err := fieldDataValueCount(fd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	subs := fd.GetStructArrays().GetFields()
+	fd.GetStructArrays().Fields = []*schemapb.FieldData{subs[1], subs[0]}
+	count, err = fieldDataValueCount(fd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	fd.GetStructArrays().Fields = nil
+	count, err = fieldDataValueCount(fd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+
+	fd.GetStructArrays().Fields = []*schemapb.FieldData{{Type: schemapb.DataType_Bool}}
+	_, err = fieldDataValueCount(fd)
+	assert.Error(t, err)
+}

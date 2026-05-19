@@ -888,6 +888,54 @@ func TestFlush(t *testing.T) {
 	}
 }
 
+func TestWaitForFlush(t *testing.T) {
+	t.Run("missing flush timestamp", func(t *testing.T) {
+		h := &HandlersV2{proxy: mocks.NewMockProxy(t)}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get flush timestamp")
+	})
+
+	t.Run("get flush state rpc error", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(nil, errors.New("mock rpc")).Once()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mock rpc")
+	})
+
+	t.Run("context canceled before flush completes", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
+			Status: merr.Success(),
+		}, nil).Once()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(ctx, "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+}
+
 func TestDatabase(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
