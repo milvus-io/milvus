@@ -1703,6 +1703,36 @@ func TestCreateCollection(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionStructArrayDuplicateName(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServerV2(mocks.NewMockProxy(t), false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(`{
+		"collectionName": "test",
+		"schema": {
+			"fields": [
+				{"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}}
+			],
+			"structFields": [{
+				"fieldName": "book_id",
+				"fields": [
+					{"fieldName": "sub_int", "dataType": "Array", "elementDataType": "Int32"}
+				]
+			}]
+		}
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.Nil(t, err)
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	assert.Contains(t, returnBody.Message, "duplicated field name: book_id")
+}
+
 func versionalV2(category string, action string) string {
 	return "/v2/vectordb" + category + action
 }
