@@ -81,23 +81,14 @@ type schedulePolicy interface {
 type queuedTask struct {
 	Task
 
-	enqueueTime   time.Time
-	deadline      time.Time
-	deadlineIndex int
+	enqueueTime time.Time
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
-	queued := &queuedTask{
-		Task:          task,
-		enqueueTime:   enqueueTime,
-		deadlineIndex: -1,
+	return &queuedTask{
+		Task:        task,
+		enqueueTime: enqueueTime,
 	}
-	if task != nil {
-		if deadline, ok := task.Context().Deadline(); ok {
-			queued.deadline = deadline
-		}
-	}
-	return queued
 }
 
 func (t *queuedTask) queueDuration(now time.Time) time.Duration {

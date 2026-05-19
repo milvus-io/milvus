@@ -1,15 +1,18 @@
 package scheduler
 
 import (
-	"container/heap"
 	"container/ring"
+	"math"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newMergeTaskQueue(group string) *mergeTaskQueue {
 	return &mergeTaskQueue{
 		name:             group,
 		tasks:            make([]*queuedTask, 0),
+		deadlineTasks:    newDeadlineTaskHeap(),
 		cleanupTimestamp: time.Now(),
 	}
 }
@@ -17,7 +20,7 @@ func newMergeTaskQueue(group string) *mergeTaskQueue {
 type mergeTaskQueue struct {
 	name             string
 	tasks            []*queuedTask
-	deadlineTasks    deadlineTaskHeap
+	deadlineTasks    typeutil.Heap[*queuedTask]
 	count            int
 	cleanupTimestamp time.Time
 }
@@ -31,8 +34,8 @@ func (q *mergeTaskQueue) len() int {
 func (q *mergeTaskQueue) push(task *queuedTask) {
 	q.tasks = append(q.tasks, task)
 	q.count++
-	if !task.deadline.IsZero() {
-		heap.Push(&q.deadlineTasks, task)
+	if _, ok := task.Context().Deadline(); ok {
+		q.deadlineTasks.Push(task)
 	}
 }
 
@@ -59,9 +62,6 @@ func (q *mergeTaskQueue) pop() *queuedTask {
 			continue
 		}
 
-		if task.deadlineIndex >= 0 {
-			heap.Remove(&q.deadlineTasks, task.deadlineIndex)
-		}
 		removed := q.markRemoved(task, time.Now())
 		if q.len() == 0 {
 			clear(q.tasks)
@@ -78,15 +78,15 @@ func (q *mergeTaskQueue) cleanup(now time.Time) []*queuedTask {
 
 	removed := make([]*queuedTask, 0)
 	for q.deadlineTasks.Len() > 0 {
-		task := q.deadlineTasks[0]
+		task := q.deadlineTasks.Peek()
 		if !task.valid() {
-			heap.Pop(&q.deadlineTasks)
+			q.deadlineTasks.Pop()
 			continue
 		}
 		if !task.cleanupReady(now) {
 			break
 		}
-		heap.Pop(&q.deadlineTasks)
+		q.deadlineTasks.Pop()
 		removed = append(removed, q.markRemoved(task, now))
 	}
 
@@ -96,9 +96,6 @@ func (q *mergeTaskQueue) cleanup(now time.Time) []*queuedTask {
 		}
 		if task.Context().Err() == nil {
 			continue
-		}
-		if task.deadlineIndex >= 0 {
-			heap.Remove(&q.deadlineTasks, task.deadlineIndex)
 		}
 		removed = append(removed, q.markRemoved(task, now))
 	}
@@ -185,36 +182,17 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 	return false
 }
 
-type deadlineTaskHeap []*queuedTask
-
-func (h deadlineTaskHeap) Len() int {
-	return len(h)
-}
-
-func (h deadlineTaskHeap) Less(i, j int) bool {
-	return h[i].deadline.Before(h[j].deadline)
-}
-
-func (h deadlineTaskHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-	h[i].deadlineIndex = i
-	h[j].deadlineIndex = j
-}
-
-func (h *deadlineTaskHeap) Push(x any) {
-	entry := x.(*queuedTask)
-	entry.deadlineIndex = len(*h)
-	*h = append(*h, entry)
-}
-
-func (h *deadlineTaskHeap) Pop() any {
-	old := *h
-	n := len(old)
-	entry := old[n-1]
-	old[n-1] = nil
-	entry.deadlineIndex = -1
-	*h = old[:n-1]
-	return entry
+func newDeadlineTaskHeap() typeutil.Heap[*queuedTask] {
+	return typeutil.NewObjectArrayBasedMinimumHeap[*queuedTask, int64](nil, func(task *queuedTask) int64 {
+		if !task.valid() {
+			return math.MaxInt64
+		}
+		deadline, ok := task.Context().Deadline()
+		if !ok {
+			return math.MaxInt64
+		}
+		return deadline.UnixNano()
+	})
 }
 
 // newFairPollingTaskQueue create a fair polling task queue.
