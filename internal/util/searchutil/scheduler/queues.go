@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"container/heap"
 	"container/ring"
 	"time"
 )
@@ -8,82 +9,129 @@ import (
 func newMergeTaskQueue(group string) *mergeTaskQueue {
 	return &mergeTaskQueue{
 		name:             group,
-		tasks:            make([]queuedTask, 0),
+		tasks:            make([]*queuedTask, 0),
 		cleanupTimestamp: time.Now(),
 	}
 }
 
 type mergeTaskQueue struct {
 	name             string
-	tasks            []queuedTask
+	tasks            []*queuedTask
+	deadlineTasks    deadlineTaskHeap
+	count            int
 	cleanupTimestamp time.Time
 }
 
 // len returns the length of taskQueue.
 func (q *mergeTaskQueue) len() int {
-	return len(q.tasks)
+	return q.count
 }
 
 // push add a new task to the end of taskQueue.
-func (q *mergeTaskQueue) push(t queuedTask) {
-	q.tasks = append(q.tasks, t)
+func (q *mergeTaskQueue) push(task *queuedTask) {
+	q.tasks = append(q.tasks, task)
+	q.count++
+	if !task.deadline.IsZero() {
+		heap.Push(&q.deadlineTasks, task)
+	}
 }
 
 // front returns the first element of taskQueue.
-func (q *mergeTaskQueue) front() queuedTask {
-	if q.len() > 0 {
+func (q *mergeTaskQueue) front() *queuedTask {
+	q.dropRemovedPrefix()
+	if len(q.tasks) > 0 {
 		return q.tasks[0]
 	}
-	return queuedTask{}
+	return nil
 }
 
 // pop pops the first element of taskQueue.
-func (q *mergeTaskQueue) pop() queuedTask {
-	if q.len() > 0 {
-		task := q.tasks[0]
-		q.tasks[0] = queuedTask{}
-		q.tasks = q.tasks[1:]
-		if q.len() == 0 {
-			q.cleanupTimestamp = time.Now()
+func (q *mergeTaskQueue) pop() *queuedTask {
+	for {
+		q.dropRemovedPrefix()
+		if len(q.tasks) == 0 {
+			return nil
 		}
-		return task
+
+		task := q.tasks[0]
+		q.tasks = q.tasks[1:]
+		if !task.valid() {
+			continue
+		}
+
+		if task.deadlineIndex >= 0 {
+			heap.Remove(&q.deadlineTasks, task.deadlineIndex)
+		}
+		removed := q.markRemoved(task, time.Now())
+		if q.len() == 0 {
+			clear(q.tasks)
+			q.tasks = nil
+		}
+		return removed
 	}
-	return queuedTask{}
 }
 
-func (q *mergeTaskQueue) cleanup(now time.Time) []queuedTask {
+func (q *mergeTaskQueue) cleanup(now time.Time) []*queuedTask {
 	if q.len() == 0 {
 		return nil
 	}
 
-	firstRemoved := -1
-	for i, task := range q.tasks {
-		if task.cleanupReady(now) {
-			firstRemoved = i
+	removed := make([]*queuedTask, 0)
+	for q.deadlineTasks.Len() > 0 {
+		task := q.deadlineTasks[0]
+		if !task.valid() {
+			heap.Pop(&q.deadlineTasks)
+			continue
+		}
+		if !task.cleanupReady(now) {
 			break
 		}
-	}
-	if firstRemoved < 0 {
-		return nil
+		heap.Pop(&q.deadlineTasks)
+		removed = append(removed, q.markRemoved(task, now))
 	}
 
-	removed := []queuedTask{q.tasks[firstRemoved]}
-	write := firstRemoved
-	for read := firstRemoved + 1; read < len(q.tasks); read++ {
-		task := q.tasks[read]
-		if task.cleanupReady(now) {
-			removed = append(removed, task)
-		} else {
-			q.tasks[write] = task
-			write++
+	for _, task := range q.tasks {
+		if !task.valid() {
+			continue
 		}
+		if task.Context().Err() == nil {
+			continue
+		}
+		if task.deadlineIndex >= 0 {
+			heap.Remove(&q.deadlineTasks, task.deadlineIndex)
+		}
+		removed = append(removed, q.markRemoved(task, now))
 	}
-	clear(q.tasks[write:])
-	q.tasks = q.tasks[:write]
+
 	if q.len() == 0 {
-		q.cleanupTimestamp = now
+		clear(q.tasks)
+		q.tasks = nil
 	}
 	return removed
+}
+
+func (q *mergeTaskQueue) markRemoved(task *queuedTask, now time.Time) *queuedTask {
+	if !task.valid() {
+		return nil
+	}
+	removed := *task
+	task.Task = nil
+	q.count--
+	if q.count == 0 {
+		q.cleanupTimestamp = now
+	}
+	return &removed
+}
+
+func (q *mergeTaskQueue) dropRemovedPrefix() {
+	for len(q.tasks) > 0 {
+		task := q.tasks[0]
+		if task.valid() {
+			return
+		}
+		q.tasks[0] = nil
+		q.tasks = q.tasks[1:]
+	}
 }
 
 // Return true if user based task is empty and empty for d time.
@@ -113,7 +161,7 @@ func canMergeNQ(task MergeTask, other MergeTask, maxNQ int64, nqMergeRatio float
 }
 
 // tryMerge try to a new task to any task in queue.
-func (q *mergeTaskQueue) tryMerge(task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
 	mergeTask := tryIntoMergeTask(task.Task)
 	if mergeTask == nil {
 		return false
@@ -122,8 +170,12 @@ func (q *mergeTaskQueue) tryMerge(task queuedTask, maxNQ int64, nqMergeRatio flo
 	if mergeTask.NQ() >= maxNQ {
 		return false
 	}
-	for i := q.len() - 1; i >= 0; i-- {
-		if taskInQueue := tryIntoMergeTask(q.tasks[i].Task); taskInQueue != nil {
+	for i := len(q.tasks) - 1; i >= 0; i-- {
+		taskInQueue := q.tasks[i]
+		if !taskInQueue.valid() {
+			continue
+		}
+		if taskInQueue := tryIntoMergeTask(taskInQueue.Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
 			if canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) && taskInQueue.MergeWith(mergeTask) {
 				return true
@@ -131,6 +183,38 @@ func (q *mergeTaskQueue) tryMerge(task queuedTask, maxNQ int64, nqMergeRatio flo
 		}
 	}
 	return false
+}
+
+type deadlineTaskHeap []*queuedTask
+
+func (h deadlineTaskHeap) Len() int {
+	return len(h)
+}
+
+func (h deadlineTaskHeap) Less(i, j int) bool {
+	return h[i].deadline.Before(h[j].deadline)
+}
+
+func (h deadlineTaskHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].deadlineIndex = i
+	h[j].deadlineIndex = j
+}
+
+func (h *deadlineTaskHeap) Push(x any) {
+	entry := x.(*queuedTask)
+	entry.deadlineIndex = len(*h)
+	*h = append(*h, entry)
+}
+
+func (h *deadlineTaskHeap) Pop() any {
+	old := *h
+	n := len(old)
+	entry := old[n-1]
+	old[n-1] = nil
+	entry.deadlineIndex = -1
+	*h = old[:n-1]
+	return entry
 }
 
 // newFairPollingTaskQueue create a fair polling task queue.
@@ -163,7 +247,7 @@ func (q *fairPollingTaskQueue) groupLen(group string) int {
 }
 
 // tryMergeWithOtherGroup try to merge given task into exists tasks in the other group.
-func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
 	if q.count == 0 {
 		return false
 	}
@@ -185,7 +269,7 @@ func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task queuedT
 }
 
 // tryMergeWithSameGroup try to merge given task into exists tasks in the same group.
-func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
 	if q.count == 0 {
 		return false
 	}
@@ -200,7 +284,7 @@ func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task queuedTa
 }
 
 // push add a new task into queue, try merge first.
-func (q *fairPollingTaskQueue) push(group string, task queuedTask) {
+func (q *fairPollingTaskQueue) push(group string, task *queuedTask) {
 	// Add a new task.
 	if r, ok := q.route[group]; ok {
 		// Add new task to the back of queue if queue exist.
@@ -223,11 +307,11 @@ func (q *fairPollingTaskQueue) push(group string, task queuedTask) {
 	q.count++
 }
 
-func (q *fairPollingTaskQueue) cleanup(now time.Time) []queuedTask {
+func (q *fairPollingTaskQueue) cleanup(now time.Time) []*queuedTask {
 	if q.count == 0 || q.checkpoint == nil {
 		return nil
 	}
-	removed := make([]queuedTask, 0)
+	removed := make([]*queuedTask, 0)
 	checkpoint := q.checkpoint
 	queuesLen := q.checkpoint.Len()
 	for i := 0; i < queuesLen; i++ {
@@ -243,10 +327,10 @@ func (q *fairPollingTaskQueue) cleanup(now time.Time) []queuedTask {
 }
 
 // pop pop next ready task.
-func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) queuedTask {
+func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) *queuedTask {
 	// Return directly if there's no task exists.
 	if q.count == 0 {
-		return queuedTask{}
+		return nil
 	}
 	checkpoint := q.checkpoint
 	queuesLen := q.checkpoint.Len()
@@ -286,5 +370,5 @@ func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) queuedTask {
 
 	// Update checkpoint.
 	q.checkpoint = checkpoint
-	return queuedTask{}
+	return nil
 }

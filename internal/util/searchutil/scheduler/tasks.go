@@ -65,15 +65,15 @@ type Scheduler interface {
 type schedulePolicy interface {
 	// Cleanup removes queued tasks whose context deadline has been reached.
 	// Removed tasks are returned to scheduler for error notification.
-	Cleanup(now time.Time) []queuedTask
+	Cleanup(now time.Time) []*queuedTask
 
 	// Push add a new task into scheduler.
 	// Return the count of new task added (task may be chunked or merged)
 	// 0 and an error will be returned if scheduler reaches some limit.
-	Push(task queuedTask) (int, error)
+	Push(task *queuedTask) (int, error)
 
 	// Pop get the task next ready to run.
-	Pop(now time.Time) queuedTask
+	Pop(now time.Time) *queuedTask
 
 	Len() int
 }
@@ -81,28 +81,37 @@ type schedulePolicy interface {
 type queuedTask struct {
 	Task
 
-	enqueueTime time.Time
+	enqueueTime   time.Time
+	deadline      time.Time
+	deadlineIndex int
 }
 
-func newQueuedTask(task Task, enqueueTime time.Time) queuedTask {
-	return queuedTask{
-		Task:        task,
-		enqueueTime: enqueueTime,
+func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
+	queued := &queuedTask{
+		Task:          task,
+		enqueueTime:   enqueueTime,
+		deadlineIndex: -1,
 	}
+	if task != nil {
+		if deadline, ok := task.Context().Deadline(); ok {
+			queued.deadline = deadline
+		}
+	}
+	return queued
 }
 
-func (t queuedTask) queueDuration(now time.Time) time.Duration {
+func (t *queuedTask) queueDuration(now time.Time) time.Duration {
 	if !t.valid() || t.enqueueTime.IsZero() {
 		return 0
 	}
 	return now.Sub(t.enqueueTime)
 }
 
-func (t queuedTask) valid() bool {
-	return t.Task != nil
+func (t *queuedTask) valid() bool {
+	return t != nil && t.Task != nil
 }
 
-func (t queuedTask) cleanupReady(now time.Time) bool {
+func (t *queuedTask) cleanupReady(now time.Time) bool {
 	if !t.valid() {
 		return false
 	}
@@ -113,7 +122,7 @@ func (t queuedTask) cleanupReady(now time.Time) bool {
 	return ok && !now.Before(deadline)
 }
 
-func cleanupTaskError(task queuedTask) error {
+func cleanupTaskError(task *queuedTask) error {
 	if err := task.Context().Err(); err != nil {
 		return err
 	}

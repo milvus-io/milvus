@@ -364,7 +364,7 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {
 	now := time.Now()
-	invalid := queuedTask{}
+	invalid := &queuedTask{}
 	s.Zero(invalid.queueDuration(now))
 	s.False(invalid.cleanupReady(now))
 
@@ -384,7 +384,7 @@ func (s *SchedulerSuite) TestRecordReadTaskQueueDurationSkipsInvalidTask() {
 	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
 
 	scheduler := &scheduler{}
-	scheduler.recordReadTaskQueueDuration(queuedTask{}, time.Now(), readTaskQueueOutcomeScheduled)
+	scheduler.recordReadTaskQueueDuration(&queuedTask{}, time.Now(), readTaskQueueOutcomeScheduled)
 
 	observer := metrics.QueryNodeReadTaskQueueDuration.WithLabelValues(paramtable.GetStringNodeID(), readTaskQueueOutcomeScheduled)
 	metric := &dto.Metric{}

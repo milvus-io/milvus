@@ -22,12 +22,12 @@ type userTaskPollingPolicy struct {
 	queue *fairPollingTaskQueue
 }
 
-func (p *userTaskPollingPolicy) Cleanup(now time.Time) []queuedTask {
+func (p *userTaskPollingPolicy) Cleanup(now time.Time) []*queuedTask {
 	return p.queue.cleanup(now)
 }
 
 // Push add a new task into scheduler, an error will be returned if scheduler reaches some limit.
-func (p *userTaskPollingPolicy) Push(task queuedTask) (int, error) {
+func (p *userTaskPollingPolicy) Push(task *queuedTask) (int, error) {
 	pt := paramtable.Get()
 	username := task.Username()
 
@@ -65,7 +65,7 @@ func (p *userTaskPollingPolicy) Push(task queuedTask) (int, error) {
 }
 
 // Pop get the task next ready to run.
-func (p *userTaskPollingPolicy) Pop(now time.Time) queuedTask {
+func (p *userTaskPollingPolicy) Pop(now time.Time) *queuedTask {
 	expire := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskQueueExpire.GetAsDuration(time.Second)
 	return p.queue.pop(expire)
 }

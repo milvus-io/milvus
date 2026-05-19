@@ -123,14 +123,18 @@ func (s *scheduler) Stop() {
 // schedule the owned task asynchronously and continuously.
 func (s *scheduler) schedule() {
 	defer s.wg.Done()
-	var task queuedTask
+	var task *queuedTask
 	for {
 		s.setupReadyLenMetric()
 
 		var execChan chan Task
+		var execTask Task
 		nq := int64(0)
 		now := time.Now()
 		task, nq, execChan = s.setupExecListener(task, now)
+		if task.valid() {
+			execTask = task.Task
+		}
 
 		select {
 		case req, ok := <-s.receiveChan:
@@ -149,7 +153,7 @@ func (s *scheduler) schedule() {
 			// Receive add operation request and return the process result.
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum, now)
-		case execChan <- task.Task:
+		case execChan <- execTask:
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
@@ -213,19 +217,23 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 }
 
 // produceExecChan produce task from scheduler into exec chan as much as possible
-func (s *scheduler) produceExecChan(now time.Time) queuedTask {
-	var task queuedTask
+func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
+	var task *queuedTask
 	for {
 		var execChan chan Task
+		var execTask Task
 		nq := int64(0)
 		task, nq, execChan = s.setupExecListener(task, now)
+		if task.valid() {
+			execTask = task.Task
+		}
 
 		select {
-		case execChan <- task.Task:
+		case execChan <- execTask:
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
-			task = queuedTask{}
+			task = nil
 		default:
 			return task
 		}
@@ -296,7 +304,7 @@ func readTaskExecuteOutcome(err error) string {
 }
 
 // setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask queuedTask, now time.Time) (queuedTask, int64, chan Task) {
+func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
 	var execChan chan Task
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
@@ -337,7 +345,7 @@ func (s *scheduler) setupReadyLenMetric() {
 	metrics.QueryNodeReadTaskReadyNQ.WithLabelValues(paramtable.GetStringNodeID()).Set(float64(s.GetWaitingTaskTotalNQ()))
 }
 
-func (s *scheduler) recordReadTaskQueueDuration(task queuedTask, now time.Time, outcome string) {
+func (s *scheduler) recordReadTaskQueueDuration(task *queuedTask, now time.Time, outcome string) {
 	if !task.valid() {
 		return
 	}

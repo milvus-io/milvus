@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -110,6 +111,36 @@ func TestMergeTaskQueueCleanupSkipsRewriteWithoutExpiredTask(t *testing.T) {
 	assert.Empty(t, removed)
 	assert.Equal(t, 3, q.len())
 	assert.Same(t, firstTask, q.tasks[0].Task)
+}
+
+func TestMergeTaskQueueCleanupMarksExpiredTasksInPlace(t *testing.T) {
+	q := newMergeTaskQueue("test_user")
+	now := time.Now()
+	later := now.Add(time.Minute)
+
+	ctx1, cancel1 := context.WithDeadline(context.Background(), later)
+	defer cancel1()
+	ctx2, cancel2 := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
+	defer cancel2()
+	ctx3, cancel3 := context.WithDeadline(context.Background(), later)
+	defer cancel3()
+
+	q.push(newQueuedTask(newMockTask(mockTaskConfig{ctx: ctx1, username: "test_user"}), now))
+	expiredTask := newMockTask(mockTaskConfig{ctx: ctx2, username: "test_user"})
+	q.push(newQueuedTask(expiredTask, now))
+	q.push(newQueuedTask(newMockTask(mockTaskConfig{ctx: ctx3, username: "test_user"}), now))
+
+	originalQueueLen := len(q.tasks)
+	removed := q.cleanup(now)
+
+	assert.Len(t, removed, 1)
+	assert.Same(t, expiredTask, removed[0].Task)
+	assert.Equal(t, 2, q.len())
+	assert.Equal(t, originalQueueLen, len(q.tasks))
+	assert.True(t, q.pop().valid())
+	assert.True(t, q.pop().valid())
+	assert.False(t, q.pop().valid())
+	assert.Equal(t, 0, q.len())
 }
 
 func TestMergeTaskQueuePopClearsPoppedSlot(t *testing.T) {

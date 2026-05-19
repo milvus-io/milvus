@@ -20,12 +20,12 @@ type fifoPolicy struct {
 	queue *mergeTaskQueue
 }
 
-func (p *fifoPolicy) Cleanup(now time.Time) []queuedTask {
+func (p *fifoPolicy) Cleanup(now time.Time) []*queuedTask {
 	return p.queue.cleanup(now)
 }
 
 // Push add a new task into scheduler, an error will be returned if scheduler reaches some limit.
-func (p *fifoPolicy) Push(task queuedTask) (int, error) {
+func (p *fifoPolicy) Push(task *queuedTask) (int, error) {
 	pt := paramtable.Get()
 
 	// Try to merge task if task can merge.
@@ -43,7 +43,7 @@ func (p *fifoPolicy) Push(task queuedTask) (int, error) {
 }
 
 // Pop get the task next ready to run.
-func (p *fifoPolicy) Pop(now time.Time) queuedTask {
+func (p *fifoPolicy) Pop(now time.Time) *queuedTask {
 	return p.queue.pop()
 }
 
