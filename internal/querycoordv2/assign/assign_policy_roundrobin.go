@@ -18,6 +18,7 @@ package assign
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -57,9 +58,14 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	nodes []int64,
 	forceAssign bool,
 ) []SegmentAssignPlan {
+	balanceBatchSize := math.MaxInt64
+
 	// Filter nodes
-	filter := newCommonSegmentNodeFilter(p.nodeManager)
-	nodes = filter.FilterNodes(ctx, nodes, forceAssign)
+	if !forceAssign {
+		filter := newCommonSegmentNodeFilter(p.nodeManager)
+		nodes = filter.FilterNodes(ctx, nodes, forceAssign)
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+	}
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -81,8 +87,6 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 		return nodes[i] < nodes[j]
 	})
 
-	// Apply batch size limit
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 
 	// Assign segments in round-robin fashion
