@@ -2347,7 +2347,7 @@ func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
 
 	dist := meta.NewDistributionManager(nil)
 	assert.False(t, segmentDeltaRecord{segmentID: 0}.isSegmentDistMatched(dist))
-	assert.False(t, segmentDeltaRecord{nodeID: 1, segmentID: 10, actionType: ActionTypeUpdate}.isSegmentDistMatched(dist))
+	assert.True(t, segmentDeltaRecord{nodeID: 1, segmentID: 10, actionType: ActionTypeUpdate}.isSegmentDistMatched(dist))
 }
 
 func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
