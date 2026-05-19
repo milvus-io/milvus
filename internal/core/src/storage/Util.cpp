@@ -2049,7 +2049,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
             arrow::BinaryBuilder builder;
             auto status = builder.Reserve(arr->length());
             AssertInfo(status.ok(),
-                       "BinaryBuilder reserve failed: " + status.ToString());
+                       "BinaryBuilder reserve failed: {}",
+                       status.ToString());
             switch (tid) {
                 case arrow::Type::LARGE_BINARY: {
                     auto src =
@@ -2064,8 +2065,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
                                 v.size());
                         }
                         AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
+                                   "BinaryBuilder append failed: {}",
+                                   status.ToString());
                     }
                     break;
                 }
@@ -2082,8 +2083,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
                                 v.size());
                         }
                         AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
+                                   "BinaryBuilder append failed: {}",
+                                   status.ToString());
                     }
                     break;
                 }
@@ -2100,8 +2101,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
                                 v.size());
                         }
                         AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
+                                   "BinaryBuilder append failed: {}",
+                                   status.ToString());
                     }
                     break;
                 }
@@ -2118,8 +2119,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
                                 v.size());
                         }
                         AssertInfo(status.ok(),
-                                   "BinaryBuilder append failed: " +
-                                       status.ToString());
+                                   "BinaryBuilder append failed: {}",
+                                   status.ToString());
                     }
                     break;
                 }
@@ -2129,7 +2130,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
             std::shared_ptr<arrow::Array> out;
             status = builder.Finish(&out);
             AssertInfo(status.ok(),
-                       "BinaryBuilder finish failed: " + status.ToString());
+                       "BinaryBuilder finish failed: {}",
+                       status.ToString());
             result.push_back(out);
             continue;
         }
@@ -2182,7 +2184,8 @@ CoerceToList(const arrow::ArrayVector& arrays) {
         arrow::Int32Builder offset_builder;
         auto status = offset_builder.Reserve(arr->length() + 1);
         AssertInfo(status.ok(),
-                   "CoerceToList: offset reserve failed: " + status.ToString());
+                   "CoerceToList: offset reserve failed: {}",
+                   status.ToString());
         std::vector<std::shared_ptr<arrow::Array>> value_slices;
         int32_t cur = 0;
         status = offset_builder.Append(0);
@@ -2202,7 +2205,8 @@ CoerceToList(const arrow::ArrayVector& arrays) {
         std::shared_ptr<arrow::Array> offsets_arr;
         status = offset_builder.Finish(&offsets_arr);
         AssertInfo(status.ok(),
-                   "CoerceToList: offset finish failed: " + status.ToString());
+                   "CoerceToList: offset finish failed: {}",
+                   status.ToString());
 
         std::shared_ptr<arrow::Array> concat_values;
         if (value_slices.empty()) {
@@ -2211,9 +2215,9 @@ CoerceToList(const arrow::ArrayVector& arrays) {
             concat_values = *empty;
         } else {
             auto concat = arrow::Concatenate(value_slices);
-            AssertInfo(
-                concat.ok(),
-                "CoerceToList: concat failed: " + concat.status().ToString());
+            AssertInfo(concat.ok(),
+                       "CoerceToList: concat failed: {}",
+                       concat.status().ToString());
             concat_values = *concat;
         }
 
@@ -2245,14 +2249,16 @@ RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array) {
     arrow::TypedBufferBuilder<bool> bb;
     auto status = bb.Reserve(array->length());
     AssertInfo(status.ok(),
-               "RebuildNullBitmap: reserve failed: " + status.ToString());
+               "RebuildNullBitmap: reserve failed: {}",
+               status.ToString());
     for (int64_t i = 0; i < array->length(); ++i) {
         bb.UnsafeAppend(!array->IsNull(i));
     }
     std::shared_ptr<arrow::Buffer> buf;
     status = bb.Finish(&buf);
     AssertInfo(status.ok(),
-               "RebuildNullBitmap: finish failed: " + status.ToString());
+               "RebuildNullBitmap: finish failed: {}",
+               status.ToString());
     return buf;
 }
 
@@ -2413,7 +2419,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             concat_values = *empty;
         } else {
             auto concat = arrow::Concatenate(slices);
-            AssertInfo(concat.ok(), "concat: " + concat.status().ToString());
+            AssertInfo(concat.ok(), "concat: {}", concat.status().ToString());
             concat_values = *concat;
         }
 
@@ -2484,7 +2490,8 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(arr->length());
         AssertInfo(status.ok(),
-                   "BinaryBuilder reserve failed: " + status.ToString());
+                   "BinaryBuilder reserve failed: {}",
+                   status.ToString());
         for (int64_t i = 0; i < arr->length(); ++i) {
             if (arr->IsNull(i)) {
                 status = builder.AppendNull();
