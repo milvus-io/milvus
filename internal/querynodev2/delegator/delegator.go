@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -166,6 +167,10 @@ type shardDelegator struct {
 	// schema version
 	schemaChangeMutex sync.RWMutex
 	schemaVersion     uint64
+
+	// limits delegator-side post-load work after worker LoadSegments returns.
+	postLoadSem           *syncutil.Semaphore
+	postLoadConfigHandler config.EventHandler
 
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
@@ -1240,6 +1245,10 @@ func (sd *shardDelegator) Close() {
 		sd.idfOracle.Close()
 	}
 
+	if sd.postLoadConfigHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
+	}
+
 	if sd.functionRunners != nil {
 		for _, function := range sd.functionRunners {
 			function.Close()
@@ -1326,6 +1335,14 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
 	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
+	postLoadSem := syncutil.NewSemaphore(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+	postLoadConfigHandler := config.NewHandler(fmt.Sprintf("qn.delegator.postload.%s.%p", channel, postLoadSem), func(event *config.Event) {
+		if event.HasUpdated {
+			concurrency := paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt()
+			postLoadSem.SetCapacity(concurrency)
+			log.Info("resize delegator post-load concurrency", zap.Int("concurrency", concurrency))
+		}
+	})
 
 	sd := &shardDelegator{
 		collectionID:   collectionID,
@@ -1349,6 +1366,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		analyzerRunners:            make(map[UniqueID]function.Analyzer),
 		isBM25Field:                make(map[int64]bool),
 		l0ForwardPolicy:            policy,
+		postLoadSem:                postLoadSem,
+		postLoadConfigHandler:      postLoadConfigHandler,
 		catchingUpStreamingData:    atomic.NewBool(true),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
@@ -1386,6 +1405,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
+	paramtable.Get().Watch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, postLoadConfigHandler)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
 }
