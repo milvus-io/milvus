@@ -259,8 +259,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	collectionID := int64(99001)
 	channel := "preferred-metric-channel-hit"
 	before := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		"99001",
-		channel,
+		"3",
 		metrics.PreferredNodeHitLabel,
 	))
 
@@ -279,8 +278,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	s.False(selectedByBalancer)
 
 	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		"99001",
-		channel,
+		"3",
 		metrics.PreferredNodeHitLabel,
 	))
 	s.Equal(float64(1), after-before)
@@ -291,8 +289,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() 
 	collectionID := int64(99002)
 	channel := "preferred-metric-channel-disabled"
 	before := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		"99002",
-		channel,
+		"0",
 		metrics.PreferredNodeMissLabel,
 	))
 
@@ -311,8 +308,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() 
 	s.Equal(int64(1), targetNode.NodeID)
 
 	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		"99002",
-		channel,
+		"0",
 		metrics.PreferredNodeMissLabel,
 	))
 	s.Equal(float64(0), after-before)

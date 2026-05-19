@@ -136,10 +136,9 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
-func recordPreferredNodeSelection(collectionID int64, channel string, status string) {
+func recordPreferredNodeSelection(nodeID int64, status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		strconv.FormatInt(collectionID, 10),
-		channel,
+		strconv.FormatInt(nodeID, 10),
 		status,
 	).Inc()
 }
@@ -150,7 +149,7 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	}
 	nodeID := workload.PreferredNodes[channel]
 	if nodeID == 0 {
-		recordPreferredNodeSelection(workload.CollectionID, channel, metrics.PreferredNodeMissLabel)
+		recordPreferredNodeSelection(0, metrics.PreferredNodeMissLabel)
 	}
 	return nodeID
 }
@@ -219,10 +218,10 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
-			recordPreferredNodeSelection(workload.CollectionID, workload.Channel, metrics.PreferredNodeHitLabel)
+			recordPreferredNodeSelection(preferredNode.NodeID, metrics.PreferredNodeHitLabel)
 			return preferredNode, false, nil
 		} else if workload.PreferredNodeID != 0 {
-			recordPreferredNodeSelection(workload.CollectionID, workload.Channel, metrics.PreferredNodeUnavailableLabel)
+			recordPreferredNodeSelection(workload.PreferredNodeID, metrics.PreferredNodeUnavailableLabel)
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
