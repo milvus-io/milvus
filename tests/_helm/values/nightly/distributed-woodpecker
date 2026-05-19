@@ -86,6 +86,8 @@ extraConfigFiles:
     common:
       storage:
         enablev2: true
+        # enable storage v3
+        useLoonFFI: true
     dataCoord:
       gc:
         interval: 1800
@@ -176,4 +178,3 @@ image:
     pullPolicy: Always
     repository: harbor.milvus.io/milvus/milvus
     tag: nightly-20240821-ed4eaff
-

@@ -36,6 +36,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    common:
+      storage:
+        # enable storage v3
+        useLoonFFI: true
     dataCoord:
       gc:
         interval: 1800

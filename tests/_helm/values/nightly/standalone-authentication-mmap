@@ -51,6 +51,9 @@ extraConfigFiles:
         scalarIndex: true
         growingMmapEnabled: true
     common:
+      storage:
+        # enable storage v3
+        useLoonFFI: true
       security:
         authorizationEnabled: true
 metrics:
