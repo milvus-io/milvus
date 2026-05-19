@@ -519,6 +519,48 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def refresh_external_collection(
+        self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.refresh_external_collection], collection_name=collection_name, **kwargs)
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
+    def get_refresh_external_collection_progress(
+        self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_refresh_external_collection_progress], job_id=job_id, **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, job_id=job_id, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_refresh_external_collection_jobs(
+        self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.list_refresh_external_collection_jobs], collection_name=collection_name, **kwargs
+        )
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
     def refresh_load(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})

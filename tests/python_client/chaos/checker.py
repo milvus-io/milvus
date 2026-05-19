@@ -8,7 +8,7 @@ import time
 import unittest
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from time import sleep
 
@@ -310,6 +310,7 @@ class Op(Enum):
     snapshot = "snapshot"
     restore_snapshot = "restore_snapshot"
     entity_ttl = "entity_ttl"
+    external_table = "external_table"
     unknown = "unknown"
 
 
@@ -825,6 +826,350 @@ class Checker:
         log.info(f"task ids {task_ids}")
         completed = utility.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720, using=self.alias)
         return task_ids, completed
+
+
+class ExternalTableChecker(Checker):
+    """Refresh-focused external table checker for chaos runs."""
+
+    def __init__(
+        self,
+        collection_name=None,
+        minio_host=None,
+        minio_bucket=None,
+        dim=ct.default_dim,
+        rows_per_file=100,
+        num_rows=None,
+        refresh_timeout=180,
+        count_timeout=60,
+        max_files=5,
+    ):
+        self.recovery_time = 0
+        self._succ = 0
+        self._fail = 0
+        self.fail_records = []
+        self.error_messages = set()
+        self.consistency_errors = []
+        self._keep_running = True
+        self.rsp_times = []
+        self.average_time = 0
+        self.dim = dim
+        self.rows_per_file = rows_per_file if num_rows is None else num_rows
+        self.refresh_timeout = refresh_timeout
+        self.count_timeout = count_timeout
+        self.max_files = max(max_files, 2)
+        self.c_name = collection_name or cf.gen_unique_str("ExternalTableChecker_")
+        self.external_key = f"external-table-chaos-checker/{self.c_name}"
+        self.external_files = {}
+        self.file_specs = {}
+        self.file_seq = 0
+        self.source_seq = 0
+        self.next_start_id = 0
+        self.active_external_key = None
+        self.collection_ready = False
+
+        from common.external_table_common import get_minio_config, new_minio_client
+
+        self.minio_cfg = get_minio_config(minio_host=minio_host, minio_bucket=minio_bucket)
+        self.minio_client = new_minio_client(self.minio_cfg)
+        if not self.minio_client.bucket_exists(self.minio_cfg["bucket"]):
+            raise AssertionError(
+                f"MinIO bucket {self.minio_cfg['bucket']} not accessible at {self.minio_cfg['address']}"
+            )
+
+        self.uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        self.token = cf.param_info.param_token or f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        self._reset_milvus_client()
+        self._prepare_collection()
+
+    @staticmethod
+    def _unwrap_single(value):
+        if isinstance(value, (list, tuple)) and len(value) == 1:
+            return value[0]
+        return value
+
+    @staticmethod
+    def _progress_state(progress):
+        if isinstance(progress, dict):
+            return progress.get("state")
+        return getattr(progress, "state", None)
+
+    @staticmethod
+    def _progress_reason(progress):
+        if isinstance(progress, dict):
+            return progress.get("reason") or ""
+        return getattr(progress, "reason", None) or ""
+
+    def _reset_milvus_client(self):
+        old_client = getattr(self, "milvus_client", None)
+        if old_client is not None:
+            try:
+                old_client.close()
+            except Exception as e:
+                log.debug(f"close external table checker client failed: {e}")
+        self.milvus_client = MilvusClient(uri=self.uri, token=self.token)
+
+    def _try_reset_milvus_client(self, context):
+        try:
+            self._reset_milvus_client()
+            return None
+        except Exception as e:
+            log.debug(f"{context}: reset external table checker client failed: {e}")
+            return str(e)
+
+    def _reset_minio_client(self):
+        from common.external_table_common import new_minio_client
+
+        self.minio_client = new_minio_client(self.minio_cfg)
+
+    def _build_basic_schema(self, external_source, external_spec):
+        schema = self.milvus_client.create_schema(external_source=external_source, external_spec=external_spec)
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("value", DataType.FLOAT, external_field="value")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=self.dim, external_field="embedding")
+        return schema
+
+    def _wait_refresh_completed(self, job_id):
+        deadline = time.time() + self.refresh_timeout
+        progress = None
+        while time.time() < deadline:
+            try:
+                progress = self._unwrap_single(
+                    self.milvus_client.get_refresh_external_collection_progress(job_id=job_id, timeout=timeout)
+                )
+            except Exception as e:
+                reset_error = self._try_reset_milvus_client("get refresh progress failed")
+                msg = f"get refresh progress failed: job_id={job_id}, error={e}"
+                if reset_error:
+                    msg += f"; reset client failed: {reset_error}"
+                return msg, False
+            state = self._progress_state(progress)
+            if state == "RefreshCompleted":
+                return None, True
+            if state == "RefreshFailed":
+                return f"refresh failed: job_id={job_id}, reason={self._progress_reason(progress)}", False
+            sleep(2)
+        return f"refresh did not complete in {self.refresh_timeout}s, job_id={job_id}, last={progress}", False
+
+    def _create_index_and_load(self, collection_name):
+        index_params = self.milvus_client.prepare_index_params()
+        index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
+        self.milvus_client.create_index(collection_name=collection_name, index_params=index_params, timeout=timeout)
+        self.milvus_client.load_collection(collection_name=collection_name, timeout=timeout)
+
+    def _expected_rows(self):
+        return sum(self.external_files.values())
+
+    def _assert_external_table_row_count(self):
+        from common.external_table_common import query_count
+
+        expected = self._expected_rows()
+        actual = query_count(self.milvus_client, self.c_name)
+        if actual != expected:
+            msg = f"expected {expected} rows from files {self.external_files}, got {actual}"
+            self.consistency_errors.append(msg)
+            return msg, False
+        return {"expected_rows": expected, "files": sorted(self.external_files)}, True
+
+    def _wait_external_table_row_count(self):
+        deadline = time.time() + self.count_timeout
+        last_error = None
+        expected = self._expected_rows()
+        while time.time() < deadline:
+            try:
+                res, result = self._assert_external_table_row_count()
+                if result:
+                    return res, True
+                if self.consistency_errors:
+                    last_error = self.consistency_errors.pop()
+                else:
+                    last_error = res
+            except Exception as e:
+                self._try_reset_milvus_client("external table count failed")
+                last_error = str(e)
+            sleep(2)
+        msg = f"expected {expected} rows did not become queryable without reload in {self.count_timeout}s"
+        if last_error:
+            msg += f", last error: {last_error}"
+        self.consistency_errors.append(msg)
+        return msg, False
+
+    def _next_external_key(self):
+        external_key = f"{self.external_key}/versions/v{self.source_seq:04d}"
+        self.source_seq += 1
+        return external_key
+
+    def _upload_external_source_snapshot(self):
+        from common.external_table_common import upload_basic_data
+
+        # Keep every published source immutable so old external segments remain
+        # loadable while refresh/querycoord recovery catches up.
+        external_key = self._next_external_key()
+        try:
+            for filename in sorted(self.external_files):
+                spec = self.file_specs[filename]
+                upload_basic_data(
+                    self.minio_client,
+                    self.minio_cfg,
+                    external_key,
+                    num_rows=spec["rows"],
+                    start_id=spec["start_id"],
+                    filename=filename,
+                    dim=self.dim,
+                )
+        except Exception:
+            self._reset_minio_client()
+            raise
+        return external_key
+
+    def _add_file(self):
+        filename = f"part_{self.file_seq:04d}.parquet"
+        start_id = self.next_start_id
+        self.external_files[filename] = self.rows_per_file
+        self.file_specs[filename] = {"rows": self.rows_per_file, "start_id": start_id}
+        self.file_seq += 1
+        self.next_start_id += self.rows_per_file
+        return f"add:{filename}"
+
+    def _remove_file(self):
+        filename = random.choice(list(self.external_files))
+        self.external_files.pop(filename)
+        self.file_specs.pop(filename, None)
+        return f"remove:{filename}"
+
+    def _mutate_external_files(self):
+        if len(self.external_files) <= 1:
+            return self._add_file()
+        if len(self.external_files) >= self.max_files:
+            return self._remove_file()
+        if random.choice([True, False]):
+            return self._add_file()
+        return self._remove_file()
+
+    def _refresh_and_wait(self, external_key=None):
+        from common.external_table_common import build_external_source, build_external_spec
+
+        kwargs = {"collection_name": self.c_name, "timeout": timeout}
+        if external_key is not None:
+            kwargs["external_source"] = build_external_source(self.minio_cfg, external_key)
+            kwargs["external_spec"] = build_external_spec(self.minio_cfg)
+        try:
+            self._reset_milvus_client()
+            job_id = self._unwrap_single(self.milvus_client.refresh_external_collection(**kwargs))
+        except Exception as e:
+            reset_error = self._try_reset_milvus_client("refresh submit failed")
+            msg = f"refresh submit failed: {e}"
+            if reset_error:
+                msg += f"; reset client failed: {reset_error}"
+            return msg, False
+        res, result = self._wait_refresh_completed(job_id)
+        if result and external_key is not None:
+            self.active_external_key = external_key
+        return res, result
+
+    def verify_consistency(self, submit_retry_timeout=None):
+        """Retry until Milvus recovers, then verify refresh produces the exact row count."""
+        deadline = time.time() + (submit_retry_timeout or self.refresh_timeout)
+        last_error = None
+        while time.time() < deadline:
+            try:
+                external_key = self._upload_external_source_snapshot()
+                res, result = self._refresh_and_wait(external_key=external_key)
+            except Exception as e:
+                self._try_reset_milvus_client("final consistency check failed")
+                last_error = str(e)
+                sleep(5)
+                continue
+            if result:
+                try:
+                    before = len(self.consistency_errors)
+                    check_res, check_result = self._wait_external_table_row_count()
+                    if check_result:
+                        return check_res, True
+                    if len(self.consistency_errors) > before:
+                        return check_res, False
+                    last_error = check_res
+                except Exception as e:
+                    self._try_reset_milvus_client("final consistency query failed")
+                    last_error = str(e)
+            else:
+                last_error = res
+            sleep(5)
+        return f"final consistency check did not pass in time, last error: {last_error}", False
+
+    def _prepare_collection(self):
+        if self.collection_ready:
+            return
+        from common.external_table_common import build_external_source, build_external_spec
+
+        if self.milvus_client.has_collection(self.c_name):
+            self.milvus_client.drop_collection(collection_name=self.c_name, timeout=timeout)
+
+        self._add_file()
+        external_key = self._upload_external_source_snapshot()
+        external_source = build_external_source(self.minio_cfg, external_key)
+        schema = self._build_basic_schema(external_source, build_external_spec(self.minio_cfg))
+        self.milvus_client.create_collection(
+            collection_name=self.c_name,
+            schema=schema,
+            consistency_level="Strong",
+            timeout=timeout,
+        )
+        res, result = self._refresh_and_wait(external_key=external_key)
+        if not result:
+            raise AssertionError(res)
+        self._create_index_and_load(self.c_name)
+        res, result = self._assert_external_table_row_count()
+        if not result:
+            raise AssertionError(res)
+        self.collection_ready = True
+
+    @trace()
+    def external_table(self):
+        try:
+            self._prepare_collection()
+            action = self._mutate_external_files()
+            external_key = self._upload_external_source_snapshot()
+            res, result = self._refresh_and_wait(external_key=external_key)
+            if not result:
+                return f"{action}: {res}", result
+            return self._wait_external_table_row_count()
+        except Exception as e:
+            self._try_reset_milvus_client("external table checker failed")
+            log.info(f"external table checker failed: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.external_table()
+        return res, result
+
+    def terminate(self):
+        self._keep_running = False
+        try:
+            self._reset_milvus_client()
+            if self.milvus_client.has_collection(self.c_name):
+                self.milvus_client.drop_collection(collection_name=self.c_name, timeout=timeout)
+        except Exception as e:
+            log.warning(f"drop external table checker collection {self.c_name} failed: {e}")
+        try:
+            from common.external_table_common import cleanup_minio_prefix
+
+            cleanup_minio_prefix(self.minio_client, self.minio_cfg["bucket"], f"{self.external_key}/")
+        except Exception as e:
+            log.warning(f"cleanup external table checker prefix {self.external_key} failed: {e}")
+        self.external_files = {}
+        self.file_specs = {}
+        self.file_seq = 0
+        self.source_seq = 0
+        self.next_start_id = 0
+        self.active_external_key = None
+        self.collection_ready = False
+        self.reset()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
 
 
 class CollectionLoadChecker(Checker):
@@ -3443,7 +3788,7 @@ class EntityTTLChecker(Checker):
         expiry = self.bucket_expiry[bucket_name]
         if expiry is None:
             return None
-        return datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(expiry, tz=UTC).isoformat()
 
     def _is_expired(self, bucket_name):
         """Check if a bucket's data should have expired (with grace window)."""
