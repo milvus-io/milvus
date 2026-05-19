@@ -549,8 +549,7 @@ queryNode:
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
-    receiveChanSize: 10240
-    unsolvedQueueSize: 10240
+    unsolvedQueueSize: 1024
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -566,13 +565,16 @@ queryNode:
       # 	Scheduling is fair on task granularity.
       # 	The policy is based on the username for authentication.
       # 	And an empty username is considered the same user.
-      # 	When there are no multi-users, the policy decay into FIFO"
+      # 	When there are no multi-users, the policy decay into FIFO.
       name: fifo
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
+      taskDeadlineAdvance: 50ms # Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
-    maxNQ: 1000
+    maxNQ: 16
+    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
+    maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped.
     topKMergeRatio: 20
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]

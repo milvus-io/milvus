@@ -216,6 +216,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum.GetAsInt64())
+		assert.Equal(t, int64(1024), Params.MaxTaskNum.GetAsInt64())
 
 		t.Logf("AccessLog.Enable: %t", Params.AccessLog.Enable.GetAsBool())
 
@@ -448,8 +449,23 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
-		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
-		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
+		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
+		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)
+		assert.Equal(t, int64(16), Params.MaxGroupNQ.GetAsInt64())
+		assert.Equal(t, 3.0, Params.NQMergeRatio.GetAsFloat())
+		assert.Equal(t, 50*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
+		defer params.Reset(Params.MaxDeadlineMergeGap.Key)
+		assert.NoError(t, params.Save(Params.MaxDeadlineMergeGap.Key, "100ms"))
+		assert.Equal(t, 100*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
+		assert.NoError(t, params.Save(Params.MaxDeadlineMergeGap.Key, "100"))
+		assert.Equal(t, 100*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
+		assert.Equal(t, "fifo", Params.SchedulePolicyName.GetValue())
+		assert.Equal(t, 50*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
+		defer params.Reset(Params.SchedulePolicyTaskDeadlineAdvance.Key)
+		assert.NoError(t, params.Save(Params.SchedulePolicyTaskDeadlineAdvance.Key, "100ms"))
+		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
+		assert.NoError(t, params.Save(Params.SchedulePolicyTaskDeadlineAdvance.Key, "100"))
+		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
 
@@ -807,6 +823,15 @@ func TestForbiddenItem(t *testing.T) {
 		Value: "new-cluster",
 	})
 	assert.Equal(t, "by-dev", params.CommonCfg.ClusterPrefix.GetValue())
+}
+
+func TestFormatDurationWithMillisecondFallback(t *testing.T) {
+	assert.Equal(t, "", formatDurationWithMillisecondFallback(""))
+	assert.Equal(t, "", formatDurationWithMillisecondFallback("  "))
+	assert.Equal(t, "100ms", formatDurationWithMillisecondFallback("100"))
+	assert.Equal(t, "1.5ms", formatDurationWithMillisecondFallback("1.5"))
+	assert.Equal(t, "2s", formatDurationWithMillisecondFallback("2s"))
+	assert.Equal(t, "invalid", formatDurationWithMillisecondFallback("invalid"))
 }
 
 func TestCachedParam(t *testing.T) {
