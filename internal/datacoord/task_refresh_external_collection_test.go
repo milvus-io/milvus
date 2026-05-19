@@ -99,9 +99,11 @@ func (s *stubAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, e
 // stubCluster is a simple stub implementation of Cluster for testing
 type stubCluster struct {
 	session.Cluster
+	refreshReq *datapb.RefreshExternalCollectionTaskRequest
 }
 
 func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
+	s.refreshReq = req
 	return nil
 }
 
@@ -760,7 +762,11 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 
 		segments := NewSegmentsInfo()
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
+		collections.Insert(100, &collectionInfo{
+			ID:         100,
+			Schema:     &schemapb.CollectionSchema{Name: "test_coll"},
+			Partitions: []int64{10},
+		})
 		mt := &meta{
 			segments:    segments,
 			collections: collections,
@@ -809,7 +815,11 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		})
 
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
+		collections.Insert(100, &collectionInfo{
+			ID:         100,
+			Schema:     &schemapb.CollectionSchema{Name: "test_coll"},
+			Partitions: []int64{10},
+		})
 		mt := &meta{
 			segments:    segments,
 			collections: collections,
@@ -825,6 +835,8 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		// Task should be marked as in progress
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
+		assert.NotNil(t, cluster.refreshReq)
+		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 	})
 }
 

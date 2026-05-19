@@ -23,7 +23,7 @@ package external
 // - DataCoord pre-allocates a batch of segment IDs (default 1000) via allocator.AllocN()
 // - Pre-allocated ID range is passed to DataNode via RefreshExternalCollectionTaskRequest.PreAllocatedSegmentIds
 // - DataNode extracts the IDRange and uses pre-allocated IDs sequentially for each new segment
-// - Manifest files are written directly to final paths: external/{collectionID}/segments/{realID}/manifest
+// - Manifest files are written directly to final StorageV3 insert_log paths
 //
 // NO TEMPORARY PATHS OR CLEANUP:
 // - All segments use real, pre-allocated IDs (no temporary negative IDs)
@@ -42,6 +42,7 @@ package external
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -52,12 +53,14 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -690,6 +693,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		seg := &datapb.SegmentInfo{
 			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
+			PartitionID:    t.req.GetPartitionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
@@ -712,11 +716,12 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 ) (string, error) {
 	// All segments now use final paths with real IDs (no temporary paths needed)
 	// Pre-allocated IDs ensure we can write directly to final locations
-	basePath := fmt.Sprintf(
-		"external/%d/segments/%d",
-		t.req.GetCollectionID(),
-		segmentID,
-	)
+	rootPath := ""
+	if storageConfig := t.req.GetStorageConfig(); storageConfig != nil {
+		rootPath = storageConfig.GetRootPath()
+	}
+	k := metautil.JoinIDPath(t.req.GetCollectionID(), t.req.GetPartitionID(), segmentID)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 
 	return packed.CreateSegmentManifestWithBasePath(
 		ctx,

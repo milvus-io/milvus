@@ -74,11 +74,10 @@ func extTestURI(cfg minioConfig, relPath string) string {
 }
 
 // extTestSpec returns an ExternalSpec JSON fragment for external-table tests
-// that target Milvus's own MinIO. The URI scheme already selects MinIO, so the
-// spec only needs the file format plus credentials.
+// that target Milvus's own MinIO.
 func extTestSpec(cfg minioConfig, format string) string {
 	return fmt.Sprintf(
-		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q}}`,
+		`{"format":%q,"extfs":{"cloud_provider":"minio","access_key_id":%q,"access_key_value":%q}}`,
 		format, cfg.accessKey, cfg.secretKey)
 }
 
@@ -147,6 +146,59 @@ func generateParquetBytes(numRows int64, startID int64) ([]byte, error) {
 		for d := 0; d < testVecDim; d++ {
 			vecValueBuilder.Append(float32(startID+i)*0.1 + float32(d))
 		}
+	}
+
+	record := builder.NewRecord()
+	defer record.Release()
+
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// generateSnapshotRestoreParquetBytes creates a compact Parquet file for the
+// snapshot restore e2e. It stores float vectors as FixedSizeBinary so the test
+// focuses on the snapshot restore path instead of list-vector decoding.
+func generateSnapshotRestoreParquetBytes(numRows int64, startID int64) ([]byte, error) {
+	arrowSchema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "value", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "embedding", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim * 4}},
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, fmt.Errorf("create parquet writer: %w", err)
+	}
+
+	pool := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(pool, arrowSchema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	valueBuilder := builder.Field(1).(*array.Float32Builder)
+	embeddingBuilder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+
+	for i := int64(0); i < numRows; i++ {
+		idx := startID + i
+		idBuilder.Append(idx)
+		valueBuilder.Append(float32(idx) * 1.5)
+
+		raw := make([]byte, testVecDim*4)
+		for d := 0; d < testVecDim; d++ {
+			value := float32(idx)*0.1 + float32(d)
+			binary.LittleEndian.PutUint32(raw[d*4:(d+1)*4], math.Float32bits(value))
+		}
+		embeddingBuilder.Append(raw)
 	}
 
 	record := builder.NewRecord()
@@ -497,6 +549,104 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 }
 
 // --- E2E Tests ---
+
+func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_snapshot_restore", 6)
+	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	snapshotName := fmt.Sprintf("snapshot_%s", common.GenRandomString("ext", 6))
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	collectionsToClean := []string{collName, restoredCollName}
+
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+		for _, name := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name))
+		}
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, fmt.Sprintf("%s/", extPath))
+	})
+
+	const numRows = int64(100)
+	data, err := generateSnapshotRestoreParquetBytes(numRows, 0)
+	require.NoError(t, err)
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("value").
+			WithDataType(entity.FieldTypeFloat).
+			WithExternalField("value")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("external collection snapshot restore e2e"))
+	common.CheckErr(t, err, true)
+
+	jobID, err := mc.RestoreSnapshot(ctx, client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName))
+	common.CheckErr(t, err, true)
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 3*time.Minute)
+	common.CheckErr(t, err, true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, numRows, count)
+
+	filterRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 10").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 10, filterRes.GetColumn("id").Len())
+
+	vec := make([]float32, testVecDim)
+	for i := range vec {
+		vec[i] = float32(i) * 0.1
+	}
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(restoredCollName, 5,
+		[]entity.Vector{entity.FloatVector(vec)}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("embedding").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+}
 
 // TestRefreshExternalCollectionAndVerifySegments tests the full external collection workflow:
 //  1. Upload parquet test data to MinIO

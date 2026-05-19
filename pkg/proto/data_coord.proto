@@ -1053,6 +1053,9 @@ message CopySegmentSource {
   // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
   // When storage_version >= 3, binlog paths must be resolved from manifest_path
   int64 storage_version = 12;
+
+  // Whether the source segment belongs to an external collection.
+  bool is_external_collection = 13;
 }
 
 message CopySegmentTarget {
@@ -1403,6 +1406,7 @@ message RefreshExternalCollectionTaskRequest {
   string explore_manifest_path = 11;      // S3 manifest path for file discovery
   int64 file_index_begin = 12;            // File range start for this task
   int64 file_index_end = 13;              // File range end for this task
+  int64 partitionID = 14;                 // target partition for manifest path
 }
 
 message RefreshExternalCollectionTaskResponse {
