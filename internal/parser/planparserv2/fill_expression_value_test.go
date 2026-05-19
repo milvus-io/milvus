@@ -203,6 +203,30 @@ func (s *FillExpressionValueSuite) TestSpecialStringTemplate() {
 		s.Equal("prefix", rangeExpr.GetValue().GetStringVal())
 	})
 
+	s.Run("regex pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField =~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, `prefix\d+`),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_RegexMatch, rangeExpr.GetOp())
+		s.Equal(`prefix\d+`, rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("regex not match pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField !~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, `^prefix`),
+		})
+		s.NoError(err)
+		notExpr := expr.GetUnaryExpr()
+		s.NotNil(notExpr)
+		rangeExpr := notExpr.GetChild().GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PrefixMatch, rangeExpr.GetOp())
+		s.Equal("prefix", rangeExpr.GetValue().GetStringVal())
+	})
+
 	s.Run("text match query", func() {
 		expr, err := ParseExpr(schemaH, `text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
 			"query": generateTemplateValue(schemapb.DataType_VarChar, "vector database"),
@@ -250,6 +274,9 @@ func (s *FillExpressionValueSuite) TestSpecialStringTemplate() {
 	})
 
 	s.Run("extra parameters are still constants", func() {
+		s.assertInvalidExpr(schemaH, `VarCharField =~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
 		s.assertInvalidExpr(schemaH, `text_match(VarCharField, "vector database", minimum_should_match={n})`, map[string]*schemapb.TemplateValue{
 			"n": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 		})
