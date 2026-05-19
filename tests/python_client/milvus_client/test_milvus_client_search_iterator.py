@@ -452,9 +452,8 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 2})
-        partitions = self.list_partitions(client, collection_name)[0]
-        assert partition_name in partitions
+                                              "consistency_level": 2,
+                                              "num_partitions": 2})
         # 2. insert
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
