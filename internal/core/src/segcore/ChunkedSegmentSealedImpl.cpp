@@ -2752,6 +2752,12 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
 
     auto absent_fields = sch->AbsentFields(*schema_);
     for (const auto& field_meta : *absent_fields) {
+        AssertInfo(!(IsVectorDataType(field_meta.get_data_type()) &&
+                     !field_meta.is_nullable()),
+                   "non-nullable vector field {} cannot be absent when "
+                   "reopening sealed segment {}",
+                   field_meta.get_id().get(),
+                   id_);
         fill_empty_field(field_meta);
     }
 
@@ -2851,9 +2857,22 @@ ChunkedSegmentSealedImpl::FinishLoad() {
             // no filling fields that data already loaded
             continue;
         }
-        if (get_bit(index_ready_bitset_, field_id) &&
-            (index_has_raw_data_[field_id])) {
+        auto index_has_raw_data_iter = index_has_raw_data_.find(field_id);
+        bool index_has_raw_data =
+            index_has_raw_data_iter != index_has_raw_data_.end() &&
+            index_has_raw_data_iter->second;
+        if (get_bit(index_ready_bitset_, field_id) && index_has_raw_data) {
             // no filling fields that index already loaded and has raw data
+            continue;
+        }
+        if (IsVectorDataType(field_meta.get_data_type()) &&
+            !field_meta.is_nullable()) {
+            AssertInfo(get_bit(index_ready_bitset_, field_id) ||
+                           get_bit(binlog_index_bitset_, field_id),
+                       "non-nullable vector field {} is not loaded by field "
+                       "data or index in sealed segment {}",
+                       field_id.get(),
+                       id_);
             continue;
         }
         fill_empty_field(field_meta);
