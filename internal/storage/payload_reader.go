@@ -1079,8 +1079,6 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 					if rowDim > fieldData.Dim {
 						fieldData.Dim = rowDim
 					}
-				} else {
-					fieldData.Contents = append(fieldData.Contents, nil)
 				}
 			}
 			offset += binaryArray.Len()

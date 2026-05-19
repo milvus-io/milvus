@@ -109,6 +109,24 @@ func CheckValidString(s string, maxLength int64, field *schemapb.FieldSchema) er
 	return nil
 }
 
+func RejectNullableArrayOfVector(schema *schemapb.CollectionSchema) error {
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_ArrayOfVector && field.GetNullable() {
+			return fmt.Errorf("ArrayOfVector does not support nullable, fieldName=%s", field.GetName())
+		}
+	}
+
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if field.GetDataType() == schemapb.DataType_ArrayOfVector && field.GetNullable() {
+				return fmt.Errorf("ArrayOfVector does not support nullable, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
+			}
+		}
+	}
+	return nil
+}
+
 // RemoveUnpopulatedFunctionOutputFields removes function output fields that have no data
 // from the InsertData. These fields are computed downstream (e.g., BM25 sparse vectors),
 // not from the data source.

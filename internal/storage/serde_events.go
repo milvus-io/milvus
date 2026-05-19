@@ -425,21 +425,20 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 	for _, structField := range schema.StructArrayFields {
 		allFieldsSchema = append(allFieldsSchema, structField.Fields...)
 	}
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	if err != nil {
+		return nil, err
+	}
 
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
 	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
-	for _, f := range allFieldsSchema {
-		dim, _ := typeutil.GetDim(f)
-
-		elementType := schemapb.DataType_None
+	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
-			elementType = f.GetElementType()
-			elementTypes[f.FieldID] = elementType
+			elementTypes[f.FieldID] = f.GetElementType()
 		}
 
-		arrowType := serdeMap[f.DataType].arrowType(int(dim), elementType)
-		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowType)
+		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
 		types[f.FieldID] = f.DataType
 	}
@@ -471,7 +470,7 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		builder := builders[field.FieldID]
 		arrays[i] = builder.NewArray()
 		builder.Release()
-		fields[i] = ConvertToArrowField(field, arrays[i].DataType(), false)
+		fields[i] = arrowSchema.Field(i)
 		field2Col[field.FieldID] = i
 	}
 	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil

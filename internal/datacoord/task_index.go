@@ -173,7 +173,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
 		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
-				if f.FieldID == fieldID && f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
+				if f.FieldID == fieldID && f.GetNullable() && typeutil.IsSupportedNullableVectorType(f.GetDataType()) {
 					effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
 					break
 				}

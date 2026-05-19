@@ -24,6 +24,7 @@
 
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
 
@@ -354,15 +355,22 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         std::map<std::string, std::string> type_params = {{"dim", "4"}};
         FieldIndexMeta fieldIndexMeta(
             vec_field_id, std::move(index_params), std::move(type_params));
-        auto& config = SegcoreConfig::default_config();
-        config.set_chunk_rows(1024);
-        config.set_enable_interim_segment_index(true);
-        config.set_nlist(16);
+        ApplyBinlogInterimIndexConfigForTest();
         std::map<FieldId, FieldIndexMeta> filedMap = {
             {vec_field_id, fieldIndexMeta}};
         IndexMetaPtr metaPtr =
             std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
         return std::move(metaPtr);
+    }
+
+    void
+    ApplyBinlogInterimIndexConfigForTest() {
+        InterimIndexConfigForTest options;
+        options.chunk_rows = 1024;
+        options.nlist = 16;
+        options.nprobe = 16;
+        options.dense_vector_interim_index_type = dense_vec_intermin_index_type;
+        ApplyInterimIndexConfigForTest(options);
     }
 
     std::unique_ptr<milvus::index::IndexBase>
@@ -775,18 +783,14 @@ TEST(test_chunk_segment,
 }
 
 TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
+    ScopedSegcoreConfigRestore config_restore;
     IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
+    ApplyBinlogInterimIndexConfigForTest();
     auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
-    segcore_config.set_enable_interim_segment_index(true);
-    if (dense_vec_intermin_index_type.has_value()) {
-        segcore_config.set_dense_vector_intermin_index_type(
-            dense_vec_intermin_index_type.value());
-    }
-    segcore_config.set_nprobe(16);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField();
 
@@ -1050,18 +1054,14 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 }
 
 TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
+    ScopedSegcoreConfigRestore config_restore;
     IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
+    ApplyBinlogInterimIndexConfigForTest();
     auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
-    segcore_config.set_enable_interim_segment_index(true);
-    if (dense_vec_intermin_index_type.has_value()) {
-        segcore_config.set_dense_vector_intermin_index_type(
-            dense_vec_intermin_index_type.value());
-    }
-    segcore_config.set_nprobe(16);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField("./data/mmap-test");
 

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -536,6 +537,43 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 // This funcion also checks the length of each column. All columns shall have the same length.
 // Also, the InsertData.Infos shall have BlobInfo with this length returned.
 // When the length is not aligned, an error will be returned.
+func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, srcField *schemapb.FieldData, logicalRows int) error {
+	if !field.GetNullable() || !typeutil.IsSupportedNullableVectorType(field.GetDataType()) {
+		return nil
+	}
+	dim := int64(0)
+	if field.GetDataType() != schemapb.DataType_SparseFloatVector && srcField.GetVectors() != nil && srcField.GetVectors().GetDim() == 0 {
+		fieldDim, err := GetDimFromParams(field.GetTypeParams())
+		if err != nil {
+			return err
+		}
+		dim = int64(fieldDim)
+	}
+	requireValidData := logicalRows > 0 || len(srcField.GetValidData()) > 0
+	if err := funcutil.ValidateNullableVectorFieldDataCompactWithDim(srcField, uint64(logicalRows), requireValidData, dim); err != nil {
+		return merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	return nil
+}
+
+func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
+	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
+	for _, fieldData := range msg.GetFieldsData() {
+		srcFields[fieldData.GetFieldId()] = fieldData
+	}
+
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		srcField, ok := srcFields[field.GetFieldID()]
+		if !ok {
+			continue
+		}
+		if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema) (idata *InsertData, err error) {
 	srcFields := make(map[FieldID]*schemapb.FieldData)
 	for _, field := range msg.FieldsData {
@@ -569,6 +607,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetFloatVector().GetData()
 			validData := srcField.GetValidData()
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
+			}
 			fd := &FloatVectorFieldData{
 				Data:      srcData,
 				Dim:       dim,
@@ -589,6 +630,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetBinaryVector()
 			validData := srcField.GetValidData()
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
+			}
 			fd := &BinaryVectorFieldData{
 				Data:      srcData,
 				Dim:       dim,
@@ -609,6 +653,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetFloat16Vector()
 			validData := srcField.GetValidData()
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
+			}
 			fd := &Float16VectorFieldData{
 				Data:      srcData,
 				Dim:       dim,
@@ -629,6 +676,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetBfloat16Vector()
 			validData := srcField.GetValidData()
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
+			}
 			fd := &BFloat16VectorFieldData{
 				Data:      srcData,
 				Dim:       dim,
@@ -648,6 +698,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			if sparseArray != nil {
 				contents = sparseArray.GetContents()
 				dim = sparseArray.GetDim()
+			}
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
 			}
 			fd := &SparseFloatVectorFieldData{
 				SparseFloatArray: schemapb.SparseFloatArray{
@@ -671,6 +724,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetInt8Vector()
 			validData := srcField.GetValidData()
+			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
+				return nil, err
+			}
 			fd := &Int8VectorFieldData{
 				Data:      lo.Map(srcData, func(v byte, _ int) int8 { return int8(v) }),
 				Dim:       dim,
@@ -1596,6 +1652,10 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 	}
 
 	// column base insert msg
+	if err := validateColumnBasedInsertMsgNullableVectors(schema, msg); err != nil {
+		return nil, err
+	}
+
 	insertRecord := &segcorepb.InsertRecord{
 		NumRows:    int64(msg.NumRows),
 		FieldsData: make([]*schemapb.FieldData, 0),

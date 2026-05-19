@@ -404,6 +404,16 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+
+			// ArrayOfVector does not support nullable rows, so its per-row
+			// VectorField array must stay aligned with the logical row count.
+			if field.GetVectors() == nil || field.GetVectors().GetVectorArray() == nil {
+				if numRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
+			}
+
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
@@ -444,7 +454,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 //  2. has default_value,
 //     will fill default_value when passed num_rows not equal to expected num_rows,
 //
-// after fillWithValue, only nullable field will has valid_data, the length of all data will be passed num_rows
+// after fillWithValue, nullable/default fields have ValidData. Scalar nullable
+// payloads are expanded to numRows; nullable vector payloads remain compact.
 func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows int) error {
 	for _, field := range data {
 		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
@@ -554,6 +565,12 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		}
 
 	case *schemapb.FieldData_Vectors:
+		if field.Type == schemapb.DataType_ArrayOfVector {
+			if len(field.GetValidData()) != 0 {
+				return merr.WrapErrParameterInvalidMsg("ArrayOfVector does not support nullable, field: %s", field.GetFieldName())
+			}
+			return nil
+		}
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}
@@ -1133,6 +1150,10 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 }
 
 func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if len(field.GetValidData()) != 0 {
+		return merr.WrapErrParameterInvalidMsg("ArrayOfVector does not support nullable, field: %s", field.GetFieldName())
+	}
+
 	data := field.GetVectors().GetVectorArray()
 	if data == nil {
 		elementTypeStr := fieldSchema.GetElementType().String()

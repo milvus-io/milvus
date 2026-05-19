@@ -52,6 +52,10 @@ type rowParser struct {
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
+	if err := common.RejectNullableArrayOfVector(schema); err != nil {
+		return nil, merr.WrapErrImportFailed(err.Error())
+	}
+
 	allFields := typeutil.GetAllFieldSchemas(schema)
 
 	id2Field := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) int64 {
@@ -167,12 +171,24 @@ func reconstructArrayForStructArray(raw any) (map[string]any, error) {
 	}
 
 	buf := make(map[string][]any)
+	var expectedKeys map[string]struct{}
 	for _, elem := range rows {
 		row, ok := elem.(map[string]any)
 		if !ok {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
 		}
+		if expectedKeys == nil {
+			expectedKeys = make(map[string]struct{}, len(row))
+			for key := range row {
+				expectedKeys[key] = struct{}{}
+			}
+		} else if len(row) != len(expectedKeys) {
+			return nil, merr.WrapErrImportFailed("inconsistent field count in StructArray")
+		}
 		for key, value := range row {
+			if _, ok := expectedKeys[key]; !ok {
+				return nil, merr.WrapErrImportFailed("inconsistent field count in StructArray")
+			}
 			buf[key] = append(buf[key], value)
 		}
 	}
@@ -792,6 +808,9 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 			vector, ok := vectorAny.([]any)
 			if !ok {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected slice as vector, but got %T", vectorAny))
+			}
+			if len(vector) != dim {
+				return nil, r.wrapDimError(len(vector), fieldID)
 			}
 			for _, v := range vector {
 				value, ok := v.(json.Number)

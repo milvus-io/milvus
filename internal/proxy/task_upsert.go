@@ -343,21 +343,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Two nullable data formats are supported:
-	//
-	//	COMPRESSED FORMAT (SDK format, before validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 2] + ValidData=[true, false, true]
-	//		- Data array contains only non-null values (compressed)
-	//		- ValidData array tracks null positions for all rows
-	//
-	//	FULL FORMAT (Milvus internal format, after validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 0, 2] + ValidData=[true, false, true]
-	//		- Data array contains values for all rows (nulls filled with zero/default)
-	//		- ValidData array still tracks null positions
-	//
-	// Note: we will unify the nullable format to FULL FORMAT before executing the merge logic
+	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
+	// must remain compact: ValidData tracks logical rows, and vector data stores
+	// only valid rows.
 	insertIdxInUpsert := make([]int, 0)
 	updateIdxInUpsert := make([]int, 0)
 	// 1. split upsert data into insert and update by query result
@@ -428,7 +416,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
-			isNullableVector := len(existField.GetValidData()) > 0 && typeutil.IsVectorType(existField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
 			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
 			existSrcIndices := make([]int64, len(updateIdxInUpsert))
 			for i, existIdx := range existIndices {
@@ -530,7 +518,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 		// Process insert data by column (field), similar to update path
 		for _, srcField := range insertWithNullField {
-			isNullableVector := len(srcField.GetValidData()) > 0 && typeutil.IsVectorType(srcField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(srcField)
 			srcComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{srcField})
 
 			// Find or create destination field in it.insertFieldData
@@ -753,7 +741,8 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 	return nil
 }
 
-// GenNullableFieldData generates nullable field data in FULL FORMAT
+// GenNullableFieldData generates all-null nullable field data.
+// Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
 	switch field.DataType {
 	case schemapb.DataType_Bool:
