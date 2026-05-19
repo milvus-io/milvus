@@ -40,6 +40,7 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentInterface.h"
@@ -284,6 +285,21 @@ class PhyCompareFilterExpr : public Expr {
     bool
     IsStringExpr();
 
+    template <typename T>
+    static ChunkedColumnInterface::ScanValueKind
+    DataScanValueKind() {
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            return ChunkedColumnInterface::ScanValueKind::StringView;
+        } else if constexpr (std::is_same_v<T, Json>) {
+            return ChunkedColumnInterface::ScanValueKind::JsonView;
+        } else if constexpr (std::is_same_v<T, ArrayView>) {
+            return ChunkedColumnInterface::ScanValueKind::ArrayView;
+        } else {
+            return ChunkedColumnInterface::ScanValueKind::FixedWidth;
+        }
+    }
+
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunks(FUNC func,
@@ -291,25 +307,156 @@ class PhyCompareFilterExpr : public Expr {
                           TargetBitmapView res,
                           TargetBitmapView valid_res,
                           const ValTypes&... values) {
+        (void)input;
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
                                                          FUNC,
                                                          ValTypes...>(
                 func, res, valid_res, values...);
-        } else {
-            return ProcessBothDataChunksForSingleChunk<T, U, FUNC, ValTypes...>(
-                func, res, valid_res, values...);
         }
+        return ProcessBothDataChunksForSingleChunk<T, U, FUNC, ValTypes...>(
+            func, res, valid_res, values...);
+    }
+
+    // Process sorted offsets with one continuous Scan per column.
+    // TODO: push the offset bitmap down into Scan when Vortex supports bitmap scan.
+    template <typename T, typename U, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessBothSortedDataByOffsets(FUNC func,
+                                   OffsetVector* input,
+                                   TargetBitmapView res,
+                                   TargetBitmapView valid_res,
+                                   const ValTypes&... values) {
+        auto left_column =
+            segment_chunk_reader_.segment_->GetChunkedColumn(left_field_);
+        auto right_column =
+            segment_chunk_reader_.segment_->GetChunkedColumn(right_field_);
+        if (left_column == nullptr || right_column == nullptr) {
+            return -1;
+        }
+        if (input->empty()) {
+            return 0;
+        }
+
+        const auto scan_start = static_cast<int64_t>((*input)[0]);
+        const auto scan_end =
+            static_cast<int64_t>((*input)[input->size() - 1]) + 1;
+        const auto scan_length = scan_end - scan_start;
+        AssertInfo(scan_length > 0,
+                   "invalid compare offset scan range [{}, {})",
+                   scan_start,
+                   scan_end);
+
+        TargetBitmap offset_bitmap(scan_length, false);
+        for (auto offset : *input) {
+            offset_bitmap[static_cast<size_t>(static_cast<int64_t>(offset) -
+                                              scan_start)] = true;
+        }
+
+        auto left_options = ChunkedColumnInterface::ScanOptions::ForData(
+            scan_start,
+            scan_length,
+            batch_size_,
+            ChunkedColumnInterface::ScanProjection::Data,
+            DataScanValueKind<T>());
+        auto right_options = ChunkedColumnInterface::ScanOptions::ForData(
+            scan_start,
+            scan_length,
+            batch_size_,
+            ChunkedColumnInterface::ScanProjection::Data,
+            DataScanValueKind<U>());
+        auto left_cursor = left_column->Scan(op_ctx_, left_options);
+        auto right_cursor = right_column->Scan(op_ctx_, right_options);
+        AssertInfo(left_cursor != nullptr && right_cursor != nullptr,
+                   "compare offset scan cursor is null");
+
+        ChunkedColumnInterface::ScanBatch left_batch;
+        ChunkedColumnInterface::ScanBatch right_batch;
+        int64_t left_batch_pos = 0;
+        int64_t right_batch_pos = 0;
+        size_t processed_offsets = 0;
+        std::vector<int32_t> batch_offsets;
+        batch_offsets.reserve(std::min<int64_t>(batch_size_, input->size()));
+
+        while (processed_offsets < input->size()) {
+            if (!EnsureDataScanBatch(left_cursor, left_batch, left_batch_pos) ||
+                !EnsureDataScanBatch(
+                    right_cursor, right_batch, right_batch_pos)) {
+                break;
+            }
+
+            const auto left_row = left_batch.row_id_start + left_batch_pos;
+            const auto right_row = right_batch.row_id_start + right_batch_pos;
+            const auto interval_start = std::max(left_row, right_row);
+            const auto interval_end =
+                std::min(left_batch.row_id_start + left_batch.size,
+                         right_batch.row_id_start + right_batch.size);
+            AssertInfo(interval_start < interval_end,
+                       "invalid compare offset scan interval [{}, {})",
+                       interval_start,
+                       interval_end);
+
+            const auto group_start = processed_offsets;
+            const auto left_base = interval_start - left_batch.row_id_start;
+            const auto right_base = interval_start - right_batch.row_id_start;
+            batch_offsets.clear();
+            for (int64_t row = interval_start;
+                 row < interval_end && processed_offsets < input->size();
+                 ++row) {
+                const auto bitmap_pos = row - scan_start;
+                if (!offset_bitmap[static_cast<size_t>(bitmap_pos)]) {
+                    continue;
+                }
+                while (processed_offsets < input->size() &&
+                       static_cast<int64_t>((*input)[processed_offsets]) ==
+                           row) {
+                    batch_offsets.push_back(
+                        static_cast<int32_t>(row - interval_start));
+                    ++processed_offsets;
+                }
+            }
+
+            const auto group_size =
+                static_cast<int64_t>(processed_offsets - group_start);
+            if (group_size > 0) {
+                func.template operator()<FilterType::random>(
+                    left_batch.values.data_as<T>() + left_base,
+                    right_batch.values.data_as<U>() + right_base,
+                    batch_offsets.data(),
+                    static_cast<int>(group_size),
+                    res + group_start,
+                    values...);
+
+                for (int64_t i = 0; i < group_size; ++i) {
+                    if (!left_batch.validity.IsValid(left_base +
+                                                     batch_offsets[i]) ||
+                        !right_batch.validity.IsValid(right_base +
+                                                      batch_offsets[i])) {
+                        res[group_start + i] = false;
+                        valid_res[group_start + i] = false;
+                    }
+                }
+            }
+
+            left_batch_pos += interval_end - left_row;
+            right_batch_pos += interval_end - right_row;
+        }
+
+        AssertInfo(processed_offsets == input->size(),
+                   "compare offset scan processed {} offsets, expected {}",
+                   processed_offsets,
+                   input->size());
+        return input->size();
     }
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessBothDataByOffsets(FUNC func,
-                             OffsetVector* input,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
-                             const ValTypes&... values) {
+    ProcessBothDataByOffsetsByChunkFallback(FUNC func,
+                                            OffsetVector* input,
+                                            TargetBitmapView res,
+                                            TargetBitmapView valid_res,
+                                            const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
         if (segment_chunk_reader_.segment_->is_chunked() ||
@@ -324,10 +471,9 @@ class PhyCompareFilterExpr : public Expr {
                             segment_chunk_reader_.SizePerChunk();
                         return {offset / size_per_chunk,
                                 offset % size_per_chunk};
-                    } else {
-                        return segment_chunk_reader_.segment_
-                            ->get_chunk_by_offset(field, offset);
                     }
+                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                        field, offset);
                 };
 
                 auto [left_chunk_id, left_chunk_offset] =
@@ -367,46 +513,62 @@ class PhyCompareFilterExpr : public Expr {
                 processed_size++;
             }
             return processed_size;
-        } else {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                op_ctx_, left_field_, 0);
-            auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                op_ctx_, right_field_, 0);
-            auto right_chunk = pw_right.get();
-            const T* left_data = left_chunk.data();
-            const U* right_data = right_chunk.data();
-            const bool* left_valid_data = left_chunk.valid_data();
-            const bool* right_valid_data = right_chunk.valid_data();
-            if (left_valid_data || right_valid_data) {
-                for (int i = 0; i < size; ++i) {
-                    auto offset = (*input)[i];
-                    if (left_valid_data && !left_valid_data[offset]) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    if (right_valid_data && !right_valid_data[offset]) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    func.template operator()<FilterType::random>(
-                        left_data + offset,
-                        right_data + offset,
-                        nullptr,
-                        1,
-                        res + i,
-                        values...);
+        }
+
+        auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
+            op_ctx_, left_field_, 0);
+        auto left_chunk = pw_left.get();
+        auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
+            op_ctx_, right_field_, 0);
+        auto right_chunk = pw_right.get();
+        const T* left_data = left_chunk.data();
+        const U* right_data = right_chunk.data();
+        const bool* left_valid_data = left_chunk.valid_data();
+        const bool* right_valid_data = right_chunk.valid_data();
+        if (left_valid_data || right_valid_data) {
+            for (int i = 0; i < size; ++i) {
+                auto offset = (*input)[i];
+                if (left_valid_data && !left_valid_data[offset]) {
+                    res[i] = false;
+                    valid_res[i] = false;
+                    continue;
                 }
-                processed_size += size;
+                if (right_valid_data && !right_valid_data[offset]) {
+                    res[i] = false;
+                    valid_res[i] = false;
+                    continue;
+                }
+                func.template operator()<FilterType::random>(
+                    left_data + offset,
+                    right_data + offset,
+                    nullptr,
+                    1,
+                    res + i,
+                    values...);
+            }
+            return size;
+        }
+        func.template operator()<FilterType::random>(
+            left_data, right_data, input->data(), size, res, values...);
+        return size;
+    }
+
+    template <typename T, typename U, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessBothDataByOffsets(FUNC func,
+                             OffsetVector* input,
+                             TargetBitmapView res,
+                             TargetBitmapView valid_res,
+                             const ValTypes&... values) {
+        if (IsDenseOffsetInputForScan(input, batch_size_)) {
+            const auto processed_size = ProcessBothSortedDataByOffsets<T, U>(
+                func, input, res, valid_res, values...);
+            if (processed_size >= 0) {
                 return processed_size;
             }
-            func.template operator()<FilterType::random>(
-                left_data, right_data, input->data(), size, res, values...);
-            processed_size += size;
-            return processed_size;
         }
+        return ProcessBothDataByOffsetsByChunkFallback<T, U>(
+            func, input, res, valid_res, values...);
     }
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
@@ -455,7 +617,6 @@ class PhyCompareFilterExpr : public Expr {
                  values...);
             const bool* left_valid_data = left_chunk.valid_data();
             const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
             for (int i = 0; i < size; ++i) {
                 if (left_valid_data && !left_valid_data[i + data_pos]) {
                     res[processed_size + i] = false;
@@ -487,7 +648,6 @@ class PhyCompareFilterExpr : public Expr {
                                           const ValTypes&... values) {
         int64_t processed_size = 0;
 
-        // only call this function when left and right are not indexed, so they have the same number of chunks
         for (size_t i = left_current_chunk_id_; i < left_num_chunk_; i++) {
             auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
                 op_ctx_, left_field_, i);
@@ -497,7 +657,7 @@ class PhyCompareFilterExpr : public Expr {
             auto right_chunk = pw_right.get();
             auto data_pos =
                 (i == left_current_chunk_id_) ? left_current_chunk_pos_ : 0;
-            auto size = 0;
+            int64_t size = 0;
             if (segment_chunk_reader_.segment_->type() ==
                 SegmentType::Growing) {
                 size =
@@ -530,7 +690,6 @@ class PhyCompareFilterExpr : public Expr {
                  values...);
             const bool* left_valid_data = left_chunk.valid_data();
             const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
             for (int i = 0; i < size; ++i) {
                 if (left_valid_data && !left_valid_data[i + data_pos]) {
                     res[processed_size + i] = false;
@@ -551,6 +710,106 @@ class PhyCompareFilterExpr : public Expr {
             }
         }
 
+        return processed_size;
+    }
+
+    template <typename T, typename U, typename FUNC, typename... ValTypes>
+    int64_t
+    TryProcessBothDataByScan(FUNC func,
+                             int64_t real_batch_size,
+                             TargetBitmapView res,
+                             TargetBitmapView valid_res,
+                             const ValTypes&... values) {
+        if (!data_scan_initialized_) {
+            data_scan_initialized_ = true;
+            auto left_column =
+                segment_chunk_reader_.segment_->GetChunkedColumn(left_field_);
+            auto right_column =
+                segment_chunk_reader_.segment_->GetChunkedColumn(right_field_);
+            if (left_column != nullptr && right_column != nullptr) {
+                const auto start = GetCurrentRows();
+                const auto length = segment_chunk_reader_.active_count_ - start;
+                auto left_options =
+                    ChunkedColumnInterface::ScanOptions::ForData(
+                        start,
+                        length,
+                        batch_size_,
+                        ChunkedColumnInterface::ScanProjection::Data,
+                        DataScanValueKind<T>());
+                auto right_options =
+                    ChunkedColumnInterface::ScanOptions::ForData(
+                        start,
+                        length,
+                        batch_size_,
+                        ChunkedColumnInterface::ScanProjection::Data,
+                        DataScanValueKind<U>());
+                left_data_cursor_ = left_column->Scan(op_ctx_, left_options);
+                right_data_cursor_ = right_column->Scan(op_ctx_, right_options);
+            }
+        }
+        if (left_data_cursor_ == nullptr || right_data_cursor_ == nullptr) {
+            return -1;
+        }
+
+        int64_t processed_size = 0;
+        while (processed_size < real_batch_size) {
+            if (!EnsureDataScanBatch(left_data_cursor_,
+                                     left_data_batch_,
+                                     left_data_batch_pos_) ||
+                !EnsureDataScanBatch(right_data_cursor_,
+                                     right_data_batch_,
+                                     right_data_batch_pos_)) {
+                break;
+            }
+
+            const auto left_row =
+                left_data_batch_.row_id_start + left_data_batch_pos_;
+            const auto right_row =
+                right_data_batch_.row_id_start + right_data_batch_pos_;
+            const auto expected_row = GetCurrentRows() + processed_size;
+            AssertInfo(left_row == expected_row && right_row == expected_row,
+                       "compare data scan row mismatch, left {}, right {}, "
+                       "expected {}",
+                       left_row,
+                       right_row,
+                       expected_row);
+
+            auto size = std::min<int64_t>(
+                {real_batch_size - processed_size,
+                 left_data_batch_.size - left_data_batch_pos_,
+                 right_data_batch_.size - right_data_batch_pos_});
+            const auto* left_data =
+                left_data_batch_.values.data_as<T>() + left_data_batch_pos_;
+            const auto* right_data =
+                right_data_batch_.values.data_as<U>() + right_data_batch_pos_;
+
+            func(left_data,
+                 right_data,
+                 nullptr,
+                 size,
+                 res + processed_size,
+                 values...);
+
+            for (int64_t i = 0; i < size; ++i) {
+                if (!left_data_batch_.validity.IsValid(left_data_batch_pos_ +
+                                                       i)) {
+                    res[processed_size + i] = false;
+                    valid_res[processed_size + i] = false;
+                    continue;
+                }
+                if (!right_data_batch_.validity.IsValid(right_data_batch_pos_ +
+                                                        i)) {
+                    res[processed_size + i] = false;
+                    valid_res[processed_size + i] = false;
+                }
+            }
+
+            processed_size += size;
+            left_data_batch_pos_ += size;
+            right_data_batch_pos_ += size;
+        }
+
+        MoveCursor();
         return processed_size;
     }
 
@@ -592,6 +851,31 @@ class PhyCompareFilterExpr : public Expr {
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_left_;
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_right_;
+    bool data_scan_initialized_{false};
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor> left_data_cursor_{
+        nullptr};
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor> right_data_cursor_{
+        nullptr};
+    ChunkedColumnInterface::ScanBatch left_data_batch_;
+    ChunkedColumnInterface::ScanBatch right_data_batch_;
+    int64_t left_data_batch_pos_{0};
+    int64_t right_data_batch_pos_{0};
+
+    bool
+    EnsureDataScanBatch(
+        std::unique_ptr<ChunkedColumnInterface::ScanCursor>& cursor,
+        ChunkedColumnInterface::ScanBatch& batch,
+        int64_t& batch_pos) {
+        while (batch_pos >= batch.size) {
+            batch_pos = 0;
+            if (!cursor->Next(&batch)) {
+                return false;
+            }
+            AssertInfo(!batch.values.empty() && batch.size > 0,
+                       "invalid compare data scan batch");
+        }
+        return true;
+    }
 };
 }  //namespace exec
 }  // namespace milvus

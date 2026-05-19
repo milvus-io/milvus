@@ -21,7 +21,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -135,6 +137,151 @@ func TestWideDataTypePolicy(t *testing.T) {
 			AssertSplitEqual(t, tc.expect, result)
 		})
 	}
+}
+
+func TestLocalFormatPolicy(t *testing.T) {
+	type testCase struct {
+		tag    string
+		input  *currentSplit
+		expect *currentSplit
+	}
+
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
+	}
+
+	cases := []testCase{
+		{
+			tag: "mixed_local_formats",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:    101,
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+				{
+					FieldID:  102,
+					DataType: schemapb.DataType_Double,
+				},
+				{
+					FieldID:    103,
+					DataType:   schemapb.DataType_Int64,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+			}, nil),
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](100, 101, 102, 103),
+				outputGroups: []ColumnGroup{
+					{
+						GroupID: 0,
+						Columns: []int{0, 2},
+						Fields:  []int64{100, 102},
+					},
+					{
+						GroupID: 1,
+						Columns: []int{1, 3},
+						Fields:  []int64{101, 103},
+					},
+				},
+			},
+		},
+		{
+			tag: "single_local_format_noop",
+			input: newCurrentSplit([]*schemapb.FieldSchema{
+				{
+					FieldID:    100,
+					DataType:   schemapb.DataType_Int64,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+				{
+					FieldID:    101,
+					DataType:   schemapb.DataType_Double,
+					TypeParams: localFormatParam(common.LocalFormatVortex),
+				},
+			}, nil),
+			expect: &currentSplit{
+				processFields: typeutil.NewSet[int64](),
+			},
+		},
+	}
+
+	policy := NewLocalFormatPolicy()
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result := policy.Split(tc.input)
+
+			AssertSplitEqual(t, tc.expect, result)
+		})
+	}
+}
+
+func TestSplitColumnsSeparatesLocalFormatsBeforeRemanent(t *testing.T) {
+	localFormatParam := func(format string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{
+			{
+				Key:   common.LocalFormatKey,
+				Value: format,
+			},
+		}
+	}
+
+	fields := []*schemapb.FieldSchema{
+		{
+			FieldID:  100,
+			DataType: schemapb.DataType_Int64,
+		},
+		{
+			FieldID:    101,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+		{
+			FieldID:  102,
+			DataType: schemapb.DataType_FloatVector,
+		},
+		{
+			FieldID:  103,
+			DataType: schemapb.DataType_Double,
+		},
+		{
+			FieldID:    104,
+			DataType:   schemapb.DataType_Int64,
+			TypeParams: localFormatParam(common.LocalFormatVortex),
+		},
+	}
+
+	result := SplitColumns(fields,
+		map[int64]ColumnStats{},
+		NewSelectedDataTypePolicy(),
+		NewLocalFormatPolicy(),
+		NewRemanentShortPolicy(-1))
+
+	assert.Equal(t, []ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0, 3},
+			Fields:  []int64{100, 103},
+		},
+		{
+			GroupID: 1,
+			Columns: []int{1, 4},
+			Fields:  []int64{101, 104},
+		},
+		{
+			GroupID: 102,
+			Columns: []int{2},
+			Fields:  []int64{102},
+		},
+	}, result)
 }
 
 func TestSystemColumnPolicy(t *testing.T) {

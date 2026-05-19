@@ -79,7 +79,7 @@ func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, p
 
 func DefaultPolicies() []ColumnGroupSplitPolicy {
 	paramtable.Init()
-	result := make([]ColumnGroupSplitPolicy, 0, 4)
+	result := make([]ColumnGroupSplitPolicy, 0, 5)
 	if paramtable.Get().CommonCfg.Stv2SplitSystemColumn.GetAsBool() {
 		result = append(result, NewSystemColumnPolicy(paramtable.Get().CommonCfg.Stv2SystemColumnIncludePK.GetAsBool(),
 			paramtable.Get().CommonCfg.Stv2SystemColumnIncludePartitionKey.GetAsBool(),
@@ -90,6 +90,7 @@ func DefaultPolicies() []ColumnGroupSplitPolicy {
 	}
 	result = append(result,
 		NewSelectedDataTypePolicy(),
+		NewLocalFormatPolicy(),
 		NewRemanentShortPolicy(-1))
 	return result
 }

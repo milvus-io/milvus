@@ -93,6 +93,48 @@ func NewSelectedDataTypePolicy() ColumnGroupSplitPolicy {
 	return &selectedDataTypePolicy{}
 }
 
+type localFormatPolicy struct{}
+
+func fieldLocalFormat(field *schemapb.FieldSchema) string {
+	for _, kv := range field.GetTypeParams() {
+		if kv.GetKey() == common.LocalFormatKey {
+			return kv.GetValue()
+		}
+	}
+	return common.LocalFormatRow
+}
+
+func (p *localFormatPolicy) Split(currentSplit *currentSplit) *currentSplit {
+	fieldIDsByFormat := make(map[string][]int64)
+	indicesByFormat := make(map[string][]int)
+	formats := make([]string, 0, 2)
+
+	currentSplit.Range(func(idx int, field *schemapb.FieldSchema) {
+		format := fieldLocalFormat(field)
+		if _, ok := fieldIDsByFormat[format]; !ok {
+			formats = append(formats, format)
+		}
+		fieldIDsByFormat[format] = append(fieldIDsByFormat[format], field.GetFieldID())
+		indicesByFormat[format] = append(indicesByFormat[format], idx)
+	})
+
+	if len(formats) <= 1 {
+		return currentSplit
+	}
+
+	for _, format := range formats {
+		currentSplit.SplitFields(
+			currentSplit.NextGroupID(),
+			fieldIDsByFormat[format],
+			indicesByFormat[format])
+	}
+	return currentSplit
+}
+
+func NewLocalFormatPolicy() ColumnGroupSplitPolicy {
+	return &localFormatPolicy{}
+}
+
 // systemColumnPolicy split system columns to a new column group
 // if includePK is true, system columns include primary key column.
 type systemColumnPolicy struct {

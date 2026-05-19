@@ -132,6 +132,10 @@ FieldMeta::ToProto() const {
         // element_type already populated above
     }
 
+    if (local_format_ != "row") {
+        add_type_param("local_format", local_format_);
+    }
+
     return proto;
 }
 
@@ -166,10 +170,19 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         return schema_proto.default_value();
     }();
 
+    static constexpr const char* kLocalFormatKey = "local_format";
+
+    auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
+    auto local_format = [&]() -> std::string {
+        if (auto it = type_map.find(kLocalFormatKey); it != type_map.end()) {
+            return it->second;
+        }
+        return "row";
+    };
+
     if (data_type == DataType::VECTOR_ARRAY) {
         // todo(SpadeA): revisit the code when index build for vector array is ready
         int64_t dim = 0;
-        auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
@@ -180,13 +193,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          dim,
                          std::nullopt,
                          nullable,
-                         external_field_mapping};
+                         external_field_mapping,
+                         local_format()};
     }
 
     if (IsVectorDataType(data_type)) {
         AssertInfo(!default_value.has_value(),
                    "vector fields do not support default values");
-        auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         auto index_map = RepeatedKeyValToMap(schema_proto.index_params());
 
         int64_t dim = 0;
@@ -203,7 +216,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                              std::nullopt,
                              nullable,
                              default_value,
-                             external_field_mapping};
+                             external_field_mapping,
+                             local_format()};
         }
         auto metric_type = index_map.at("metric_type");
         return FieldMeta{name,
@@ -213,11 +227,11 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          metric_type,
                          nullable,
                          default_value,
-                         external_field_mapping};
+                         external_field_mapping,
+                         local_format()};
     }
 
     if (IsStringDataType(data_type)) {
-        auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         int64_t max_len = 0;
         if (type_map.count(MAX_LENGTH)) {
             max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
@@ -243,6 +257,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
         bool enable_analyzer = get_bool_value("enable_analyzer");
         bool enable_match = get_bool_value("enable_match");
+        auto string_params = type_map;
+        string_params.erase(kLocalFormatKey);
 
         return FieldMeta{name,
                          field_id,
@@ -251,9 +267,10 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          nullable,
                          enable_match,
                          enable_analyzer,
-                         type_map,
+                         string_params,
                          default_value,
-                         external_field_mapping};
+                         external_field_mapping,
+                         local_format()};
     }
 
     if (IsArrayDataType(data_type)) {
@@ -263,7 +280,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          DataType(schema_proto.element_type()),
                          nullable,
                          default_value,
-                         external_field_mapping};
+                         external_field_mapping,
+                         local_format()};
     }
 
     return FieldMeta{name,
@@ -271,7 +289,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                      data_type,
                      nullable,
                      default_value,
-                     external_field_mapping};
+                     external_field_mapping,
+                     local_format()};
 }
 
 }  // namespace milvus

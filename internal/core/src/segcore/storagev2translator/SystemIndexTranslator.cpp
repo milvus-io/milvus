@@ -174,16 +174,12 @@ TimestampIndexTranslator::get_cells(
     CheckCancellation(
         ctx, segment_id_, "TimestampIndexTranslator::get_cells()");
 
-    // Pin column chunks temporarily to build the TimestampIndex, then release.
-    // TimestampIndexCell intentionally does NOT hold raw timestamp data or
-    // pins to GroupChunk cells — callers read raw timestamps by pinning the
-    // timestamp column directly. This avoids a DList deadlock where evicting
-    // this cell would unpin GroupChunk cells under the same list_mtx_.
-    auto all_chunks = column_->GetAllChunks(ctx);
+    // Read through Span instead of assuming GetChunk materializes as
+    // FixedWidthChunk. Vortex columns intentionally disable GetChunk paths.
     TimestampIndex index;
-    if (all_chunks.size() == 1) {
-        auto* fixed_chunk = static_cast<FixedWidthChunk*>(all_chunks[0].get());
-        auto span = fixed_chunk->Span();
+    if (column_->num_chunks() == 1) {
+        auto pin = column_->Span(ctx, 0);
+        const auto& span = pin.get();
         auto* ts_ptr = static_cast<const Timestamp*>(span.data());
         AssertInfo(static_cast<int64_t>(span.row_count()) == num_rows_,
                    "timestamp chunk row count {} != expected {}",
@@ -193,13 +189,13 @@ TimestampIndexTranslator::get_cells(
     } else {
         std::vector<Timestamp> temp(num_rows_);
         size_t offset = 0;
-        for (auto& pin : all_chunks) {
-            auto* fixed_chunk = static_cast<FixedWidthChunk*>(pin.get());
-            auto span = fixed_chunk->Span();
-            milvus::fastmem::FastMemcpy(
-                temp.data() + offset,
-                static_cast<const Timestamp*>(span.data()),
-                span.row_count() * sizeof(*temp.data()));
+        for (int64_t chunk_id = 0; chunk_id < column_->num_chunks();
+             ++chunk_id) {
+            auto pin = column_->Span(ctx, chunk_id);
+            const auto& span = pin.get();
+            std::copy_n(static_cast<const Timestamp*>(span.data()),
+                        span.row_count(),
+                        temp.data() + offset);
             offset += span.row_count();
         }
         AssertInfo(static_cast<int64_t>(offset) == num_rows_,
