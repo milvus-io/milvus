@@ -19,7 +19,6 @@ package shardclient
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -133,9 +132,8 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
-func recordPreferredNodeSelection(nodeID int64, status string) {
+func recordPreferredNodeSelection(status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
-		strconv.FormatInt(nodeID, 10),
 		status,
 	).Inc()
 }
@@ -146,7 +144,7 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	}
 	nodeID := workload.PreferredNodes[channel]
 	if nodeID == 0 {
-		recordPreferredNodeSelection(0, metrics.PreferredNodeMissLabel)
+		recordPreferredNodeSelection(metrics.PreferredNodeMissLabel)
 	}
 	return nodeID
 }
@@ -215,10 +213,10 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
-			recordPreferredNodeSelection(preferredNode.NodeID, metrics.PreferredNodeHitLabel)
+			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
 			return preferredNode, false, nil
 		} else if workload.PreferredNodeID != 0 {
-			recordPreferredNodeSelection(workload.PreferredNodeID, metrics.PreferredNodeUnavailableLabel)
+			recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
