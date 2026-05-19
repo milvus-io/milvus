@@ -370,12 +370,6 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	maxTopk := funcutil.Max(topk, otherTopk)
 	after := (nq + otherNq) * maxTopk
 	ratio := float64(after) / float64(pre)
-	minNQ := funcutil.Min(t.MinNQ(), other.MinNQ())
-	nqMergeRatio := 0.0
-	if minNQ > 0 {
-		nqMergeRatio = float64(nq+otherNq) / float64(minNQ)
-	}
-	nqMergeRatioLimit := paramtable.Get().QueryNodeCfg.NQMergeRatio.GetAsFloat()
 
 	// Check mergeable
 	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
@@ -385,9 +379,6 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
-		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||
-		minNQ <= 0 ||
-		(nqMergeRatioLimit > 0 && nqMergeRatio > nqMergeRatioLimit) ||
 		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
