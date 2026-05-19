@@ -140,7 +140,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         auto ca = SemiInlineGet(iter->second->PinCells(op_ctx, {0}));
         auto index = ca->get_cell_of(0);
-        return {PinWrapper<const index::IndexBase*>(ca, index)};
+        return {PinWrapper<const index::IndexBase*>(std::move(ca), index)};
     }
 
     bool

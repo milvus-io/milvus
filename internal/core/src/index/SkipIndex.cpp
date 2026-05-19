@@ -30,7 +30,7 @@ SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
             field_chunk_metrics->PinCells(nullptr, {chunk_id}));
         auto metrics = ca->get_cell_of(chunk_id);
         return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
-            ca, metrics);
+            std::move(ca), metrics);
     }
     return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
         &defaultFieldChunkMetrics);

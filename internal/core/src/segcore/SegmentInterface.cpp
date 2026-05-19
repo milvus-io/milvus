@@ -690,7 +690,8 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
                                      milvus::cachinglayer::CacheSlot<
                                          milvus::index::TextMatchIndex>>>) {
             auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
-            return PinWrapper<index::TextMatchIndex*>(ca, ca->get_cell_of(0));
+            auto index = ca->get_cell_of(0);
+            return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
         } else {
             throw SegcoreError(
                 milvus::ErrorCode::UnexpectedError,
