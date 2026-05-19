@@ -23,7 +23,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	// Register built-in function expressions
 	_ "github.com/milvus-io/milvus/internal/util/function/chain/expr"

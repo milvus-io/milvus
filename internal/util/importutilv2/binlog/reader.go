@@ -23,7 +23,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"

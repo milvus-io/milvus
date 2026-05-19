@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/file"
-	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 

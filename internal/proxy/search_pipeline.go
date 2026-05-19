@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"

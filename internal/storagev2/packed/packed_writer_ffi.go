@@ -31,8 +31,8 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/cdata"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 

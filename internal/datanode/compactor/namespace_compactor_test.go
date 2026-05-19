@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 

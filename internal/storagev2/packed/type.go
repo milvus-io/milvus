@@ -25,9 +25,9 @@ package packed
 import "C"
 
 import (
-	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/arrio"
-	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/arrio"
+	"github.com/apache/arrow-go/v18/arrow/cdata"
 )
 
 type PackedWriter struct {

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 

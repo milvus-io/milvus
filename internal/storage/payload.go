@@ -17,9 +17,9 @@
 package storage
 
 import (
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/file"
-	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )

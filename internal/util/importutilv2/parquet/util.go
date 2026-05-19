@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 

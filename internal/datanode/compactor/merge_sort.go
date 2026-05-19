@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// From github.com/apache/arrow/go/v17/parquet/compress/ztsd.go
+// From github.com/apache/arrow-go/v18/parquet/compress/ztsd.go
 // to implement a new codec to limit the concurrency of zstd compression.
 
 package compress
@@ -23,7 +23,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/apache/arrow/go/v17/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
