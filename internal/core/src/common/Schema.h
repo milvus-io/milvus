@@ -44,6 +44,23 @@ namespace milvus {
 using ArrowSchemaPtr = std::shared_ptr<arrow::Schema>;
 static int64_t debug_id = START_USER_FIELDID;
 
+inline std::optional<std::string>
+GetStructNameForArrayField(const FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    if (data_type != DataType::ARRAY && data_type != DataType::VECTOR_ARRAY) {
+        return std::nullopt;
+    }
+
+    const auto& field_name = field_meta.get_name().get();
+    auto left = field_name.find('[');
+    auto right = field_name.find(']', left == std::string::npos ? 0 : left);
+    if (left == std::string::npos || right == std::string::npos || left == 0) {
+        return std::nullopt;
+    }
+
+    return field_name.substr(0, left);
+}
+
 class Schema {
  public:
     FieldId
@@ -455,20 +472,13 @@ class Schema {
         name_ids_.emplace(field_name, field_id);
         id_names_.emplace(field_id, field_name);
 
-        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields
-        // Field name format: "struct_name[0].field_name"
-        auto data_type = field_meta.get_data_type();
-        if (data_type == DataType::ARRAY ||
-            data_type == DataType::VECTOR_ARRAY) {
-            const std::string& name_str = field_name.get();
-            auto bracket_pos = name_str.find('[');
-            if (bracket_pos != std::string::npos && bracket_pos > 0) {
-                std::string struct_name = name_str.substr(0, bracket_pos);
-                // Only cache the first array field for each struct
-                if (struct_array_field_cache_.find(struct_name) ==
-                    struct_array_field_cache_.end()) {
-                    struct_array_field_cache_[struct_name] = field_id;
-                }
+        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields.
+        if (auto struct_name = GetStructNameForArrayField(field_meta);
+            struct_name.has_value()) {
+            // Only cache the first array field for each struct.
+            if (struct_array_field_cache_.find(*struct_name) ==
+                struct_array_field_cache_.end()) {
+                struct_array_field_cache_[*struct_name] = field_id;
             }
         }
 

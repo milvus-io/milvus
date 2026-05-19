@@ -1150,6 +1150,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     fill_empty_field(const FieldMeta& field_meta);
 
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
+
     /**
      * @brief Fill default values for fields without data sources
      *
