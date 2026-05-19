@@ -414,6 +414,34 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
+	ginHandler := gin.New()
+	app := ginHandler.Group("")
+	path := "/middleware/restful-size/context-cancel"
+
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	observed := make(chan error, 1)
+
+	app.POST(path, restfulSizeMiddleware(timeoutMiddleware(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		cancel()
+		select {
+		case <-ctx.Done():
+			observed <- ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			observed <- errors.New("request context was not canceled")
+		}
+	}), false))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil).WithContext(requestCtx)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, errors.Is(<-observed, context.Canceled))
+}
+
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
