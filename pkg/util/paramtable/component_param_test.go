@@ -523,6 +523,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, hardware.GetCPUNum(), Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Save(Params.DelegatorPostLoadConcurrencyFactor.Key, "2")
+		assert.Equal(t, hardware.GetCPUNum()*2, Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Save(Params.DelegatorPostLoadConcurrencyFactor.Key, "0")
+		assert.Equal(t, hardware.GetCPUNum(), Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Reset(Params.DelegatorPostLoadConcurrencyFactor.Key)
+
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
 		assert.Equal(t, true, Params.EnableSegmentFilter.GetAsBool())
 
