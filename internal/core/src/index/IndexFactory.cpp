@@ -58,9 +58,29 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
+#include "storage/ChunkStreamUtils.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+namespace {
+
+uint64_t
+ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
+                                int32_t scalar_version) {
+    if (index_size_in_bytes == 0) {
+        return 0;
+    }
+    if (scalar_version < 3) {
+        return index_size_in_bytes;
+    }
+    auto budget_bytes =
+        milvus::storage::TransientMemoryBudget::GetScalarIndexChunkBudget()
+            .CapacityBytes();
+    return std::min<uint64_t>(index_size_in_bytes, budget_bytes);
+}
+
+}  // namespace
 
 template <typename T>
 ScalarIndexPtr<T>
@@ -374,6 +394,12 @@ IndexFactory::ScalarIndexLoadResource(
     const std::string& index_type = index_type_it->second;
 
     knowhere::expected<knowhere::Resource> resource;
+    auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    auto stream_memory_overhead =
+        ScalarIndexStreamMemoryOverhead(index_size_in_bytes, scalar_version);
 
     LoadResourceRequest request{};
     request.has_raw_data = false;
@@ -383,13 +409,14 @@ IndexFactory::ScalarIndexLoadResource(
             // V3 streaming: chunks streamed to disk + mmap, no resident memory
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = 0;
+            request.max_memory_cost = stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: pre-allocate target, stream into it
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + stream_memory_overhead;
             request.max_disk_cost = 0;
         }
         request.has_raw_data = true;
@@ -399,13 +426,14 @@ IndexFactory::ScalarIndexLoadResource(
             // V3 streaming: trie streamed to disk + mmap, str_ids in memory
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = 0;
+            request.max_memory_cost = stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: trie via temp file + read, str_ids pre-allocated
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;  // trie temp file
         }
         request.has_raw_data = true;
@@ -424,7 +452,7 @@ IndexFactory::ScalarIndexLoadResource(
             // MMapIndexData writes frozen format to final file
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = 0;
+            request.max_memory_cost = stream_memory_overhead;
             request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
             // V3 streaming: pre-allocate buffer + deserialize
