@@ -415,7 +415,9 @@ func (record segmentDeltaRecord) isSegmentDistMatched(distMgr *meta.Distribution
 	case ActionTypeReduce:
 		return !segmentInDist
 	default:
-		return false
+		// Only grow/reduce actions affect segment presence; other segment
+		// actions have zero workload effect and are treated as reflected.
+		return true
 	}
 }
 
@@ -425,7 +427,7 @@ func (delta *SegmentTaskDelta) printDetailInfos() {
 
 	if len(delta.records) > 0 {
 		log.Info("segment task delta cache info",
-			zap.Any("records", delta.records),
+			zap.String("records", fmt.Sprintf("%+v", delta.records)),
 		)
 	}
 }
