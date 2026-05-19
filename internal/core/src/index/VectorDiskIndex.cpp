@@ -916,7 +916,8 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     load_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN ||
+        GetIndexType() == knowhere::IndexEnum::INDEX_AISAQ) {
         // set base info
         load_config[DISK_ANN_PREPARE_WARM_UP] = false;
         load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
