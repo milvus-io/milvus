@@ -1075,7 +1075,21 @@ func TestFlush(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{}, nil).Once()
+	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{
+		Status: merr.Success(),
+		CollSegIDs: map[string]*schemapb.LongArray{
+			"test": {Data: []int64{1}},
+		},
+		CollFlushTs: map[string]uint64{
+			"test": 100,
+		},
+	}, nil).Once()
+	mp.EXPECT().GetFlushState(mock.Anything, mock.MatchedBy(func(req *milvuspb.GetFlushStateRequest) bool {
+		return req.GetCollectionName() == "test" && req.GetFlushTs() == 100 && assert.ObjectsAreEqual([]int64{1}, req.GetSegmentIDs())
+	})).Return(&milvuspb.GetFlushStateResponse{
+		Status:  merr.Success(),
+		Flushed: true,
+	}, nil).Once()
 	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(
 		&milvuspb.FlushResponse{
 			Status: &commonpb.Status{
@@ -1114,6 +1128,54 @@ func TestFlush(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitForFlush(t *testing.T) {
+	t.Run("missing flush timestamp", func(t *testing.T) {
+		h := &HandlersV2{proxy: mocks.NewMockProxy(t)}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get flush timestamp")
+	})
+
+	t.Run("get flush state rpc error", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(nil, errors.New("mock rpc")).Once()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(context.Background(), "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mock rpc")
+	})
+
+	t.Run("context canceled before flush completes", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetFlushState(mock.Anything, mock.Anything).Return(&milvuspb.GetFlushStateResponse{
+			Status: merr.Success(),
+		}, nil).Once()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		h := &HandlersV2{proxy: mp}
+		err := h.waitForFlush(ctx, "", "test", &milvuspb.FlushResponse{
+			CollSegIDs: map[string]*schemapb.LongArray{
+				"test": {Data: []int64{1}},
+			},
+			CollFlushTs: map[string]uint64{
+				"test": 100,
+			},
+		})
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 func TestDatabase(t *testing.T) {
@@ -1514,9 +1576,9 @@ func TestCreateCollection(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(15)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(8)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
@@ -1655,11 +1717,53 @@ func TestCreateCollection(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
-		        "fields": [
-		            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
-		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
-		        ]
-		    }, "params": {"partitionKeyIsolation": "true"}}`),
+			        "fields": [
+			            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "isPartitionKey": true, "elementTypeParams": {}},
+			            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+			        ]
+			    }, "params": {"partitionKeyIsolation": "true"}}`),
+	})
+	// Struct sub-vector index via collection_create indexParams: the
+	// structName[subName] form is registered in fieldNames so users can
+	// create the sub-vector index alongside top-level indexes in one call.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"},
+	        {"fieldName": "my_struct[sub_vec]", "indexName": "sub_vec_idx", "metricType": "L2"}
+	    ]}`),
+	})
+
+	// Struct sub-field qualified name that does not exist in schema is rejected.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "my_struct[nonexistent]", "indexName": "bad", "metricType": "L2"}
+	    ]}`),
+		errMsg:  "missing required parameters, error: `my_struct[nonexistent]` hasn't defined in schema",
+		errCode: 1802,
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
@@ -1839,6 +1943,36 @@ func TestCreateCollection(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, int32(0), returnBody.Code)
 	})
+}
+
+func TestCreateCollectionStructArrayDuplicateName(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServerV2(mocks.NewMockProxy(t), false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(`{
+		"collectionName": "test",
+		"schema": {
+			"fields": [
+				{"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}}
+			],
+			"structFields": [{
+				"fieldName": "book_id",
+				"fields": [
+					{"fieldName": "sub_int", "dataType": "Array", "elementDataType": "Int32"}
+				]
+			}]
+		}
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.Nil(t, err)
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	assert.Contains(t, returnBody.Message, "duplicated field name: book_id")
 }
 
 func versionalV2(category string, action string) string {
