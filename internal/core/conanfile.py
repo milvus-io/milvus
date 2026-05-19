@@ -22,12 +22,13 @@ class MilvusConan(ConanFile):
         "glog/0.7.1#a306e61d7b8311db8cb148ad62c48030",
         "gflags/2.2.2#7671803f1dc19354cc90bd32874dcfda",
         "double-conversion/3.3.0#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
+        "libsodium/1.0.19",
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
-        "folly/2024.08.12.00@milvus/dev#f9b2bdf162c0ec47cb4e5404097b340d",
+        "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
+        "milvus-common/1.0.0-9ca5ea6@milvus/dev#274d428d85f1d3d996e1092f0c9c7144",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
         "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
@@ -82,6 +83,8 @@ class MilvusConan(ConanFile):
         "glog/*:shared": True,
         "prometheus-cpp/*:with_pull": False,
         "fmt/*:header_only": False,
+        "openblas/*:dynamic_arch": True,
+        "openblas/*:shared": False,
         "onetbb/*:tbbmalloc": False,
         "onetbb/*:tbbproxy": False,
         "gflags/*:shared": True,
@@ -118,7 +121,7 @@ class MilvusConan(ConanFile):
         self.requires("libcurl/8.10.1#a3113369c86086b0e84231844e7ed0a9", force=True)
         self.requires("nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d", force=True)
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
-        self.requires("fmt/11.0.2#eb98daa559c7c59d591f4720dde4cd5c", force=True)
+        self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
         self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
@@ -128,7 +131,9 @@ class MilvusConan(ConanFile):
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
-        self.requires("lz4/1.9.4#7f0b5851453198536c14354ee30ca9ae", force=True)
+        self.requires("lz4/1.10.0#982d9b673900f665a1da109e09c17cab", force=True)
+        if self.settings.os == "Linux":
+            self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection

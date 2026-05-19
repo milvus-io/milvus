@@ -37,11 +37,45 @@ install -m 755 bin/etcd %{buildroot}/usr/bin/milvus-etcd
 install -m 755 bin/minio %{buildroot}/usr/bin/milvus-minio
 
 # lib
-install -m 755 lib/libknowhere.so %{buildroot}/lib64/milvus/libknowhere.so
-install -m 755 lib/libmilvus_core.so %{buildroot}/lib64/milvus/libmilvus_core.so
-install -m 755 /usr/lib/libopenblas-r0.3.9.so %{buildroot}/lib64/milvus/libopenblas.so.0
-install -m 755 lib/libngt.so.1.12.0 %{buildroot}/lib64/milvus/libngt.so.1
-install -m 755 /usr/lib64/libgfortran.so.4.0.0 %{buildroot}/lib64/milvus/libgfortran.so.4
+for lib in \
+    libaddress_sorting.so* \
+    libbson-1.0.so* \
+    libbsoncxx.so* \
+    libcrypto.so* \
+    libdouble-conversion.so* \
+    libevent_core-2.1.so* \
+    libfolly.so* \
+    libfolly_test_util.so* \
+    libgflags_nothreads.so* \
+    libglog.so* \
+    libgpr.so* \
+    libgrpc++.so* \
+    libgrpc.so* \
+    libicudata.so* \
+    libjemalloc.so* \
+    libknowhere.so* \
+    liblzma.so* \
+    libmilvus-common.so* \
+    libmilvus_core.so* \
+    libmilvus-planparser-cpp.so* \
+    libmilvus-planparser.so* \
+    libmilvus-storage.so* \
+    libprotobuf.so* \
+    librdkafka.so* \
+    librocksdb.so* \
+    libsimdjson.so* \
+    libssl.so* \
+    libtbb.so* \
+    libupb_base_lib.so* \
+    libupb_json_lib.so* \
+    libupb_mem_lib.so* \
+    libupb_message_lib.so* \
+    libupb_mini_descriptor_lib.so* \
+    libupb_textformat_lib.so* \
+    libupb_wire_lib.so* \
+    libutf8_range_lib.so*; do
+    cp -a lib/${lib} %{buildroot}/lib64/milvus/
+done
 
 # conf
 install -m 755 configs/milvus.yaml %{buildroot}/etc/milvus/configs/milvus.yaml
@@ -79,11 +113,42 @@ systemctl daemon-reload
 /usr/bin/milvus-etcd
 /usr/bin/milvus-minio
 
-/lib64/milvus/libknowhere.so
-/lib64/milvus/libmilvus_core.so
-/lib64/milvus/libopenblas.so.0
-/lib64/milvus/libngt.so.1
-/lib64/milvus/libgfortran.so.4
+/lib64/milvus/libaddress_sorting.so*
+/lib64/milvus/libbson-1.0.so*
+/lib64/milvus/libbsoncxx.so*
+/lib64/milvus/libcrypto.so*
+/lib64/milvus/libdouble-conversion.so*
+/lib64/milvus/libevent_core-2.1.so*
+/lib64/milvus/libfolly.so*
+/lib64/milvus/libfolly_test_util.so*
+/lib64/milvus/libgflags_nothreads.so*
+/lib64/milvus/libglog.so*
+/lib64/milvus/libgpr.so*
+/lib64/milvus/libgrpc++.so*
+/lib64/milvus/libgrpc.so*
+/lib64/milvus/libicudata.so*
+/lib64/milvus/libjemalloc.so*
+/lib64/milvus/libknowhere.so*
+/lib64/milvus/liblzma.so*
+/lib64/milvus/libmilvus-common.so*
+/lib64/milvus/libmilvus_core.so*
+/lib64/milvus/libmilvus-planparser-cpp.so*
+/lib64/milvus/libmilvus-planparser.so*
+/lib64/milvus/libmilvus-storage.so*
+/lib64/milvus/libprotobuf.so*
+/lib64/milvus/librdkafka.so*
+/lib64/milvus/librocksdb.so*
+/lib64/milvus/libsimdjson.so*
+/lib64/milvus/libssl.so*
+/lib64/milvus/libtbb.so*
+/lib64/milvus/libupb_base_lib.so*
+/lib64/milvus/libupb_json_lib.so*
+/lib64/milvus/libupb_mem_lib.so*
+/lib64/milvus/libupb_message_lib.so*
+/lib64/milvus/libupb_mini_descriptor_lib.so*
+/lib64/milvus/libupb_textformat_lib.so*
+/lib64/milvus/libupb_wire_lib.so*
+/lib64/milvus/libutf8_range_lib.so*
 
 /etc/milvus/configs/milvus.yaml
 /etc/milvus/configs/advanced/etcd.yaml

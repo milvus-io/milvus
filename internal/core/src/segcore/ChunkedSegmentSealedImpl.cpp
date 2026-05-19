@@ -405,7 +405,7 @@ ChunkedSegmentSealedImpl::init_storage_v1_pk_index(
     const std::shared_ptr<ChunkedColumnInterface>& column,
     DataType data_type,
     bool is_replace) {
-    if (schema_->get_primary_field_id() != field_id) {
+    if (schema_->get_primary_field_id().value_or(FieldId(-1)) != field_id) {
         return;
     }
     // Build compressed offset->pk for FillPrimaryKeys fast path
@@ -429,7 +429,7 @@ ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
     FieldId field_id,
     const std::shared_ptr<ChunkedColumnInterface>& column,
     DataType data_type) {
-    if (schema_->get_primary_field_id() != field_id) {
+    if (schema_->get_primary_field_id().value_or(FieldId(-1)) != field_id) {
         return;
     }
     std::unique_ptr<Translator<storagev2translator::PkIndexCell>> translator =
@@ -521,7 +521,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
-    auto is_pk = field_id == schema_->get_primary_field_id();
+    auto is_pk =
+        field_id == schema_->get_primary_field_id().value_or(FieldId(-1));
 
     LOG_INFO("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
              info.field_id,
@@ -4367,7 +4368,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     // set pks to offset
-    if (schema_->get_primary_field_id() == field_id) {
+    if (schema_->get_primary_field_id().value_or(FieldId(-1)) == field_id) {
         if (std::atomic_load(&segment_load_info_)->GetStorageVersion() >=
             STORAGE_V2) {
             init_storage_v2_pk_index(field_id, column, data_type);

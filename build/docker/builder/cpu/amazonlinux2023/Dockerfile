@@ -13,9 +13,9 @@ FROM amazonlinux:2023
 
 ARG TARGETARCH
 
-RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
+RUN dnf install -y wget g++ gcc gcc-gfortran gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
     autoconf automake python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio perl-IPC-Cmd perl-Digest-SHA libasan openblas-devel tzdata && \
+    pkg-config libuuid-devel libaio perl-IPC-Cmd perl-Digest-SHA libasan tzdata && \
     rm -rf /var/cache/yum/*
 
 ENV GOPATH /go

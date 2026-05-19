@@ -14,9 +14,9 @@ FROM ubuntu:focal-20220426
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
-    g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
+    g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
-    pkg-config uuid-dev libaio-dev libopenblas-dev software-properties-common && \
+    pkg-config uuid-dev libaio-dev software-properties-common && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \

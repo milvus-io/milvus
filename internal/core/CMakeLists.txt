@@ -128,7 +128,7 @@ if ( MILVUS_UNITY_BUILD )
     message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
 endif ()
 
-set( CMAKE_CXX_STANDARD 17 )
+set( CMAKE_CXX_STANDARD 20 )
 set( CMAKE_CXX_STANDARD_REQUIRED on )
 
 # Use std::shared_ptr/std::string_view etc. instead of opentelemetry::nostd::
@@ -192,6 +192,10 @@ find_package(unordered_dense REQUIRED)
 find_package(absl REQUIRED)
 find_package(RapidJSON REQUIRED)
 find_package(simde REQUIRED)
+find_package(milvus-common REQUIRED)
+if (LINUX)
+    find_package(OpenBLAS CONFIG REQUIRED)
+endif()
 find_package(LibLZMA REQUIRED)
 find_package(RdKafka REQUIRED)
 find_package(GTest REQUIRED)
@@ -445,6 +449,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )
+# cgo consumers need milvus-common headers in the core output include path.
+foreach(MILVUS_COMMON_INCLUDE_DIR IN LISTS milvus-common_INCLUDE_DIRS)
+    install(DIRECTORY ${MILVUS_COMMON_INCLUDE_DIR}/
+            DESTINATION include
+    )
+endforeach()
 
 # Install monitor
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/monitor/
