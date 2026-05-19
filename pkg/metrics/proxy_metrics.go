@@ -373,7 +373,6 @@ var (
 			Name:      "shard_leader_preferred_node_count",
 			Help:      "counter of preferred shard leader selection results",
 		}, []string{
-			nodeIDLabelName,
 			statusLabelName,
 		})
 
