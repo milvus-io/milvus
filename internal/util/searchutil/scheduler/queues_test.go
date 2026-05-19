@@ -53,7 +53,7 @@ func TestMergeTaskQueue(t *testing.T) {
 			mergeAble: true,
 			nq:        int64(i),
 		})
-		assert.Equal(t, i <= 10, q.tryMerge(newQueuedTask(task, time.Now()), 56, 0))
+		assert.Equal(t, i <= 10, q.tryMerge(newQueuedTask(task, time.Now()), 56, 0, 0))
 	}
 	for i := 1; i <= 2; i++ {
 		task := newMockTask(mockTaskConfig{
@@ -71,7 +71,7 @@ func TestMergeTaskQueue(t *testing.T) {
 		})
 		// 2 + 1 + ... + 9 < 55
 		// 1 + 10 + 11 + 12 + 13 < 55
-		assert.Equal(t, i <= 13, q.tryMerge(newQueuedTask(task, time.Now()), 55, 0))
+		assert.Equal(t, i <= 13, q.tryMerge(newQueuedTask(task, time.Now()), 55, 0, 0))
 	}
 }
 
@@ -87,14 +87,66 @@ func TestMergeTaskQueueNQMergeRatio(t *testing.T) {
 		username:  "test_user",
 		mergeAble: true,
 		nq:        4,
-	}), time.Now()), 16, 3))
+	}), time.Now()), 16, 3, 0))
 
 	assert.False(t, q.tryMerge(newQueuedTask(newMockTask(mockTaskConfig{
 		username:  "test_user",
 		mergeAble: true,
 		nq:        4,
-	}), time.Now()), 16, 3))
+	}), time.Now()), 16, 3, 0))
 	assert.Equal(t, int64(6), q.front().NQ())
+}
+
+func TestMergeTaskQueueDeadlineMergeGap(t *testing.T) {
+	now := time.Now()
+	baseDeadline := now.Add(time.Second)
+	baseCtx, baseCancel := context.WithDeadline(context.Background(), baseDeadline)
+	defer baseCancel()
+
+	newTask := func(ctx context.Context, nq int64) *queuedTask {
+		return newQueuedTask(newMockTask(mockTaskConfig{
+			ctx:       ctx,
+			username:  "test_user",
+			mergeAble: true,
+			nq:        nq,
+		}), now)
+	}
+
+	t.Run("deadline gap too large", func(t *testing.T) {
+		q := newMergeTaskQueue("test_user")
+		q.push(newTask(baseCtx, 2))
+		shortCtx, shortCancel := context.WithDeadline(context.Background(), baseDeadline.Add(-100*time.Millisecond))
+		defer shortCancel()
+
+		assert.False(t, q.tryMerge(newTask(shortCtx, 2), 16, 0, 50*time.Millisecond))
+		assert.Equal(t, int64(2), q.front().NQ())
+	})
+
+	t.Run("deadline gap within threshold", func(t *testing.T) {
+		q := newMergeTaskQueue("test_user")
+		q.push(newTask(baseCtx, 2))
+		closeCtx, closeCancel := context.WithDeadline(context.Background(), baseDeadline.Add(-40*time.Millisecond))
+		defer closeCancel()
+
+		assert.True(t, q.tryMerge(newTask(closeCtx, 2), 16, 0, 50*time.Millisecond))
+		assert.Equal(t, int64(4), q.front().NQ())
+	})
+
+	t.Run("one side missing deadline", func(t *testing.T) {
+		q := newMergeTaskQueue("test_user")
+		q.push(newTask(baseCtx, 2))
+
+		assert.False(t, q.tryMerge(newTask(context.Background(), 2), 16, 0, 50*time.Millisecond))
+		assert.Equal(t, int64(2), q.front().NQ())
+	})
+
+	t.Run("both sides missing deadline", func(t *testing.T) {
+		q := newMergeTaskQueue("test_user")
+		q.push(newTask(context.Background(), 2))
+
+		assert.True(t, q.tryMerge(newTask(context.Background(), 2), 16, 0, 50*time.Millisecond))
+		assert.Equal(t, int64(4), q.front().NQ())
+	})
 }
 
 func TestMergeTaskQueueCleanupSkipsRewriteWithoutExpiredTask(t *testing.T) {
@@ -206,8 +258,8 @@ func TestFairPollingTaskQueue(t *testing.T) {
 		username:  username,
 		mergeAble: true,
 	})
-	assert.False(t, q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), 1, 0))
-	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), 1, 0))
+	assert.False(t, q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), 1, 0, 0))
+	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), 1, 0, 0))
 
 	// Add basic user info first.
 	for i := 1; i <= userN; i++ {
@@ -228,7 +280,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 			username:  username,
 			mergeAble: true,
 		})
-		success := q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0)
+		success := q.tryMergeWithSameGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0, 0)
 		assert.Equal(t, i+userN <= n, success)
 		assert.Equal(t, userN, q.len())
 		assert.Equal(t, 1, q.groupLen(username))
@@ -239,7 +291,7 @@ func TestFairPollingTaskQueue(t *testing.T) {
 		username:  username,
 		mergeAble: true,
 	})
-	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0))
-	assert.True(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN)+1, 0))
+	assert.False(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN), 0, 0))
+	assert.True(t, q.tryMergeWithOtherGroup(username, newQueuedTask(task, time.Now()), int64(n/userN)+1, 0, 0))
 	assert.Equal(t, 0, q.groupLen(username))
 }

@@ -157,8 +157,26 @@ func canMergeNQ(task MergeTask, other MergeTask, maxNQ int64, nqMergeRatio float
 	return minNQ > 0 && float64(totalNQ)/float64(minNQ) <= nqMergeRatio
 }
 
+func canMergeDeadline(task *queuedTask, other *queuedTask, maxDeadlineMergeGap time.Duration) bool {
+	if maxDeadlineMergeGap < 0 {
+		return true
+	}
+	deadline, ok := task.Context().Deadline()
+	otherDeadline, otherOk := other.Context().Deadline()
+	if !ok && !otherOk {
+		return true
+	}
+	if ok != otherOk {
+		return false
+	}
+	if deadline.After(otherDeadline) {
+		deadline, otherDeadline = otherDeadline, deadline
+	}
+	return otherDeadline.Sub(deadline) <= maxDeadlineMergeGap
+}
+
 // tryMerge try to a new task to any task in queue.
-func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio float64, maxDeadlineMergeGap time.Duration) bool {
 	mergeTask := tryIntoMergeTask(task.Task)
 	if mergeTask == nil {
 		return false
@@ -174,7 +192,9 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 		}
 		if taskInQueue := tryIntoMergeTask(taskInQueue.Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
-			if canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) && taskInQueue.MergeWith(mergeTask) {
+			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
+				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap)) &&
+				taskInQueue.MergeWith(mergeTask) {
 				return true
 			}
 		}
@@ -225,7 +245,7 @@ func (q *fairPollingTaskQueue) groupLen(group string) int {
 }
 
 // tryMergeWithOtherGroup try to merge given task into exists tasks in the other group.
-func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64, maxDeadlineMergeGap time.Duration) bool {
 	if q.count == 0 {
 		return false
 	}
@@ -238,7 +258,7 @@ func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task *queued
 		if queue.len() == 0 || queue.name == group {
 			continue
 		}
-		if queue.tryMerge(task, maxNQ, nqMergeRatio) {
+		if queue.tryMerge(task, maxNQ, nqMergeRatio, maxDeadlineMergeGap) {
 			return true
 		}
 		node = prev
@@ -247,14 +267,14 @@ func (q *fairPollingTaskQueue) tryMergeWithOtherGroup(group string, task *queued
 }
 
 // tryMergeWithSameGroup try to merge given task into exists tasks in the same group.
-func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64) bool {
+func (q *fairPollingTaskQueue) tryMergeWithSameGroup(group string, task *queuedTask, maxNQ int64, nqMergeRatio float64, maxDeadlineMergeGap time.Duration) bool {
 	if q.count == 0 {
 		return false
 	}
 	// Applied to task with same group first.
 	if r, ok := q.route[group]; ok {
 		// Try to merge task into queue.
-		if r.Value.(*mergeTaskQueue).tryMerge(task, maxNQ, nqMergeRatio) {
+		if r.Value.(*mergeTaskQueue).tryMerge(task, maxNQ, nqMergeRatio, maxDeadlineMergeGap) {
 			return true
 		}
 	}

@@ -36,13 +36,14 @@ func (p *userTaskPollingPolicy) Push(task *queuedTask) (int, error) {
 		// Try to merge with same group first.
 		maxNQ := pt.QueryNodeCfg.MaxGroupNQ.GetAsInt64()
 		nqMergeRatio := pt.QueryNodeCfg.NQMergeRatio.GetAsFloat()
-		if p.queue.tryMergeWithSameGroup(username, task, maxNQ, nqMergeRatio) {
+		maxDeadlineMergeGap := pt.QueryNodeCfg.MaxDeadlineMergeGap.GetAsDurationByParse()
+		if p.queue.tryMergeWithSameGroup(username, task, maxNQ, nqMergeRatio, maxDeadlineMergeGap) {
 			return 0, nil
 		}
 
 		// Try to merge with other group if option is enabled.
 		enableCrossGroupMerge := pt.QueryNodeCfg.SchedulePolicyEnableCrossUserGrouping.GetAsBool()
-		if enableCrossGroupMerge && p.queue.tryMergeWithOtherGroup(username, task, maxNQ, nqMergeRatio) {
+		if enableCrossGroupMerge && p.queue.tryMergeWithOtherGroup(username, task, maxNQ, nqMergeRatio, maxDeadlineMergeGap) {
 			return 0, nil
 		}
 	}

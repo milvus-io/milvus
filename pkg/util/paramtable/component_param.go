@@ -2200,7 +2200,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "256",
+		DefaultValue: "1024",
 		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}
@@ -3520,6 +3520,7 @@ type queryNodeConfig struct {
 	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	NQMergeRatio          ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
@@ -4420,6 +4421,16 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.NQMergeRatio.Init(base.mgr)
+
+	p.MaxDeadlineMergeGap = ParamItem{
+		Key:          "queryNode.grouping.maxDeadlineMergeGap",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.MaxDeadlineMergeGap.Init(base.mgr)
 
 	p.TopKMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.topKMergeRatio",

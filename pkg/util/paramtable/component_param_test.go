@@ -218,7 +218,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxDimension: %d", Params.MaxDimension.GetAsInt64())
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum.GetAsInt64())
-		assert.Equal(t, int64(256), Params.MaxTaskNum.GetAsInt64())
+		assert.Equal(t, int64(1024), Params.MaxTaskNum.GetAsInt64())
 
 		t.Logf("AccessLog.Enable: %t", Params.AccessLog.Enable.GetAsBool())
 
@@ -465,6 +465,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)
 		assert.Equal(t, int64(16), Params.MaxGroupNQ.GetAsInt64())
 		assert.Equal(t, 3.0, Params.NQMergeRatio.GetAsFloat())
+		assert.Equal(t, 50*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
+		defer params.Reset(Params.MaxDeadlineMergeGap.Key)
+		assert.NoError(t, params.Save(Params.MaxDeadlineMergeGap.Key, "100ms"))
+		assert.Equal(t, 100*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
+		assert.NoError(t, params.Save(Params.MaxDeadlineMergeGap.Key, "100"))
+		assert.Equal(t, 100*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
 		assert.Equal(t, "fifo", Params.SchedulePolicyName.GetValue())
 		assert.Equal(t, 50*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		defer params.Reset(Params.SchedulePolicyTaskDeadlineAdvance.Key)
