@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -868,6 +870,14 @@ type updateSegmentPack struct {
 	// for update segment metric after alter segments
 	metricMutation              *segMetricMutation
 	fromSaveBinlogPathSegmentID int64 // if true, the operator is from save binlog paths
+	err                         error
+}
+
+func (p *updateSegmentPack) fail(err error) bool {
+	if err != nil {
+		p.err = err
+	}
+	return false
 }
 
 func (p *updateSegmentPack) Validate() error {
@@ -1120,6 +1130,108 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 			},
 		}
 		return true
+	}
+}
+
+func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment *SegmentInfo, deltalogs []*datapb.FieldBinlog) bool {
+	if len(deltalogs) == 0 {
+		return false
+	}
+
+	segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	segment.deltaRowcount.Store(-1)
+	modPack.increments[segmentID] = metastore.BinlogsIncrement{
+		Segment: segment.SegmentInfo,
+		UpdateMask: metastore.BinlogsUpdateMask{
+			WithoutBinlogs:       true,
+			WithoutDeltalogs:     false,
+			WithoutStatslogs:     true,
+			WithoutBm25Statslogs: true,
+		},
+	}
+	return true
+}
+
+func clearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.LogPath = ""
+		}
+	}
+}
+
+func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error {
+	if manifestPath == "" || segment.GetManifestPath() == manifestPath {
+		return nil
+	}
+
+	currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+	if err != nil {
+		return err
+	}
+	incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return err
+	}
+	if currentBase != incomingBase {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase))
+	}
+	if incomingVersion > currentVersion {
+		segment.ManifestPath = manifestPath
+	}
+	return nil
+}
+
+func AddL0DeltalogsAndUpdateManifestOperator(
+	segmentID int64,
+	deltalogs []*datapb.FieldBinlog,
+	storageConfig *indexpb.StorageConfig,
+	committedV3Manifests map[int64]string,
+) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: add L0 deltalog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if len(deltalogs) == 0 {
+			return false
+		}
+
+		if segment.GetManifestPath() == "" {
+			if err := binlog.CompressFieldBinlogs(deltalogs); err != nil {
+				return modPack.fail(err)
+			}
+			return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
+		}
+
+		manifestPath := ""
+		if committedV3Manifests != nil {
+			manifestPath = committedV3Manifests[segmentID]
+		}
+		if manifestPath == "" {
+			entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
+			if err != nil {
+				return modPack.fail(err)
+			}
+			if len(entries) == 0 {
+				return false
+			}
+			manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(segment.GetManifestPath(), storageConfig, entries)
+			if err != nil {
+				return modPack.fail(err)
+			}
+			if committedV3Manifests != nil {
+				committedV3Manifests[segmentID] = manifestPath
+			}
+		}
+
+		if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
+			return modPack.fail(err)
+		}
+		clearBinlogPaths(deltalogs)
+		return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
 	}
 }
 
@@ -1545,6 +1657,9 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 
 	for _, operator := range operators {
 		operator(updatePack)
+		if updatePack.err != nil {
+			return updatePack.err
+		}
 	}
 
 	// skip if all segment not exist
