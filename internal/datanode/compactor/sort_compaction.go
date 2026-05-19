@@ -479,24 +479,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			}, nil
 		}
 		// For V3 segments, register text index stats in manifest.
-		// C++ Upload() returns relative file names; convert to absolute
-		// by prepending statsBasePath before registering with manifest.
+		// TextStatsLogs already carries full object keys for mixed-version compatibility;
+		// AddStatsToManifest stores the manifest-relative representation at commit time.
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
-			basePath, _, bErr := packed.UnmarshalManifestPath(resultSegment.GetManifest())
-			if bErr != nil {
-				log.Warn("failed to unmarshal manifest path for text index stats",
-					zap.Int64("targetSegmentID", targetSegemntID), zap.Error(bErr))
-				return &datapb.CompactionPlanResult{
-					PlanID: t.GetPlanID(),
-					State:  datapb.CompactionTaskState_failed,
-				}, nil
-			}
-			for _, stats := range textStatsLogs {
-				prefix := fmt.Sprintf("%s/_stats/text_index.%d", basePath, stats.GetFieldID())
-				for i, f := range stats.GetFiles() {
-					stats.Files[i] = prefix + "/" + f
-				}
-			}
 			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
 			newManifest, mErr := packed.AddStatsToManifest(
 				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
@@ -638,8 +623,10 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				return err
 			}
 
-			// Compute statsBasePath so C++ uploads text index to manifest-compatible location.
-			var statsBasePath string
+			// Compute statsBasePath so C++ uploads text index to the same location
+			// that is returned in TextStatsLogs.Files.
+			statsBasePath := metautil.BuildTextIndexPrefix(t.compactionParams.StorageConfig.GetRootPath(),
+				t.GetPlanID(), 0, collectionID, partitionID, segmentID, field.GetFieldID())
 			if segment.GetManifest() != "" {
 				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 				if err != nil {
@@ -695,6 +682,9 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			for _, info := range indexStats.GetSerializedIndexInfos() {
 				uploaded[info.FileName] = info.FileSize
 			}
+			// TextMatch upload returns relative filenames. Store full paths in
+			// metadata/task results for mixed-version compatibility.
+			files := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
@@ -702,7 +692,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				FieldID:                   field.GetFieldID(),
 				Version:                   0,
 				BuildID:                   taskID,
-				Files:                     lo.Keys(uploaded),
+				Files:                     files,
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
@@ -712,7 +702,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			log.Info("field enable match, create text index done",
 				zap.Int64("segmentID", segmentID),
 				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", lo.Keys(uploaded)),
+				zap.Strings("files", files),
 			)
 			return nil
 		})
