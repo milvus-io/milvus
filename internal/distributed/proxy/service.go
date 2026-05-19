@@ -620,8 +620,12 @@ func (s *Server) Stop() (err error) {
 
 		portShareMode := s.listenerManager != nil && s.listenerManager.portShareMode
 		if portShareMode && s.httpServer != nil {
-			logger.Info("Proxy stop http server...")
-			s.httpServer.Close()
+			logger.Info("Proxy shutdown http server...")
+			ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ProxyGrpcServerCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+			if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+				logger.Warn("Proxy failed to shutdown http server", zap.Error(err))
+			}
+			cancel()
 		}
 
 		if s.grpcExternalServer != nil {
