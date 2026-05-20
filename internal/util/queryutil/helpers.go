@@ -688,21 +688,25 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 				continue
 			}
 			va := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
-			if va == nil || di >= len(va.GetData()) {
+			if va == nil {
 				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
 				vd := fd.GetValidData()
 				if isNullable && int(ref.rowIdx) < len(vd) && !vd[ref.rowIdx] {
 					continue
 				}
-				dataLen := 0
-				if va != nil {
-					dataLen = len(va.GetData())
-				}
 				return nil, fmt.Errorf(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
-					di, dataLen, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+					di, 0, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+			}
+			if di >= len(va.GetData()) {
+				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
+				return nil, fmt.Errorf(
+					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
+						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
+					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
+					di, len(va.GetData()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
 			data = append(data, va.GetData()[di])
 		}
@@ -850,10 +854,11 @@ func rangeSliceScalarField(sf *schemapb.ScalarField, start, end int) *schemapb.S
 func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) *schemapb.VectorField {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
+	_, isVectorArray := vf.GetData().(*schemapb.VectorField_VectorArray)
 
 	// For compact mode: convert logical [start, end) to data [dataStart, dataEnd).
 	dataStart, dataEnd := start, end
-	if len(validData) > 0 {
+	if len(validData) > 0 && !isVectorArray {
 		dataStart = 0
 		for i := 0; i < start; i++ {
 			if validData[i] {
@@ -898,6 +903,9 @@ func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData [
 		}
 	case *schemapb.VectorField_VectorArray:
 		data := vf.GetVectorArray().GetData()
+		if len(validData) > 0 && len(data) == 0 {
+			dataStart, dataEnd = 0, 0
+		}
 		newVf.Data = &schemapb.VectorField_VectorArray{
 			VectorArray: &schemapb.VectorArray{
 				Dim:         vf.GetVectorArray().GetDim(),
@@ -1107,11 +1115,12 @@ func sliceScalarField(sf *schemapb.ScalarField, indices []int) *schemapb.ScalarF
 func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) *schemapb.VectorField {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
+	_, isVectorArray := vf.GetData().(*schemapb.VectorField_VectorArray)
 
 	// Pre-compute compact index mapping if nullable.
 	// compactIdx[logicalRow] = data index, or -1 if null.
 	var compactIdx []int
-	if len(validData) > 0 {
+	if len(validData) > 0 && !isVectorArray {
 		compactIdx = make([]int, len(validData))
 		di := 0
 		for i, v := range validData {
@@ -1225,12 +1234,14 @@ func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool)
 	case *schemapb.VectorField_VectorArray:
 		srcData := vf.GetVectorArray().GetData()
 		newData := make([]*schemapb.VectorField, 0, validCount)
-		for _, idx := range indices {
-			di := toDataIdx(idx)
-			if di < 0 {
-				continue
+		if !(len(validData) > 0 && len(srcData) == 0) {
+			for _, idx := range indices {
+				di := toDataIdx(idx)
+				if di < 0 {
+					continue
+				}
+				newData = append(newData, srcData[di])
 			}
-			newData = append(newData, srcData[di])
 		}
 		newVf.Data = &schemapb.VectorField_VectorArray{
 			VectorArray: &schemapb.VectorArray{
