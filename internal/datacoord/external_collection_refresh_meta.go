@@ -416,7 +416,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 				log.Warn("update job state after pre-apply failed",
 					zap.Int64("jobID", jobID),
 					zap.Error(saveErr))
-				return false, merr.WrapErrServiceInternalErr(err, "pre-apply failed; additionally failed to persist Failed job state: %v", saveErr)
+				return false, merr.Wrapf(err, "pre-apply failed; additionally failed to persist Failed job state: %v", saveErr)
 			}
 			m.jobs.Insert(jobID, cloneJob)
 			m.addToCollectionJobs(cloneJob)

@@ -398,7 +398,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			log.Warn("get file resources for collection failed", zap.Int64("collectionID", taskProto.GetCollectionID()), zap.Error(err))
-			return nil, merr.WrapErrServiceInternalErr(err, "get file resources for sort compaction failed")
+			return nil, merr.Wrap(err, "get file resources for sort compaction failed")
 		}
 		plan.FileResources = resources
 	}

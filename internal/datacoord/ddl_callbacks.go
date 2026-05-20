@@ -89,7 +89,7 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "collection %d does not exist", collectionID)
+		return nil, merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -161,7 +161,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
 	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "snapshot %s does not exist for collection %d",
+		return merr.Wrapf(err, "snapshot %s does not exist for collection %d",
 			snapshotData.SnapshotInfo.GetName(), sourceCollectionID)
 	}
 	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
@@ -169,7 +169,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "collection %d does not exist", collectionID)
+		return merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -180,7 +180,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	// ========== Validate Partitions Exist ==========
 	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to get partitions for collection %d", collectionID)
+		return merr.Wrapf(err, "failed to get partitions for collection %d", collectionID)
 	}
 
 	// Build set of existing partition names

@@ -1292,7 +1292,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(merr.WrapErrServiceInternalErr(err, "%s", msg)),
+			Status: merr.Status(merr.Wrap(err, msg)),
 		}, nil
 	}
 

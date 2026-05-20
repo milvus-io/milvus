@@ -562,7 +562,7 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 	// Get target database properties first (needed for both encrypted and non-encrypted snapshots)
 	dbResp, err := sm.broker.DescribeDatabase(ctx, targetDbName)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to describe target database %s", targetDbName)
+		return merr.Wrapf(err, "failed to describe target database %s", targetDbName)
 	}
 	targetIsEncrypted := hookutil.IsDBEncrypted(dbResp.GetProperties())
 
@@ -662,7 +662,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	pinID, activePins, err := sm.snapshotMeta.PinSnapshot(ctx, sourceCollectionID, snapshotName, pinTTLSeconds)
 	if err != nil {
 		phase0Lock.Close()
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to pin source snapshot under restore lock")
+		return 0, merr.Wrap(err, "failed to pin source snapshot under restore lock")
 	}
 	setSnapshotActivePinsGauge(sourceCollectionID, snapshotName, activePins)
 	phase0Lock.Close()
@@ -691,7 +691,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// Phase 1: Read snapshot data (now protected by the refcount guard)
 	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	if err != nil {
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to read snapshot data")
+		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
 	log.Info("snapshot data loaded",
 		zap.Int("segmentCount", len(snapshotData.Segments)),
@@ -707,7 +707,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// Phase 2: Restore collection and partitions
 	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
 	if err != nil {
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to restore collection")
+		return 0, merr.Wrap(err, "failed to restore collection")
 	}
 	log.Info("collection and partitions restored", zap.Int64("collectionID", collectionID))
 
@@ -718,7 +718,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to restore indexes")
+		return 0, merr.Wrap(err, "failed to restore indexes")
 	}
 	log.Info("indexes restored", zap.Int("indexCount", len(snapshotData.Indexes)))
 
@@ -741,7 +741,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to start broadcaster for restore message")
+		return 0, merr.Wrap(err, "failed to start broadcaster for restore message")
 	}
 	defer func() {
 		if restoreBroadcaster != nil {
@@ -760,7 +760,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
-		err = merr.WrapErrServiceInternalErr(valErr, "resource validation failed")
+		err = merr.Wrap(valErr, "resource validation failed")
 		return 0, err
 	}
 
@@ -872,7 +872,7 @@ func (sm *snapshotManager) RestoreIndexes(
 	// Get collection info for dbId
 	coll, err := sm.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to describe collection %d", collectionID)
+		return merr.Wrapf(err, "failed to describe collection %d", collectionID)
 	}
 
 	for _, indexInfo := range snapshotData.Indexes {
@@ -898,12 +898,12 @@ func (sm *snapshotManager) RestoreIndexes(
 
 		// Validate the index params (basic validation without JSON path parsing)
 		if err := ValidateIndexParams(index); err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to validate index %s", indexInfo.GetIndexName())
+			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
 		// Check scalar index engine version for JSON path indexes with new types
 		if err := sm.checkJSONPathIndexVersion(index); err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to validate index %s", indexInfo.GetIndexName())
+			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
 		// Create a new broadcaster for each index
@@ -977,14 +977,14 @@ func (sm *snapshotManager) RestoreData(
 	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to read snapshot data", zap.Error(err))
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to read snapshot data")
+		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
 
 	// ========== Phase 2: Build partition mapping ==========
 	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)
 	if err != nil {
 		log.Error("failed to build partition mapping", zap.Error(err))
-		return 0, merr.WrapErrServiceInternalErr(err, "partition mapping failed")
+		return 0, merr.Wrap(err, "partition mapping failed")
 	}
 	log.Info("partition mapping built", zap.Any("partitionMapping", partitionMapping))
 
@@ -992,14 +992,14 @@ func (sm *snapshotManager) RestoreData(
 	channelMapping, err := sm.buildChannelMapping(ctx, snapshotData, collectionID)
 	if err != nil {
 		log.Error("failed to build channel mapping", zap.Error(err))
-		return 0, merr.WrapErrServiceInternalErr(err, "channel mapping failed")
+		return 0, merr.Wrap(err, "channel mapping failed")
 	}
 
 	// ========== Phase 4: Create copy segment job ==========
 	// Use the pre-allocated jobID from the WAL message
 	if err := sm.createRestoreJob(ctx, collectionID, channelMapping, partitionMapping, snapshotData, jobID, pinID); err != nil {
 		log.Error("failed to create restore job", zap.Error(err))
-		return 0, merr.WrapErrServiceInternalErr(err, "restore job creation failed")
+		return 0, merr.Wrap(err, "restore job creation failed")
 	}
 
 	log.Info("restore data completed successfully",
@@ -1047,7 +1047,7 @@ func (sm *snapshotManager) restoreUserPartitions(
 		}
 
 		if err := sm.broker.CreatePartition(ctx, req); err != nil {
-			return merr.WrapErrServiceInternalErr(err, "failed to create partition %s", partitionName)
+			return merr.Wrapf(err, "failed to create partition %s", partitionName)
 		}
 	}
 

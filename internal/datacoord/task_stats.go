@@ -299,7 +299,7 @@ func (st *statsTask) handleEmptySegment(ctx context.Context) error {
 func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo) (*workerpb.CreateStatsRequest, error) {
 	collInfo, err := st.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil || collInfo == nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to get collection info")
+		return nil, merr.Wrap(err, "failed to get collection info")
 	}
 	if collInfo.Schema == nil || len(collInfo.Schema.GetFields()) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("collection schema is nil or has no fields, collectionID: %d", segment.GetCollectionID())
