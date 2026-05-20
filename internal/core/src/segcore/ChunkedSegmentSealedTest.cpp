@@ -67,6 +67,55 @@ struct DeferRelease {
 };
 
 using namespace milvus;
+
+namespace {
+
+void
+LoadInt64FieldData(segcore::SegmentSealed* segment,
+                   FieldId field_id,
+                   int64_t row_count) {
+    std::vector<int64_t> data(row_count);
+    std::iota(data.begin(), data.end(), 0);
+
+    auto field_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1);
+    field_data->FillFieldData(data.data(), row_count);
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    field_id.get(),
+                                                    {field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
+}
+
+index::IndexBasePtr
+BuildIvfSqVectorIndex(const std::vector<float>& data,
+                      int64_t row_count,
+                      int64_t dim) {
+    index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto indexing = index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, storage::FileManagerContext());
+    auto dataset = knowhere::GenDataSet(row_count, dim, data.data());
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "16"}};
+    indexing->BuildWithDataset(dataset, build_conf);
+    return indexing;
+}
+
+}  // namespace
+
 TEST(test_chunk_segment, TestSearchOnSealed) {
     int dim = 16;
     int chunk_num = 3;
@@ -668,6 +717,100 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegment, TestChunkSegment, testing::Bool());
+
+TEST(test_chunk_segment, ReopenRejectsAbsentNonNullableVectorField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_field_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field_id);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddField(
+        FieldName("pk"), pk_field_id, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk_field_id);
+    new_schema->AddField(FieldName("fakevec"),
+                         FieldId(pk_field_id.get() + 1),
+                         DataType::VECTOR_FLOAT,
+                         8,
+                         knowhere::metric::L2,
+                         false);
+
+    ASSERT_ANY_THROW(segment->Reopen(new_schema));
+}
+
+TEST(test_chunk_segment, FinishLoadSkipsNonNullableVectorWithIndex) {
+    auto schema = std::make_shared<Schema>();
+    const int64_t dim = 8;
+    const int64_t row_count = 200;
+    auto vec_field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto pk_field_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field_id);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+    auto segment_impl =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    LoadInt64FieldData(segment.get(), pk_field_id, row_count);
+    ASSERT_TRUE(segment_impl->HasFieldData(pk_field_id));
+    ASSERT_FALSE(segment_impl->HasFieldData(vec_field_id));
+
+    std::vector<float> vec_data(row_count * dim);
+    for (int64_t i = 0; i < row_count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vec_data[i * dim + d] = static_cast<float>(i * dim + d);
+        }
+    }
+
+    auto indexing = BuildIvfSqVectorIndex(vec_data, row_count, dim);
+    auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+    ASSERT_NE(vec_index, nullptr);
+    ASSERT_FALSE(vec_index->HasRawData());
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_field_id.get();
+    load_index_info.field_type = DataType::VECTOR_FLOAT;
+    load_index_info.element_type = DataType::NONE;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.num_rows = row_count;
+    load_index_info.dim = dim;
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("ivfsq_no_raw_data", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+
+    ASSERT_NO_THROW(segment->LoadIndex(load_index_info));
+    ASSERT_TRUE(segment_impl->HasIndex(vec_field_id));
+    ASSERT_FALSE(segment_impl->HasFieldData(vec_field_id));
+
+    ASSERT_NO_THROW(segment->FinishLoad());
+    EXPECT_FALSE(segment_impl->HasFieldData(vec_field_id));
+}
+
+TEST(test_chunk_segment, FinishLoadRejectsMissingNonNullableVectorCarrier) {
+    auto schema = std::make_shared<Schema>();
+    const int64_t dim = 8;
+    const int64_t row_count = 100;
+    auto vec_field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto pk_field_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field_id);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+    auto segment_impl =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    LoadInt64FieldData(segment.get(), pk_field_id, row_count);
+    ASSERT_TRUE(segment_impl->HasFieldData(pk_field_id));
+    ASSERT_FALSE(segment_impl->HasFieldData(vec_field_id));
+    ASSERT_FALSE(segment_impl->HasIndex(vec_field_id));
+
+    ASSERT_ANY_THROW(segment->FinishLoad());
+}
 
 TEST_P(TestChunkSegment, TestSkipNextTermExpr) {
     bool pk_is_string = GetParam();
