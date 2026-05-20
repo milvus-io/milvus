@@ -91,12 +91,28 @@ func TestReliable_NodeNotFound_DrainImmediately(t *testing.T) {
 	defer setup.syncer.Close()
 
 	var lostCalled atomic.Bool
-	sv := newTestSyncView(1, 1, nil, func() { lostCalled.Store(true) })
+	sv := newTestSyncView(1, 1, nil, func(qviews.QueryNode) { lostCalled.Store(true) })
 
 	err := setup.syncer.SyncViews(context.Background(), newTestSyncGroup(sv))
 	require.NoError(t, err)
 
-	assert.True(t, lostCalled.Load(), "OnNodeLost should be called immediately for unknown node")
+	assert.True(t, lostCalled.Load(), "OnQueryNodeLost should be called immediately for unknown node")
+}
+
+func TestReliable_StreamingNodeNotFoundDoesNotCallQueryNodeLost(t *testing.T) {
+	setup := newReliableTestSetup(t)
+	defer setup.syncer.Close()
+
+	var lostCalled atomic.Bool
+	sv := SyncView{
+		View:            newTestSNView(1),
+		OnQueryNodeLost: func(qviews.QueryNode) { lostCalled.Store(true) },
+	}
+
+	err := setup.syncer.SyncViews(context.Background(), newTestSyncGroup(sv))
+	require.NoError(t, err)
+
+	assert.False(t, lostCalled.Load(), "StreamingNode loss should not invoke OnQueryNodeLost")
 }
 
 func TestReliable_LazyCreation(t *testing.T) {
@@ -126,7 +142,7 @@ func TestReliable_LazyCreation(t *testing.T) {
 		"stream should be opened on first SyncViews")
 }
 
-func TestReliable_NodeLostViaWatch(t *testing.T) {
+func TestReliable_QueryNodeLostViaWatch(t *testing.T) {
 	node := qviews.NewQueryNode(1)
 	setup := newReliableTestSetup(t, node)
 	defer setup.syncer.Close()
@@ -134,7 +150,7 @@ func TestReliable_NodeLostViaWatch(t *testing.T) {
 	var lostCalled atomic.Bool
 	sv := newTestSyncView(1, 1,
 		func(qviews.QueryViewAtWorkNode) bool { return false },
-		func() { lostCalled.Store(true) },
+		func(qviews.QueryNode) { lostCalled.Store(true) },
 	)
 
 	err := setup.syncer.SyncViews(context.Background(), newTestSyncGroup(sv))
@@ -149,7 +165,7 @@ func TestReliable_NodeLostViaWatch(t *testing.T) {
 	setup.client.notifyNodeChanged()
 
 	assert.True(t, waitForCond(lostCalled.Load, 2*time.Second),
-		"OnNodeLost should be called after node removal")
+		"OnQueryNodeLost should be called after node removal")
 }
 
 func TestReliable_StreamBreakRecovery(t *testing.T) {
@@ -328,7 +344,7 @@ func TestReliable_NodeRemovedDuringSync(t *testing.T) {
 	var lostCalled atomic.Bool
 	sv := newTestSyncView(1, 1,
 		func(qviews.QueryViewAtWorkNode) bool { return false },
-		func() { lostCalled.Store(true) },
+		func(qviews.QueryNode) { lostCalled.Store(true) },
 	)
 
 	err := setup.syncer.SyncViews(context.Background(), newTestSyncGroup(sv))
@@ -342,7 +358,7 @@ func TestReliable_NodeRemovedDuringSync(t *testing.T) {
 	setup.client.removeNode(node)
 	setup.client.notifyNodeChanged()
 
-	// The view should be drained via OnNodeLost.
+	// The view should be drained via OnQueryNodeLost.
 	assert.True(t, waitForCond(lostCalled.Load, 2*time.Second))
 }
 

@@ -237,11 +237,16 @@ func newTestSNView(version int64) qviews.QueryViewAtWorkNode {
 }
 
 // newTestSyncView creates a SyncView for a QN with configurable callbacks.
-func newTestSyncView(nodeID int64, version int64, onResp func(qviews.QueryViewAtWorkNode) bool, onLost func()) SyncView {
+func newTestSyncView(
+	nodeID int64,
+	version int64,
+	onResp func(qviews.QueryViewAtWorkNode) bool,
+	onQueryNodeLost func(qviews.QueryNode),
+) SyncView {
 	return SyncView{
-		View:           newTestQNView(nodeID, version),
-		OnSyncResponse: onResp,
-		OnNodeLost:     onLost,
+		View:            newTestQNView(nodeID, version),
+		OnSyncResponse:  onResp,
+		OnQueryNodeLost: onQueryNodeLost,
 	}
 }
 

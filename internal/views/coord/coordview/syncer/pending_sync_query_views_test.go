@@ -190,16 +190,32 @@ func TestPending_Drain(t *testing.T) {
 	p := newPendingSyncQueryViews()
 
 	var lostCount atomic.Int32
-	onLost := func() { lostCount.Add(1) }
+	onQueryNodeLost := func(qviews.QueryNode) { lostCount.Add(1) }
 
 	for i := int64(1); i <= 3; i++ {
-		sv := newTestSyncView(1, i, nil, onLost)
+		sv := newTestSyncView(1, i, nil, onQueryNodeLost)
 		p.Upsert(sv)
 	}
 
-	p.Drain()
+	p.Drain(qviews.NewQueryNode(1))
 
 	assert.Equal(t, int32(3), lostCount.Load())
+	assert.Nil(t, p.CollectProtos(), "entries should be empty after drain")
+	assert.Nil(t, p.DrainUnsent(), "unsent should be cleared after drain")
+}
+
+func TestPending_DrainSkipsStreamingNode(t *testing.T) {
+	p := newPendingSyncQueryViews()
+
+	var lostCalled atomic.Bool
+	p.Upsert(SyncView{
+		View:            newTestSNView(1),
+		OnQueryNodeLost: func(qviews.QueryNode) { lostCalled.Store(true) },
+	})
+
+	p.Drain(qviews.NewStreamingNodeFromVChannel(testVChannel))
+
+	assert.False(t, lostCalled.Load(), "StreamingNode drain should not invoke OnQueryNodeLost")
 	assert.Nil(t, p.CollectProtos(), "entries should be empty after drain")
 	assert.Nil(t, p.DrainUnsent(), "unsent should be cleared after drain")
 }

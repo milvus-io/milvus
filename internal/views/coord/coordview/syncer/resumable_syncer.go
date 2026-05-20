@@ -64,10 +64,12 @@ func (rs *resumableSyncer) Close() {
 	rs.wg.Wait()
 }
 
-// DrainPendingIfNodeLost drains all remaining pending views (invokes OnNodeLost for each).
+// DrainPendingIfNodeLost drains all remaining pending views.
+// QueryNode loss invokes OnQueryNodeLost for each pending entry; StreamingNode
+// loss is not a per-view event and only clears pending entries.
 // Must only be called after Close, when the node is declared lost.
 func (rs *resumableSyncer) DrainPendingIfNodeLost() {
-	rs.pending.Drain()
+	rs.pending.Drain(rs.node)
 }
 
 // loop is the single goroutine that manages the stream lifecycle:

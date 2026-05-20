@@ -420,11 +420,16 @@ func (m *ShardViewManager) flush() {
 		for _, entry := range m.pendingSyncs {
 			version := entry.sm.Version()
 			for _, view := range entry.views {
-				key := view.WorkNode().Key()
+				node := view.WorkNode()
+				key := node.Key()
+				var onQueryNodeLost func(qviews.QueryNode)
+				if _, ok := node.(qviews.QueryNode); ok {
+					onQueryNodeLost = m.makeOnQueryNodeLost(version)
+				}
 				viewsByNode[key] = append(viewsByNode[key], syncer.SyncView{
-					View:           view,
-					OnSyncResponse: m.makeOnSyncResponse(version),
-					OnNodeLost:     m.makeOnNodeLost(version),
+					View:            view,
+					OnSyncResponse:  m.makeOnSyncResponse(version, view),
+					OnQueryNodeLost: onQueryNodeLost,
 				})
 			}
 		}
@@ -443,11 +448,11 @@ func (m *ShardViewManager) flush() {
 	}
 }
 
-// makeOnSyncResponse creates a callback that processes node responses for a view.
+// makeOnSyncResponse creates a callback that processes node responses for a view sync.
 //
 // The callback acquires m.mu, calls sm.OnNodeStateReported, calls processStateMachine.
-// Returns true when the view is removed (Dropped), stopping ReliableSyncer tracking.
-func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion) func(resp qviews.QueryViewAtWorkNode) bool {
+// Returns true when this node has completed the sync represented by target.
+func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, target qviews.QueryViewAtWorkNode) func(resp qviews.QueryViewAtWorkNode) bool {
 	return func(resp qviews.QueryViewAtWorkNode) bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -462,16 +467,32 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion) f
 		m.flush()
 		m.publishStatsLocked()
 
-		// If the view was removed during processing, stop tracking.
 		_, exists := m.views[version]
-		return !exists
+		return !exists || syncResponseCompletesTarget(target.State(), resp.State())
 	}
 }
 
-// makeOnNodeLost creates a callback invoked when the target node is declared lost.
-// It transitions the view to Unrecoverable directly.
-func (m *ShardViewManager) makeOnNodeLost(version qviews.QueryViewVersion) func() {
-	return func() {
+func syncResponseCompletesTarget(target, reported qviews.QueryViewState) bool {
+	if reported == qviews.QueryViewStateUnrecoverable {
+		return true
+	}
+
+	switch target {
+	case qviews.QueryViewStatePreparing:
+		return reported == qviews.QueryViewStateReady || reported == qviews.QueryViewStateUp
+	case qviews.QueryViewStateUp:
+		return reported == qviews.QueryViewStateUp
+	case qviews.QueryViewStateDown:
+		return reported == qviews.QueryViewStateDown || reported == qviews.QueryViewStateDropped
+	case qviews.QueryViewStateDropped:
+		return reported == qviews.QueryViewStateDropped
+	default:
+		return false
+	}
+}
+
+func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) func(qviews.QueryNode) {
+	return func(node qviews.QueryNode) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
@@ -480,7 +501,7 @@ func (m *ShardViewManager) makeOnNodeLost(version qviews.QueryViewVersion) func(
 			return // view already removed
 		}
 
-		sm.EnterUnrecoverable()
+		sm.OnQueryNodeLost(node)
 		m.processStateMachine(sm)
 		m.flush()
 		m.publishStatsLocked()

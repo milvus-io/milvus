@@ -95,9 +95,9 @@ func (p *pendingSyncQueryViews) MatchResponse(pb *viewpb.QueryViewOfShard) {
 	p.mu.Unlock()
 }
 
-// Drain removes all pending entries and invokes OnNodeLost() for each.
-// Called when the node is declared lost.
-func (p *pendingSyncQueryViews) Drain() {
+// Drain removes all pending entries and invokes OnQueryNodeLost for each entry
+// only when the lost node is a QueryNode.
+func (p *pendingSyncQueryViews) Drain(node qviews.WorkNode) {
 	p.mu.Lock()
 	drained := make([]SyncView, 0, len(p.entries))
 	for _, sv := range p.entries {
@@ -107,8 +107,17 @@ func (p *pendingSyncQueryViews) Drain() {
 	p.unsent = nil
 	p.mu.Unlock()
 
+	qn, ok := node.(qviews.QueryNode)
+	if !ok {
+		return
+	}
 	for _, entry := range drained {
-		entry.OnNodeLost()
+		if _, ok := entry.View.WorkNode().(qviews.QueryNode); !ok {
+			continue
+		}
+		if entry.OnQueryNodeLost != nil {
+			entry.OnQueryNodeLost(qn)
+		}
 	}
 }
 

@@ -112,14 +112,14 @@ func (s *mockSyncer) findOnSyncResponse(node qviews.WorkNode, version qviews.Que
 	return nil
 }
 
-// findOnNodeLost returns the latest OnNodeLost callback for the given node and version.
-func (s *mockSyncer) findOnNodeLost(node qviews.WorkNode, version qviews.QueryViewVersion) func() {
+// findOnQueryNodeLost returns the latest OnQueryNodeLost callback for the given node and version.
+func (s *mockSyncer) findOnQueryNodeLost(node qviews.WorkNode, version qviews.QueryViewVersion) func(qviews.QueryNode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := len(s.syncedViews) - 1; i >= 0; i-- {
 		sv := s.syncedViews[i]
 		if sv.View.Version().EQ(version) && sv.View.WorkNode().Key() == node.Key() {
-			return sv.OnNodeLost
+			return sv.OnQueryNodeLost
 		}
 	}
 	return nil
@@ -446,6 +446,52 @@ func TestNormalFlow_PrepareToUpCascade(t *testing.T) {
 	assert.NotNil(t, cb, "should have a Down sync for v1 to SN")
 }
 
+func TestSyncResponseCompletesCurrentNodeSync(t *testing.T) {
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManager(catalog, s)
+
+	b := testBuilder(1, 1, 1)
+	ver1 := testVersion(1, 1, 1)
+	require.NoError(t, mgr.AddPreparing(context.Background(), b))
+
+	// Preparing is synced to QN and SN. Each node completes that specific sync
+	// when it reports Ready; the view itself is not removed yet.
+	done := simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateReady)
+	assert.True(t, done, "QN Ready should complete its Preparing sync")
+
+	done = simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateReady)
+	assert.True(t, done, "SN Ready should complete its Preparing sync")
+
+	// Ready pushes Up only to SN; SN Up completes that Up sync.
+	done = simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateUp)
+	assert.True(t, done, "SN Up should complete its Up sync")
+
+	// Release pushes Down only to SN; SN Down completes that Down sync and
+	// moves the view to Dropping.
+	require.NoError(t, mgr.RequestRelease(context.Background()))
+	done = simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateDown)
+	assert.True(t, done, "SN Down should complete its Down sync")
+
+	// Dropping pushes Dropped to all nodes. Each node completes its own Dropped
+	// sync independently; the final response also removes the view.
+	done = simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateDropped)
+	assert.True(t, done, "SN Dropped should complete its Dropped sync")
+	done = simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateDropped)
+	assert.True(t, done, "QN Dropped should complete its Dropped sync")
+}
+
+func TestStreamingNodeSyncHasNoQueryNodeLostCallback(t *testing.T) {
+	s := newMockSyncer()
+	mgr := newTestManager(newMockCatalog(), s)
+
+	ver1 := testVersion(1, 1, 1)
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+
+	assert.Nil(t, s.findOnQueryNodeLost(testSN, ver1))
+	assert.NotNil(t, s.findOnQueryNodeLost(testQN1, ver1))
+}
+
 // ===========================================================================
 // Full lifecycle: Down → Dropping → Dropped
 // ===========================================================================
@@ -498,10 +544,10 @@ func TestFullLifecycle_DownToDropped(t *testing.T) {
 }
 
 // ===========================================================================
-// Unrecoverable flow via OnNodeLost
+// Unrecoverable flow via OnQueryNodeLost
 // ===========================================================================
 
-func TestNodeLost_TriggersUnrecoverable(t *testing.T) {
+func TestQueryNodeLost_TriggersUnrecoverable(t *testing.T) {
 	catalog := newMockCatalog()
 	s := newMockSyncer()
 	mgr := newTestManager(catalog, s)
@@ -510,14 +556,14 @@ func TestNodeLost_TriggersUnrecoverable(t *testing.T) {
 	ver1 := testVersion(1, 1, 1)
 	require.NoError(t, mgr.AddPreparing(context.Background(), b))
 
-	// Simulate QN1 lost via OnNodeLost.
-	onLost := s.findOnNodeLost(testQN1, ver1)
-	require.NotNil(t, onLost)
+	// Simulate QN1 lost via OnQueryNodeLost.
+	onQueryNodeLost := s.findOnQueryNodeLost(testQN1, ver1)
+	require.NotNil(t, onQueryNodeLost)
 
-	// Invoke OnNodeLost — should inject synthetic Unrecoverable internally.
+	// Invoke OnQueryNodeLost — should inject synthetic Unrecoverable internally.
 	catalog.reset()
 	s.reset()
-	onLost()
+	onQueryNodeLost(testQN1)
 
 	// Should persist Unrecoverable but NOT advance to Dropping yet.
 	states := catalog.savedStates()
@@ -551,6 +597,49 @@ func TestNodeLost_TriggersUnrecoverable(t *testing.T) {
 	mgr.mu.Lock()
 	require.Len(t, mgr.views, 1)
 	assert.Equal(t, qviews.QueryViewStatePreparing, mgr.views[ver2].State())
+	mgr.mu.Unlock()
+}
+
+func TestQueryNodeLost_DroppingCleanupCompletes(t *testing.T) {
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManager(catalog, s)
+
+	b := testBuilder(1, 1, 2)
+	ver1 := testVersion(1, 1, 1)
+	require.NoError(t, mgr.AddPreparing(context.Background(), b))
+
+	// Drive v1 to Up.
+	simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateReady, 1001)
+	simulateNodeResponse(t, s, qviews.NewQueryNode(2), ver1, qviews.QueryViewStateReady, 1002)
+	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateReady)
+	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateUp)
+
+	// Release v1 and move it into Dropping.
+	require.NoError(t, mgr.RequestRelease(context.Background()))
+	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateDown)
+
+	mgr.mu.Lock()
+	require.Len(t, mgr.views, 1)
+	assert.Equal(t, qviews.QueryViewStateDropping, mgr.views[ver1].State())
+	mgr.mu.Unlock()
+
+	// QN2 is removed while Dropped is pending. The manager should count it as
+	// cleaned up and complete once SN and the remaining QN report Dropped.
+	onQueryNodeLost := s.findOnQueryNodeLost(qviews.NewQueryNode(2), ver1)
+	require.NotNil(t, onQueryNodeLost)
+	onQueryNodeLost(qviews.NewQueryNode(2))
+
+	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateDropped)
+	catalog.reset()
+	done := simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateDropped)
+
+	assert.True(t, done, "callback should return true when view is Dropped")
+	require.Len(t, catalog.savedStates(), 1)
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStateDropped, catalog.savedStates()[0])
+
+	mgr.mu.Lock()
+	assert.Empty(t, mgr.views)
 	mgr.mu.Unlock()
 }
 
@@ -755,10 +844,10 @@ func TestCallback_RemovedView_ReturnsTrue(t *testing.T) {
 }
 
 // ===========================================================================
-// Edge case: OnNodeLost for already removed view is no-op
+// Edge case: OnQueryNodeLost for already removed view is no-op
 // ===========================================================================
 
-func TestOnNodeLost_RemovedView_NoOp(t *testing.T) {
+func TestOnQueryNodeLost_RemovedView_NoOp(t *testing.T) {
 	catalog := newMockCatalog()
 	s := newMockSyncer()
 	mgr := newTestManager(catalog, s)
@@ -767,9 +856,9 @@ func TestOnNodeLost_RemovedView_NoOp(t *testing.T) {
 	ver1 := testVersion(1, 1, 1)
 	require.NoError(t, mgr.AddPreparing(context.Background(), b))
 
-	// Grab OnNodeLost before the view is removed.
-	onLost := s.findOnNodeLost(testSN, ver1)
-	require.NotNil(t, onLost)
+	// Grab OnQueryNodeLost before the view is removed.
+	onQueryNodeLost := s.findOnQueryNodeLost(testQN1, ver1)
+	require.NotNil(t, onQueryNodeLost)
 
 	// Force release and drive to Dropped.
 	require.NoError(t, mgr.RequestRelease(context.Background()))
@@ -780,8 +869,8 @@ func TestOnNodeLost_RemovedView_NoOp(t *testing.T) {
 	assert.Empty(t, mgr.views)
 	mgr.mu.Unlock()
 
-	// OnNodeLost for removed view should be a no-op (no panic).
-	onLost()
+	// OnQueryNodeLost for removed view should be a no-op (no panic).
+	onQueryNodeLost(testQN1)
 
 	mgr.mu.Lock()
 	assert.Empty(t, mgr.views)

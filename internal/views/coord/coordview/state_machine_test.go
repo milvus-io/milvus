@@ -255,6 +255,40 @@ func TestNormalFlow_DroppingRequiresAllNodesDropped(t *testing.T) {
 	assertNoPendingSync(t, sm)
 }
 
+func TestQueryNodeLost_DroppingCountsAsDropped(t *testing.T) {
+	view := buildTestView(2)
+	sm := NewCoordQueryViewStateMachine(view)
+	drainPending(sm)
+
+	// Fast-forward to Dropping state.
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(qnReport(view, 2, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
+	drainPending(sm)
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
+	drainPending(sm)
+	sm.EnterDown()
+	drainPending(sm)
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
+	assert.Equal(t, qviews.QueryViewStateDropping, sm.State())
+	drainPending(sm)
+
+	// QN2 disappears during cleanup. The view should no longer wait for a
+	// Dropped response from that node.
+	sm.OnQueryNodeLost(qviews.NewQueryNode(2))
+	assert.Equal(t, qviews.QueryViewStateDropping, sm.State())
+	assertNoPending(t, sm)
+
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
+	assert.Equal(t, qviews.QueryViewStateDropping, sm.State())
+	assertNoPending(t, sm)
+
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
+	assert.Equal(t, qviews.QueryViewStateDropped, sm.State())
+	assertPendingPersistState(t, sm, qviews.QueryViewStateDropped)
+	assertNoPendingSync(t, sm)
+}
+
 // ===========================================================================
 // 2. RECOVERY FAST-FORWARD (SN already Up during Preparing)
 // ===========================================================================

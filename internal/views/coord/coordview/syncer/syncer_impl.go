@@ -60,10 +60,21 @@ func (s *reliableSyncer) SyncViews(ctx context.Context, group SyncGroup) error {
 		}
 		// Node not found — notify views immediately.
 		for _, sv := range views {
-			sv.OnNodeLost()
+			notifyQueryNodeLost(sv)
 		}
 	}
 	return nil
+}
+
+func notifyQueryNodeLost(sv SyncView) {
+	if sv.OnQueryNodeLost == nil {
+		return
+	}
+	qn, ok := sv.View.WorkNode().(qviews.QueryNode)
+	if !ok {
+		return
+	}
+	sv.OnQueryNodeLost(qn)
 }
 
 // getOrCreateSyncer returns the existing ResumableSyncer for the node,

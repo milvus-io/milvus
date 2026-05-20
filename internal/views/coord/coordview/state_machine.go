@@ -151,6 +151,28 @@ func (sm *CoordQueryViewStateMachine) EnterUnrecoverable() {
 	}
 }
 
+// OnQueryNodeLost is called by the Manager when QueryNode service discovery
+// removes a QueryNode targeted by this view.
+//
+// StreamingNode loss is intentionally not modeled here: SN availability is
+// handled by the channel assignment layer, not by the per-view state machine.
+func (sm *CoordQueryViewStateMachine) OnQueryNodeLost(node qviews.QueryNode) {
+	if _, ok := sm.qnStates[node.ID]; !ok {
+		return
+	}
+
+	switch sm.state {
+	case qviews.QueryViewStatePreparing:
+		sm.transitionToUnrecoverable()
+	case qviews.QueryViewStateDropping:
+		sm.qnStates[node.ID] = qviews.QueryViewStateDropped
+		if sm.allNodesDropped() {
+			sm.state = qviews.QueryViewStateDropped
+			sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateDropped)
+		}
+	}
+}
+
 // EnterDown is called by the Manager to transition this view from Up to Down.
 // Triggers: higher-version view is Up (Manager decision), or ReleaseCollection.
 // No-op if not in Up state.

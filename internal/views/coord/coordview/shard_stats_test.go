@@ -199,9 +199,9 @@ func TestStats_UnrecoverableIncludedByNode(t *testing.T) {
 	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	simulateNodeResponse(t, s, testQN1, ver, qviews.QueryViewStateReady, 1001)
 
-	onLost := s.findOnNodeLost(testSN, ver)
-	require.NotNil(t, onLost)
-	onLost()
+	onQueryNodeLost := s.findOnQueryNodeLost(testQN1, ver)
+	require.NotNil(t, onQueryNodeLost)
+	onQueryNodeLost(testQN1)
 
 	stats := mgr.Stats()
 	assert.Nil(t, stats.UpVersion)
@@ -222,9 +222,9 @@ func TestStats_UnrecoverableSegmentWithoutReady(t *testing.T) {
 	ver := testVersion(1, 1, 1)
 	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 
-	onLost := s.findOnNodeLost(testSN, ver)
-	require.NotNil(t, onLost)
-	onLost()
+	onQueryNodeLost := s.findOnQueryNodeLost(testQN1, ver)
+	require.NotNil(t, onQueryNodeLost)
+	onQueryNodeLost(testQN1)
 
 	stats := mgr.Stats()
 	assert.Nil(t, stats.UpVersion)

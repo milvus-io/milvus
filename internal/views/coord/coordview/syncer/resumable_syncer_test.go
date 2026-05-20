@@ -117,13 +117,13 @@ func TestResumable_CloseDoesNotDrain(t *testing.T) {
 	stream := waitStream(t, streamReady)
 
 	var lostCalled atomic.Bool
-	sv := newTestSyncView(1, 1, nil, func() { lostCalled.Store(true) })
+	sv := newTestSyncView(1, 1, nil, func(qviews.QueryNode) { lostCalled.Store(true) })
 	rs.Sync([]SyncView{sv})
 
 	// Wait for send to confirm it's in pending.
 	stream.waitSend(time.Second)
 
-	// Close — should NOT call OnNodeLost.
+	// Close — should NOT call OnQueryNodeLost.
 	rs.Close()
 	assert.False(t, lostCalled.Load(), "Close should not drain pending entries")
 
@@ -132,7 +132,7 @@ func TestResumable_CloseDoesNotDrain(t *testing.T) {
 	assert.Len(t, protos, 1)
 }
 
-func TestResumable_DrainPendingIfNodeLost(t *testing.T) {
+func TestResumable_DrainPendingIfQueryNodeLost(t *testing.T) {
 	rs, streamReady, cancel := newResumableTestSetup(t)
 	defer cancel()
 
@@ -140,7 +140,7 @@ func TestResumable_DrainPendingIfNodeLost(t *testing.T) {
 
 	var lostCount atomic.Int32
 	for i := int64(1); i <= 3; i++ {
-		sv := newTestSyncView(1, i, nil, func() { lostCount.Add(1) })
+		sv := newTestSyncView(1, i, nil, func(qviews.QueryNode) { lostCount.Add(1) })
 		rs.Sync([]SyncView{sv})
 	}
 
