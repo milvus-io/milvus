@@ -2356,6 +2356,93 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	describeCalls := 0
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			describeCalls++
+			numPartitions := int64(1)
+			requestTime := uint64(1000)
+			if describeCalls > 1 {
+				numPartitions = 2
+				requestTime = 3000
+			}
+			return &milvuspb.DescribeCollectionResponse{
+				Status:        merr.Success(),
+				CollectionID:  1,
+				DbName:        "db",
+				NumPartitions: numPartitions,
+				RequestTime:   requestTime,
+				Schema: &schemapb.CollectionSchema{
+					Name:   "collection",
+					Fields: []*schemapb.FieldSchema{},
+				},
+			}, nil
+		}).Times(2)
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	info, err := cache.GetCollectionInfo(ctx, "db", "collection", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info.numPartitions)
+
+	cache.RemovePartition(ctx, "db", 1, "collection", "par1", 2000)
+
+	info, err = cache.GetCollectionInfo(ctx, "db", "collection", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), info.numPartitions)
+}
+
+func TestMetaCache_RemovePartitionKeepsCollectionInfoForStaleVersion(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	describeCalls := 0
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			describeCalls++
+			return &milvuspb.DescribeCollectionResponse{
+				Status:        merr.Success(),
+				CollectionID:  1,
+				DbName:        "db",
+				NumPartitions: 1,
+				RequestTime:   1000,
+				Schema: &schemapb.CollectionSchema{
+					Name:   "collection",
+					Fields: []*schemapb.FieldSchema{},
+				},
+			}, nil
+		}).Times(1)
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	info, err := cache.GetCollectionInfo(ctx, "db", "collection", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info.numPartitions)
+
+	cache.RemovePartition(ctx, "db", 1, "collection", "par1", 500)
+
+	info, err = cache.GetCollectionInfo(ctx, "db", "collection", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info.numPartitions)
+	assert.Equal(t, 1, describeCalls)
+}
+
 func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)

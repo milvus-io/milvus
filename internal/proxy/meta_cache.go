@@ -1225,6 +1225,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	staleCollectionInfo := m.shouldStaleCollectionInfoLocked(collectionID, version)
 	names := make(map[string]struct{})
 	realNames := make(map[string]struct{})
 	for _, dbName := range partitionInvalidationDatabases(database) {
@@ -1249,11 +1250,24 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 			}
 		}
 
+		if staleCollectionInfo {
+			// Partition DDL changes collection-level fields such as NumPartitions,
+			// without requiring removeCollectionByID's partition-cache sweep.
+			for name := range names {
+				m.staleCollectionInfoByNameLocked(dbName, name)
+			}
+			if collectionID != 0 {
+				m.sfGlobal.Forget(buildSfKeyById(dbName, collectionID))
+			}
+		}
 		for name := range names {
 			m.stalePartitionCacheLocked(dbName, name, partitionName, version)
 		}
 		clear(names)
 		clear(realNames)
+	}
+	if staleCollectionInfo && collectionID != 0 && version != 0 {
+		m.collectionCacheVersion[collectionID] = version
 	}
 
 	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.Int64("collectionID", collectionID), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
@@ -1363,6 +1377,21 @@ func (m *MetaCache) stalePartitionCacheLocked(database, collectionName, partitio
 	m.partitionCache.Stale(buildPartitionSfKey(database, collectionName, partitionName), version)
 	m.sfCollLevelPartitionCache.Forget(collectionKey)
 	m.collLevelPartitionCache.Stale(collectionKey, version)
+}
+
+func (m *MetaCache) shouldStaleCollectionInfoLocked(collectionID UniqueID, version uint64) bool {
+	if collectionID == 0 || version == 0 {
+		return true
+	}
+	return m.collectionCacheVersion[collectionID] <= version
+}
+
+func (m *MetaCache) staleCollectionInfoByNameLocked(database, collectionName string) {
+	if db, ok := m.collInfo[database]; ok {
+		delete(db, collectionName)
+	}
+
+	m.sfGlobal.Forget(buildSfKeyByName(database, collectionName))
 }
 
 func (m *MetaCache) backgroundGCLoop(stopCh <-chan struct{}) {
