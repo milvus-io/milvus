@@ -22,13 +22,19 @@ var ratedRegistry sync.Map
 // The limiter is created lazily on first access with the specified rate limit and burst=1.
 func getOrCreateRatedEntry(pc uintptr, limit rate.Limit) *ratedEntry {
 	if v, ok := ratedRegistry.Load(pc); ok {
-		return v.(*ratedEntry)
+		entry := v.(*ratedEntry)
+		entry.limiter.SetLimit(limit)
+		return entry
 	}
 	entry := &ratedEntry{
 		limiter: rate.NewLimiter(limit, 1),
 	}
 	actual, _ := ratedRegistry.LoadOrStore(pc, entry)
-	return actual.(*ratedEntry)
+	actualEntry := actual.(*ratedEntry)
+	if actualEntry != entry {
+		actualEntry.limiter.SetLimit(limit)
+	}
+	return actualEntry
 }
 
 // ratedAllow checks if a log entry should be emitted based on rate limiting.

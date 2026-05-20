@@ -414,6 +414,7 @@ func TestGetOrCreateRatedEntryLazyInit(t *testing.T) {
 	// Second call should return the same entry
 	entry2 := getOrCreateRatedEntry(key, 20) // different rate, same key
 	assert.Equal(t, entry, entry2, "should return cached entry")
+	assert.Equal(t, rate.Limit(20), entry2.limiter.Limit(), "cached entry should update to the latest limit")
 }
 
 func TestGetOrCreateRatedEntryConcurrent(t *testing.T) {
