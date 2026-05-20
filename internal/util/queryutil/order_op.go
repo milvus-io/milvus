@@ -270,7 +270,7 @@ func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults
 	}
 
 	for i, fd := range result.GetFieldsData() {
-		sliced, err := sliceFieldDataChecked(fd, indices)
+		sliced, err := sliceFieldData(fd, indices)
 		if err != nil {
 			return nil, err
 		}

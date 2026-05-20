@@ -19,6 +19,7 @@ package queryutil
 import (
 	"fmt"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -456,33 +457,6 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 	return indices, nil
 }
 
-func hasAnyTrue(values []bool) bool {
-	for _, value := range values {
-		if value {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAnyTrueInRange(values []bool, start, end int) bool {
-	for i := start; i < end && i < len(values); i++ {
-		if values[i] {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAnyTrueAtIndices(values []bool, indices []int) bool {
-	for _, idx := range indices {
-		if idx >= 0 && idx < len(values) && values[idx] {
-			return true
-		}
-	}
-	return false
-}
-
 func newEmptyArrayOfVectorRow(dim int64, elementType schemapb.DataType) (*schemapb.VectorField, error) {
 	vf := &schemapb.VectorField{Dim: dim}
 	switch elementType {
@@ -572,7 +546,7 @@ func validateArrayOfVectorResultLayout(results []*internalpb.RetrieveResults, se
 			continue
 		}
 		if va == nil || dataLen == 0 {
-			if nullableLayout && !hasAnyTrue(vd) {
+			if nullableLayout && !lo.Contains(vd, true) {
 				continue
 			}
 			return fmt.Errorf(
@@ -876,15 +850,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 // rangeSliceRetrieveResults extracts a contiguous range [start, end) from a RetrieveResult.
 // This is more efficient than sliceRetrieveResults for contiguous ranges since it uses
 // direct sub-slicing instead of element-by-element copying.
-func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) *internalpb.RetrieveResults {
-	sliced, err := rangeSliceRetrieveResultsChecked(result, start, end)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func rangeSliceRetrieveResultsChecked(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
+func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
 	if start < 0 || end < 0 {
 		return nil, fmt.Errorf("invalid retrieve result range [%d,%d)", start, end)
 	}
@@ -898,7 +864,7 @@ func rangeSliceRetrieveResultsChecked(result *internalpb.RetrieveResults, start,
 	}
 
 	for i, fd := range result.GetFieldsData() {
-		sliced, err := rangeSliceFieldDataChecked(fd, start, end)
+		sliced, err := rangeSliceFieldData(fd, start, end)
 		if err != nil {
 			return nil, err
 		}
@@ -933,15 +899,7 @@ func rangeSliceIDs(ids *schemapb.IDs, start, end int) *schemapb.IDs {
 }
 
 // rangeSliceFieldData extracts a contiguous range [start, end) from field data.
-func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) *schemapb.FieldData {
-	sliced, err := rangeSliceFieldDataChecked(fd, start, end)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func rangeSliceFieldDataChecked(fd *schemapb.FieldData, start, end int) (*schemapb.FieldData, error) {
+func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.FieldData, error) {
 	if fd == nil {
 		return nil, nil
 	}
@@ -965,7 +923,7 @@ func rangeSliceFieldDataChecked(fd *schemapb.FieldData, start, end int) (*schema
 			Scalars: rangeSliceScalarField(fd.GetScalars(), start, end),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := rangeSliceVectorFieldChecked(fd.GetVectors(), start, end, fd.GetValidData())
+		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, fd.GetValidData())
 		if err != nil {
 			return nil, fmt.Errorf("range slice field %q: %w", fd.GetFieldName(), err)
 		}
@@ -982,21 +940,13 @@ func rangeSliceFieldDataChecked(fd *schemapb.FieldData, start, end int) (*schema
 }
 
 // rangeSliceStructArrayField extracts a contiguous range [start, end) from each sub-field.
-func rangeSliceStructArrayField(sa *schemapb.StructArrayField, start, end int) *schemapb.StructArrayField {
-	sliced, err := rangeSliceStructArrayFieldChecked(sa, start, end)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func rangeSliceStructArrayFieldChecked(sa *schemapb.StructArrayField, start, end int) (*schemapb.StructArrayField, error) {
+func rangeSliceStructArrayField(sa *schemapb.StructArrayField, start, end int) (*schemapb.StructArrayField, error) {
 	if sa == nil {
 		return nil, nil
 	}
 	newFields := make([]*schemapb.FieldData, len(sa.GetFields()))
 	for i, subFd := range sa.GetFields() {
-		sliced, err := rangeSliceFieldDataChecked(subFd, start, end)
+		sliced, err := rangeSliceFieldData(subFd, start, end)
 		if err != nil {
 			return nil, err
 		}
@@ -1047,15 +997,7 @@ func rangeSliceScalarField(sf *schemapb.ScalarField, start, end int) *schemapb.S
 // rangeSliceVectorField extracts a contiguous range [start, end) from vector data.
 // validData is the field's ValidData bitmap. For nullable vectors in compact mode,
 // data indices must be computed by counting valid rows, not using logical row indices.
-func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) *schemapb.VectorField {
-	sliced, err := rangeSliceVectorFieldChecked(vf, start, end, validData)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func rangeSliceVectorFieldChecked(vf *schemapb.VectorField, start, end int, validData []bool) (*schemapb.VectorField, error) {
+func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) (*schemapb.VectorField, error) {
 	if start < 0 || end < start {
 		return nil, fmt.Errorf("invalid vector range [%d,%d)", start, end)
 	}
@@ -1115,7 +1057,7 @@ func rangeSliceVectorFieldChecked(vf *schemapb.VectorField, start, end int, vali
 	case *schemapb.VectorField_VectorArray:
 		data := vf.GetVectorArray().GetData()
 		if len(validData) > 0 && len(data) == 0 {
-			if hasAnyTrueInRange(validData, start, end) {
+			if lo.Contains(validData[start:end], true) {
 				return nil, fmt.Errorf("VectorArray data missing for valid row in range [%d,%d)", start, end)
 			}
 			dataStart, dataEnd = 0, 0
@@ -1163,15 +1105,7 @@ func sliceIDs(ids *schemapb.IDs, indices []int) *schemapb.IDs {
 }
 
 // sliceFieldData extracts field data at the given indices.
-func sliceFieldData(fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
-	sliced, err := sliceFieldDataChecked(fd, indices)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func sliceFieldDataChecked(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData, error) {
+func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData, error) {
 	if fd == nil || len(indices) == 0 {
 		return nil, nil
 	}
@@ -1197,7 +1131,7 @@ func sliceFieldDataChecked(fd *schemapb.FieldData, indices []int) (*schemapb.Fie
 			Scalars: sliceScalarField(fd.GetScalars(), indices),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := sliceVectorFieldChecked(fd.GetVectors(), indices, fd.GetValidData())
+		vectors, err := sliceVectorField(fd.GetVectors(), indices, fd.GetValidData())
 		if err != nil {
 			return nil, fmt.Errorf("slice field %q: %w", fd.GetFieldName(), err)
 		}
@@ -1221,21 +1155,13 @@ func sliceFieldDataChecked(fd *schemapb.FieldData, indices []int) (*schemapb.Fie
 
 // sliceScalarField extracts scalar data at the given indices.
 // sliceStructArrayField extracts struct array sub-fields at the given indices.
-func sliceStructArrayField(sa *schemapb.StructArrayField, indices []int) *schemapb.StructArrayField {
-	sliced, err := sliceStructArrayFieldChecked(sa, indices)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func sliceStructArrayFieldChecked(sa *schemapb.StructArrayField, indices []int) (*schemapb.StructArrayField, error) {
+func sliceStructArrayField(sa *schemapb.StructArrayField, indices []int) (*schemapb.StructArrayField, error) {
 	if sa == nil {
 		return nil, nil
 	}
 	newFields := make([]*schemapb.FieldData, len(sa.GetFields()))
 	for i, subFd := range sa.GetFields() {
-		sliced, err := sliceFieldDataChecked(subFd, indices)
+		sliced, err := sliceFieldData(subFd, indices)
 		if err != nil {
 			return nil, err
 		}
@@ -1361,15 +1287,7 @@ func sliceScalarField(sf *schemapb.ScalarField, indices []int) *schemapb.ScalarF
 
 // sliceVectorField extracts vector data at the given logical indices.
 // validData is the field's ValidData bitmap for compact mode handling.
-func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) *schemapb.VectorField {
-	sliced, err := sliceVectorFieldChecked(vf, indices, validData)
-	if err != nil {
-		panic(err)
-	}
-	return sliced
-}
-
-func sliceVectorFieldChecked(vf *schemapb.VectorField, indices []int, validData []bool) (*schemapb.VectorField, error) {
+func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) (*schemapb.VectorField, error) {
 	for _, idx := range indices {
 		if idx < 0 {
 			return nil, fmt.Errorf("invalid logical row %d", idx)
@@ -1505,7 +1423,7 @@ func sliceVectorFieldChecked(vf *schemapb.VectorField, indices []int, validData 
 		srcData := vf.GetVectorArray().GetData()
 		newData := make([]*schemapb.VectorField, 0, validCount)
 		if len(srcData) == 0 {
-			if len(indices) > 0 && (len(validData) == 0 || hasAnyTrueAtIndices(validData, indices)) {
+			if len(indices) > 0 && (len(validData) == 0 || lo.SomeBy(indices, func(idx int) bool { return validData[idx] })) {
 				return nil, fmt.Errorf("VectorArray data missing for valid row")
 			}
 		} else {

@@ -99,7 +99,7 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) (*intern
 		return result, nil
 	}
 
-	return rangeSliceRetrieveResultsChecked(result, start, end)
+	return rangeSliceRetrieveResults(result, start, end)
 }
 
 // applyElementLevelSlice applies element-level offset and limit.
@@ -171,7 +171,7 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 	}
 
 	// Phase 3: Slice field data at document granularity [startDoc, endDoc)
-	sliced, err := rangeSliceRetrieveResultsChecked(result, startDoc, endDoc)
+	sliced, err := rangeSliceRetrieveResults(result, startDoc, endDoc)
 	if err != nil {
 		return nil, err
 	}
