@@ -2256,9 +2256,8 @@ RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array) {
     }
     std::shared_ptr<arrow::Buffer> buf;
     status = bb.Finish(&buf);
-    AssertInfo(status.ok(),
-               "RebuildNullBitmap: finish failed: {}",
-               status.ToString());
+    AssertInfo(
+        status.ok(), "RebuildNullBitmap: finish failed: {}", status.ToString());
     return buf;
 }
 
@@ -2489,9 +2488,8 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         };
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(arr->length());
-        AssertInfo(status.ok(),
-                   "BinaryBuilder reserve failed: {}",
-                   status.ToString());
+        AssertInfo(
+            status.ok(), "BinaryBuilder reserve failed: {}", status.ToString());
         for (int64_t i = 0; i < arr->length(); ++i) {
             if (arr->IsNull(i)) {
                 status = builder.AppendNull();
