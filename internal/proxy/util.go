@@ -2072,14 +2072,14 @@ func subFieldHasData(subField *schemapb.FieldData) bool {
 	}
 }
 
-func getStructSubFieldSchema(structName string, structSchema *schemapb.StructArrayFieldSchema, subFieldName string) *schemapb.FieldSchema {
-	transformedName := typeutil.ConcatStructFieldName(structName, subFieldName)
-	for _, field := range structSchema.GetFields() {
-		if field.GetName() == subFieldName || field.GetName() == transformedName {
-			return field
-		}
+func buildStructSubFieldSchemaMap(structName string, structSchema *schemapb.StructArrayFieldSchema) map[string]*schemapb.FieldSchema {
+	fields := structSchema.GetFields()
+	schemaByName := make(map[string]*schemapb.FieldSchema, len(fields)*2)
+	for _, field := range fields {
+		schemaByName[field.GetName()] = field
+		schemaByName[typeutil.ConcatStructFieldName(structName, field.GetName())] = field
 	}
-	return nil
+	return schemaByName
 }
 
 func structScalarArrayElementCount(row *schemapb.ScalarField, fieldSchema *schemapb.FieldSchema) (int, error) {
@@ -2105,6 +2105,9 @@ func structScalarArrayElementCount(row *schemapb.ScalarField, fieldSchema *schem
 }
 
 func structVectorArrayElementCount(row *schemapb.VectorField, fieldSchema *schemapb.FieldSchema) (int, error) {
+	if row.GetData() == nil {
+		return 0, fmt.Errorf("nil vector array data")
+	}
 	dim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return 0, err
@@ -2171,21 +2174,33 @@ func structSubFieldElementCount(subField *schemapb.FieldData, fieldSchema *schem
 	}
 }
 
-func structLogicalRowIndex(validData []bool, physicalRow int) int {
+func buildStructPhysicalToLogicalRows(validData []bool, rowCount int) ([]int, error) {
 	if len(validData) == 0 {
+		return nil, nil
+	}
+
+	physicalToLogical := make([]int, 0, rowCount)
+	for logicalRow, valid := range validData {
+		if valid {
+			physicalToLogical = append(physicalToLogical, logicalRow)
+		}
+	}
+	if len(physicalToLogical) != rowCount {
+		return nil, fmt.Errorf("ValidData true count %d does not match payload row count %d", len(physicalToLogical), rowCount)
+	}
+	return physicalToLogical, nil
+}
+
+func structLogicalRow(physicalToLogical []int, physicalRow int) int {
+	if len(physicalToLogical) == 0 {
 		return physicalRow
 	}
-	validCount := 0
-	for logicalRow, valid := range validData {
-		if !valid {
-			continue
-		}
-		if validCount == physicalRow {
-			return logicalRow
-		}
-		validCount++
-	}
-	return physicalRow
+	return physicalToLogical[physicalRow]
+}
+
+type structSubFieldCountInfo struct {
+	field  *schemapb.FieldData
+	schema *schemapb.FieldSchema
 }
 
 func checkStructElementCountPerRow(structName string, structSchema *schemapb.StructArrayFieldSchema, subFields []*schemapb.FieldData, rowCount int) error {
@@ -2193,34 +2208,40 @@ func checkStructElementCountPerRow(structName string, structSchema *schemapb.Str
 		return nil
 	}
 
-	refField := subFields[0]
-	refFieldSchema := getStructSubFieldSchema(structName, structSchema, refField.GetFieldName())
-	if refFieldSchema == nil {
-		return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", refField.GetFieldName(), structName)
+	schemaByName := buildStructSubFieldSchemaMap(structName, structSchema)
+	infos := make([]structSubFieldCountInfo, len(subFields))
+	for i, subField := range subFields {
+		fieldSchema := schemaByName[subField.GetFieldName()]
+		if fieldSchema == nil {
+			return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
+		}
+		infos[i] = structSubFieldCountInfo{
+			field:  subField,
+			schema: fieldSchema,
+		}
+	}
+
+	physicalToLogical, err := buildStructPhysicalToLogicalRows(infos[0].field.GetValidData(), rowCount)
+	if err != nil {
+		return fmt.Errorf("invalid ValidData for sub-field '%s' in struct '%s': %w", infos[0].field.GetFieldName(), structName, err)
 	}
 
 	for physicalRow := 0; physicalRow < rowCount; physicalRow++ {
-		refCount, err := structSubFieldElementCount(refField, refFieldSchema, physicalRow)
+		refCount, err := structSubFieldElementCount(infos[0].field, infos[0].schema, physicalRow)
 		if err != nil {
 			return fmt.Errorf("failed to get element count for sub-field '%s' in struct '%s' at row %d: %w",
-				refField.GetFieldName(), structName, structLogicalRowIndex(refField.GetValidData(), physicalRow), err)
+				infos[0].field.GetFieldName(), structName, structLogicalRow(physicalToLogical, physicalRow), err)
 		}
 
-		for _, subField := range subFields[1:] {
-			fieldSchema := getStructSubFieldSchema(structName, structSchema, subField.GetFieldName())
-			if fieldSchema == nil {
-				return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
-			}
-
-			count, err := structSubFieldElementCount(subField, fieldSchema, physicalRow)
-			logicalRow := structLogicalRowIndex(refField.GetValidData(), physicalRow)
+		for _, info := range infos[1:] {
+			count, err := structSubFieldElementCount(info.field, info.schema, physicalRow)
 			if err != nil {
 				return fmt.Errorf("failed to get element count for sub-field '%s' in struct '%s' at row %d: %w",
-					subField.GetFieldName(), structName, logicalRow, err)
+					info.field.GetFieldName(), structName, structLogicalRow(physicalToLogical, physicalRow), err)
 			}
 			if count != refCount {
 				return fmt.Errorf("inconsistent struct element count in struct '%s' at row %d: '%s' has %d, '%s' has %d",
-					structName, logicalRow, refField.GetFieldName(), refCount, subField.GetFieldName(), count)
+					structName, structLogicalRow(physicalToLogical, physicalRow), infos[0].field.GetFieldName(), refCount, info.field.GetFieldName(), count)
 			}
 		}
 	}

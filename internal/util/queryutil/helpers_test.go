@@ -955,6 +955,95 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) 
 	assert.Empty(t, va.GetData())
 }
 
+func TestBuildMergedVectorField_NullableStructVectorArray_AllNullWithEmptyVectorArray(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{false, false},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{result},
+		[]rowRef{{resultIdx: 0, rowIdx: 1}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.NotNil(t, va)
+	assert.Equal(t, dim, va.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, va.GetElementType())
+	assert.Empty(t, va.GetData())
+}
+
+func TestBuildMergedVectorField_NullableArrayOfVectorMixedAllNullSourceKeepsRowDense(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}
+
+	allNullResult := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+				}},
+				ValidData: []bool{false},
+			},
+		},
+	}
+	validResult := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{2}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{v1},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{true},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{allNullResult, validResult},
+		[]rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 1, rowIdx: 0}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false, true}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.Len(t, va.GetData(), 2)
+	assert.Empty(t, va.GetData()[0].GetFloatVector().GetData())
+	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[1].GetFloatVector().GetData())
+}
+
 func TestBuildMergedVectorField_NullableArrayOfVectorUsesLogicalRowIndex(t *testing.T) {
 	const fieldID = int64(700)
 	dim := int64(2)
@@ -2619,6 +2708,22 @@ func TestSliceVectorField_NullableRowDense_VectorArray_AllNullNoData(t *testing.
 	assert.Empty(t, sliced.GetVectorArray().GetData())
 }
 
+func TestSliceVectorField_NullableRowDense_VectorArray_EmptyDataWithValidRowReturnsError(t *testing.T) {
+	dim := int64(2)
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{true, false}
+
+	_, err := sliceVectorFieldChecked(vf, []int{0}, validData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VectorArray data missing")
+}
+
 func TestSliceVectorField_NullableCompact_SkipNull(t *testing.T) {
 	// Select a null row — it should be skipped
 	vf := &schemapb.VectorField{
@@ -2748,6 +2853,37 @@ func TestRangeSliceVectorField_NullableRowDense_VectorArray_PreservesNullPlaceho
 	assert.Equal(t, []float32{1, 2}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
 	assert.Empty(t, sliced.GetVectorArray().GetData()[1].GetFloatVector().GetData())
 	assert.Equal(t, []float32{3, 4}, sliced.GetVectorArray().GetData()[2].GetFloatVector().GetData())
+}
+
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_AllNullNoData(t *testing.T) {
+	dim := int64(2)
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{false, false}
+
+	sliced := rangeSliceVectorField(vf, 0, 2, validData)
+	assert.Empty(t, sliced.GetVectorArray().GetData())
+}
+
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_EmptyDataWithValidRowReturnsError(t *testing.T) {
+	dim := int64(2)
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{false, true}
+
+	_, err := rangeSliceVectorFieldChecked(vf, 0, 2, validData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VectorArray data missing")
 }
 
 // =========================================================================

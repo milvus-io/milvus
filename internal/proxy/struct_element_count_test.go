@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -126,4 +127,94 @@ func TestCheckAndFlattenStructFieldDataRejectsMismatchedVectorElementCounts(t *t
 	assert.Contains(t, err.Error(), "inconsistent struct element count")
 	assert.Contains(t, err.Error(), "row 0")
 	assert.Contains(t, err.Error(), "field2")
+}
+
+func TestCheckAndFlattenStructFieldDataAllowsMatchingScalarAndVectorElementCounts(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "test_struct",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+					{
+						Name:        "field2",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
+				},
+			},
+		},
+	}
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
+		structElementCountTestScalarArray("field1", []int32{1, 2}, []int32{3}),
+		structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4}, []float32{0.5, 0.6}),
+	))
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+	require.NoError(t, err)
+	assert.Len(t, insertMsg.FieldsData, 2)
+}
+
+func TestCheckAndFlattenStructFieldDataAllowsConsistentlyEmptyRows(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "test_struct",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+					{
+						Name:        "field2",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
+				},
+			},
+		},
+	}
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
+		structElementCountTestScalarArray("field1", []int32{}, []int32{}),
+		structElementCountTestVectorArray("field2", []float32{}, []float32{}),
+	))
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+	require.NoError(t, err)
+	assert.Len(t, insertMsg.FieldsData, 2)
+}
+
+func TestCheckAndFlattenStructFieldDataAllowsNullableNullRowAndPresentRow(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "test_struct",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true},
+					{
+						Name:        "field2",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						Nullable:    true,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
+				},
+			},
+		},
+	}
+	field1 := structElementCountTestScalarArray("field1", []int32{1, 2})
+	field1.ValidData = []bool{false, true}
+	field2 := structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4})
+	field2.ValidData = []bool{false, true}
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(field1, field2))
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+	require.NoError(t, err)
+	assert.Len(t, insertMsg.FieldsData, 2)
 }
