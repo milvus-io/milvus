@@ -88,6 +88,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         }
     }
 
+    for (const auto& function : schema_proto.functions()) {
+        if (function.type() != milvus::proto::schema::BM25) {
+            continue;
+        }
+        for (const auto output_field_id : function.output_field_ids()) {
+            schema->bm25_function_output_fields_.emplace(output_field_id);
+        }
+    }
+
     std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
         GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
