@@ -1,12 +1,12 @@
+import glob
 import os
 import threading
 import time
-import glob
-from chaos import constants
-from yaml import full_load
-from utils.util_log import test_log as log
-from delayed_assert import expect
+
 import pytest
+from chaos import constants
+from utils.util_log import test_log as log
+from yaml import full_load
 
 
 def check_config(chaos_config):
@@ -101,33 +101,37 @@ def reconnect(connections, alias="default", timeout=360):
     return connections.connect(alias)
 
 
-def assert_statistic(
-    checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49
-):
+def assert_statistic(checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49):
     for k in checkers.keys():
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
-        error_messages = getattr(checkers[k], 'error_messages', set())
+        error_messages = getattr(checkers[k], "error_messages", set())
         if expectations.get(k, "") == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
-            )
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
             pytest.assume(
                 succ_rate < fail_rate_threshold or total < 2,
                 f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
             )
         else:
-            log.info(
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            # Build assertion message with error details
+            assert_msg = (
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             )
-            # Build assertion message with error details
-            assert_msg = f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             if error_messages:
                 error_details = "; ".join(error_messages)
                 assert_msg += f", unique errors({len(error_messages)}): [{error_details}]"
-            pytest.assume(
-                succ_rate >= succ_rate_threshold and total > 2,
-                assert_msg,
-            )
+            if total == 0:
+                # Checker never completed any operation. This indicates either the checker
+                # thread failed to start or the service was completely unavailable. Treat
+                # it as a real failure rather than silently skipping.
+                pytest.assume(False, f"{str(k)} never completed any operation (total=0)")
+            else:
+                # total >= 1: at least one operation completed, succ_rate is meaningful.
+                # We no longer require total > 2 because low-frequency checkers (e.g.
+                # AddFieldChecker, AddVectorFieldChecker) legitimately complete only a few
+                # operations within a 10-minute window, and succ_rate=1.0 with total=2 is
+                # a valid passing result.
+                pytest.assume(succ_rate >= succ_rate_threshold, assert_msg)
