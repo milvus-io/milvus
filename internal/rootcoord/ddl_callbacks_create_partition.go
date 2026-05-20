@@ -52,9 +52,10 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 		return partitionID, errIgnoerdCreatePartition
 	}
 	cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
-	if len(collMeta.Partitions) >= cfgMaxPartitionNum {
+	partitionNum := collMeta.GetPartitionNum(true)
+	if partitionNum >= cfgMaxPartitionNum {
 		return 0, fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
-			len(collMeta.Partitions), cfgMaxPartitionNum, collMeta.Name)
+			partitionNum, cfgMaxPartitionNum, collMeta.Name)
 	}
 
 	partID, err := c.idAllocator.AllocOne()
