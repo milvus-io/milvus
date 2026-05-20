@@ -53,6 +53,7 @@ set(MILVUS_TEST_FILES
         test_storage.cpp
         test_string_expr.cpp
         test_rust_result.cpp
+        test_schema_reopen.cpp
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
         )

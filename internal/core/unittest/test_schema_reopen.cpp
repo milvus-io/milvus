@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -43,25 +46,32 @@ class SchemaReopenTest : public testing::Test {
     SetUp() override {
         // Create initial schema V1 with vector field
         schema_v1_ = std::make_shared<Schema>();
-        auto vec_fid = schema_v1_->AddDebugField(
+        vec_fid_ = schema_v1_->AddDebugField(
             "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
-        auto pk_fid = schema_v1_->AddDebugField("pk", DataType::INT64);
-        schema_v1_->set_primary_field_id(pk_fid);
+        pk_fid_ = schema_v1_->AddDebugField("pk", DataType::INT64);
+        schema_v1_->set_primary_field_id(pk_fid_);
         schema_v1_->set_schema_version(1);
 
         // Create schema V2 with additional field
         schema_v2_ = std::make_shared<Schema>();
-        schema_v2_->AddDebugField(
-            "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
-        auto pk_fid_v2 = schema_v2_->AddDebugField("pk", DataType::INT64);
+        schema_v2_->AddField(FieldName("vec"),
+                             vec_fid_,
+                             DataType::VECTOR_FLOAT,
+                             128,
+                             knowhere::metric::L2,
+                             false);
+        schema_v2_->AddField(
+            FieldName("pk"), pk_fid_, DataType::INT64, false, std::nullopt);
         schema_v2_->AddDebugField("new_field",
                                   DataType::VARCHAR);  // New field in V2
-        schema_v2_->set_primary_field_id(pk_fid_v2);
+        schema_v2_->set_primary_field_id(pk_fid_);
         schema_v2_->set_schema_version(2);
     }
 
     SchemaPtr schema_v1_;
     SchemaPtr schema_v2_;
+    FieldId vec_fid_;
+    FieldId pk_fid_;
 };
 
 /**
@@ -89,6 +99,7 @@ TEST_F(SchemaReopenTest, InsertAfterReopenShouldNotCrash) {
                     data_v1.raw_);
 
     // Step 3: Reopen with schema V2 (this may destroy old Schema object)
+    schema_v1_.reset();
     seg_impl->Reopen(schema_v2_);
 
     // Step 4: Insert more data - this should NOT crash
@@ -192,6 +203,7 @@ TEST_F(SchemaReopenTest, NewFieldAfterReopenShouldBeSkipped) {
     ASSERT_NE(seg_impl, nullptr);
 
     // Reopen with V2 which has a new field
+    schema_v1_.reset();
     seg_impl->Reopen(schema_v2_);
 
     // Insert data that includes the new field
