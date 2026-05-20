@@ -186,43 +186,6 @@ func TestSliceOperator_EmptyInput(t *testing.T) {
 	assert.NotNil(t, outputs[0])
 }
 
-func TestSliceOperator_NullableVectorArrayEmptyDataWithValidRowReturnsError(t *testing.T) {
-	op := NewSliceOperator(1, 0)
-	ctx := context.Background()
-	dim := int64(2)
-
-	result := &internalpb.RetrieveResults{
-		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-			},
-		},
-		FieldsData: []*schemapb.FieldData{
-			{
-				Type:      schemapb.DataType_ArrayOfVector,
-				FieldName: "vec_array",
-				FieldId:   10,
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: dim,
-						Data: &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Dim:         dim,
-								ElementType: schemapb.DataType_FloatVector,
-							},
-						},
-					},
-				},
-				ValidData: []bool{true, false},
-			},
-		},
-	}
-
-	_, err := op.Run(ctx, nil, result)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "VectorArray data missing")
-}
-
 // =========================================================================
 // Element-Level Tests
 // =========================================================================

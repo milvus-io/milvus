@@ -139,59 +139,6 @@ func TestOrderByLimitOperator_SortAscending(t *testing.T) {
 	assert.Equal(t, int64(300), values[2])
 }
 
-func TestOrderByLimitOperator_NullableVectorArrayEmptyDataWithValidRowReturnsError(t *testing.T) {
-	orderByFields := []*orderby.OrderByField{
-		{FieldID: 2, FieldName: "value", Ascending: true, DataType: schemapb.DataType_Int64},
-	}
-	op := NewOrderByLimitOperator(orderByFields, 0)
-	ctx := context.Background()
-	dim := int64(2)
-
-	result := &internalpb.RetrieveResults{
-		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-			},
-		},
-		FieldsData: []*schemapb.FieldData{
-			makePKField([]int64{1, 2}),
-			{
-				Type:      schemapb.DataType_Int64,
-				FieldName: "value",
-				FieldId:   2,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{Data: []int64{20, 10}},
-						},
-					},
-				},
-			},
-			{
-				Type:      schemapb.DataType_ArrayOfVector,
-				FieldName: "vec_array",
-				FieldId:   10,
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: dim,
-						Data: &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Dim:         dim,
-								ElementType: schemapb.DataType_FloatVector,
-							},
-						},
-					},
-				},
-				ValidData: []bool{true, false},
-			},
-		},
-	}
-
-	_, err := op.Run(ctx, nil, result)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "VectorArray data missing")
-}
-
 func TestOrderByLimitOperator_SortDescending(t *testing.T) {
 	orderByFields := []*orderby.OrderByField{
 		{FieldID: 2, FieldName: "value", Ascending: false, DataType: schemapb.DataType_Int64},

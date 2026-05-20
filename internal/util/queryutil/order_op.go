@@ -111,10 +111,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		// Partial sort: use max-heap to select top-K indices, then sort them.
 		// O(N log K) instead of O(N log N).
 		indices := op.partialSort(result, rowCount, k)
-		sorted, err := op.reorderResult(result, indices)
-		if err != nil {
-			return nil, err
-		}
+		sorted := op.reorderResult(result, indices)
 		return []any{sorted}, nil
 	}
 
@@ -128,10 +125,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		return op.compareRowsAt(result, indices[i], indices[j]) < 0
 	})
 
-	sorted, err := op.reorderResult(result, indices)
-	if err != nil {
-		return nil, err
-	}
+	sorted := op.reorderResult(result, indices)
 	return []any{sorted}, nil
 }
 
@@ -260,7 +254,7 @@ func (op *OrderByLimitOperator) compareFieldValuesAt(fd *schemapb.FieldData, idx
 }
 
 // reorderResult reorders result rows by given indices.
-func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults, indices []int) (*internalpb.RetrieveResults, error) {
+func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults, indices []int) *internalpb.RetrieveResults {
 	newResult := &internalpb.RetrieveResults{
 		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
@@ -270,11 +264,7 @@ func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults
 	}
 
 	for i, fd := range result.GetFieldsData() {
-		sliced, err := sliceFieldData(fd, indices)
-		if err != nil {
-			return nil, err
-		}
-		newResult.FieldsData[i] = sliced
+		newResult.FieldsData[i] = sliceFieldData(fd, indices)
 	}
 
 	// Propagate element-level metadata (defensive: ORDER BY and element-level
@@ -289,5 +279,5 @@ func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults
 		newResult.ElementIndices = newElemIndices
 	}
 
-	return newResult, nil
+	return newResult
 }
