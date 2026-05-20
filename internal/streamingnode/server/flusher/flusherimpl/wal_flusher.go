@@ -227,8 +227,10 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	}
 	timetick := msg.TimeTick()
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
-	// only for truncate api now.
-	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
+	// Only truncate collection needs to observe before the flusher handles the message.
+	// Other messages should keep the deferred order so lifecycle cleanup such as
+	// DropCollection can finish the flowgraph before recovery storage observes it.
+	if msg.MessageType() == message.MessageTypeTruncateCollection {
 		if err := impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 			return err
