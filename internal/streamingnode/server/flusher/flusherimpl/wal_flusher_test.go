@@ -5,11 +5,11 @@ package flusherimpl
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
