@@ -2655,8 +2655,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 		defer mockGetSnapshot.UnPatch()
 
 		// Resolve collection via datacoord-local handler cache — no broker RPC.
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -2665,8 +2665,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 		).Build()
 		defer mockGetColl.UnPatch()
 
-		mockBroadCaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadCaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -2712,8 +2712,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 			}).Build()
 		defer mockHasPins.UnPatch()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -2722,14 +2722,14 @@ func TestServer_DropSnapshot(t *testing.T) {
 		).Build()
 		defer mockGetColl.UnPatch()
 
-		mockBroadCaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadCaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 
 		// Broadcast() must NOT be called — rejection happens before it.
 		broadcastCalled := false
-		mockBroadcastSend := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Broadcast).To(
-			func(b *struct{ broadcaster.BroadcastAPI }, ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+		mockBroadcastSend := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(b *embeddedBroadcastAPI, ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
 				broadcastCalled = true
 				return nil, nil
 			}).Build()
@@ -2777,8 +2777,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 			}).Build()
 		defer mockHasPins.UnPatch()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -2787,8 +2787,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 		).Build()
 		defer mockGetColl.UnPatch()
 
-		mockBroadCaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadCaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -3087,8 +3087,8 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 			int64(0), 0, merr.WrapErrSnapshotNotFound("non_existent_snapshot")).Build()
 		defer mockPin.UnPatch()
 
-		mockBroadCaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadCaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -3215,9 +3215,9 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		// failure must short-circuit before collection resolution. We still
 		// patch it to assert it's never called.
 		handlerCalled := false
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).To(
-			func(_ *struct{ Handler }, _ context.Context, _ int64) (*collectionInfo, error) {
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).To(
+			func(_ *embeddedHandler, _ context.Context, _ int64) (*collectionInfo, error) {
 				handlerCalled = true
 				return &collectionInfo{DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_coll"}}, nil
 			}).Build()
@@ -3258,8 +3258,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockGet.UnPatch()
 
 		// Resolve collection via local handler cache — no broker RPC.
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "default",
@@ -3278,8 +3278,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		fakeBroker := &struct{ broker.Broker }{}
-		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).Return(true, nil).Build()
+		fakeBroker := &embeddedBroker{}
+		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
 		defer mockHasCollection.UnPatch()
 
 		server := &Server{
@@ -3309,8 +3309,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		).Build()
 		defer mockGet.UnPatch()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "default",
@@ -3320,11 +3320,11 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockGetColl.UnPatch()
 
 		broadcastCalled := false
-		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
-		mockDoBroadcast := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Broadcast).To(
-			func(_ *struct{ broadcaster.BroadcastAPI }, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
 				broadcastCalled = true
 				return &types2.BroadcastAppendResult{}, nil
 			}).Build()
@@ -3336,9 +3336,9 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockStartBroadcast.UnPatch()
 
 		hasCollectionCalled := false
-		fakeBroker := &struct{ broker.Broker }{}
-		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).To(
-			func(_ *struct{ broker.Broker }, _ context.Context, collectionID int64) (bool, error) {
+		fakeBroker := &embeddedBroker{}
+		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
+			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
 				hasCollectionCalled = true
 				assert.Equal(t, int64(100), collectionID)
 				return false, nil
@@ -3372,8 +3372,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		).Build()
 		defer mockGet.UnPatch()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "default",
@@ -3383,11 +3383,11 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockGetColl.UnPatch()
 
 		broadcastCalled := false
-		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
-		mockDoBroadcast := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Broadcast).To(
-			func(_ *struct{ broadcaster.BroadcastAPI }, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
 				broadcastCalled = true
 				return &types2.BroadcastAppendResult{}, nil
 			}).Build()
@@ -3398,8 +3398,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockStartBroadcast.UnPatch()
 
-		fakeBroker := &struct{ broker.Broker }{}
-		mockHasCollection := mockey.Mock((*struct{ broker.Broker }).HasCollection).Return(
+		fakeBroker := &embeddedBroker{}
+		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
 			false, errors.New("rootcoord unavailable"),
 		).Build()
 		defer mockHasCollection.UnPatch()
@@ -3437,8 +3437,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		// Resolve collection identity from datacoord-local handler cache — no
 		// broker RPC on the hot path.
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -3450,8 +3450,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 		// Record which resource keys were requested, and assert the call order.
 		var capturedKeys []message.ResourceKey
 		lockAcquired := false
-		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -3520,8 +3520,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 		// handler.GetCollection returning an error (collection not in datacoord
 		// cache AND rootcoord fallback failed) must surface to the user rather
 		// than fall through into the broadcast path.
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			nil, errors.New("collection gone"),
 		).Build()
 		defer mockGetColl.UnPatch()
@@ -3547,8 +3547,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 		// ErrCollectionNotFound so the client sees a clear error.
 		ctx := context.Background()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			nil, nil,
 		).Build()
 		defer mockGetColl.UnPatch()
@@ -3572,8 +3572,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 	t.Run("lock_acquisition_failed", func(t *testing.T) {
 		ctx := context.Background()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -4625,9 +4625,9 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 
 		// Bypass startBroadcast (broker not wired in test) and the new
 		// duplicate-active-job pre-check (refreshMeta is nil here).
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&struct{ broadcaster.BroadcastAPI }{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(nil).Build()
 		defer mockGetActive.UnPatch()
@@ -4650,9 +4650,9 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&struct{ broadcaster.BroadcastAPI }{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(&datapb.ExternalCollectionRefreshJob{
 			JobId:        12345,
@@ -5166,8 +5166,8 @@ func TestPinSnapshotData(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -5176,8 +5176,8 @@ func TestPinSnapshotData(t *testing.T) {
 		).Build()
 		defer mockGetColl.UnPatch()
 
-		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -5212,8 +5212,8 @@ func TestPinSnapshotData(t *testing.T) {
 	t.Run("pin_error", func(t *testing.T) {
 		ctx := context.Background()
 
-		fakeHandler := &struct{ Handler }{}
-		mockGetColl := mockey.Mock((*struct{ Handler }).GetCollection).Return(
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
 			&collectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
@@ -5222,8 +5222,8 @@ func TestPinSnapshotData(t *testing.T) {
 		).Build()
 		defer mockGetColl.UnPatch()
 
-		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
-		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -5468,3 +5468,12 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 		assert.False(t, seg.GetIsImporting())
 	}
 }
+
+// Named helper types for mockey interface-method patching. Using named types
+// instead of anonymous struct{ Iface } avoids a go1.26 `go vet` printf-pass
+// panic in x/tools refactor/satisfy on method expressions of *struct{...}.
+type (
+	embeddedHandler      struct{ Handler }
+	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
+	embeddedBroker       struct{ broker.Broker }
+)
