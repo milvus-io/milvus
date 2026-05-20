@@ -574,7 +574,7 @@ queryNode:
   grouping:
     maxNQ: 16
     nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
-    maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped.
+    maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
