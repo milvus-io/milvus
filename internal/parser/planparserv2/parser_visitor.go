@@ -215,6 +215,26 @@ func (v *ParserVisitor) parseStringLiteralOrTemplate(ctx parser.IExprContext, ar
 	return value.GetStringVal(), "", false, nil
 }
 
+func (v *ParserVisitor) parseRegexPatternOrTemplate(ctx parser.IExprContext, argName string) (string, string, bool, error) {
+	if ctx == nil {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("%s is missing", argName)
+	}
+	if _, ok := ctx.(*parser.StringContext); ok {
+		pattern, err := extractRegexPattern(ctx.GetText())
+		return pattern, "", false, err
+	}
+
+	parsed := ctx.Accept(v)
+	if err := getError(parsed); err != nil {
+		return "", "", false, err
+	}
+	valueExpr := getValueExpr(parsed)
+	if valueExpr == nil || !isTemplateExpr(valueExpr) {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("%s should be a string literal or template variable, got: %s", argName, ctx.GetText())
+	}
+	return "", valueExpr.GetTemplateVariableName(), true, nil
+}
+
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 && !columnInfo.GetIsElementLevel() {
 		return errors.New("can not comparisons array fields directly")
@@ -680,6 +700,20 @@ func tryOptimizeRegexToLike(pattern string) (planpb.OpType, string, bool) {
 	}
 }
 
+func validateAndOptimizeRegexPattern(pattern string) (planpb.OpType, string, error) {
+	if _, err := regexp.Compile(pattern); err != nil {
+		return 0, "", fmt.Errorf("invalid regex pattern: %s", err)
+	}
+
+	op := planpb.OpType_RegexMatch
+	operand := pattern
+	if optOp, optOperand, ok := tryOptimizeRegexToLike(pattern); ok {
+		op = optOp
+		operand = optOperand
+	}
+	return op, operand, nil
+}
+
 func isRegexMatchSupportedType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
 	return typeutil.IsStringType(dataType) ||
 		typeutil.IsJSONType(dataType) ||
@@ -688,7 +722,7 @@ func isRegexMatchSupportedType(dataType schemapb.DataType, elementType schemapb.
 
 // VisitRegexMatch handles =~ regex match operations.
 func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface{} {
-	left := ctx.Expr().Accept(v)
+	left := ctx.Expr(0).Accept(v)
 	if err := getError(left); err != nil {
 		return err
 	}
@@ -710,33 +744,33 @@ func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface
 		return errors.New("regex match on non-string or non-json field is unsupported")
 	}
 
-	pattern, err := extractRegexPattern(ctx.StringLiteral().GetText())
+	pattern, placeholder, isTemplate, err := v.parseRegexPatternOrTemplate(ctx.Expr(1), "regex pattern")
 	if err != nil {
 		return err
 	}
 
-	// Validate regex syntax
-	if _, err := regexp.Compile(pattern); err != nil {
-		return fmt.Errorf("invalid regex pattern: %s", err)
-	}
-
-	// Try to optimize simple regex patterns to faster LIKE operations.
 	op := planpb.OpType_RegexMatch
-	operand := pattern
-	if optOp, optOperand, ok := tryOptimizeRegexToLike(pattern); ok {
-		op = optOp
-		operand = optOperand
+	var value *planpb.GenericValue
+	if !isTemplate {
+		operand := ""
+		op, operand, err = validateAndOptimizeRegexPattern(pattern)
+		if err != nil {
+			return err
+		}
+		value = NewString(operand)
 	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: column,
-					Op:         op,
-					Value:      NewString(operand),
+					ColumnInfo:           column,
+					Op:                   op,
+					Value:                value,
+					TemplateVariableName: placeholder,
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -744,7 +778,7 @@ func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface
 
 // VisitRegexNotMatch handles !~ regex not match operations.
 func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) interface{} {
-	left := ctx.Expr().Accept(v)
+	left := ctx.Expr(0).Accept(v)
 	if err := getError(left); err != nil {
 		return err
 	}
@@ -766,32 +800,32 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 		return errors.New("regex match on non-string or non-json field is unsupported")
 	}
 
-	pattern, err := extractRegexPattern(ctx.StringLiteral().GetText())
+	pattern, placeholder, isTemplate, err := v.parseRegexPatternOrTemplate(ctx.Expr(1), "regex pattern")
 	if err != nil {
 		return err
 	}
 
-	// Validate regex syntax
-	if _, err := regexp.Compile(pattern); err != nil {
-		return fmt.Errorf("invalid regex pattern: %s", err)
-	}
-
-	// Try to optimize simple regex patterns to faster LIKE operations.
 	op := planpb.OpType_RegexMatch
-	operand := pattern
-	if optOp, optOperand, ok := tryOptimizeRegexToLike(pattern); ok {
-		op = optOp
-		operand = optOperand
+	var value *planpb.GenericValue
+	if !isTemplate {
+		operand := ""
+		op, operand, err = validateAndOptimizeRegexPattern(pattern)
+		if err != nil {
+			return err
+		}
+		value = NewString(operand)
 	}
 
 	innerExpr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
 			UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: column,
-				Op:         op,
-				Value:      NewString(operand),
+				ColumnInfo:           column,
+				Op:                   op,
+				Value:                value,
+				TemplateVariableName: placeholder,
 			},
 		},
+		IsTemplate: isTemplate,
 	}
 
 	return &ExprWithType{
@@ -802,6 +836,7 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 					Child: innerExpr,
 				},
 			},
+			IsTemplate: isTemplate,
 		},
 		dataType: schemapb.DataType_Bool,
 	}
