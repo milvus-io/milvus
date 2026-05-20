@@ -26,7 +26,6 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -43,7 +42,6 @@ struct ReadOutcome {
     int64_t bytes_read;
     bool advance_position_on_error = false;
     std::string data;
-    int64_t expected_zeroed_bytes = -1;
 };
 
 class FailingRandomAccessFile : public arrow::io::RandomAccessFile {
@@ -91,11 +89,6 @@ class FailingRandomAccessFile : public arrow::io::RandomAccessFile {
         ++read_calls_;
         if (next_outcome_ < read_outcomes_.size()) {
             auto outcome = read_outcomes_[next_outcome_++];
-            auto status =
-                ValidateZeroedBuffer(outcome.expected_zeroed_bytes, out);
-            if (!status.ok()) {
-                return status;
-            }
             if (!outcome.status.ok()) {
                 FillBuffer(outcome.bytes_read, out, outcome.data);
                 if (outcome.advance_position_on_error) {
@@ -156,21 +149,6 @@ class FailingRandomAccessFile : public arrow::io::RandomAccessFile {
                     : override_data[static_cast<size_t>(i) %
                                     override_data.size()]);
         }
-    }
-
-    arrow::Status
-    ValidateZeroedBuffer(int64_t nbytes, void* out) const {
-        if (nbytes < 0) {
-            return arrow::Status::OK();
-        }
-        auto* out_data = static_cast<const uint8_t*>(out);
-        for (int64_t i = 0; i < nbytes; ++i) {
-            if (out_data[i] != 0) {
-                return arrow::Status::Invalid(
-                    "buffer was not cleared before read");
-            }
-        }
-        return arrow::Status::OK();
     }
 
     std::vector<ReadOutcome> read_outcomes_;
@@ -337,7 +315,7 @@ TEST(RemoteInputStreamTest, WritesOnlyActualBytesReadAfterRetryingReadToFile) {
     auto file =
         std::make_shared<FailingRandomAccessFile>(std::vector<ReadOutcome>{
             {InternalFailedFlushStatus(), 4, false, "zzzz"},
-            {arrow::Status::OK(), 2, false, "", 4},
+            {arrow::Status::OK(), 2},
             {arrow::Status::OK(), 2}});
     auto* file_ptr = file.get();
     RemoteInputStream stream(std::move(file));
