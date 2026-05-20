@@ -11,15 +11,21 @@ import (
 // that are still waiting for responses. Owned by a single resumableSyncer.
 // Thread-safe.
 type pendingSyncQueryViews struct {
-	mu      sync.Mutex
-	entries map[qviews.QueryViewKey]SyncView
-	unsent  []*viewpb.QueryViewOfShard // protos accumulated by Upsert, drained by sendLoop
-	notify  chan struct{}              // cap 1, signaled by Upsert
+	mu       sync.Mutex
+	entries  map[qviews.QueryViewKey]pendingSyncEntry
+	revision uint64
+	unsent   []*viewpb.QueryViewOfShard // protos accumulated by Upsert, drained by sendLoop
+	notify   chan struct{}              // cap 1, signaled by Upsert
+}
+
+type pendingSyncEntry struct {
+	revision uint64
+	view     SyncView
 }
 
 func newPendingSyncQueryViews() *pendingSyncQueryViews {
 	return &pendingSyncQueryViews{
-		entries: make(map[qviews.QueryViewKey]SyncView),
+		entries: make(map[qviews.QueryViewKey]pendingSyncEntry),
 		notify:  make(chan struct{}, 1),
 	}
 }
@@ -30,7 +36,11 @@ func (p *pendingSyncQueryViews) Upsert(sv SyncView) {
 	key := sv.View.QueryViewKey()
 
 	p.mu.Lock()
-	p.entries[key] = sv
+	p.revision++
+	p.entries[key] = pendingSyncEntry{
+		revision: p.revision,
+		view:     sv,
+	}
 	p.unsent = append(p.unsent, sv.View.IntoProto())
 	p.mu.Unlock()
 
@@ -59,24 +69,30 @@ func (p *pendingSyncQueryViews) DrainUnsent() []*viewpb.QueryViewOfShard {
 // MatchResponse matches a received response proto to pending entries
 // and invokes the callback. If callback returns true, the entry is removed.
 //
-// The callback is invoked while holding the lock to prevent a concurrent
-// Upsert from replacing the entry between the read and delete.
-// OnSyncResponse must not block for long or call back into pendingSyncQueryViews.
+// The callback is invoked outside p.mu so it may enqueue follow-up syncs.
+// If the entry is replaced while the callback runs, a true return only deletes
+// the entry when the revision still matches.
 func (p *pendingSyncQueryViews) MatchResponse(pb *viewpb.QueryViewOfShard) {
 	view := qviews.NewQueryViewAtWorkNodeFromProto(pb)
 	key := view.QueryViewKey()
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	entry, ok := p.entries[key]
+	p.mu.Unlock()
 	if !ok {
 		return
 	}
 
-	if entry.OnSyncResponse(view) {
+	if !entry.view.OnSyncResponse(view) {
+		return
+	}
+
+	p.mu.Lock()
+	current, ok := p.entries[key]
+	if ok && current.revision == entry.revision {
 		delete(p.entries, key)
 	}
+	p.mu.Unlock()
 }
 
 // Drain removes all pending entries and invokes OnNodeLost() for each.
@@ -85,9 +101,9 @@ func (p *pendingSyncQueryViews) Drain() {
 	p.mu.Lock()
 	drained := make([]SyncView, 0, len(p.entries))
 	for _, sv := range p.entries {
-		drained = append(drained, sv)
+		drained = append(drained, sv.view)
 	}
-	p.entries = make(map[qviews.QueryViewKey]SyncView)
+	p.entries = make(map[qviews.QueryViewKey]pendingSyncEntry)
 	p.unsent = nil
 	p.mu.Unlock()
 
@@ -108,7 +124,7 @@ func (p *pendingSyncQueryViews) CollectProtos() []*viewpb.QueryViewOfShard {
 
 	protos := make([]*viewpb.QueryViewOfShard, 0, len(p.entries))
 	for _, sv := range p.entries {
-		protos = append(protos, sv.View.IntoProto())
+		protos = append(protos, sv.view.View.IntoProto())
 	}
 	return protos
 }

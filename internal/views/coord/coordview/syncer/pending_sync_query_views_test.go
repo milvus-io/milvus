@@ -5,6 +5,7 @@ package syncer
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,6 +116,74 @@ func TestPending_MatchResponse_UnknownKey(t *testing.T) {
 		return true
 	}, nil)
 	p.MatchResponse(sv.View.IntoProto())
+}
+
+func TestPending_MatchResponse_CallbackCanEnqueueFollowUpSync(t *testing.T) {
+	p := newPendingSyncQueryViews()
+
+	original := newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool {
+		p.Upsert(newTestSyncView(1, 2, nil, nil))
+		return true
+	}, nil)
+	p.Upsert(original)
+
+	done := make(chan struct{})
+	go func() {
+		p.MatchResponse(original.View.IntoProto())
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	protos := p.CollectProtos()
+	require.Len(t, protos, 1)
+	assert.Equal(t, newTestSyncView(1, 2, nil, nil).View.QueryViewKey(),
+		qviews.NewQueryViewAtWorkNodeFromProto(protos[0]).QueryViewKey())
+}
+
+func TestPending_MatchResponse_CallbackCanReplacePendingEntry(t *testing.T) {
+	p := newPendingSyncQueryViews()
+
+	var replacementCalled atomic.Bool
+	var replacement SyncView
+	original := newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool {
+		p.Upsert(replacement)
+		return true
+	}, nil)
+	replacement = newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool {
+		replacementCalled.Store(true)
+		return false
+	}, nil)
+
+	p.Upsert(original)
+
+	done := make(chan struct{})
+	go func() {
+		p.MatchResponse(original.View.IntoProto())
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Len(t, p.CollectProtos(), 1, "callback replacement should remain pending")
+
+	p.MatchResponse(replacement.View.IntoProto())
+	assert.True(t, replacementCalled.Load(), "replacement callback should handle later responses")
+	assert.Len(t, p.CollectProtos(), 1)
 }
 
 func TestPending_Drain(t *testing.T) {
