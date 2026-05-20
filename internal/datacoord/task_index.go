@@ -255,7 +255,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// Get collection info and field
 	collectionInfo, err := it.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to get collection info")
+		return nil, merr.Wrap(err, "failed to get collection info")
 	}
 
 	schema := collectionInfo.Schema

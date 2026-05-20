@@ -871,12 +871,12 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	// when both present.
 	if job.GetExternalSource() != "" {
 		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
-			return nil, "", merr.WrapErrServiceInternalErr(err, "external source/spec failed revalidation")
+			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}
 	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
 	if err != nil {
-		return nil, "", merr.WrapErrServiceInternalErr(err, "failed to parse external spec")
+		return nil, "", merr.Wrap(err, "failed to parse external spec")
 	}
 
 	collInfo := m.mt.GetCollection(job.GetCollectionId())

@@ -148,14 +148,14 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to validate import request")
+		return merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "failed to start broadcast with collection id")
+		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
