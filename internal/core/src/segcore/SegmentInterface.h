@@ -67,6 +67,14 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 
+namespace milvus::expr {
+class ITypeExpr;
+}  // namespace milvus::expr
+
+namespace arrow {
+class RecordBatch;
+}  // namespace arrow
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -75,6 +83,23 @@ struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
+};
+
+struct ArrowRecordBatchView {
+    int64_t row_begin;
+    int64_t row_count;
+    PinWrapper<std::shared_ptr<arrow::RecordBatch>> batch;
+};
+
+class ArrowRecordBatchReader {
+ public:
+    virtual ~ArrowRecordBatchReader() = default;
+
+    virtual bool
+    HasNext() const = 0;
+
+    virtual ArrowRecordBatchView
+    Next() = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -505,6 +530,33 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
+
+    virtual bool
+    CanUseArrowRecordBatchReader(FieldId field_id, DataType data_type) const {
+        return false;
+    }
+
+    virtual std::unique_ptr<ArrowRecordBatchReader>
+    CreateArrowRecordBatchReader(milvus::OpContext* op_ctx,
+                                 std::vector<FieldId> field_ids,
+                                 int64_t start_row_stripe_id) const {
+        ThrowInfo(NotImplemented,
+                  "segment does not support Arrow RecordBatch reader");
+    }
+
+    virtual bool
+    CanExecuteArrowNativeExpr(
+        const std::shared_ptr<const milvus::expr::ITypeExpr>& expr) const {
+        return false;
+    }
+
+    virtual BitsetType
+    ExecuteArrowNativeExpr(
+        milvus::OpContext* op_ctx,
+        const std::shared_ptr<const milvus::expr::ITypeExpr>& expr) const {
+        ThrowInfo(NotImplemented,
+                  "segment does not support Arrow native expression execution");
+    }
 
     PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;

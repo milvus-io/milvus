@@ -16,6 +16,8 @@
 
 #include "UnaryExpr.h"
 
+#include <arrow/array.h>
+
 #include <simdjson.h>
 #include <algorithm>
 #include <cstdint>
@@ -1606,6 +1608,86 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
     return nullptr;
 }
 
+template <typename T, typename FUNC, typename... ValTypes>
+std::optional<int64_t>
+PhyUnaryRangeFilterExpr::ProcessArrowDataChunks(
+    FUNC func,
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+    TargetBitmapView res,
+    TargetBitmapView valid_res,
+    const ValTypes&... values) {
+    if constexpr (!std::is_same_v<T, int64_t>) {
+        return std::nullopt;
+    } else {
+        if (has_offset_input_ || expr_->column_.element_level_ ||
+            exec_path_ != ExprExecPath::RawData ||
+            !segment_->CanUseArrowRecordBatchReader(field_id_, field_type_)) {
+            return std::nullopt;
+        }
+
+        int64_t processed_size = 0;
+        auto reader = segment_->CreateArrowRecordBatchReader(
+            op_ctx_, {field_id_}, current_data_chunk_);
+        auto& skip_index = segment_->GetSkipIndex();
+
+        for (int64_t chunk_id = current_data_chunk_; reader->HasNext();
+             ++chunk_id) {
+            auto view = reader->Next();
+            auto data_pos =
+                chunk_id == current_data_chunk_ ? current_data_chunk_pos_ : 0;
+            auto size = view.row_count - data_pos;
+            size = std::min(size, batch_size_ - processed_size);
+            if (size == 0) {
+                continue;
+            }
+
+            auto array = std::static_pointer_cast<arrow::Int64Array>(
+                view.batch.get()->column(0));
+            const auto* data = array->raw_values() + data_pos;
+
+            std::optional<FixedVector<bool>> validity;
+            const bool* valid_data = nullptr;
+            if (array->null_count() > 0) {
+                validity.emplace(size);
+                for (int64_t i = 0; i < size; ++i) {
+                    (*validity)[i] = !array->IsNull(data_pos + i);
+                }
+                valid_data = validity->data();
+            }
+
+            if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                func(data,
+                     valid_data,
+                     nullptr,
+                     size,
+                     res + processed_size,
+                     valid_res + processed_size,
+                     values...);
+            } else {
+                ApplyValidData(valid_data,
+                               res + processed_size,
+                               valid_res + processed_size,
+                               size);
+                func(nullptr,
+                     nullptr,
+                     nullptr,
+                     size,
+                     res + processed_size,
+                     valid_res + processed_size,
+                     values...);
+            }
+
+            processed_size += size;
+            if (processed_size >= batch_size_) {
+                current_data_chunk_ = chunk_id;
+                current_data_chunk_pos_ = data_pos + size;
+                break;
+            }
+        }
+        return processed_size;
+    }
+}
+
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
@@ -1825,7 +1907,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     };
 
     int64_t processed_size;
-    if (has_offset_input_) {
+    if (auto arrow_processed = ProcessArrowDataChunks<T>(
+            execute_sub_batch, skip_index_func, res, valid_res, val)) {
+        processed_size = *arrow_processed;
+    } else if (has_offset_input_) {
         if (expr_->column_.element_level_) {
             // For element-level filtering with offset input
             processed_size = ProcessElementLevelByOffsets<T>(
