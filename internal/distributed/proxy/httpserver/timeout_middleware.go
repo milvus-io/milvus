@@ -305,6 +305,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			bufPool.Put(buffer)
 
 			realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if traceID, ok := getTraceID(gCtx); ok {
+				setTraceIDHeaderTo(realWriter.Header(), traceID)
+			}
 			realWriter.WriteHeader(http.StatusRequestTimeout)
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 			realWriter.Write(body)
