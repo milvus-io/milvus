@@ -474,10 +474,12 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 }
 
 // buildMergedVectorField builds merged vector field from selected rows.
-// For nullable vector fields, segcore uses compact mode: the data array only
-// contains entries for valid (non-null) rows, and ValidData bitmap marks which
-// logical rows are null. Null rows don't occupy space in the data array.
-// buildCompactIndices/getVecDataIdx handle the logical→data index mapping.
+// For nullable primitive vector fields, segcore uses compact mode: the data
+// array only contains entries for valid (non-null) rows, and ValidData bitmap
+// marks which logical rows are null. Null rows don't occupy space in the data
+// array. buildCompactIndices/getVecDataIdx handle the logical→data index
+// mapping. ArrayOfVector is already row-dense when VectorArray data is present,
+// with empty per-row placeholders for null rows, so it keeps logical row indexes.
 //
 // fieldSchema drives the type switch (DataType) and dim, avoiding the previous
 // bug where template.GetData().(type) was used: when the template result had
@@ -530,7 +532,8 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 	}
 
 	newVf := &schemapb.VectorField{Dim: dim}
-	compactIdx, err := buildCompactIndices(results, fieldIdx, isNullable)
+	useCompactVectorIndex := isNullable && dataType != schemapb.DataType_ArrayOfVector
+	compactIdx, err := buildCompactIndices(results, fieldIdx, useCompactVectorIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -687,11 +690,19 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			va := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
 			if va == nil || di >= len(va.GetData()) {
 				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
+				vd := fd.GetValidData()
+				if isNullable && int(ref.rowIdx) < len(vd) && !vd[ref.rowIdx] {
+					continue
+				}
+				dataLen := 0
+				if va != nil {
+					dataLen = len(va.GetData())
+				}
 				return nil, fmt.Errorf(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
-					di, len(va.GetData()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+					di, dataLen, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
 			data = append(data, va.GetData()[di])
 		}

@@ -955,6 +955,49 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) 
 	assert.Empty(t, va.GetData())
 }
 
+func TestBuildMergedVectorField_NullableArrayOfVectorUsesLogicalRowIndex(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
+	v3 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3.0, 4.0}}}}
+
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{v1, empty, v3, empty},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{true, false, true, false},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{result},
+		[]rowRef{{resultIdx: 0, rowIdx: 2}, {resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, merged.FieldsData[0].GetValidData())
+
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.Len(t, va.GetData(), 3)
+	assert.Equal(t, []float32{3.0, 4.0}, va.GetData()[0].GetFloatVector().GetData())
+	assert.Empty(t, va.GetData()[1].GetFloatVector().GetData())
+	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[2].GetFloatVector().GetData())
+}
+
 // =========================================================================
 // sliceVectorField & rangeSliceVectorField: VectorArray branch
 // =========================================================================
