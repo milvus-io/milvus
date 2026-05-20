@@ -223,11 +223,7 @@ AsyncReopenSegment(CTraceContext c_trace,
          schema = std::move(schema)](
             folly::CancellationToken cancel_token) -> bool* {
             milvus::OpContext op_ctx(cancel_token);
-            if (schema) {
-                segment->Reopen(&op_ctx, load_info, schema);
-            } else {
-                segment->Reopen(&op_ctx, load_info);
-            }
+            segment->Reopen(&op_ctx, load_info, schema);
             return nullptr;
         },
         milvus::futures::PoolType::kLoad);

@@ -619,7 +619,7 @@ func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
 	defer s.ptrLock.Unpin()
 
 	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
-		field := typeutil.GetField(s.collection.schema.Load(), indexInfo.IndexInfo.FieldID)
+		field := typeutil.GetField(s.collection.Schema(), indexInfo.IndexInfo.FieldID)
 		if typeutil.IsJSONType(field.GetDataType()) {
 			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
 			if err != nil {
@@ -1393,10 +1393,11 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
+	schema, schemaVersion := s.collection.SchemaAndVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
-		Schema:        s.collection.Schema(),
-		SchemaVersion: s.collection.SchemaVersion(),
+		Schema:        schema,
+		SchemaVersion: schemaVersion,
 	})
 	if err != nil {
 		return err

@@ -3162,24 +3162,13 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     new_schema->set_primary_field_id(FieldId(100));
     new_schema->set_schema_version(200);
 
-    auto segment = CreateSealedSegment(old_schema);
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    proto::segcore::SegmentLoadInfo proto;
-    proto.set_segmentid(50001);
-    proto.set_num_of_rows(1);
-    auto* pk_binlog = proto.add_binlog_paths();
-    pk_binlog->set_fieldid(100);
-    auto* pk_log = pk_binlog->add_binlogs();
-    pk_log->set_log_path("/path/to/pk");
-    pk_log->set_entries_num(1);
-    sealed->SetLoadInfo(proto);
-
-    try {
-        sealed->Reopen(new_schema);
-    } catch (...) {
-    }
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+    EXPECT_TRUE(sealed->HasFieldData(FieldId(101)));
 
     auto snapshot = sealed->TestGetSegmentLoadInfo();
     EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));

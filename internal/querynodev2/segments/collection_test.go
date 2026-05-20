@@ -17,6 +17,8 @@
 package segments
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -83,6 +85,54 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
+	coll := s.cm.Get(1)
+	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
+	coll.setSchema(schema, 0)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			schema, version := coll.SchemaAndVersion()
+			if schema.GetName() != fmt.Sprintf("collection_%d", version) {
+				select {
+				case errCh <- fmt.Sprintf("schema %s does not match version %d", schema.GetName(), version):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	for i := 1; i <= 1000; i++ {
+		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
+		coll.setSchema(schema, uint64(i))
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case msg := <-errCh:
+		s.Fail(msg)
+	default:
+	}
+
+	schema, version := coll.SchemaAndVersion()
+	s.Equal(uint64(1000), version)
+	s.Equal("collection_1000", schema.GetName())
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	// Verify initial collection has IndexMeta set from SetupTest.
 	coll := s.cm.Get(1)
@@ -121,8 +171,13 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
 
+	updatedCollection := s.cm.Get(1)
+	updatedSchema, updatedVersion := updatedCollection.SchemaAndVersion()
+	s.Equal(uint64(100), updatedVersion)
+	s.Len(updatedSchema.GetFields(), len(schema.GetFields()))
+
 	// Verify IndexMeta now contains the new field.
-	updatedIndexMeta := s.cm.Get(1).GetCCollection().IndexMeta()
+	updatedIndexMeta := updatedCollection.GetCCollection().IndexMeta()
 	found := false
 	for _, meta := range updatedIndexMeta.GetIndexMetas() {
 		if meta.GetFieldID() == newVecFieldID {

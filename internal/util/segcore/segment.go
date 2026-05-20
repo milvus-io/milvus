@@ -336,6 +336,16 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 }
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+	if req == nil {
+		return errors.New("reopen request is nil")
+	}
+	if req.LoadInfo == nil {
+		return errors.New("reopen load info is nil")
+	}
+	if req.Schema == nil {
+		return errors.New("reopen schema is nil")
+	}
+
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
@@ -345,28 +355,27 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return err
 	}
+	if len(loadInfoBlob) == 0 {
+		return errors.New("reopen load info blob is empty")
+	}
 
-	var schemaBlob []byte
-	if req.Schema != nil {
-		schemaBlob, err = proto.Marshal(req.Schema)
-		if err != nil {
-			return err
-		}
+	schemaBlob, err := proto.Marshal(req.Schema)
+	if err != nil {
+		return err
+	}
+	if len(schemaBlob) == 0 {
+		return errors.New("reopen schema blob is empty")
 	}
 	defer runtime.KeepAlive(schemaBlob)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			var schemaPtr unsafe.Pointer
-			if len(schemaBlob) > 0 {
-				schemaPtr = unsafe.Pointer(&schemaBlob[0])
-			}
 			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
 				traceCtx.ctx,
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
 				C.int64_t(len(loadInfoBlob)),
-				schemaPtr,
+				unsafe.Pointer(&schemaBlob[0]),
 				C.int64_t(len(schemaBlob)),
 				C.uint64_t(req.SchemaVersion),
 			))

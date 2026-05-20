@@ -836,8 +836,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
     log->set_entries_num(500);
 
     SegmentLoadInfo current_info(proto, schema_);
-    // calculate first diff to set default value fields
     auto diff = current_info.GetLoadDiff();
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
     SegmentLoadInfo new_info(proto, schema_);
     diff = current_info.ComputeDiff(new_info);
 
@@ -912,16 +914,18 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
 
     // Verify fields were added to fields_to_fill_default
     EXPECT_FALSE(first_diff.fields_to_fill_default.empty());
-    // Second diff: first_new_info -> same proto (simulates reopen)
-    // first_new_info should now have fields_filled_with_default_ populated
+    for (const auto& field_id : first_diff.fields_to_fill_default) {
+        first_new_info.SetFieldFilledWithDefault(field_id);
+    }
+
     SegmentLoadInfo second_new_info(proto, schema_);
     auto second_diff = first_new_info.ComputeDiff(second_new_info);
 
     // All previously filled fields should be skipped
     EXPECT_TRUE(second_diff.fields_to_fill_default.empty());
 
-    // Verify that second_new_info inherited the filled status
-    // by doing a third diff
+    second_new_info.SetFieldsFilledWithDefault(
+        first_new_info.GetDefaultFilledFieldsForNewInfo(second_new_info));
     SegmentLoadInfo third_new_info(proto, schema_);
     auto third_diff = second_new_info.ComputeDiff(third_new_info);
     EXPECT_TRUE(third_diff.fields_to_fill_default.empty());
@@ -2033,8 +2037,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogNoReplace) {
     log->set_entries_num(500);
 
     SegmentLoadInfo current_info(proto, schema_);
-    // First GetLoadDiff to initialize default fields
     auto first_diff = current_info.GetLoadDiff();
+    for (const auto& field_id : first_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
 
     SegmentLoadInfo new_info(proto, schema_);
     auto diff = current_info.ComputeDiff(new_info);
@@ -2110,9 +2116,11 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
     log1->set_entries_num(1000);
 
     SegmentLoadInfo current_info(initial_proto, schema_);
-    // GetLoadDiff populates fields_filled_with_default_ for fields 101-110
     auto initial_diff = current_info.GetLoadDiff();
     EXPECT_FALSE(initial_diff.fields_to_fill_default.empty());
+    for (const auto& field_id : initial_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
 
     // Step 2: New LoadInfo adds binlog for field 101 (was default-filled)
     proto::segcore::SegmentLoadInfo new_proto;
@@ -2484,7 +2492,10 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoReloadWhenIndexStaysRaw) {
     param->set_value(milvus::index::ASCENDING_SORT);
 
     SegmentLoadInfo current_info(proto, schema_);
-    (void)current_info.GetLoadDiff();
+    auto initial_diff = current_info.GetLoadDiff();
+    for (const auto& field_id : initial_diff.fields_to_fill_default) {
+        current_info.SetFieldFilledWithDefault(field_id);
+    }
     SegmentLoadInfo new_info(proto, schema_);
     auto diff = current_info.ComputeDiff(new_info);
 

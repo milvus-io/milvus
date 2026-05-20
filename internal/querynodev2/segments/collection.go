@@ -92,11 +92,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.schemaVersion.Load() {
-			// the schema may be changed even the collection is loaded
-			collection.schema.Store(schema)
-			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
-			collection.schemaVersion.Store(loadMeta.GetSchemaVersion())
+		if loadMeta.GetSchemaVersion() > collection.SchemaVersion() {
+			if err := collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion()); err != nil {
+				return err
+			}
+			collection.setSchema(schema, loadMeta.GetSchemaVersion())
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
@@ -139,8 +139,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
 		return err
 	}
-	collection.schema.Store(schema)
-	collection.schemaVersion.Store(version)
+	collection.setSchema(schema, version)
 	return nil
 }
 
@@ -182,6 +181,11 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 	return true
 }
 
+type collectionSchemaSnapshot struct {
+	schema  *schemapb.CollectionSchema
+	version uint64
+}
+
 // Collection is a wrapper of the underlying C-structure C.CCollection
 // In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
@@ -197,11 +201,10 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType    atomic.String // deprecated
-	schema        atomic.Pointer[schemapb.CollectionSchema]
-	isGpuIndex    bool
-	loadFields    typeutil.Set[int64]
-	schemaVersion *atomic.Uint64
+	metricType atomic.String // deprecated
+	schema     atomic.Pointer[collectionSchemaSnapshot]
+	isGpuIndex bool
+	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
@@ -230,13 +233,27 @@ func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
 }
 
+func (c *Collection) setSchema(schema *schemapb.CollectionSchema, version uint64) {
+	c.schema.Store(&collectionSchemaSnapshot{schema: schema, version: version})
+}
+
+func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
+	snapshot := c.schema.Load()
+	if snapshot == nil {
+		return nil, 0
+	}
+	return snapshot.schema, snapshot.version
+}
+
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
-	return c.schema.Load()
+	schema, _ := c.SchemaAndVersion()
+	return schema
 }
 
 func (c *Collection) SchemaVersion() uint64 {
-	return c.schemaVersion.Load()
+	_, version := c.SchemaAndVersion()
+	return version
 }
 
 // IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
@@ -335,7 +352,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		dbName:        loadMetaInfo.GetDbName(),
 		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		schemaVersion: atomic.NewUint64(loadMetaInfo.GetSchemaVersion()),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
@@ -343,7 +359,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.schema.Store(schema)
+	coll.setSchema(schema, loadMetaInfo.GetSchemaVersion())
 
 	return coll, nil
 }
@@ -356,7 +372,7 @@ func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *sc
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
-	col.schema.Store(schema)
+	col.setSchema(schema, 0)
 	return col
 }
 
@@ -368,7 +384,7 @@ func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.Col
 		partitions: typeutil.NewConcurrentSet[int64](),
 		refCount:   atomic.NewUint32(0),
 	}
-	coll.schema.Store(schema)
+	coll.setSchema(schema, 0)
 	return coll
 }
 
