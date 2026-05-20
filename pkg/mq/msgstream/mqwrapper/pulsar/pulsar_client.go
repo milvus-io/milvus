@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin/config"
 	"github.com/cockroachdb/errors"
-	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -150,18 +150,18 @@ func GetFullTopicName(tenant string, namespace string, topic string) (string, er
 	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
 }
 
-func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, error) {
-	config := common.Config{
+func NewAdminClient(address, authPlugin, authParams string) (admin.Client, error) {
+	cfg := config.Config{
 		WebServiceURL: address,
 		AuthPlugin:    authPlugin,
 		AuthParams:    authParams,
 	}
-	admin, err := pulsarctl.New(&config)
+	adminClient, err := admin.New(&cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
 	}
 
-	return admin, nil
+	return adminClient, nil
 }
 
 // EarliestMessageID returns the earliest message id
