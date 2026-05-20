@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.view;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/viewpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 
 // ViewSyncService is the unified service to sync query views and data views between coord and nodes.
 service ViewSyncService {
