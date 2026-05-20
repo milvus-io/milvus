@@ -21,13 +21,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-<<<<<<< HEAD
 	"io"
 	"net"
 	"net/http"
-=======
-	"net"
->>>>>>> 9e452624b8 (test: use random free ports in Test_NewHTTPServer_TLS_* to avoid 8080 collision)
 	"net/http/httptest"
 	"os"
 	"strconv"

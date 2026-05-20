@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -111,13 +110,13 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		if !funcutil.IsControlChannel(vchannel) {
 			// create shard info when virtual channel is created.
 			if err := c.createCollectionShard(ctx, header, body, vchannel, result); err != nil {
-				return errors.Wrap(err, "failed to create collection shard")
+				return merr.Wrap(err, "failed to create collection shard")
 			}
 		}
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
-		return errors.Wrap(err, "failed to add collection to meta table")
+		return merr.Wrap(err, "failed to add collection to meta table")
 	}
 
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(

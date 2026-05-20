@@ -30,7 +30,13 @@ import (
 
 var _ streamingpb.StreamingCoordAssignmentServiceServer = (*assignmentServiceImpl)(nil)
 
-var errReplicateConfigurationSame = errors.New("same replicate configuration")
+var (
+	errReplicateConfigurationSame = errors.New("same replicate configuration")
+	// errDone is an INTERNAL break-signal sentinel used by
+	// waitUntilPrimaryChangeOrConfigurationSame to exit the watch callback.
+	// Never crosses any gRPC boundary.
+	errDone = errors.New("done")
+)
 
 // NewAssignmentService returns a new assignment service.
 func NewAssignmentService() streamingpb.StreamingCoordAssignmentServiceServer {
@@ -125,7 +131,6 @@ func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx co
 	if err != nil {
 		return err
 	}
-	errDone := errors.New("done")
 	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		if proto.Equal(config, param.ReplicateConfiguration) {
 			return errDone

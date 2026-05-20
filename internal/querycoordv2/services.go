@@ -61,7 +61,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))
 		return &querypb.ShowCollectionsResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -138,7 +138,7 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 		msg := "failed to show partitions"
 		log.Warn(msg, zap.Error(err))
 		return &querypb.ShowPartitionsResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -369,7 +369,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 		msg := "failed to get partition states"
 		log.Warn(msg, zap.Error(err))
 		return &querypb.GetPartitionStatesResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 
@@ -437,7 +437,7 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 		msg := "failed to get segment info"
 		log.Warn(msg, zap.Error(err))
 		return &querypb.GetSegmentInfoResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 
@@ -452,7 +452,7 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 				msg := fmt.Sprintf("segment %v not found in any node", segmentID)
 				log.Warn(msg, zap.Int64("segment", segmentID))
 				return &querypb.GetSegmentInfoResponse{
-					Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+					Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 				}, nil
 			}
 			info := &querypb.SegmentInfo{}
@@ -639,7 +639,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	// Verify request
@@ -664,7 +664,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		return merr.Status(err), nil
 	}
 	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		return merr.Status(errors.Wrapf(err, "can't balance, because the source node[%d] is invalid", srcNode)), nil
+		return merr.Status(merr.Wrapf(err, "can't balance, because the source node[%d] is invalid", srcNode)), nil
 	}
 
 	// when no dst node specified, default to use all other nodes in same
@@ -685,7 +685,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	// check whether dstNode is healthy
 	for dstNode := range dstNodeSet {
 		if err := s.isStoppingNode(ctx, dstNode); err != nil {
-			return merr.Status(errors.Wrapf(err, "can't balance, because the destination node[%d] is invalid", dstNode)), nil
+			return merr.Status(merr.Wrapf(err, "can't balance, because the destination node[%d] is invalid", dstNode)), nil
 		}
 	}
 
@@ -721,7 +721,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	if err != nil {
 		msg := "failed to balance segments"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	return merr.Success(), nil
@@ -736,7 +736,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 		msg := "failed to show configurations"
 		log.Warn(msg, zap.Error(err))
 		return &internalpb.ShowConfigurationsResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 	configList := make([]*commonpb.KeyValuePair, 0)
@@ -764,7 +764,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 
@@ -795,7 +795,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 		msg := "failed to get replicas"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetReplicasResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 
@@ -825,7 +825,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		msg := "failed to get shard leaders"
 		log.Warn(msg, zap.Error(err))
 		return &querypb.GetShardLeadersResponse{
-			Status: merr.Status(errors.Wrapf(err, "%s", msg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
 		}, nil
 	}
 
@@ -901,13 +901,14 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		return merr.Status(err), nil
 	}
 
-	if err := s.broadcastCreateResourceGroup(ctx, req); err != nil {
-		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
-			log.Info("create resource group request ignored")
-			return merr.Success(), nil
-		}
+	ignored, err := s.broadcastCreateResourceGroup(ctx, req)
+	if err != nil {
 		log.Warn("failed to create resource group", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if ignored {
+		log.Info("create resource group request ignored")
+		return merr.Success(), nil
 	}
 	log.Info("create resource group done")
 	return merr.Success(), nil
@@ -943,13 +944,14 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		return merr.Status(err), nil
 	}
 
-	if err := s.broadcastDropResourceGroup(ctx, req); err != nil {
-		if errors.Is(err, meta.ErrResourceGroupOperationIgnored) {
-			log.Info("drop resource group request ignored")
-			return merr.Success(), nil
-		}
+	ignored, err := s.broadcastDropResourceGroup(ctx, req)
+	if err != nil {
 		log.Warn("failed to drop resource group", zap.Error(err))
 		return merr.Status(err), nil
+	}
+	if ignored {
+		log.Info("drop resource group request ignored")
+		return merr.Success(), nil
 	}
 	log.Info("drop resource group done")
 	return merr.Success(), nil
@@ -1103,14 +1105,14 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to update load config"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups())
 	if err != nil {
 		msg := "failed to update load config"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	log.Info("update load config request finished")
@@ -1184,7 +1186,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return &querypb.ListLoadedSegmentsResponse{
-			Status: merr.Status(errors.Wrap(err, "failed to list loaded segments")),
+			Status: merr.Status(merr.Wrap(err, "failed to list loaded segments")),
 		}, nil
 	}
 	segmentIDs := typeutil.NewUniqueSet()
@@ -1216,7 +1218,7 @@ func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(errors.Wrap(err, "failed to run analyzer")),
+			Status: merr.Status(merr.Wrap(err, "failed to run analyzer")),
 		}, nil
 	}
 
@@ -1240,7 +1242,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 
 func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(errors.Wrap(err, "failed to validate analyzer"))}, nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "failed to validate analyzer"))}, nil
 	}
 
 	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
@@ -1260,7 +1262,7 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return &querypb.ComputePhraseMatchSlopResponse{
-			Status: merr.Status(errors.Wrap(err, "failed to compute phrase match slop")),
+			Status: merr.Status(merr.Wrap(err, "failed to compute phrase match slop")),
 		}, nil
 	}
 

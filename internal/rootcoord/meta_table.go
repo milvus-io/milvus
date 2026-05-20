@@ -1710,7 +1710,7 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 
 func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	if funcutil.IsEmptyString(credInfo.GetUsername()) {
-		return errEmptyUsername
+		return merr.WrapErrParameterInvalidMsg("username is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1738,7 +1738,7 @@ func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *interna
 
 func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	if funcutil.IsEmptyString(credInfo.GetUsername()) {
-		return errEmptyUsername
+		return merr.WrapErrParameterInvalidMsg("username is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1792,7 +1792,7 @@ func (mt *MetaTable) GetCredential(ctx context.Context, username string) (*inter
 
 func (mt *MetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) error {
 	if funcutil.IsEmptyString(req.GetUsername()) {
-		return errEmptyUsername
+		return merr.WrapErrParameterInvalidMsg("username is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1835,7 +1835,7 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 
 	usernames, err := mt.catalog.ListCredentials(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list credential usernames")
+		return nil, merr.Wrap(err, "failed to list credential usernames")
 	}
 	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }
@@ -1843,7 +1843,7 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 // CheckIfCreateRole checks if the role can be created.
 func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
 	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
-		return errEmptyRoleName
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -1877,7 +1877,7 @@ func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milv
 
 func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
 	if funcutil.IsEmptyString(in.GetRoleName()) {
-		return errEmptyRoleName
+		return merr.WrapErrParameterInvalidMsg("role name is empty")
 	}
 	if util.IsBuiltinRole(in.GetRoleName()) {
 		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
@@ -2148,7 +2148,7 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 
 func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
 	if funcutil.IsEmptyString(req.GetGroupName()) {
-		return errEmptyPrivilegeGroupName
+		return merr.WrapErrParameterInvalidMsg("privilege group name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -2179,7 +2179,7 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 
 func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
 	if funcutil.IsEmptyString(req.GetGroupName()) {
-		return errEmptyPrivilegeGroupName
+		return merr.WrapErrParameterInvalidMsg("privilege group name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
@@ -2234,7 +2234,7 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 // CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
 func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
 	if funcutil.IsEmptyString(req.GetGroupName()) {
-		return errEmptyPrivilegeGroupName
+		return merr.WrapErrParameterInvalidMsg("privilege group name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()

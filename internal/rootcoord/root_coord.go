@@ -584,7 +584,7 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	for _, role := range util.DefaultRoles {
 		err = c.meta.CreateRole(initCtx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
-			return errors.Wrap(err, "failed to create role")
+			return merr.Wrap(err, "failed to create role")
 		}
 	}
 
@@ -624,7 +624,7 @@ func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 			},
 		}, milvuspb.OperatePrivilegeType_Grant)
 		if err != nil && !common.IsIgnorableError(err) {
-			return errors.Wrap(err, "failed to grant global privilege")
+			return merr.Wrap(err, "failed to grant global privilege")
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
@@ -639,7 +639,7 @@ func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 			},
 		}, milvuspb.OperatePrivilegeType_Grant)
 		if err != nil && !common.IsIgnorableError(err) {
-			return errors.Wrap(err, "failed to grant collection privilege")
+			return merr.Wrap(err, "failed to grant collection privilege")
 		}
 	}
 	return nil
@@ -652,12 +652,12 @@ func (c *Core) initBuiltinRoles(ctx context.Context) error {
 		err := c.meta.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Error("create a builtin role fail", zap.String("roleName", role), zap.Error(err))
-			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
+			return merr.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
 			privilegeName, err := c.getMetastorePrivilegeName(ctx, privilege[util.RoleConfigPrivilege])
 			if err != nil {
-				return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
+				return merr.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 			}
 
 			err = c.meta.OperatePrivilege(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
@@ -672,7 +672,7 @@ func (c *Core) initBuiltinRoles(ctx context.Context) error {
 			}, milvuspb.OperatePrivilegeType_Grant)
 			if err != nil && !common.IsIgnorableError(err) {
 				log.Error("grant privilege to builtin role fail", zap.String("roleName", role), zap.Any("privilege", privilege), zap.Error(err))
-				return errors.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
+				return merr.Wrapf(err, "failed to grant privilege: <%s, %s, %s> of db: %s to role: %s", privilege[util.RoleConfigObjectType], privilege[util.RoleConfigObjectName], privilege[util.RoleConfigPrivilege], privilege[util.RoleConfigDBName], role)
 			}
 		}
 		util.BuiltinRoles = append(util.BuiltinRoles, role)
@@ -2785,7 +2785,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	if err != nil {
 		ctxLog.Error("fail to list policy", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(errors.Wrap(err, "fail to list policy"), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(merr.Wrap(err, "fail to list policy"), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	// expand privilege groups and turn to policies
@@ -3151,7 +3151,7 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		err = c.fileResourceObserver.Sync()
 		if err != nil {
 			c.fileResourceObserver.Notify()
-			return merr.Status(errors.Wrap(err, "add file resource success but some node sync failed")), nil
+			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil
 		}
 	}
 
@@ -3181,7 +3181,7 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 		err = c.fileResourceObserver.Sync()
 		if err != nil {
 			c.fileResourceObserver.Notify()
-			return merr.Status(errors.Wrap(err, "remove file resource success but some node sync failed")), nil
+			return merr.Status(merr.Wrap(err, "remove file resource success but some node sync failed")), nil
 		}
 	}
 

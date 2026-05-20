@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -83,7 +82,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		fieldSchemas = append(fieldSchemas, fieldSchema)
 	}
 	if err := checkFieldSchema(fieldSchemas); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 
 	// 3. check if the fields already exist

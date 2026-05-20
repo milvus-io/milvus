@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -39,7 +38,7 @@ import (
 var ErrNodeNotFound = merr.WrapErrServiceInternalMsg("node not found")
 
 func WrapErrNodeNotFound(nodeID int64) error {
-	return errors.Wrapf(ErrNodeNotFound, "node %v", nodeID)
+	return merr.Wrapf(ErrNodeNotFound, "node %v", nodeID)
 }
 
 type Cluster interface {

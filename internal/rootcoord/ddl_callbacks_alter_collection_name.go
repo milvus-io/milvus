@@ -3,7 +3,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -110,12 +109,12 @@ func (c *Core) validateEncryption(ctx context.Context, oldDBName string, newDBNa
 	// old and new DB names are filled in Prepare, shouldn't be empty here
 	originalDB, err := c.meta.GetDatabaseByName(ctx, oldDBName, typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrap(err, "failed to get original database")
+		return merr.Wrap(err, "failed to get original database")
 	}
 
 	targetDB, err := c.meta.GetDatabaseByName(ctx, newDBName, typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrapf(err, "target database %s not found", newDBName)
+		return merr.Wrapf(err, "target database %s not found", newDBName)
 	}
 
 	// Check if either database has encryption enabled
