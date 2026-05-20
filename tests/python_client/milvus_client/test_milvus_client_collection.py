@@ -5684,7 +5684,7 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         insert_nb = 10
         pk_values = [i for i in range(insert_nb)]
         float_vec = cf.gen_vectors(insert_nb, default_dim)
-        int8_values = [[numpy.int8(j) for j in range(insert_nb)] for i in range(insert_nb)]
+        int8_values = [[j for j in range(insert_nb)] for i in range(insert_nb)]
         int16_values = [[numpy.int16(j) for j in range(insert_nb)] for i in range(insert_nb)]
         int32_values = [[numpy.int32(j) for j in range(insert_nb)] for i in range(insert_nb)]
         int64_values = [[numpy.int64(j) for j in range(insert_nb)] for i in range(insert_nb)]

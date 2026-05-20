@@ -3943,6 +3943,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         if nullable:
             rows = [
                 {
@@ -3959,7 +3960,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     default_primary_key_field_name: str(i),
                     default_vector_field_name: list(rng.random((1, dim))[0]),
                     default_string_field_name: str(i),
-                    "nullable_field": np.int8(i),
+                    "nullable_field": i % int8_bound,
                 }
                 for i in range(default_nb)
             ]
@@ -4025,6 +4026,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int16_bound = np.iinfo(np.int16).max + 1
         if nullable:
             rows = [
                 {
@@ -4041,7 +4043,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     default_primary_key_field_name: str(i),
                     default_vector_field_name: list(rng.random((1, dim))[0]),
                     default_string_field_name: str(i),
-                    "nullable_field": np.int16(i),
+                    "nullable_field": i % int16_bound,
                 }
                 for i in range(default_nb)
             ]
@@ -6215,12 +6217,14 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int16_bound = np.iinfo(np.int16).max + 1
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
-                value = np.int16(i)
+                value = i % int16_bound
             elif rerank_fields == DataType.INT32:
                 value = np.int32(i)
             elif rerank_fields == DataType.FLOAT:
@@ -6326,12 +6330,14 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int16_bound = np.iinfo(np.int16).max + 1
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
-                value = np.int16(i)
+                value = i % int16_bound
             elif rerank_fields == DataType.INT32:
                 value = np.int32(i)
             elif rerank_fields == DataType.INT64:

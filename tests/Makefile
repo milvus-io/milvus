@@ -80,7 +80,7 @@ lint: _require-base-ref
 format-check: _require-base-ref
 	@files=$$($(CHANGED_FILES_CMD)); \
 	if [ -z "$$files" ]; then echo "No changed Python files under tests/ (base: $(BASE_REF))."; \
-	else cd $(REPO_ROOT) && $(RUFF) format --check --diff $$files; fi
+	else cd $(REPO_ROOT) && $(RUFF) format --check --diff --force-exclude $$files; fi
 
 ci: lint format-check
 

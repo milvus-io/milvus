@@ -47,7 +47,7 @@ jobs:
         with:
           version: "0.15.11"
           src: ${{ steps.changed.outputs.all_changed_files }}
-          args: "format --check --diff"
+          args: "format --check --diff --force-exclude"
 
       - name: Validate ruff configuration (smoke test)
         # Always runs so config-only PRs still catch a broken ruff.toml.
