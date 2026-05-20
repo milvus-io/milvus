@@ -1,7 +1,7 @@
 # Shard View Manager Design
 
 > This document describes the design of `ShardViewManager`, which manages multiple QueryViews for a single shard (vchannel) within a single replica on the Coord side.
-> Reference: [Distributed Query View Design](distributed_query_view_design.md), [QueryView State Machine](query_view_state_machine.md), [view.proto](../../../../pkg/proto/view.proto), [ReliableSyncer](../../../../internal/views/coord/coordview/syncer/reliable_syncer.go), [CoordQueryViewStateMachine](../../../../internal/views/coord/coordview/state_machine.go)
+> Reference: [Distributed Query View Design](README.md), [QueryView State Machine](query_view_state_machine.md), [view.proto](../../../../pkg/proto/view.proto), [ReliableSyncer](../../../../internal/views/coord/coordview/syncer/reliable_syncer.go), [CoordQueryViewStateMachine](../../../../internal/views/coord/coordview/state_machine.go)
 
 ## 1. Overview
 

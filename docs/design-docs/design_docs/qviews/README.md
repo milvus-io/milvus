@@ -1,8 +1,5 @@
 # Distributed Query View Design Document
 
-> Source: Feishu Document "Growing Query/Search On StreamingNode"
-> Document link: https://zilliverse.feishu.cn/docx/VijFd7VFZoYzFvx9KagcnLpvntd
-
 ## 1. Background and Motivation
 
 StreamingNode needs to handle all incremental queries in Milvus while managing all data publish/subscribe operations. If the current delegator logic were placed directly on StreamingNode, it would cause the following problems:
@@ -78,9 +75,15 @@ See the definitions of `DataVersion`, `DataViewOfCollection`, `DataViewOfShard`,
 
 ### 5.3 Storage View Version Evolution Example
 
-![DataView Version Evolution](img/dv.png)
+The following timeline shows the version evolution process of the storage view (DataView), with each Segment labeled as `SegmentID @DataVersion`:
 
-The diagram shows the version evolution process of the storage view (DataView), with each Segment labeled as `SegmentID @DataVersion`:
+| Step | Event | DataView Version | Segments in the View |
+|---|---|---|---|
+| 1 | Initial state | `1,0` | `Segment 1 @1,0`, `Segment 2 @1,0` |
+| 2 | Flush Segment 3 | `2,0` | `Segment 1 @1,0`, `Segment 2 @1,0`, `Segment 3 @2,0` |
+| 3 | Compact Segment 1 and 2 into Segment 4 and 5 | `2,1` | `Segment 4 @2,1`, `Segment 5 @2,1`, `Segment 3 @2,0` |
+| 4 | Cluster compaction or reshard | `2,2` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2` |
+| 5 | Import Segment 5 | `3,0` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2`, `Segment 10 @3,0` |
 
 1. **Version 1,0**: Initial state, containing Segment 1 @1,0 and Segment 2 @1,0.
 2. **Version 2,0** (Flush Segment 3): Segment 3 @2,0 is added, streaming_version is incremented. Segments 1 and 2 retain their original version number @1,0.
@@ -113,9 +116,15 @@ The query view version number is at the **ShardOnReplica level**, and its lifecy
 
 ### 6.2 Query View Version Evolution Example
 
-![QueryView Version Evolution](img/pv.png)
+The following timeline shows the version evolution process of the query view (QueryView), with each Segment labeled as `SegmentID @NodeID`:
 
-The diagram shows the version evolution process of the query view (QueryView), with each Segment labeled as `SegmentID @NodeID`:
+| Step | Event | QueryView Version | Segment Placement |
+|---|---|---|---|
+| 1 | Initial placement | `(1,1)` | `Segment 1 @Node1`, `Segment 2 @Node1` |
+| 2 | Balance: move Segment 2 from Node1 to Node2 | `(1,2)` | `Segment 1 @Node1`, `Segment 2 @Node2` |
+| 3 | DataVersion 2 arrives and adds Segment 3 | `(2,1)` | `Segment 1 @Node1`, `Segment 2 @Node2`, `Segment 3 @Node2` |
+| 4 | Recovery balance after Node2 crashes | `(2,2)` | `Segment 1 @Node1`, `Segment 2 @Node1`, `Segment 3 @Node1` |
+| 5 | DataVersion 3 arrives with more QueryNodes | `(3,1)` | `Segment 6 @Node1`, `Segment 7 @Node2`, `Segment 8 @Node3`, `Segment 9 @Node1`, `Segment 10 @Node2` |
 
 1. **Version (1,1)**: Initial state, Segment 1 @Node1, Segment 2 @Node1 (all Segments on Node 1).
 2. **Version (1,2)** (Balance Operation: Move Segment 2 From Node 1 To Node 2): Segment 2 is migrated to Node 2. DataVersion remains unchanged (D=1), QueryVersion is incremented (Q: 1→2).

@@ -2,7 +2,7 @@
 
 > This document provides a detailed per-node, per-state analysis of the QueryView state machine.
 > For each state, it covers: entry conditions, automatic behavior, valid transitions, and possible peer states with how the current node reacts to each.
-> Reference: [Distributed Query View Design](distributed_query_view_design.md), [view.proto](../../../../pkg/proto/view.proto)
+> Reference: [Distributed Query View Design](README.md), [view.proto](../../../../pkg/proto/view.proto)
 
 ## 1. Coord State Machine
 
