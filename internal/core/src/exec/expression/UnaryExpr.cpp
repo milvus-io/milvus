@@ -1621,67 +1621,70 @@ PhyUnaryRangeFilterExpr::ProcessArrowDataChunks(
     } else {
         if (has_offset_input_ || expr_->column_.element_level_ ||
             exec_path_ != ExprExecPath::RawData ||
-            !segment_->CanUseArrowRecordBatchReader(field_id_, field_type_)) {
+            (field_type_ != DataType::INT64 &&
+             field_type_ != DataType::TIMESTAMPTZ) ||
+            !segment_->CanUseArrowBatchIterator({field_id_})) {
             return std::nullopt;
         }
 
+        (void)skip_func;
         int64_t processed_size = 0;
-        auto reader = segment_->CreateArrowRecordBatchReader(
-            op_ctx_, {field_id_}, current_data_chunk_);
-        auto& skip_index = segment_->GetSkipIndex();
+        const auto row_begin =
+            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
+            current_data_chunk_pos_;
+        const auto selection_count =
+            std::min<int64_t>(batch_size_, active_count_ - row_begin);
+        auto selection = segment_->Prune(
+            segcore::PrunePredicate{},
+            segcore::CandidateSelection::RowRange(row_begin, selection_count));
+        auto iterator = segment_->Iterate(op_ctx_, {field_id_}, selection);
 
-        for (int64_t chunk_id = current_data_chunk_; reader->HasNext();
-             ++chunk_id) {
-            auto view = reader->Next();
-            auto data_pos =
-                chunk_id == current_data_chunk_ ? current_data_chunk_pos_ : 0;
-            auto size = view.row_count - data_pos;
-            size = std::min(size, batch_size_ - processed_size);
+        while (iterator->HasNext()) {
+            auto view = iterator->Next();
+            auto size =
+                std::min(view.row_count, selection_count - processed_size);
             if (size == 0) {
                 continue;
             }
 
             auto array = std::static_pointer_cast<arrow::Int64Array>(
                 view.batch.get()->column(0));
-            const auto* data = array->raw_values() + data_pos;
+            const auto* data = array->raw_values();
 
             std::optional<FixedVector<bool>> validity;
             const bool* valid_data = nullptr;
             if (array->null_count() > 0) {
                 validity.emplace(size);
                 for (int64_t i = 0; i < size; ++i) {
-                    (*validity)[i] = !array->IsNull(data_pos + i);
+                    (*validity)[i] = !array->IsNull(i);
                 }
                 valid_data = validity->data();
             }
 
-            if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
-                func(data,
-                     valid_data,
-                     nullptr,
-                     size,
-                     res + processed_size,
-                     valid_res + processed_size,
-                     values...);
-            } else {
-                ApplyValidData(valid_data,
-                               res + processed_size,
-                               valid_res + processed_size,
-                               size);
-                func(nullptr,
-                     nullptr,
-                     nullptr,
-                     size,
-                     res + processed_size,
-                     valid_res + processed_size,
-                     values...);
-            }
+            func(data,
+                 valid_data,
+                 nullptr,
+                 size,
+                 res + processed_size,
+                 valid_res + processed_size,
+                 values...);
 
             processed_size += size;
-            if (processed_size >= batch_size_) {
-                current_data_chunk_ = chunk_id;
-                current_data_chunk_pos_ = data_pos + size;
+            if (processed_size >= selection_count) {
                 break;
+            }
+        }
+        const auto next_row = row_begin + processed_size;
+        if (processed_size >= selection_count && processed_size > 0) {
+            if (next_row < active_count_) {
+                auto [next_chunk, next_pos] =
+                    segment_->get_chunk_by_offset(field_id_, next_row);
+                current_data_chunk_ = next_chunk;
+                current_data_chunk_pos_ = next_pos;
+            } else if (num_data_chunk_ > 0) {
+                current_data_chunk_ = num_data_chunk_ - 1;
+                current_data_chunk_pos_ =
+                    segment_->chunk_size(field_id_, current_data_chunk_);
             }
         }
         return processed_size;

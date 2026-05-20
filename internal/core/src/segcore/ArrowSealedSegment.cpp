@@ -120,27 +120,6 @@ RecordBatchBytes(const std::shared_ptr<arrow::RecordBatch>& batch) {
     return std::max<int64_t>(bytes, 1);
 }
 
-bool
-CompareInt64(int64_t lhs, proto::plan::OpType op, int64_t rhs) {
-    switch (op) {
-        case proto::plan::OpType::Equal:
-            return lhs == rhs;
-        case proto::plan::OpType::NotEqual:
-            return lhs != rhs;
-        case proto::plan::OpType::GreaterThan:
-            return lhs > rhs;
-        case proto::plan::OpType::GreaterEqual:
-            return lhs >= rhs;
-        case proto::plan::OpType::LessThan:
-            return lhs < rhs;
-        case proto::plan::OpType::LessEqual:
-            return lhs <= rhs;
-        default:
-            throw std::invalid_argument("unsupported Arrow native op type " +
-                                        proto::plan::OpType_Name(op));
-    }
-}
-
 }  // namespace
 
 struct ArrowSealedSegment::RecordBatchCell {
@@ -367,84 +346,26 @@ ArrowSealedSegment::ArrowFieldColumnGroupForTest(FieldId field_id) const {
 }
 
 size_t
-ArrowSealedSegment::ArrowRecordBatchReaderCreatedCountForTest() const {
-    return arrow_record_batch_reader_created_count_.load(
+ArrowSealedSegment::ArrowBatchIteratorCreatedCountForTest() const {
+    return arrow_batch_iterator_created_count_.load(
         std::memory_order_relaxed);
-}
-
-size_t
-ArrowSealedSegment::ArrowNativeExprExecutionCountForTest() const {
-    return arrow_native_expr_execution_count_.load(std::memory_order_relaxed);
-}
-
-BitsetType
-ArrowSealedSegment::ExecuteArrowNativeExprForTest(
-    milvus::OpContext* op_ctx, const expr::TypedExprPtr& expr) const {
-    return ExecuteArrowNativeExpr(op_ctx, expr);
-}
-
-bool
-ArrowSealedSegment::CanExecuteArrowNativeExpr(
-    const expr::TypedExprPtr& expr) const {
-    auto unary =
-        std::dynamic_pointer_cast<const expr::UnaryRangeFilterExpr>(expr);
-    if (unary == nullptr) {
-        return false;
-    }
-    if (unary->column_.data_type_ != DataType::INT64 &&
-        unary->column_.data_type_ != DataType::TIMESTAMPTZ) {
-        return false;
-    }
-    if (!unary->val_.has_int64_val()) {
-        return false;
-    }
-    return is_field_exist(unary->column_.field_id_);
-}
-
-BitsetType
-ArrowSealedSegment::ExecuteArrowNativeExpr(
-    milvus::OpContext* op_ctx, const expr::TypedExprPtr& expr) const {
-    if (!CanExecuteArrowNativeExpr(expr)) {
-        throw std::invalid_argument(
-            "Arrow native POC only supports INT64 UnaryRangeFilterExpr");
-    }
-    arrow_native_expr_execution_count_.fetch_add(1, std::memory_order_relaxed);
-
-    auto unary =
-        std::dynamic_pointer_cast<const expr::UnaryRangeFilterExpr>(expr);
-    BitsetType result(row_count_, false);
-    auto iterator = IterateRecordBatches(op_ctx, {unary->column_.field_id_});
-    while (iterator.HasNext()) {
-        auto view = iterator.Next();
-        auto array = std::static_pointer_cast<arrow::Int64Array>(
-            view.batch.get()->column(0));
-        for (int64_t i = 0; i < array->length(); ++i) {
-            if (!array->IsNull(i) && CompareInt64(array->Value(i),
-                                                  unary->op_type_,
-                                                  unary->val_.int64_val())) {
-                result.set(view.row_begin + i, true);
-            }
-        }
-    }
-    return result;
 }
 
 ArrowSealedSegment::RecordBatchIterator::RecordBatchIterator(
     const ArrowSealedSegment* segment,
     milvus::OpContext* op_ctx,
-    std::vector<FieldId> field_ids,
-    int64_t start_row_stripe_id)
+    Projection field_ids,
+    CandidateSelection input)
     : segment_(segment),
       op_ctx_(op_ctx),
       field_ids_(std::move(field_ids)),
-      next_row_stripe_id_(start_row_stripe_id) {
+      next_row_offset_(input.row_begin()),
+      row_end_(input.row_end()) {
     if (segment_ == nullptr) {
         throw std::invalid_argument("RecordBatchIterator requires a segment");
     }
-    if (start_row_stripe_id < 0 ||
-        start_row_stripe_id >
-            static_cast<int64_t>(segment_->backing_batches_.size())) {
-        throw std::out_of_range("Arrow start row stripe id out of range");
+    if (input.row_begin() < 0 || input.row_end() > segment_->row_count_) {
+        throw std::out_of_range("Arrow candidate selection is outside segment");
     }
     for (auto field_id : field_ids_) {
         if (!segment_->is_field_exist(field_id)) {
@@ -457,17 +378,15 @@ ArrowSealedSegment::RecordBatchIterator::RecordBatchIterator(
 
 bool
 ArrowSealedSegment::RecordBatchIterator::HasNext() const {
-    return next_row_stripe_id_ <
-           static_cast<int64_t>(segment_->backing_batches_.size());
+    return next_row_offset_ < row_end_;
 }
 
-ArrowSealedSegment::RecordBatchView
+ArrowSealedSegment::BatchView
 ArrowSealedSegment::RecordBatchIterator::Next() {
     if (!HasNext()) {
-        throw std::out_of_range("Arrow RecordBatch iterator is exhausted");
+        throw std::out_of_range("Arrow batch iterator is exhausted");
     }
 
-    const auto row_stripe_id = next_row_stripe_id_++;
     std::vector<FieldId> output_fields = field_ids_;
     if (output_fields.empty()) {
         for (const auto& column_group : segment_->column_groups_) {
@@ -476,6 +395,17 @@ ArrowSealedSegment::RecordBatchIterator::Next() {
                                  column_group.field_ids.end());
         }
     }
+    if (output_fields.empty()) {
+        throw std::invalid_argument("Arrow batch iterator has no fields");
+    }
+
+    const auto location = segment_->LocateOffset(next_row_offset_);
+    const auto row_stripe_id = location.chunk_id;
+    const auto local_offset = location.local_offset;
+    const auto row_stripe_end =
+        segment_->rows_until_batch_.at(row_stripe_id + 1);
+    const auto output_row_count =
+        std::min(row_end_, row_stripe_end) - next_row_offset_;
 
     std::vector<std::shared_ptr<cachinglayer::CellAccessor<RecordBatchCell>>>
         accessors;
@@ -499,50 +429,57 @@ ArrowSealedSegment::RecordBatchIterator::Next() {
         const auto& location = segment_->field_to_location_.at(field_id);
         const auto& batch = batches.at(location.column_group_id);
         fields.push_back(batch->schema()->field(location.column_index));
-        columns.push_back(batch->column(location.column_index));
+        columns.push_back(batch->column(location.column_index)
+                              ->Slice(local_offset, output_row_count));
     }
     auto batch = arrow::RecordBatch::Make(
         std::make_shared<arrow::Schema>(std::move(fields)),
-        segment_->chunk_size(output_fields.front(), row_stripe_id),
+        output_row_count,
         std::move(columns));
+    const auto row_begin = next_row_offset_;
+    next_row_offset_ += output_row_count;
 
-    return {segment_->rows_until_batch_.at(row_stripe_id),
+    return {row_begin,
             batch->num_rows(),
             PinWrapper<std::shared_ptr<arrow::RecordBatch>>(
                 std::move(accessors), std::move(batch))};
 }
 
-ArrowSealedSegment::RecordBatchIterator
-ArrowSealedSegment::IterateRecordBatches(milvus::OpContext* op_ctx,
-                                         std::vector<FieldId> field_ids) const {
-    return RecordBatchIterator(this, op_ctx, std::move(field_ids));
-}
-
-ArrowSealedSegment::RecordBatchIterator
-ArrowSealedSegment::IterateRecordBatches(milvus::OpContext* op_ctx) const {
-    return RecordBatchIterator(this, op_ctx, {});
-}
-
 bool
-ArrowSealedSegment::CanUseArrowRecordBatchReader(FieldId field_id,
-                                                 DataType data_type) const {
-    if (!is_field_exist(field_id)) {
-        return false;
+ArrowSealedSegment::CanUseArrowBatchIterator(const Projection& fields) const {
+    if (fields.empty()) {
+        return true;
     }
-    auto field_type = schema_->operator[](field_id).get_data_type();
-    return field_type == data_type &&
-           (data_type == DataType::INT64 || data_type == DataType::TIMESTAMPTZ);
+    for (auto field_id : fields) {
+        if (!is_field_exist(field_id)) {
+            return false;
+        }
+        auto field_type = schema_->operator[](field_id).get_data_type();
+        try {
+            (void)ExpectedArrowType(field_type);
+        } catch (const std::invalid_argument&) {
+            return false;
+        }
+    }
+    return true;
 }
 
-std::unique_ptr<ArrowRecordBatchReader>
-ArrowSealedSegment::CreateArrowRecordBatchReader(
+CandidateSelection
+ArrowSealedSegment::Prune(const PrunePredicate& predicate,
+                          CandidateSelection input) const {
+    (void)predicate;
+    return input;
+}
+
+std::unique_ptr<ArrowBatchIterator>
+ArrowSealedSegment::Iterate(
     milvus::OpContext* op_ctx,
-    std::vector<FieldId> field_ids,
-    int64_t start_row_stripe_id) const {
-    arrow_record_batch_reader_created_count_.fetch_add(
+    Projection fields,
+    CandidateSelection input) const {
+    arrow_batch_iterator_created_count_.fetch_add(
         1, std::memory_order_relaxed);
-    return std::unique_ptr<ArrowRecordBatchReader>(new RecordBatchIterator(
-        this, op_ctx, std::move(field_ids), start_row_stripe_id));
+    return std::unique_ptr<ArrowBatchIterator>(
+        new RecordBatchIterator(this, op_ctx, std::move(fields), input));
 }
 
 void

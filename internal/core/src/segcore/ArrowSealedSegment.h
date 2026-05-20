@@ -30,7 +30,6 @@
 #include <vector>
 
 #include "common/Schema.h"
-#include "expr/ITypeExpr.h"
 #include "segcore/SegmentSealed.h"
 
 namespace milvus::cachinglayer {
@@ -82,30 +81,16 @@ class ArrowSealedSegment : public SegmentSealed {
     ArrowFieldColumnGroupForTest(FieldId field_id) const;
 
     size_t
-    ArrowRecordBatchReaderCreatedCountForTest() const;
+    ArrowBatchIteratorCreatedCountForTest() const;
 
-    size_t
-    ArrowNativeExprExecutionCountForTest() const;
+    using BatchView = ArrowBatchView;
 
-    BitsetType
-    ExecuteArrowNativeExprForTest(milvus::OpContext* op_ctx,
-                                  const expr::TypedExprPtr& expr) const;
-
-    bool
-    CanExecuteArrowNativeExpr(const expr::TypedExprPtr& expr) const override;
-
-    BitsetType
-    ExecuteArrowNativeExpr(milvus::OpContext* op_ctx,
-                           const expr::TypedExprPtr& expr) const override;
-
-    using RecordBatchView = ArrowRecordBatchView;
-
-    class RecordBatchIterator : public ArrowRecordBatchReader {
+    class RecordBatchIterator : public ArrowBatchIterator {
      public:
         bool
         HasNext() const override;
 
-        RecordBatchView
+        BatchView
         Next() override;
 
      private:
@@ -113,30 +98,27 @@ class ArrowSealedSegment : public SegmentSealed {
 
         RecordBatchIterator(const ArrowSealedSegment* segment,
                             milvus::OpContext* op_ctx,
-                            std::vector<FieldId> field_ids,
-                            int64_t start_row_stripe_id = 0);
+                            Projection field_ids,
+                            CandidateSelection input);
 
         const ArrowSealedSegment* segment_;
         milvus::OpContext* op_ctx_;
-        std::vector<FieldId> field_ids_;
-        int64_t next_row_stripe_id_{0};
+        Projection field_ids_;
+        int64_t next_row_offset_{0};
+        int64_t row_end_{0};
     };
 
-    RecordBatchIterator
-    IterateRecordBatches(milvus::OpContext* op_ctx,
-                         std::vector<FieldId> field_ids) const;
-
-    RecordBatchIterator
-    IterateRecordBatches(milvus::OpContext* op_ctx) const;
-
     bool
-    CanUseArrowRecordBatchReader(FieldId field_id,
-                                 DataType data_type) const override;
+    CanUseArrowBatchIterator(const Projection& fields) const override;
 
-    std::unique_ptr<ArrowRecordBatchReader>
-    CreateArrowRecordBatchReader(milvus::OpContext* op_ctx,
-                                 std::vector<FieldId> field_ids,
-                                 int64_t start_row_stripe_id) const override;
+    CandidateSelection
+    Prune(const PrunePredicate& predicate,
+          CandidateSelection input) const override;
+
+    std::unique_ptr<ArrowBatchIterator>
+    Iterate(milvus::OpContext* op_ctx,
+            Projection fields,
+            CandidateSelection input) const override;
 
     void
     LoadIndex(LoadIndexInfo& info) override;
@@ -418,8 +400,7 @@ class ArrowSealedSegment : public SegmentSealed {
     std::unordered_map<FieldId, FieldLocation> field_to_location_;
     std::vector<ColumnGroup> column_groups_;
     std::shared_ptr<std::atomic<int64_t>> simulated_load_latency_us_;
-    mutable std::atomic<size_t> arrow_record_batch_reader_created_count_{0};
-    mutable std::atomic<size_t> arrow_native_expr_execution_count_{0};
+    mutable std::atomic<size_t> arrow_batch_iterator_created_count_{0};
     InsertRecord<true> insert_record_;
     ConcurrentVector<Timestamp> timestamps_;
 };

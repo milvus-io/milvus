@@ -12,7 +12,7 @@ The current POC implements the first narrow slice of the design:
 
 - Arrow-backed sealed-segment test segment: `ArrowSealedSegment`.
 - Cache cell shape: one `RecordBatchCell` per column group and row stripe.
-- Segment-side reader interface: `ArrowRecordBatchReader`.
+- Segment-side access interface: `Prune(...)`, `Iterate(...)`, and `Take(...)`.
 - Expression integration point: `PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData`.
 - Supported expression shape: simple `INT64` / `TIMESTAMPTZ` unary range filters.
 - Normal query path: `query::ExecuteQueryExpr(...)` and `FilterBitsNode`.
@@ -25,8 +25,9 @@ query::ExecuteQueryExpr(...)
   -> ExprSet::Eval(...)
   -> PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData<T>
   -> ProcessArrowDataChunks<T>
-  -> SegmentInternalInterface::CreateArrowRecordBatchReader(...)
-  -> ArrowRecordBatchReader::Next()
+  -> SegmentInternalInterface::Prune(...)
+  -> SegmentInternalInterface::Iterate(...)
+  -> ArrowBatchIterator::Next()
   -> arrow::RecordBatch
   -> arrow::Int64Array
   -> arrow::Int64Array::raw_values()
@@ -35,7 +36,7 @@ query::ExecuteQueryExpr(...)
 
 So the expression framework now owns the scalar filter semantics. Arrow supplies the physical batch. The normal path no longer uses a `FilterBitsNode -> segment executes whole expression` shortcut.
 
-The POC still keeps `ExecuteArrowNativeExprForTest(...)` and `ExecuteArrowNativeExpr(...)` as direct helpers, but tests assert that the normal `query::ExecuteQueryExpr(...)` path creates an Arrow `RecordBatch` reader and does not call the direct segment-level executor.
+There is no segment-level Arrow expression executor in the POC. The segment only provides projected Arrow batches over a candidate row selection; expression operators perform exact evaluation.
 
 Current limitations:
 
@@ -43,7 +44,7 @@ Current limitations:
 - Only unary range filters are supported.
 - No offset-input / random-access path.
 - No string, JSON, array, vector, or sparse vector Arrow evaluator.
-- No multi-field aligned Arrow batch reader yet.
+- Multi-field projected batch iteration exists for fields backed by aligned row stripes, but cross-column-group row-boundary alignment is still POC-level.
 - No production QueryNode loader or local disk cache format change yet.
 
 ## Goals
@@ -102,25 +103,43 @@ The important separation is:
 The current POC uses a smaller interface before introducing the full `LogicalArrowDataset` object:
 
 ```cpp
-struct ArrowRecordBatchView {
+using Projection = std::vector<FieldId>;
+using RowIdBatch = std::vector<int64_t>;
+
+struct PrunePredicate {
+};
+
+class CandidateSelection {
+ public:
+    static CandidateSelection All(int64_t row_count);
+    static CandidateSelection RowRange(int64_t row_begin, int64_t row_count);
+};
+
+struct ArrowBatchView {
     int64_t row_begin;
     int64_t row_count;
     PinWrapper<std::shared_ptr<arrow::RecordBatch>> batch;
 };
 
-class ArrowRecordBatchReader {
+class ArrowBatchIterator {
  public:
     virtual bool HasNext() const = 0;
-    virtual ArrowRecordBatchView Next() = 0;
+    virtual ArrowBatchView Next() = 0;
 };
 
 virtual bool
-CanUseArrowRecordBatchReader(FieldId field_id, DataType data_type) const;
+CanUseArrowBatchIterator(const Projection& fields) const;
 
-virtual std::unique_ptr<ArrowRecordBatchReader>
-CreateArrowRecordBatchReader(milvus::OpContext* op_ctx,
-                             std::vector<FieldId> field_ids,
-                             int64_t start_row_stripe_id) const;
+virtual CandidateSelection
+Prune(const PrunePredicate& predicate, CandidateSelection input) const;
+
+virtual std::unique_ptr<ArrowBatchIterator>
+Iterate(milvus::OpContext* op_ctx,
+        Projection fields,
+        CandidateSelection input) const;
+
+virtual std::unique_ptr<ArrowBatchIterator>
+Take(milvus::OpContext* op_ctx, Projection fields, RowIdBatch row_ids) const;
 ```
 
 This is the minimal bridge that lets the existing expression framework consume Arrow-backed batches while preserving the broader target model.
@@ -300,13 +319,15 @@ no stable raw Arrow buffer access without a lifetime guard
 The POC flow is narrower and still type-specific:
 
 1. `FilterBitsNode` invokes the normal `ExprSet` / `EvalCtx` path.
-2. `PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData<T>` checks whether the segment can provide an Arrow reader.
-3. For `T == int64_t`, no offset input, and supported field types, it creates an `ArrowRecordBatchReader`.
-4. The reader pins one `RecordBatchCell` at a time and returns an `ArrowRecordBatchView`.
-5. The expression operator extracts `arrow::Int64Array::raw_values()` as `const int64_t*`.
-6. Arrow nulls are converted into a temporary `FixedVector<bool>` only when needed.
-7. The existing Milvus unary batch evaluator runs over the `T*` data and produces the result bitmap.
-8. If Arrow is unsupported for the expression, the existing Milvus chunk path remains the fallback.
+2. `PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData<T>` checks whether the segment can provide an Arrow batch iterator for the referenced field.
+3. For `T == int64_t`, no offset input, and supported field types, it builds a `CandidateSelection::RowRange(...)`.
+4. The expression path calls `Prune(...)`; this is currently a no-op placeholder for physical pruning.
+5. The expression path calls `Iterate(...)`.
+6. The iterator pins one `RecordBatchCell` at a time and returns an `ArrowBatchView`.
+7. The expression operator extracts `arrow::Int64Array::raw_values()` as `const int64_t*`.
+8. Arrow nulls are converted into a temporary `FixedVector<bool>` only when needed.
+9. The existing Milvus unary batch evaluator runs over the `T*` data and produces the result bitmap.
+10. If Arrow is unsupported for the expression, the existing Milvus chunk path remains the fallback.
 
 This means the current POC validates the data-access direction, but it has not yet replaced all chunk-aware expression code with a general Arrow batch abstraction.
 
@@ -330,7 +351,7 @@ This means the current POC validates the data-access direction, but it has not y
 
 ## Suggested Phases
 
-1. Keep the current `ArrowRecordBatchReader` bridge and expand scalar type support beyond `Int64Array`.
+1. Expand the current `ArrowBatchIterator` bridge to support scalar types beyond `Int64Array`.
 2. Add offset-input support by grouping candidate offsets by `RecordBatchCell`.
 3. Introduce multi-field batch alignment for conjuncts and compare expressions across column groups with different row stripe boundaries.
 4. Introduce `LogicalArrowDataset` and a more general `ArrowBatchView` / `ColumnView` abstraction so expression code does not branch directly on Milvus span vs Arrow array.

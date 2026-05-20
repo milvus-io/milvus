@@ -160,15 +160,13 @@ TEST(ArrowSealedSegmentTest, SegcoreExprFiltersArrowBackedSegment) {
     auto filter_node = std::make_shared<plan::FilterBitsNode>(
         DEFAULT_PLANNODE_ID, BuildAgeGreaterThanExpr(fixture.age_fid, 30));
 
-    EXPECT_EQ(fixture.segment->ArrowNativeExprExecutionCountForTest(), 0);
-    EXPECT_EQ(fixture.segment->ArrowRecordBatchReaderCreatedCountForTest(), 0);
+    EXPECT_EQ(fixture.segment->ArrowBatchIteratorCreatedCountForTest(), 0);
     auto bitset = query::ExecuteQueryExpr(
         filter_node,
         fixture.segment.get(),
         fixture.segment->get_active_count(MAX_TIMESTAMP),
         MAX_TIMESTAMP);
-    EXPECT_EQ(fixture.segment->ArrowNativeExprExecutionCountForTest(), 0);
-    EXPECT_EQ(fixture.segment->ArrowRecordBatchReaderCreatedCountForTest(), 1);
+    EXPECT_EQ(fixture.segment->ArrowBatchIteratorCreatedCountForTest(), 1);
     BitsetTypeView view(bitset);
 
     EXPECT_FALSE(view[0]);
@@ -289,18 +287,20 @@ TEST(ArrowSealedSegmentTest,
 }
 
 TEST(ArrowSealedSegmentTest,
-     RecordBatchIteratorProjectsFieldsAndPinsRowStripes) {
+     ArrowBatchIteratorProjectsFieldsAndPinsRowStripes) {
     auto fixture = BuildSegment();
     auto segment = fixture.segment;
     auto age_group = segment->ArrowFieldColumnGroupForTest(fixture.age_fid);
     auto name_group = segment->ArrowFieldColumnGroupForTest(fixture.name_fid);
 
-    auto iterator = segment->IterateRecordBatches(
-        nullptr, {fixture.age_fid, fixture.name_fid});
-    ASSERT_TRUE(iterator.HasNext());
+    auto iterator = segment->Iterate(
+        nullptr,
+        {fixture.age_fid, fixture.name_fid},
+        CandidateSelection::All(segment->get_row_count()));
+    ASSERT_TRUE(iterator->HasNext());
 
     {
-        auto view = iterator.Next();
+        auto view = iterator->Next();
         EXPECT_EQ(view.row_begin, 0);
         EXPECT_EQ(view.row_count, 2);
         ASSERT_NE(view.batch.get(), nullptr);
@@ -322,38 +322,42 @@ TEST(ArrowSealedSegmentTest,
 
     EXPECT_TRUE(segment->EvictArrowRecordBatch(age_group, 0));
     EXPECT_TRUE(segment->EvictArrowRecordBatch(name_group, 0));
-    ASSERT_TRUE(iterator.HasNext());
+    ASSERT_TRUE(iterator->HasNext());
 
-    auto view = iterator.Next();
+    auto view = iterator->Next();
     EXPECT_EQ(view.row_begin, 2);
     EXPECT_EQ(view.row_count, 3);
     EXPECT_EQ(segment->ArrowRecordBatchLoadCount(age_group, 1), 1);
     EXPECT_EQ(segment->ArrowRecordBatchLoadCount(name_group, 1), 1);
-    EXPECT_FALSE(iterator.HasNext());
-    EXPECT_THROW(iterator.Next(), std::out_of_range);
+    EXPECT_FALSE(iterator->HasNext());
+    EXPECT_THROW(iterator->Next(), std::out_of_range);
 }
 
-TEST(ArrowSealedSegmentTest, ArrowNativeExprFiltersViaRecordBatchIterator) {
+TEST(ArrowSealedSegmentTest, ArrowBatchIteratorHonorsCandidateRowRange) {
     auto fixture = BuildSegment();
     auto segment = fixture.segment;
-    auto pk_group = segment->ArrowFieldColumnGroupForTest(fixture.pk_fid);
-    auto age_group = segment->ArrowFieldColumnGroupForTest(fixture.age_fid);
-    auto name_group = segment->ArrowFieldColumnGroupForTest(fixture.name_fid);
+    auto iterator = segment->Iterate(
+        nullptr,
+        {fixture.age_fid},
+        CandidateSelection::RowRange(1, 3));
 
-    auto expr = BuildAgeGreaterThanExpr(fixture.age_fid, 30);
-    auto bitset = segment->ExecuteArrowNativeExprForTest(nullptr, expr);
-    BitsetTypeView view(bitset);
+    ASSERT_TRUE(iterator->HasNext());
+    auto first = iterator->Next();
+    EXPECT_EQ(first.row_begin, 1);
+    EXPECT_EQ(first.row_count, 1);
+    auto first_ages = std::static_pointer_cast<arrow::Int64Array>(
+        first.batch.get()->column(0));
+    EXPECT_EQ(first_ages->Value(0), 35);
 
-    EXPECT_FALSE(view[0]);
-    EXPECT_TRUE(view[1]);
-    EXPECT_TRUE(view[2]);
-    EXPECT_FALSE(view[3]);
-    EXPECT_TRUE(view[4]);
-
-    EXPECT_EQ(segment->ArrowRecordBatchLoadCount(age_group, 0), 1);
-    EXPECT_EQ(segment->ArrowRecordBatchLoadCount(age_group, 1), 1);
-    EXPECT_EQ(segment->ArrowRecordBatchLoadCount(pk_group, 0), 0);
-    EXPECT_EQ(segment->ArrowRecordBatchLoadCount(name_group, 0), 0);
+    ASSERT_TRUE(iterator->HasNext());
+    auto second = iterator->Next();
+    EXPECT_EQ(second.row_begin, 2);
+    EXPECT_EQ(second.row_count, 2);
+    auto second_ages = std::static_pointer_cast<arrow::Int64Array>(
+        second.batch.get()->column(0));
+    EXPECT_EQ(second_ages->Value(0), 31);
+    EXPECT_EQ(second_ages->Value(1), 29);
+    EXPECT_FALSE(iterator->HasNext());
 }
 
 TEST(ArrowSealedSegmentTest, RejectsInvalidFieldAndOffset) {

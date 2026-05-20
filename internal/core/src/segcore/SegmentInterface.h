@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -67,10 +68,6 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 
-namespace milvus::expr {
-class ITypeExpr;
-}  // namespace milvus::expr
-
 namespace arrow {
 class RecordBatch;
 }  // namespace arrow
@@ -85,20 +82,82 @@ struct SegmentStats {
     std::atomic<size_t> mem_size{};
 };
 
-struct ArrowRecordBatchView {
+using Projection = std::vector<FieldId>;
+using RowIdBatch = std::vector<int64_t>;
+
+struct PrunePredicate {
+};
+
+class CandidateSelection {
+ public:
+    enum class Kind {
+        All,
+        RowRange,
+    };
+
+    static CandidateSelection
+    All(int64_t row_count) {
+        return CandidateSelection(Kind::All, 0, row_count);
+    }
+
+    static CandidateSelection
+    RowRange(int64_t row_begin, int64_t row_count) {
+        return CandidateSelection(Kind::RowRange, row_begin, row_count);
+    }
+
+    Kind
+    kind() const {
+        return kind_;
+    }
+
+    int64_t
+    row_begin() const {
+        return row_begin_;
+    }
+
+    int64_t
+    row_count() const {
+        return row_count_;
+    }
+
+    int64_t
+    row_end() const {
+        return row_begin_ + row_count_;
+    }
+
+    bool
+    empty() const {
+        return row_count_ == 0;
+    }
+
+ private:
+    CandidateSelection(Kind kind, int64_t row_begin, int64_t row_count)
+        : kind_(kind), row_begin_(row_begin), row_count_(row_count) {
+        if (row_begin < 0 || row_count < 0) {
+            throw std::invalid_argument(
+                "CandidateSelection requires non-negative row range");
+        }
+    }
+
+    Kind kind_;
+    int64_t row_begin_;
+    int64_t row_count_;
+};
+
+struct ArrowBatchView {
     int64_t row_begin;
     int64_t row_count;
     PinWrapper<std::shared_ptr<arrow::RecordBatch>> batch;
 };
 
-class ArrowRecordBatchReader {
+class ArrowBatchIterator {
  public:
-    virtual ~ArrowRecordBatchReader() = default;
+    virtual ~ArrowBatchIterator() = default;
 
     virtual bool
     HasNext() const = 0;
 
-    virtual ArrowRecordBatchView
+    virtual ArrowBatchView
     Next() = 0;
 };
 
@@ -532,30 +591,24 @@ class SegmentInternalInterface : public SegmentInterface {
     GetFieldDataType(FieldId fieldId) const = 0;
 
     virtual bool
-    CanUseArrowRecordBatchReader(FieldId field_id, DataType data_type) const {
+    CanUseArrowBatchIterator(const Projection&) const {
         return false;
     }
 
-    virtual std::unique_ptr<ArrowRecordBatchReader>
-    CreateArrowRecordBatchReader(milvus::OpContext* op_ctx,
-                                 std::vector<FieldId> field_ids,
-                                 int64_t start_row_stripe_id) const {
-        ThrowInfo(NotImplemented,
-                  "segment does not support Arrow RecordBatch reader");
+    virtual CandidateSelection
+    Prune(const PrunePredicate&, CandidateSelection input) const {
+        return input;
     }
 
-    virtual bool
-    CanExecuteArrowNativeExpr(
-        const std::shared_ptr<const milvus::expr::ITypeExpr>& expr) const {
-        return false;
+    virtual std::unique_ptr<ArrowBatchIterator>
+    Iterate(milvus::OpContext*, Projection, CandidateSelection) const {
+        ThrowInfo(NotImplemented,
+                  "segment does not support Arrow batch iteration");
     }
 
-    virtual BitsetType
-    ExecuteArrowNativeExpr(
-        milvus::OpContext* op_ctx,
-        const std::shared_ptr<const milvus::expr::ITypeExpr>& expr) const {
-        ThrowInfo(NotImplemented,
-                  "segment does not support Arrow native expression execution");
+    virtual std::unique_ptr<ArrowBatchIterator>
+    Take(milvus::OpContext*, Projection, RowIdBatch) const {
+        ThrowInfo(NotImplemented, "segment does not support Arrow row take");
     }
 
     PinWrapper<index::TextMatchIndex*>
