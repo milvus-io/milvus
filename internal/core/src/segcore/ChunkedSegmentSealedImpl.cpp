@@ -4237,22 +4237,17 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             LoadGeometryCache(field_id, column);
         }
 
-        // Check if need to build ArrayOffsetsSealed for struct array fields
-        if (data_type == DataType::ARRAY ||
-            data_type == DataType::VECTOR_ARRAY) {
-            auto& field_meta = schema_->operator[](field_id);
-            const std::string& field_name = field_meta.get_name().get();
+        // Check if need to build ArrayOffsetsSealed for struct array fields.
+        auto& field_meta = schema_->operator[](field_id);
+        if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
+            parsed_struct_name.has_value()) {
+            struct_name = *parsed_struct_name;
 
-            if (field_name.find('[') != std::string::npos &&
-                field_name.find(']') != std::string::npos) {
-                struct_name = field_name.substr(0, field_name.find('['));
-
-                auto it = struct_to_array_offsets_.find(struct_name);
-                if (it != struct_to_array_offsets_.end()) {
-                    array_offsets_map_[field_id] = it->second;
-                } else {
-                    field_meta_ptr = &field_meta;  // need to build
-                }
+            auto it = struct_to_array_offsets_.find(struct_name);
+            if (it != struct_to_array_offsets_.end()) {
+                array_offsets_map_[field_id] = it->second;
+            } else {
+                field_meta_ptr = &field_meta;  // need to build
             }
         }
     }
@@ -4309,6 +4304,11 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
     }
 
     schema_ = sch;
+
+    auto row_count = num_rows_.value_or(0);
+    for (const auto& field_meta : *absent_fields) {
+        EnsureArrayOffsetsForStructField(field_meta, row_count);
+    }
 }
 
 void
@@ -4567,6 +4567,26 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
 }
 
 void
+ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
+    const FieldMeta& field_meta, int64_t row_count) {
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value()) {
+        return;
+    }
+
+    auto it = struct_to_array_offsets_.find(*struct_name);
+    if (it == struct_to_array_offsets_.end()) {
+        std::vector<int32_t> row_to_element_start(row_count + 1, 0);
+        auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
+            std::move(row_to_element_start));
+        it =
+            struct_to_array_offsets_.emplace(*struct_name, array_offsets).first;
+    }
+
+    array_offsets_map_[field_meta.get_id()] = it->second;
+}
+
+void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids) {
     std::unique_lock lck(mutex_);
@@ -4582,6 +4602,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         }
         const auto& field_meta = schema_->operator[](field_id);
         fill_empty_field(field_meta);
+        EnsureArrayOffsetsForStructField(field_meta, num_rows_.value_or(0));
     }
 }
 
