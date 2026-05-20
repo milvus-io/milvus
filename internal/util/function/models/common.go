@@ -130,6 +130,12 @@ const (
 	YandexCloudAKEnvStr string = "MILVUS_YC_API_KEY"
 )
 
+// Qianfan
+
+const (
+	QianfanAKEnvStr string = "MILVUS_QIANFAN_API_KEY"
+)
+
 // Gemini
 
 const (

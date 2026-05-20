@@ -62,6 +62,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your openai embedding url, Default is the official embedding url"
 			case "openai.enable":
 				return "Whether to enable openai model service"
+			case "qianfan.credential":
+				return "The name in the credential configuration item"
+			case "qianfan.url":
+				return "Your Qianfan embedding url, Default is the official embedding url"
+			case "qianfan.enable":
+				return "Whether to enable Qianfan model service"
 			case "dashscope.credential":
 				return "The name in the crendential configuration item"
 			case "dashscope.url":

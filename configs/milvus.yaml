@@ -1471,6 +1471,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service
         url:  # Your openai embedding url, Default is the official embedding url
+      qianfan:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Qianfan model service
+        url:  # Your Qianfan embedding url, Default is the official embedding url
       siliconflow:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable siliconflow model service

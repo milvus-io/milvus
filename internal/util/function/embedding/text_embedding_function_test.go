@@ -1098,6 +1098,62 @@ func (s *TextEmbeddingFunctionSuite) TestDisableYC() {
 	s.ErrorContains(err, "text embedding model provider [yc] is disabled")
 }
 
+func (s *TextEmbeddingFunctionSuite) TestQianfanEmbedding() {
+	ts := CreateQianfanEmbeddingServer(4)
+	defer ts.Close()
+
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := qianfanProvider + "." + models.URLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
+
+	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: qianfanProvider},
+			{Key: models.ModelNameParamKey, Value: "embedding-v1"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.NoError(err)
+
+	ret, err := runner.ProcessInsert(context.Background(), createData([]string{"sentence", "sentence 2"}))
+	s.NoError(err)
+	s.Equal([]float32{0.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0}, ret[0].GetVectors().GetFloatVector().GetData())
+}
+
+func (s *TextEmbeddingFunctionSuite) TestDisableQianfan() {
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := qianfanProvider + "." + models.EnableConf
+		return map[string]string{
+			key: "false",
+		}
+	}
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: qianfanProvider},
+			{Key: models.ModelNameParamKey, Value: "embedding-v1"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.ErrorContains(err, "text embedding model provider [qianfan] is disabled")
+}
+
 func (s *TextEmbeddingFunctionSuite) TestCheck() {
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
