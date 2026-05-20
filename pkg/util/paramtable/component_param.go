@@ -234,6 +234,8 @@ type commonConfig struct {
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
+	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
+	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -737,6 +739,28 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
+
+	p.ArrowReaderHoleSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.holeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum byte gap between adjacent Arrow read ranges that can be coalesced. ` +
+			`0 keeps Arrow's default. Increasing this can reduce remote object-store GET ` +
+			`count by reading small holes between Parquet column chunk ranges.`,
+		Export: false,
+	}
+	p.ArrowReaderHoleSizeLimitBytes.Init(base.mgr)
+
+	p.ArrowReaderRangeSizeLimitBytes = ParamItem{
+		Key:          "common.arrow.reader.rangeSizeLimitBytes",
+		Version:      "2.6.16",
+		DefaultValue: "0",
+		Doc: `Maximum size in bytes of a coalesced Arrow read range. 0 keeps Arrow's ` +
+			`default. Increase this with holeSizeLimitBytes when larger remote reads ` +
+			`are needed to amortize object-store request latency.`,
+		Export: false,
+	}
+	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",

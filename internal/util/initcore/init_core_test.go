@@ -66,6 +66,17 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
 }
 
+func TestInitArrowReaderConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	assert.NoError(t, InitArrowReaderConfig(pt))
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
+	assert.NoError(t, InitArrowReaderConfig(pt))
+}
+
 func TestInitStorageV2FileSystem(t *testing.T) {
 	// init local storage
 	paramtable.Init()
