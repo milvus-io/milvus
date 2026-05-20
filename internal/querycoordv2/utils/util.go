@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -57,7 +56,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	if info == nil {
 		err := merr.WrapErrNodeOffline(leader.ID)
 		log.Info("leader is not available", zap.Error(err))
-		return errors.Wrap(err, "leader not available")
+		return merr.Wrap(err, "leader not available")
 	}
 
 	// Check if delegator is still catching up with streaming data

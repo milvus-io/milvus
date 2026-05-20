@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -86,7 +86,7 @@ func callMessageAckOnceCallback(ctx context.Context, msg message.ImmutableMessag
 	}
 	callback, err := callbackFuture.GetWithContext(ctx)
 	if err != nil {
-		return errors.Wrap(err, "when waiting callback registered")
+		return merr.Wrap(err, "when waiting callback registered")
 	}
 	return callback(ctx, msg)
 }

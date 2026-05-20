@@ -19,8 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -60,7 +58,7 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 
 	partID, err := c.idAllocator.AllocOne()
 	if err != nil {
-		return 0, errors.Wrap(err, "failed to allocate partition ID")
+		return 0, merr.Wrap(err, "failed to allocate partition ID")
 	}
 
 	channels := make([]string, 0, collMeta.ShardsNum+1)
@@ -99,7 +97,7 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 		State:                     pb.PartitionState_PartitionCreated,
 	}
 	if err := c.meta.AddPartition(ctx, partition); err != nil {
-		return errors.Wrap(err, "failed to add partition meta")
+		return merr.Wrap(err, "failed to add partition meta")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

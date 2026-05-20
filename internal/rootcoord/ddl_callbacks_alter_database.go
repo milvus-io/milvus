@@ -70,11 +70,11 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 
 	oldDB, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrap(err, "failed to get database by name")
+		return merr.Wrap(err, "failed to get database by name")
 	}
 	alterLoadConfig, err := c.getAlterLoadConfigOfAlterDatabase(ctx, req.GetDbName(), oldDB.Properties, req.GetProperties())
 	if err != nil {
-		return errors.Wrap(err, "failed to get alter load config of alter database")
+		return merr.Wrap(err, "failed to get alter load config of alter database")
 	}
 
 	// We only allow to alter or delete properties, not both.
@@ -141,7 +141,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 
 	db := model.NewDatabase(header.DbId, header.DbName, etcdpb.DatabaseState_DatabaseCreated, body.Properties)
 	if err := c.meta.AlterDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to alter database")
+		return merr.Wrap(err, "failed to alter database")
 	}
 	if body.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
@@ -150,14 +150,14 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 			ResourceGroups: body.AlterLoadConfig.ResourceGroups,
 		})
 		if err != nil {
-			return errors.Wrap(err, "failed to update load config")
+			return merr.Wrap(err, "failed to update load config")
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
 				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
 				return nil
 			}
-			return errors.Wrap(err, "failed to update load config")
+			return merr.Wrap(err, "failed to update load config")
 		}
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().

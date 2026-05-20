@@ -20,7 +20,6 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -56,7 +55,7 @@ func NewKeyManager(
 func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 	currentStates, err := hookutil.GetEzStates()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get cipher states")
+		return nil, merr.Wrap(err, "failed to get cipher states")
 	}
 
 	abnormalDB := make(map[int64]struct{})

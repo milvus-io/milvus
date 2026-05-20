@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -105,7 +104,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		fieldSchemas = append(fieldSchemas, fieldSchema)
 	}
 	if err := checkFieldSchema(fieldSchemas); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 	newFieldNames := make(map[string]struct{}, len(fieldSchemas))
 	for _, fieldSchema := range fieldSchemas {

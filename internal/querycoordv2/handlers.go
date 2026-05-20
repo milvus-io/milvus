@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -165,7 +164,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrapf(err, "%s", msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 
@@ -245,7 +244,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrapf(err, "%s", msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 

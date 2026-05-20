@@ -108,7 +108,7 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error {
 	replicas, err := m.catalog.GetReplicas(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to recover replicas")
+		return merr.Wrap(err, "failed to recover replicas")
 	}
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
@@ -245,10 +245,10 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 		)
 	}
 	if err := m.put(ctx, params.CollectionID, replicas...); err != nil {
-		return nil, errors.Wrap(err, "failed to put replicas")
+		return nil, merr.Wrap(err, "failed to put replicas")
 	}
 	if err := m.removeRedundantReplicas(ctx, params); err != nil {
-		return nil, errors.Wrap(err, "failed to remove redundant replicas")
+		return nil, merr.Wrap(err, "failed to remove redundant replicas")
 	}
 	return replicas, nil
 }

@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -47,7 +46,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return errors.Wrapf(err, "context error while waiting for release, collection=%d", collection)
+			return merr.Wrapf(err, "context error while waiting for release, collection=%d", collection)
 		}
 
 		var (
@@ -100,7 +99,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	// manual trigger update next target
 	ready, err := targetObserver.UpdateNextTarget(collection)
 	if err != nil {
-		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
+		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}
 
 	// accelerate check
@@ -111,7 +110,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	case <-ready:
 		return nil
 	case <-ctx.Done():
-		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
 		return merr.WrapErrServiceInternalMsg("wait current target updated timeout, collection=%d", collection)
 	}
@@ -121,7 +120,7 @@ func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetOb
 	// manual trigger update next target
 	ready, err := targetObserver.UpdatePartition(collection, partition)
 	if err != nil {
-		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
+		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}
 	select {
 	case <-ready:
@@ -137,7 +136,7 @@ func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetOb
 	case <-ready:
 		return nil
 	case <-ctx.Done():
-		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
 		return merr.WrapErrServiceInternalMsg("wait current target updated timeout, collection=%d", collection)
 	}
