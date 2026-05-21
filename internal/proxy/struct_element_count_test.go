@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func structElementCountTestInsertMsg(fieldData *schemapb.FieldData) *msgstream.InsertMsg {
@@ -156,6 +157,42 @@ func TestCheckAndFlattenStructFieldDataAllowsMatchingScalarAndVectorElementCount
 
 	require.NoError(t, err)
 	assert.Len(t, insertMsg.FieldsData, 2)
+}
+
+func TestCheckAndFlattenStructFieldDataAllowsRawPayloadNamesWithStoredStructSubFieldNames(t *testing.T) {
+	const structName = "test_struct"
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: structName,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        typeutil.ConcatStructFieldName(structName, "field1"),
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+					},
+					{
+						Name:        typeutil.ConcatStructFieldName(structName, "field2"),
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
+				},
+			},
+		},
+	}
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
+		structElementCountTestScalarArray("field1", []int32{1, 2}),
+		structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4}),
+	))
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+	require.NoError(t, err)
+	require.Len(t, insertMsg.FieldsData, 2)
+	assert.Equal(t, typeutil.ConcatStructFieldName(structName, "field1"), insertMsg.FieldsData[0].GetFieldName())
+	assert.Equal(t, typeutil.ConcatStructFieldName(structName, "field2"), insertMsg.FieldsData[1].GetFieldName())
 }
 
 func TestCheckAndFlattenStructFieldDataAllowsConsistentlyEmptyRows(t *testing.T) {

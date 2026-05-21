@@ -2079,8 +2079,17 @@ func checkStructElementCountPerRow(structName string, structSchema *schemapb.Str
 
 	schemaByName := make(map[string]*schemapb.FieldSchema, len(structSchema.GetFields())*2)
 	for _, field := range structSchema.GetFields() {
-		schemaByName[field.GetName()] = field
-		schemaByName[typeutil.ConcatStructFieldName(structName, field.GetName())] = field
+		fieldName := field.GetName()
+		schemaByName[fieldName] = field
+		if typeutil.IsStructSubField(fieldName) {
+			rawName, err := typeutil.ExtractStructFieldName(fieldName)
+			if err != nil {
+				return err
+			}
+			schemaByName[rawName] = field
+		} else {
+			schemaByName[typeutil.ConcatStructFieldName(structName, fieldName)] = field
+		}
 	}
 
 	type subFieldInfo struct {
