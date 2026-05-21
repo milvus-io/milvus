@@ -17,6 +17,7 @@
 #pragma once
 
 #include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -331,8 +332,10 @@ class FileWriteWorkerPool {
             std::lock_guard<std::mutex> lock(executor_mutex_);
             old_executor = executor_;
             if (nr_worker > 0) {
-                executor_ =
-                    std::make_shared<folly::CPUThreadPoolExecutor>(nr_worker);
+                executor_ = std::make_shared<folly::CPUThreadPoolExecutor>(
+                    nr_worker,
+                    std::make_shared<folly::NamedThreadFactory>(
+                        "MILVUS_FL_WR_"));
             } else {
                 executor_ = nullptr;
             }
