@@ -75,8 +75,9 @@ func NewRecordReaderFromManifest(manifest string,
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	option ...RwOption,
 ) (RecordReader, error) {
-	return NewManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext)
+	return NewManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, option...)
 }
 
 var _ RecordReader = (*IterativeRecordReader)(nil)
@@ -154,6 +155,7 @@ type ManifestReader struct {
 	field2Col            map[FieldID]int
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
+	externalReader       packed.ExternalReaderContext
 
 	neededColumns []string
 }
@@ -206,14 +208,29 @@ func NewManifestReader(manifest string,
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	option ...RwOption,
 ) (*ManifestReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
 
-	// Override TEXT fields to binary type — LOB references are binary encoded in manifest storage
-	arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+	// The Arrow schema passed to storagev2 is a physical read contract, not a
+	// generic "accept whatever the reader returns" conversion layer. TEXT is the
+	// boundary case: internal packed manifests store TEXT as binary LOB
+	// references, while external collections read source columns where TEXT is
+	// ordinary UTF8 data. Keep that storage-format split here so later
+	// RecordToInsertData conversion does not accidentally decode internal LOB
+	// references as user text. Any source type coercion must stay in the
+	// external-source normalization path, not in the internal manifest path.
+	if !typeutil.IsExternalCollection(schema) {
+		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+	}
 
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
@@ -240,6 +257,7 @@ func NewManifestReader(manifest string,
 		field2Col:            field2Col,
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
+		externalReader:       rwOptions.externalReader,
 
 		neededColumns: neededColumns,
 	}
@@ -253,7 +271,8 @@ func NewManifestReader(manifest string,
 }
 
 func (mr *ManifestReader) init() error {
-	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext)
+	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
+		mr.bufferSize, mr.storageConfig, mr.storagePluginContext, mr.externalReader)
 	if err != nil {
 		return err
 	}

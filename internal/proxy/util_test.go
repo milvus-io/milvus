@@ -2746,6 +2746,59 @@ func TestValidateFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("Normalize function output flags explicitly", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+
+		err := validateFunction(schema, "", true)
+		assert.NoError(t, err)
+		assert.False(t, schema.GetFields()[1].GetIsFunctionOutput())
+
+		err = normalizeFunctionOutputFields(schema)
+		assert.NoError(t, err)
+		assert.True(t, schema.GetFields()[1].GetIsFunctionOutput())
+	})
+
+	t.Run("Valid external field may match function output field name", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "input_field",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "output_field",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "enable_analyzer", Value: "true"},
+					},
+				},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
+
 	t.Run("Invalid function schema - duplicate function names", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{

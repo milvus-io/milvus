@@ -945,11 +945,6 @@ func validateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
-	// reset `IsFunctionOuput` despite any user input, this shall be determined by function def only.
-	for _, field := range coll.Fields {
-		field.IsFunctionOutput = false
-	}
-
 	for _, function := range coll.GetFunctions() {
 		if err := checkFunctionBasicParams(function); err != nil {
 			return err
@@ -992,7 +987,6 @@ func validateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 				return fmt.Errorf("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
 			}
 
-			outputField.IsFunctionOutput = true
 			outputFields[i] = outputField
 			if usedOutputField.Contain(name) {
 				return fmt.Errorf("duplicate function output field: function %s, field %s", function.GetName(), name)
@@ -1007,6 +1001,46 @@ func validateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 	if !disableRuntimeCheck {
 		if err := embedding.ValidateFunctions(coll, needValidateFunctionName, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func normalizeFunctionOutputFields(coll *schemapb.CollectionSchema) error {
+	if coll == nil {
+		return nil
+	}
+	fieldsByName := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
+		return field.GetName(), field
+	})
+	fieldsByID := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (int64, *schemapb.FieldSchema) {
+		return field.GetFieldID(), field
+	})
+
+	for _, field := range coll.GetFields() {
+		field.IsFunctionOutput = false
+	}
+
+	for _, function := range coll.GetFunctions() {
+		for _, fieldID := range function.GetOutputFieldIds() {
+			if fieldID == 0 {
+				continue
+			}
+			field, ok := fieldsByID[fieldID]
+			if !ok {
+				return fmt.Errorf("function output field id %d not found in schema", fieldID)
+			}
+			field.IsFunctionOutput = true
+		}
+		for _, name := range function.GetOutputFieldNames() {
+			if name == "" {
+				continue
+			}
+			field, ok := fieldsByName[name]
+			if !ok {
+				return fmt.Errorf("function output field not found: %s", name)
+			}
+			field.IsFunctionOutput = true
 		}
 	}
 	return nil

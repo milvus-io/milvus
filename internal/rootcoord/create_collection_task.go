@@ -487,6 +487,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := typeutil.ValidateExternalCollectionGeneratedColumns(t.body.CollectionSchema); err != nil {
+		return err
+	}
 
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())

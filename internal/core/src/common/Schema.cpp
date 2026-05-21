@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <charconv>
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <tuple>
 
 #include "Schema.h"
@@ -33,6 +35,31 @@ namespace milvus {
 
 using std::string;
 const std::string namespace_field_name = "$namespace_id";
+
+std::optional<FieldId>
+ParseFieldIdColumnName(const std::string& column_name) {
+    if (column_name.empty()) {
+        return std::nullopt;
+    }
+    if (column_name.size() > 1 && column_name[0] == '0') {
+        return std::nullopt;
+    }
+    for (const auto c : column_name) {
+        if (c < '0' || c > '9') {
+            return std::nullopt;
+        }
+    }
+
+    int64_t field_id = 0;
+    const auto* begin = column_name.data();
+    const auto* end = begin + column_name.size();
+    auto [ptr, err] = std::from_chars(begin, end, field_id);
+    if (err != std::errc() || ptr != end) {
+        return std::nullopt;
+    }
+    return FieldId(field_id);
+}
+
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
@@ -136,6 +163,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     if (!schema_proto.external_source().empty()) {
         schema->set_external_source(schema_proto.external_source());
         schema->set_external_spec(schema_proto.external_spec());
+    }
+
+    // Collect function output field ids from FunctionSchema list.
+    for (const auto& fn : schema_proto.functions()) {
+        for (auto out_id : fn.output_field_ids()) {
+            schema->add_function_output_field_id(FieldId(out_id));
+        }
     }
 
     return schema;
@@ -246,8 +280,14 @@ Schema::GetExternalColumnNames() const {
     auto columns = std::make_shared<std::vector<std::string>>();
     for (const auto& field_id : field_ids_) {
         auto it = fields_.find(field_id);
-        if (it != fields_.end() && it->second.is_external_field()) {
+        if (it == fields_.end())
+            continue;
+        if (it->second.is_external_field()) {
             columns->push_back(it->second.get_external_field());
+        } else if (is_function_output(field_id)) {
+            // Function output fields are computed by Milvus and stored by
+            // numeric field id, same as internal collection fields.
+            columns->push_back(std::to_string(field_id.get()));
         }
     }
     return columns;
@@ -262,11 +302,21 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
                 return fid;
             }
         }
+        if (auto field_id = ParseFieldIdColumnName(column_name);
+            field_id.has_value()) {
+            return field_id.value();
+        }
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "external column '{}' not found in schema",
                   column_name);
     }
-    return FieldId(std::stoll(column_name));
+    if (auto field_id = ParseFieldIdColumnName(column_name);
+        field_id.has_value()) {
+        return field_id.value();
+    }
+    ThrowInfo(ErrorCode::DataFormatBroken,
+              "column '{}' is not a valid field id",
+              column_name);
 }
 
 std::pair<bool, bool>

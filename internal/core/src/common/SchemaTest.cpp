@@ -11,8 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <algorithm>
+#include <exception>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -460,4 +463,70 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
         EXPECT_TRUE(orig->type()->Equals(loon->type()));
         EXPECT_EQ(orig->nullable(), loon->nullable());
     }
+}
+
+TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    pk_field->set_external_field("id_col");
+
+    auto* text_field = schema_proto.add_fields();
+    text_field->set_fieldid(101);
+    text_field->set_name("text");
+    text_field->set_data_type(milvus::proto::schema::DataType::VarChar);
+    text_field->set_external_field("sparse");
+    auto* max_length = text_field->add_type_params();
+    max_length->set_key("max_length");
+    max_length->set_value("1024");
+
+    auto* bm25_vector = schema_proto.add_fields();
+    bm25_vector->set_fieldid(102);
+    bm25_vector->set_name("sparse");
+    bm25_vector->set_data_type(
+        milvus::proto::schema::DataType::SparseFloatVector);
+    bm25_vector->set_is_function_output(true);
+
+    auto* function = schema_proto.add_functions();
+    function->set_type(milvus::proto::schema::BM25);
+    function->add_output_field_ids(102);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_EQ(schema->get_storage_column_name(FieldId(101)), "sparse");
+    EXPECT_EQ(schema->get_storage_column_name(FieldId(102)), "102");
+    EXPECT_EQ(schema->ResolveColumnFieldId("sparse"), FieldId(101));
+    EXPECT_EQ(schema->ResolveColumnFieldId("102"), FieldId(102));
+
+    auto parsed_field_id = ParseFieldIdColumnName("102");
+    ASSERT_TRUE(parsed_field_id.has_value());
+    EXPECT_EQ(parsed_field_id.value(), FieldId(102));
+
+    const std::vector<std::string> invalid_field_id_columns = {
+        "102abc",
+        "-102",
+        "0102",
+        " 102",
+        "102 ",
+        "",
+        "99999999999999999999",
+    };
+    for (const auto& column : invalid_field_id_columns) {
+        EXPECT_FALSE(ParseFieldIdColumnName(column).has_value())
+            << "column=" << column;
+        EXPECT_THROW(schema->ResolveColumnFieldId(column), std::exception)
+            << "column=" << column;
+    }
+
+    auto columns = schema->GetExternalColumnNames();
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "sparse"),
+              columns->end());
+    EXPECT_NE(std::find(columns->begin(), columns->end(), "102"),
+              columns->end());
 }

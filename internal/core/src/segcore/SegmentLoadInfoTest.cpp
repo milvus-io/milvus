@@ -1515,6 +1515,28 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreateForUnindexed) {
     EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(103)) == 0);
 }
 
+TEST_F(SegmentLoadInfoTest, ComputeDiffExternalTextIndexCreateForUnindexed) {
+    auto text_schema = CreateSchemaWithTextMatchField();
+    text_schema->set_external_source("s3://external-bucket/table");
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Match internal collection behavior: without persisted text index stats,
+    // load can create a runtime text index from raw field data.
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
+}
+
 TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
     // Test the conversion of TextIndexStats to LoadTextIndexInfo
     proto::segcore::SegmentLoadInfo proto;

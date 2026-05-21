@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func ensureContext(ctx context.Context) error {
@@ -297,7 +299,7 @@ func fragmentKey(f packed.Fragment) string {
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments
 func (t *RefreshExternalCollectionTask) buildCurrentSegmentFragments() (packed.SegmentFragments, error) {
-	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig())
+	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig(), t.columns)
 }
 
 // organizeSegments compares fragments and organizes them into segments
@@ -324,6 +326,15 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 
+	var outputColumns []string
+	if t.hasFunctions() {
+		var err error
+		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
+		if err != nil {
+			return nil, fmt.Errorf("resolve function output columns: %w", err)
+		}
+	}
+
 	// Check each current segment
 	for _, seg := range t.req.GetCurrentSegments() {
 		if err := ensureContext(ctx); err != nil {
@@ -346,7 +357,21 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 		}
 
-		if allFragmentsExist {
+		reusableSegment := allFragmentsExist
+		if reusableSegment && len(outputColumns) > 0 {
+			hasOutputs, err := t.segmentHasFunctionOutputColumns(seg, outputColumns)
+			if err != nil {
+				return nil, err
+			}
+			if !hasOutputs {
+				reusableSegment = false
+				log.Info("Segment invalidated due to missing function output columns",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.String("manifestPath", seg.GetManifestPath()))
+			}
+		}
+
+		if reusableSegment {
 			// Keep this segment unchanged
 			keptSegments = append(keptSegments, seg)
 			for _, f := range fragments {
@@ -358,7 +383,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 			log.Debug("Segment kept unchanged",
 				zap.Int64("segmentID", seg.GetID()))
-		} else {
+		} else if !allFragmentsExist {
 			// Segment invalidated - its remaining fragments become orphans
 			log.Info("Segment invalidated due to removed fragments",
 				zap.Int64("segmentID", seg.GetID()))
@@ -398,6 +423,56 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		zap.Int("totalSegments", len(result)))
 
 	return result, nil
+}
+
+func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *datapb.SegmentInfo, outputColumns []string) (bool, error) {
+	if len(outputColumns) == 0 {
+		return true, nil
+	}
+	if segmentChildFieldsContainColumns(seg, outputColumns) {
+		return true, nil
+	}
+	if seg.GetManifestPath() == "" {
+		return false, nil
+	}
+	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+	if err != nil {
+		return false, fmt.Errorf("check function output columns for segment %d: %w", seg.GetID(), err)
+	}
+	return hasColumns, nil
+}
+
+func segmentChildFieldsContainColumns(seg *datapb.SegmentInfo, columns []string) bool {
+	required := make(map[int64]struct{}, len(columns))
+	for _, column := range columns {
+		fieldID, err := strconv.ParseInt(column, 10, 64)
+		if err != nil {
+			return false
+		}
+		required[fieldID] = struct{}{}
+	}
+
+	seen := make(map[int64]struct{}, len(required))
+	for _, binlog := range seg.GetBinlogs() {
+		for _, fieldID := range binlog.GetChildFields() {
+			if _, ok := required[fieldID]; ok {
+				seen[fieldID] = struct{}{}
+			}
+		}
+	}
+	return len(seen) == len(required)
+}
+
+func functionOutputColumnNames(schema *schemapb.CollectionSchema) ([]string, error) {
+	outputFields, err := functionOutputFields(schema)
+	if err != nil {
+		return nil, err
+	}
+	columns := make([]string, 0, len(outputFields))
+	for _, field := range outputFields {
+		columns = append(columns, strconv.FormatInt(field.GetFieldID(), 10))
+	}
+	return columns, nil
 }
 
 // balanceFragmentsToSegments organizes fragments into segments with balanced row counts
@@ -532,7 +607,13 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
-			manifestPath, err := t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			var manifestPath string
+			var err error
+			if t.hasFunctions() {
+				manifestPath, err = t.createManifestWithFunctions(ctx, work.segmentID, work.fragments)
+			} else {
+				manifestPath, err = t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			}
 			if err != nil {
 				return "", fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
 			}
@@ -587,6 +668,10 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
 	segmentAvgBytes := make([]int64, len(works))
 	var fallbackAvg int64
+	functionOutputAvgBytes, err := estimateFunctionOutputBytesPerRow(t.req.GetSchema())
+	if err != nil {
+		return nil, err
+	}
 
 	// firstSampleErr captures the first underlying sampling failure so we
 	// can surface the real root cause (e.g. "Column 'xxx' not found in
@@ -689,7 +774,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	// Phase 4: Build result and mappings (sequential, lightweight)
 	result := make([]*datapb.SegmentInfo, 0, len(works))
 	for i, work := range works {
-		memorySize := segmentAvgBytes[i] * work.rowCount
+		memorySize := (segmentAvgBytes[i] + functionOutputAvgBytes) * work.rowCount
 		seg := &datapb.SegmentInfo{
 			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
@@ -716,12 +801,12 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 ) (string, error) {
 	// All segments now use final paths with real IDs (no temporary paths needed)
 	// Pre-allocated IDs ensure we can write directly to final locations
-	rootPath := ""
-	if storageConfig := t.req.GetStorageConfig(); storageConfig != nil {
-		rootPath = storageConfig.GetRootPath()
-	}
-	k := metautil.JoinIDPath(t.req.GetCollectionID(), t.req.GetPartitionID(), segmentID)
-	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
+	basePath := segmentInsertLogBasePath(
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		t.req.GetPartitionID(),
+		segmentID,
+	)
 
 	return packed.CreateSegmentManifestWithBasePath(
 		ctx,
@@ -730,6 +815,53 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		t.columns,
 		fragments,
 		t.req.GetStorageConfig(),
+	)
+}
+
+func segmentInsertLogBasePath(
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+) string {
+	rootPath := ""
+	if storageConfig != nil {
+		rootPath = storageConfig.GetRootPath()
+	}
+	return path.Join(rootPath, common.SegmentInsertLogPath, metautil.JoinIDPath(collectionID, partitionID, segmentID))
+}
+
+// hasFunctions returns true if the schema defines any functions.
+func (t *RefreshExternalCollectionTask) hasFunctions() bool {
+	return len(t.req.GetSchema().GetFunctions()) > 0
+}
+
+// createManifestWithFunctions builds an input manifest from the segment's
+// fragments, runs schema functions, and appends a function-output column group
+// on top. External input files are referenced, never copied.
+func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
+	ctx context.Context,
+	segmentID int64,
+	fragments []packed.Fragment,
+) (string, error) {
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	basePath := segmentInsertLogBasePath(
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		t.req.GetPartitionID(),
+		segmentID,
+	)
+
+	return ExecuteFunctionsForSegment(
+		ctx,
+		t.req.GetSchema(),
+		fragments,
+		t.parsedSpec.Format,
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		segmentID,
+		basePath,
+		clusterID,
 	)
 }
 
@@ -759,6 +891,27 @@ func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.Collect
 			},
 		},
 	}
+}
+
+// estimateFunctionOutputBytesPerRow computes the per-row memory estimate for
+// fields generated during refresh. These fields are not present in external
+// source samples, so add them explicitly to the fake binlog memory size.
+func estimateFunctionOutputBytesPerRow(schema *schemapb.CollectionSchema) (int64, error) {
+	var total int64
+	outputFields, err := functionOutputFields(schema)
+	if err != nil {
+		return 0, err
+	}
+	for _, field := range outputFields {
+		size, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{field},
+		})
+		if err != nil {
+			return 0, fmt.Errorf("estimate function output field %s: %w", field.GetName(), err)
+		}
+		total += int64(size)
+	}
+	return total, nil
 }
 
 // sumFieldSizes computes total avgBytesPerRow from per-field sampling results.

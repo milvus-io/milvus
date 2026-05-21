@@ -74,6 +74,7 @@ type rwOptions struct {
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
 	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	externalReader      packed.ExternalReaderContext
 }
 
 func (o *rwOptions) validate() error {
@@ -173,6 +174,12 @@ func GetStorageConfig(option ...RwOption) *indexpb.StorageConfig {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithExternalReaderContext(externalReader packed.ExternalReaderContext) RwOption {
+	return func(options *rwOptions) {
+		options.externalReader = externalReader
 	}
 }
 
@@ -364,7 +371,8 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 			}
 		}
 	}
-	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize,
+		rwOptions.storageConfig, pluginContext, option...)
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,

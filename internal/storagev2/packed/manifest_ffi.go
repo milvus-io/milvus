@@ -175,18 +175,121 @@ func createColumnGroups(
 }
 
 // ReadFragmentsFromManifest reads fragment info from a manifest path.
-// This function wraps the C exttable_read_column_groups call.
+// This function wraps loon_exttable_read_manifest and walks its column groups.
 //
 // The manifestPath is a JSON string like {"ver":1,"base_path":"external/.../segments/..."}.
 // The actual manifest file is at: base_path/_metadata/manifest-{ver}.avro
+// When columns is non-empty, only column groups containing at least one of the
+// requested columns are considered.
 func ReadFragmentsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	columns []string,
 ) ([]Fragment, error) {
+	columnSet := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		columnSet[column] = struct{}{}
+	}
+
+	var fragments []Fragment
+	err := withManifest(manifestPath, storageConfig, func(manifest *C.LoonManifest) error {
+		var fragmentID int64
+		return forEachManifestColumnGroup(manifest, func(index int, cg *C.LoonColumnGroup) error {
+			if len(columnSet) > 0 && !columnGroupHasAnyColumn(cg, columnSet) {
+				return nil
+			}
+
+			// Check if files array is valid
+			if cg.files == nil && cg.num_of_files > 0 {
+				log.Warn("column group has num_of_files > 0 but files array is nil in ReadFragmentsFromManifest",
+					zap.Int("columnGroupIndex", index),
+					zap.Uint64("numFiles", uint64(cg.num_of_files)))
+				return nil
+			}
+
+			if cg.files == nil {
+				return nil // Empty column group, skip
+			}
+
+			fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
+			for j := range fileArray {
+				file := &fileArray[j]
+
+				// Validate file path pointer
+				if file.path == nil {
+					log.Warn("file path is nil in ReadFragmentsFromManifest",
+						zap.Int("columnGroupIndex", index),
+						zap.Int("fileIndex", j))
+					continue
+				}
+
+				filePath := C.GoString(file.path)
+				startRow := int64(file.start_index)
+				endRow := int64(file.end_index)
+
+				fragments = append(fragments, Fragment{
+					FragmentID: fragmentID,
+					FilePath:   filePath,
+					StartRow:   startRow,
+					EndRow:     endRow,
+					RowCount:   endRow - startRow,
+				})
+				fragmentID++
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fragments, nil
+}
+
+// ManifestHasColumns returns true when the manifest contains every requested
+// column in any column group.
+func ManifestHasColumns(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) (bool, error) {
+	if len(columns) == 0 {
+		return true, nil
+	}
+	required := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		required[column] = struct{}{}
+	}
+
+	err := withManifest(manifestPath, storageConfig, func(manifest *C.LoonManifest) error {
+		return forEachManifestColumnGroup(manifest, func(_ int, cg *C.LoonColumnGroup) error {
+			if cg.columns == nil || cg.num_of_columns == 0 {
+				return nil
+			}
+			columnArray := unsafe.Slice(cg.columns, int(cg.num_of_columns))
+			for _, column := range columnArray {
+				if column == nil {
+					continue
+				}
+				delete(required, C.GoString(column))
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(required) == 0, nil
+}
+
+func withManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	fn func(*C.LoonManifest) error,
+) error {
 	// 1. Parse manifest path to get base path and version
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+		return fmt.Errorf("failed to parse manifest path: %w", err)
 	}
 
 	// 2. Construct full manifest file path: base_path/_metadata/manifest-{version}.avro
@@ -196,7 +299,7 @@ func ReadFragmentsFromManifest(
 	// 3. Create properties from storage config
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return fmt.Errorf("failed to create properties: %w", err)
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -208,65 +311,47 @@ func ReadFragmentsFromManifest(
 	var manifest *C.LoonManifest
 	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
+		return fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
 	}
 
-	// 5. Destroy manifest when done
+	// 6. Destroy manifest when done
 	defer C.loon_manifest_destroy(manifest)
+	return fn(manifest)
+}
 
-	// 6. Extract fragments from LoonManifest's column groups
-	var fragments []Fragment
-	var fragmentID int64 = 0
-
+func forEachManifestColumnGroup(
+	manifest *C.LoonManifest,
+	fn func(index int, cg *C.LoonColumnGroup) error,
+) error {
 	cgroups := &manifest.column_groups
 
 	// Validate column groups structure before accessing
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
 	for i := range cgArray {
-		cg := &cgArray[i]
-
-		// Check if files array is valid
-		if cg.files == nil && cg.num_of_files > 0 {
-			log.Warn("column group has num_of_files > 0 but files array is nil in ReadFragmentsFromManifest",
-				zap.Int("columnGroupIndex", i),
-				zap.Uint64("numFiles", uint64(cg.num_of_files)))
-			continue
-		}
-
-		if cg.files == nil {
-			continue // Empty column group, skip
-		}
-
-		fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
-		for j := range fileArray {
-			file := &fileArray[j]
-
-			// Validate file path pointer
-			if file.path == nil {
-				log.Warn("file path is nil in ReadFragmentsFromManifest",
-					zap.Int("columnGroupIndex", i),
-					zap.Int("fileIndex", j))
-				continue
-			}
-
-			filePath := C.GoString(file.path)
-			startRow := int64(file.start_index)
-			endRow := int64(file.end_index)
-
-			fragments = append(fragments, Fragment{
-				FragmentID: fragmentID,
-				FilePath:   filePath,
-				StartRow:   startRow,
-				EndRow:     endRow,
-				RowCount:   endRow - startRow,
-			})
-			fragmentID++
+		if err := fn(i, &cgArray[i]); err != nil {
+			return err
 		}
 	}
 
-	return fragments, nil
+	return nil
+}
+
+func columnGroupHasAnyColumn(cg *C.LoonColumnGroup, columns map[string]struct{}) bool {
+	if cg.columns == nil || cg.num_of_columns == 0 {
+		return false
+	}
+	columnArray := unsafe.Slice(cg.columns, int(cg.num_of_columns))
+	for _, column := range columnArray {
+		if column == nil {
+			continue
+		}
+		if _, ok := columns[C.GoString(column)]; ok {
+			return true
+		}
+	}
+	return false
 }

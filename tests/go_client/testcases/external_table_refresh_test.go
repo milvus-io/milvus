@@ -40,6 +40,13 @@ func envOrDefault(key, defaultVal string) string {
 		if _, bucket, ok := inferGoSDKMinIOConfig(); ok {
 			return bucket
 		}
+	case "MINIO_ROOT_PATH":
+		if _, _, ok := inferGoSDKMinIOConfig(); ok {
+			// The go-sdk Helm deployment writes Milvus object data under
+			// minio.rootPath=file. Keep the inferred MinIO config complete so
+			// tests that inspect persisted objects use the same prefix.
+			return "file"
+		}
 	}
 	return defaultVal
 }

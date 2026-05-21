@@ -2015,26 +2015,9 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.Equal(t, "vec_field", freshTask.schema.Fields[2].Name)
 	})
 
-	t.Run("functions forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
-	})
-
 	t.Run("dynamic field forbidden", func(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.EnableDynamicField = true
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("primary key forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Fields[0].IsPrimaryKey = true
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
@@ -2064,15 +2047,20 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("text match forbidden", func(t *testing.T) {
+	t.Run("text match allowed", func(t *testing.T) {
 		schema := buildExternalSchema()
-		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
-			Key:   "enable_match",
-			Value: "true",
-		})
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams,
+			&commonpb.KeyValuePair{
+				Key:   "enable_match",
+				Value: "true",
+			},
+			&commonpb.KeyValuePair{
+				Key:   common.EnableAnalyzerKey,
+				Value: "true",
+			})
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("struct field forbidden", func(t *testing.T) {
