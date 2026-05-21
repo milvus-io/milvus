@@ -60,9 +60,8 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 	c.JSON(code, result)
 }
 
-// HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response stream,
-// it uses less memory since it does not buffer the entire JSON structure before sending it,
-// unlike c.JSON in HTTPReturn, which serializes the JSON fully in memory before writing it to the response.
+// HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
+// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
 func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
