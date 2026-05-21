@@ -415,6 +415,199 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestTimeoutResponseRecorderIsolation(t *testing.T) {
+	realResponse := httptest.NewRecorder()
+	realCtx, _ := gin.CreateTestContext(realResponse)
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+
+	recorder.Header().Set("X-Test", "value")
+	recorder.WriteHeader(http.StatusAccepted)
+	recorder.WriteHeaderNow()
+	recorder.Flush()
+	n, err := recorder.WriteString("body")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, n)
+	assert.Empty(t, realResponse.Body.String())
+	assert.Empty(t, realResponse.Header().Get("X-Test"))
+	assert.Equal(t, http.StatusAccepted, recorder.Status())
+	assert.Equal(t, 4, recorder.Size())
+	assert.True(t, recorder.Written())
+
+	assert.NoError(t, recorder.CommitTo(realCtx.Writer))
+	assert.Equal(t, http.StatusAccepted, realResponse.Code)
+	assert.Equal(t, "value", realResponse.Header().Get("X-Test"))
+	assert.Equal(t, "body", realResponse.Body.String())
+
+	recorder.CloseForTimeout()
+	n, err = recorder.Write([]byte("late"))
+	assert.Error(t, err)
+	assert.Equal(t, 0, n)
+}
+
+func TestTimeoutMiddlewareCommitsBufferedResponsesAndMetadata(t *testing.T) {
+	testCases := []struct {
+		name   string
+		status int
+		code   int32
+		write  func(c *gin.Context, code int32, message string)
+	}{
+		{
+			name:   "return",
+			status: http.StatusCreated,
+			code:   11,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPReturn(c, http.StatusCreated, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+		{
+			name:   "stream",
+			status: http.StatusAccepted,
+			code:   12,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPReturnStream(c, http.StatusAccepted, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+		{
+			name:   "abort",
+			status: http.StatusNonAuthoritativeInfo,
+			code:   13,
+			write: func(c *gin.Context, code int32, message string) {
+				HTTPAbortReturn(c, http.StatusNonAuthoritativeInfo, gin.H{HTTPReturnCode: code, HTTPReturnMessage: message})
+			},
+		},
+	}
+
+	for _, testcase := range testCases {
+		t.Run(testcase.name, func(t *testing.T) {
+			ginHandler := gin.New()
+			originalCtx := make(chan *gin.Context, 1)
+			path := "/middleware/timeout/commit/" + testcase.name
+
+			ginHandler.Use(func(c *gin.Context) {
+				c.Set(ContextUsername, "root")
+				originalCtx <- c
+				c.Next()
+			})
+			ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+				username, ok := c.Get(ContextUsername)
+				assert.True(t, ok)
+				assert.Equal(t, "root", username)
+				c.Header("X-Test", testcase.name)
+				c.Set(ContextRequest, "request-"+testcase.name)
+				c.Set(ContextResponse, "response-"+testcase.name)
+				c.Set("traceID", "trace-"+testcase.name)
+				testcase.write(c, testcase.code, testcase.name)
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+
+			assert.Equal(t, testcase.status, w.Code)
+			assert.Equal(t, testcase.name, w.Header().Get("X-Test"))
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, testcase.code, returnBody.Code)
+			assert.Equal(t, testcase.name, returnBody.Message)
+
+			ctx := <-originalCtx
+			value, ok := ctx.Get(HTTPReturnCode)
+			assert.True(t, ok)
+			assert.Equal(t, testcase.code, value)
+			value, ok = ctx.Get(HTTPReturnMessage)
+			assert.True(t, ok)
+			assert.Equal(t, testcase.name, value)
+			value, ok = ctx.Get(ContextRequest)
+			assert.True(t, ok)
+			assert.Equal(t, "request-"+testcase.name, value)
+			value, ok = ctx.Get(ContextResponse)
+			assert.True(t, ok)
+			assert.Equal(t, "response-"+testcase.name, value)
+			value, ok = ctx.Get("traceID")
+			assert.True(t, ok)
+			assert.Equal(t, "trace-"+testcase.name, value)
+		})
+	}
+}
+
+func TestTimeoutMiddlewarePropagatesAbortToOriginalContext(t *testing.T) {
+	ginHandler := gin.New()
+	path := "/middleware/timeout/abort-propagation"
+	nextCalled := false
+
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(100), HTTPReturnMessage: "aborted"})
+	}), func(c *gin.Context) {
+		nextCalled = true
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(200), HTTPReturnMessage: "next"})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.False(t, nextCalled)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(100), returnBody.Code)
+	assert.Equal(t, "aborted", returnBody.Message)
+}
+
+func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key, "10")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().HTTPCfg.RequestTimeoutMs.Key)
+	})
+
+	ginHandler := gin.New()
+	path := "/middleware/timeout/late-write"
+	originalCtx := make(chan *gin.Context, 1)
+	handlerCtx := make(chan *gin.Context, 1)
+	lateWriteDone := make(chan struct{}, 1)
+
+	ginHandler.Use(func(c *gin.Context) {
+		originalCtx <- c
+		c.Next()
+	})
+	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		handlerCtx <- c
+		<-c.Request.Context().Done()
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(12345), HTTPReturnMessage: "late write"})
+		lateWriteDone <- struct{}{}
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestTimeout, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.TimeoutCode, returnBody.Code)
+	assert.Equal(t, "request timeout", returnBody.Message)
+	assert.NotContains(t, w.Body.String(), "late write")
+
+	ctx := <-originalCtx
+	copiedCtx := <-handlerCtx
+	assert.False(t, ctx == copiedCtx)
+	select {
+	case <-lateWriteDone:
+	case <-time.After(time.Second):
+		t.Fatal("late handler write did not finish")
+	}
+
+	value, ok := ctx.Get(HTTPReturnCode)
+	assert.True(t, ok)
+	assert.Equal(t, merr.TimeoutCode, value)
+	value, ok = ctx.Get(HTTPReturnMessage)
+	assert.True(t, ok)
+	assert.Equal(t, "request timeout", value)
+}
+
 func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
 	ginHandler := gin.New()
 	app := ginHandler.Group("")
