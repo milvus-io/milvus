@@ -729,16 +729,28 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto is_embedding_list = (elem_type_ != DataType::NONE);
     std::unique_ptr<storage::FileWriter> embedding_list_meta_writer_ptr =
         nullptr;
+    std::unique_ptr<storage::FileWriter> embedding_list_raw_index_writer_ptr =
+        nullptr;
     auto embedding_list_meta_path =
         GetValueFromConfig<std::string>(config, EMB_LIST_META_PATH);
+    auto embedding_list_raw_index_path =
+        GetValueFromConfig<std::string>(config, EMB_LIST_RAW_INDEX_PATH);
     if (is_embedding_list) {
         AssertInfo(embedding_list_meta_path.has_value(),
-                   "mmap filepath is empty when load index");
+                   "emb list meta mmap filepath is empty when load index");
         std::filesystem::create_directories(
             std::filesystem::path(embedding_list_meta_path.value())
                 .parent_path());
         embedding_list_meta_writer_ptr = std::make_unique<storage::FileWriter>(
             embedding_list_meta_path.value());
+        if (embedding_list_raw_index_path.has_value()) {
+            std::filesystem::create_directories(
+                std::filesystem::path(embedding_list_raw_index_path.value())
+                    .parent_path());
+            embedding_list_raw_index_writer_ptr =
+                std::make_unique<storage::FileWriter>(
+                    embedding_list_raw_index_path.value());
+        }
     }
 
     auto file_writer = storage::FileWriter(
@@ -776,8 +788,30 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     std::unique_ptr<storage::DataCodec> valid_data_count_codec;
     std::unique_ptr<storage::DataCodec> valid_data_codec;
     // load files in two parts:
-    // 1. EMB_LIST_META: Written separately to embedding_list_meta_writer_ptr (if embedding list type)
-    // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere
+    // 1. Emb-list sidecar files: written separately so knowhere can mmap them.
+    // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere.
+    auto WriteIndexData = [&](const std::string& prefix,
+                              std::unique_ptr<storage::DataCodec>& index_data) {
+        if (prefix == knowhere::meta::EMB_LIST_META &&
+            embedding_list_meta_writer_ptr) {
+            embedding_list_meta_writer_ptr->Write(index_data->PayloadData(),
+                                                  index_data->PayloadSize());
+        } else if (prefix == knowhere::meta::EMB_LIST_RAW_INDEX) {
+            AssertInfo(embedding_list_raw_index_writer_ptr,
+                       "emb list raw index mmap filepath is empty when load "
+                       "index");
+            embedding_list_raw_index_writer_ptr->Write(
+                index_data->PayloadData(), index_data->PayloadSize());
+        } else if (prefix == VALID_DATA_COUNT_KEY) {
+            valid_data_count_codec = std::move(index_data);
+        } else if (prefix == VALID_DATA_KEY) {
+            valid_data_codec = std::move(index_data);
+        } else {
+            file_writer.Write(index_data->PayloadData(),
+                              index_data->PayloadSize());
+        }
+    };
+
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
         std::string index_file_prefix = slice_meta_filepath.substr(
@@ -807,18 +841,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    if (prefix == knowhere::meta::EMB_LIST_META &&
-                        embedding_list_meta_writer_ptr) {
-                        embedding_list_meta_writer_ptr->Write(
-                            data->PayloadData(), data->PayloadSize());
-                    } else if (prefix == VALID_DATA_COUNT_KEY) {
-                        valid_data_count_codec = std::move(data);
-                    } else if (prefix == VALID_DATA_KEY) {
-                        valid_data_codec = std::move(data);
-                    } else {
-                        file_writer.Write(data->PayloadData(),
-                                          data->PayloadSize());
-                    }
+                    WriteIndexData(prefix, data);
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
                 }
@@ -852,18 +875,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [prefix, index_data] : result) {
-            if (prefix == knowhere::meta::EMB_LIST_META &&
-                embedding_list_meta_writer_ptr) {
-                embedding_list_meta_writer_ptr->Write(
-                    index_data->PayloadData(), index_data->PayloadSize());
-            } else if (prefix == VALID_DATA_COUNT_KEY) {
-                valid_data_count_codec = std::move(index_data);
-            } else if (prefix == VALID_DATA_KEY) {
-                valid_data_codec = std::move(index_data);
-            } else {
-                file_writer.Write(index_data->PayloadData(),
-                                  index_data->PayloadSize());
-            }
+            WriteIndexData(prefix, index_data);
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
@@ -879,13 +891,20 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     if (embedding_list_meta_writer_ptr) {
         embedding_list_meta_writer_ptr->Finish();
     }
+    if (embedding_list_raw_index_writer_ptr) {
+        embedding_list_raw_index_writer_ptr->Finish();
+    }
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
     if (is_embedding_list) {
-        conf["emb_list_meta_file_path"] = embedding_list_meta_path.value();
+        conf[EMB_LIST_META_PATH] = embedding_list_meta_path.value();
+        if (embedding_list_raw_index_path.has_value()) {
+            conf[EMB_LIST_RAW_INDEX_PATH] =
+                embedding_list_raw_index_path.value();
+        }
     }
     auto start_deserialize = std::chrono::system_clock::now();
     auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
