@@ -4486,3 +4486,371 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		assert.True(t, result, "import segment with commit_ts=5000 should be GCed when cpTimestamp=6000")
 	})
 }
+
+// TestGarbageCollector_recycleTasks_OrphanAndLOBLambdas ensures the orphan and
+// LOB inline task lambdas registered by recycleTasks are exercised. They are
+// otherwise only reached via the work() loop, which the unit tests skip.
+func TestGarbageCollector_recycleTasks_OrphanAndLOBLambdas(t *testing.T) {
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-recycletasks"))
+	gc := newGarbageCollector(nil, nil, GcOption{
+		cli:           cli,
+		checkInterval: time.Second,
+		scanInterval:  time.Second,
+	})
+
+	mockBin := mockey.Mock((*garbageCollector).recycleUnusedBinlogFiles).Return().Build()
+	defer mockBin.UnPatch()
+	mockV0 := mockey.Mock((*garbageCollector).recycleUnusedIndexFilesV0).Return().Build()
+	defer mockV0.UnPatch()
+	mockV1 := mockey.Mock((*garbageCollector).recycleUnusedIndexFilesV1).Return().Build()
+	defer mockV1.UnPatch()
+	mockLOB := mockey.Mock((*garbageCollector).recycleUnusedLOBFiles).Return().Build()
+	defer mockLOB.UnPatch()
+
+	tasks := gc.recycleTasks()
+	byName := make(map[string]recycleTask, len(tasks))
+	for _, task := range tasks {
+		byName[task.name] = task
+	}
+
+	orphan, ok := byName[gcTaskOrphan]
+	require.True(t, ok)
+	orphan.run(context.Background(), nil)
+	assert.Equal(t, 1, mockBin.Times())
+	assert.Equal(t, 1, mockV0.Times())
+	assert.Equal(t, 1, mockV1.Times())
+
+	lob, ok := byName[gcTaskLOB]
+	require.True(t, ok)
+	lob.run(context.Background(), nil)
+	assert.Equal(t, 1, mockLOB.Times())
+}
+
+// TestGarbageCollector_work_FansOutTasks verifies that work() starts a
+// goroutine per recycle task and exits cleanly when ctx is canceled. Each
+// task callback is stubbed so the smoke test stays hermetic.
+func TestGarbageCollector_work_FansOutTasks(t *testing.T) {
+	gc := newGarbageCollector(nil, nil, GcOption{
+		cli:           storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-work")),
+		checkInterval: time.Hour,
+		scanInterval:  time.Hour,
+	})
+
+	stubTask := func(_ context.Context, _ <-chan gcCmd) {}
+	stubbedTasks := []recycleTask{
+		{name: gcTaskDroppedSegments, interval: time.Hour, run: stubTask},
+		{name: gcTaskOrphan, interval: time.Hour, run: stubTask},
+		{name: gcTaskLOB, interval: time.Hour, run: stubTask},
+	}
+	mockTasks := mockey.Mock((*garbageCollector).recycleTasks).Return(stubbedTasks).Build()
+	defer mockTasks.UnPatch()
+	mockCtrl := mockey.Mock((*garbageCollector).startControlLoop).Return().Build()
+	defer mockCtrl.UnPatch()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		gc.work(ctx)
+		gc.wg.Wait()
+		close(done)
+	}()
+
+	// Give worker goroutines a moment to enter their runRecycleTaskWithPauser
+	// select before we cancel them.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("work goroutines did not exit after ctx cancellation")
+	}
+
+	assert.Equal(t, 1, mockTasks.Times())
+	assert.Equal(t, 1, mockCtrl.Times())
+}
+
+// TestGarbageCollector_pause_PauseWorkersFailRollsBack covers the pause()
+// failure tail (lines 468-471) where pauseWorkers returns an error and the
+// caller resumes the just-committed ticket and surfaces the error.
+func TestGarbageCollector_pause_PauseWorkersFailRollsBack(t *testing.T) {
+	t.Run("global pause", func(t *testing.T) {
+		gc := newGarbageCollector(nil, nil, GcOption{})
+		// Fire the timeout immediately so pauseWorkers cannot deliver to any
+		// worker channel and returns an error.
+		timeoutCh := make(chan struct{})
+		close(timeoutCh)
+		err := gc.pause(gcCmd{
+			ticket:   "rollback-global",
+			duration: time.Minute,
+			timeout:  timeoutCh,
+		})
+		require.Error(t, err)
+		// resume() should have wiped the ticket from pauseUntil.
+		assert.Equal(t, time.Time{}, gc.pauseUntil.PauseUntil())
+	})
+
+	t.Run("collection-scoped pause", func(t *testing.T) {
+		gc := newGarbageCollector(nil, nil, GcOption{})
+		timeoutCh := make(chan struct{})
+		close(timeoutCh)
+		err := gc.pause(gcCmd{
+			ticket:       "rollback-coll",
+			collectionID: 42,
+			duration:     time.Minute,
+			timeout:      timeoutCh,
+		})
+		require.Error(t, err)
+		// The collection bucket should have been removed by resume().
+		_, has := gc.pausedCollection.Get(int64(42))
+		assert.False(t, has)
+	})
+}
+
+// TestGarbageCollector_pause_SuccessRetainsTicket covers the happy path
+// (line 472, return nil) where pauseWorkers succeeds and the ticket stays
+// committed in pauseUntil.
+func TestGarbageCollector_pause_SuccessRetainsTicket(t *testing.T) {
+	gc := newGarbageCollector(nil, nil, GcOption{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, taskName := range gcPausableTaskNames {
+		ch := gc.controlChannels[taskName]
+		go func() {
+			cmd := <-ch
+			close(cmd.done)
+		}()
+	}
+	err := gc.pause(gcCmd{
+		ticket:   "success-global",
+		duration: time.Minute,
+		timeout:  ctx.Done(),
+	})
+	require.NoError(t, err)
+	assert.False(t, gc.pauseUntil.PauseUntil().IsZero(),
+		"global pause ticket must remain committed after a successful pause")
+}
+
+// TestGarbageCollector_pauseWorkers_SkipsUnknownChannel covers the
+// `if !ok { continue }` branch in pauseWorkers (line 485) when a registered
+// pausable task has no control channel - e.g. it was unwired after init.
+func TestGarbageCollector_pauseWorkers_SkipsUnknownChannel(t *testing.T) {
+	gc := newGarbageCollector(nil, nil, GcOption{})
+	// Drop one task's channel so pauseWorkers must `continue` on it.
+	missing := gcPausableTaskNames[0]
+	delete(gc.controlChannels, missing)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, taskName := range gcPausableTaskNames {
+		if taskName == missing {
+			continue
+		}
+		ch := gc.controlChannels[taskName]
+		go func() {
+			cmd := <-ch
+			close(cmd.done)
+		}()
+	}
+	assert.NoError(t, gc.pauseWorkers(gcCmd{timeout: ctx.Done()}))
+}
+
+// TestGarbageCollector_recycleDroppedSegments_GCRemoveConcurrentClamp covers
+// the maxConcurrentSegments < 1 clamp (lines 859-860). The paramtable
+// formatter rewrites the literal "0" to CPU count, so we set a negative
+// value (which the formatter passes through) to hit the defensive clamp.
+func TestGarbageCollector_recycleDroppedSegments_GCRemoveConcurrentClamp(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.GCRemoveConcurrent.Key, "-1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.GCRemoveConcurrent.Key)
+	require.Less(t, Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), 1,
+		"paramtable must surface the negative value so the clamp branch is reachable")
+
+	ctx := context.Background()
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-clamp"))
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cli,
+		dropTolerance: 0,
+	})
+
+	processed := atomic.NewInt32(0)
+	mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).To(
+		func(gc *garbageCollector, ctx context.Context, segmentID int64, seg *SegmentInfo) {
+			processed.Inc()
+		}).Build()
+	defer mockRecycle.UnPatch()
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Equal(t, int32(1), processed.Load(),
+		"recycleDroppedSegment must still run for the dropped segment when GCRemoveConcurrent is clamped to 1")
+	// Segment should still exist because recycleDroppedSegment is mocked.
+	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
+}
+
+// TestGarbageCollector_recycleDroppedSegments_SlotAcquireCancelReturns covers
+// the `return` on lines 904-905 where acquireDroppedSegmentSlot fails (ctx
+// canceled) and the outer dispatch loop bails out without dropping the segment.
+func TestGarbageCollector_recycleDroppedSegments_SlotAcquireCancelReturns(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.GCRemoveConcurrent.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.GCRemoveConcurrent.Key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-slot-cancel"))
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cli,
+		dropTolerance: 0,
+	})
+
+	acquireCalled := atomic.NewInt32(0)
+	mockAcquire := mockey.Mock((*garbageCollector).acquireDroppedSegmentSlot).To(
+		func(gc *garbageCollector, c context.Context, sig <-chan gcCmd, slots chan struct{}) bool {
+			acquireCalled.Inc()
+			cancel()
+			return false
+		}).Build()
+	defer mockAcquire.UnPatch()
+
+	recycleCalled := atomic.NewInt32(0)
+	mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).To(
+		func(gc *garbageCollector, c context.Context, sid int64, s *SegmentInfo) {
+			recycleCalled.Inc()
+		}).Build()
+	defer mockRecycle.UnPatch()
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Equal(t, int32(1), acquireCalled.Load())
+	assert.Equal(t, int32(0), recycleCalled.Load(),
+		"recycleDroppedSegment must NOT run after acquireDroppedSegmentSlot reports failure")
+	assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+}
+
+// TestGarbageCollector_acquireDroppedSegmentSlot_TickerAcksSignal covers
+// lines 922-923 in the ticker.C branch where the call blocks on a full slot
+// channel and the per-tick ackSignal drains a queued pause command. The
+// ticker inside acquireDroppedSegmentSlot fires every 100ms; the helper
+// goroutine watches for that ack and then frees a slot so the call returns.
+func TestGarbageCollector_acquireDroppedSegmentSlot_TickerAcksSignal(t *testing.T) {
+	gc := newGarbageCollector(nil, nil, GcOption{})
+
+	// Pre-fill the slot channel so segmentSlots<- blocks and the call falls
+	// through to ticker.C.
+	slots := make(chan struct{}, 1)
+	slots <- struct{}{}
+
+	signal := make(chan gcCmd, 1)
+	cmdDone := make(chan error, 1)
+	signal <- gcCmd{done: cmdDone}
+
+	helperDone := make(chan struct{})
+	go func() {
+		defer close(helperDone)
+		select {
+		case <-cmdDone:
+		case <-time.After(3 * time.Second):
+			t.Errorf("ticker.C path did not ackSignal the pending pause cmd")
+			return
+		}
+		// Free a slot so the next iteration of the for-select succeeds via
+		// the segmentSlots<- branch.
+		<-slots
+	}()
+
+	got := gc.acquireDroppedSegmentSlot(context.Background(), signal, slots)
+	assert.True(t, got)
+	<-helperDone
+}
+
+// TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop covers
+// the third ctx.Err() guard (lines 987-988) by canceling ctx inside
+// removeDroppedSegmentIndexMeta so DropSegment must NOT run.
+func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing.T) {
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-cancel-drop"))
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cli,
+		dropTolerance: 0,
+	})
+
+	mockRemove := mockey.Mock((*garbageCollector).removeObjectFiles).Return(nil).Build()
+	defer mockRemove.UnPatch()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var indexMetaCalls atomic.Int32
+	mockIdx := mockey.Mock((*garbageCollector).removeDroppedSegmentIndexMeta).To(
+		func(gc *garbageCollector, c context.Context, idx []*model.SegmentIndex) error {
+			indexMetaCalls.Inc()
+			cancel()
+			return nil
+		}).Build()
+	defer mockIdx.UnPatch()
+
+	var dropCalls atomic.Int32
+	mockDrop := mockey.Mock((*meta).DropSegment).To(
+		func(m *meta, ctx context.Context, sid int64) error {
+			dropCalls.Inc()
+			return nil
+		}).Build()
+	defer mockDrop.UnPatch()
+
+	gc.recycleDroppedSegment(ctx, segment.ID, segment)
+
+	assert.Equal(t, int32(1), indexMetaCalls.Load())
+	assert.Equal(t, int32(0), dropCalls.Load(),
+		"DropSegment must NOT run when ctx is canceled between index-meta and segment-meta steps")
+	assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+}
+
+// TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs covers
+// lines 1062-1063 and 1065-1066 (the for-range loops that merge getTextLogs
+// and getJSONKeyLogs into the file deletion set in the V1/V2 path).
+func TestGarbageCollector_removeDroppedSegmentFiles_TextAndJSONLogs(t *testing.T) {
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	var mu sync.Mutex
+	removed := make(map[string]struct{})
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, filePath string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			removed[filePath] = struct{}{}
+			return nil
+		}).Maybe()
+
+	gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
+	const textFile = "text/log/file-1"
+	const jsonFile = "json-file"
+	const indexFile = "idx/extra/file-99"
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           7001,
+			CollectionID: 100,
+			PartitionID:  10,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {Files: []string{textFile}},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				102: {
+					FieldID: 102,
+					BuildID: 11,
+					Version: 1,
+					Files:   []string{jsonFile},
+				},
+			},
+		},
+	}
+
+	indexFiles := map[string]struct{}{indexFile: {}}
+	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment, indexFiles))
+
+	expectedJSON := path.Join("root", common.JSONIndexPath, "11", "1", "100", "10", "7001", "102", jsonFile)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, removed, textFile)
+	assert.Contains(t, removed, expectedJSON)
+	assert.Contains(t, removed, indexFile)
+}
