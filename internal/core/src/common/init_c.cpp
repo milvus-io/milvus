@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <cstddef>
+#include <algorithm>
 #include <mutex>
 #include <string>
 
@@ -31,7 +32,9 @@
 #include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -71,6 +74,29 @@ SetLowPriorityThreadCoreCoefficient(const float value) {
 void
 SetThreadPoolMaxThreadsSize(const int value) {
     milvus::SetThreadPoolMaxThreadsSize(value);
+}
+
+void
+SetFieldDataLoadMemoryLimitMB(const int64_t value) {
+    milvus::storage::TransientMemoryBudget::SetFieldDataLoadBudgetBytes(
+        static_cast<size_t>(std::max<int64_t>(value, 1)) << 20);
+}
+
+void
+SetFieldDataLoadBatchSizeMB(const int64_t value) {
+    milvus::segcore::SetFieldDataLoadBatchTargetBytes(
+        std::max<int64_t>(value, 1) << 20);
+}
+
+void
+SetFieldDataLoadReadBufferSizeMB(const int64_t value) {
+    milvus::segcore::SetFieldDataReadWindowBytes(std::max<int64_t>(value, 1)
+                                                 << 20);
+}
+
+void
+SetFieldDataLoadMaxReadParallelism(const int64_t value) {
+    milvus::segcore::SetFieldDataMaxReadParallelism(value);
 }
 
 void

@@ -257,6 +257,36 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.threadCoreCoefficient.lowPriority", ResizeLowPriorityPool))
 	pt.Watch(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key,
 		config.NewHandler("common.threadCoreCoefficient.maxThreadsSize", ResizeAllPools))
+	fieldDataLoadHandler := func(key string) func(evt *config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			cfg := paramtable.Get().CommonCfg
+			initcore.UpdateFieldDataLoadMemoryLimitMB(cfg.FieldDataLoadMemoryLimitMB.GetAsInt())
+			initcore.UpdateFieldDataLoadBatchSizeMB(cfg.FieldDataLoadBatchSizeMB.GetAsInt())
+			initcore.UpdateFieldDataLoadReadBufferSizeMB(cfg.FieldDataLoadReadBufferSizeMB.GetAsInt())
+			initcore.UpdateFieldDataLoadMaxReadParallelism(cfg.FieldDataLoadMaxReadParallelism.GetAsInt())
+			log.Info("field data load config updated",
+				zap.String("trigger", key),
+				zap.Int("memoryLimitMB", cfg.FieldDataLoadMemoryLimitMB.GetAsInt()),
+				zap.Int("batchSizeMB", cfg.FieldDataLoadBatchSizeMB.GetAsInt()),
+				zap.Int("readBufferSizeMB", cfg.FieldDataLoadReadBufferSizeMB.GetAsInt()),
+				zap.Int("maxReadParallelism", cfg.FieldDataLoadMaxReadParallelism.GetAsInt()))
+		}
+	}
+	pt.Watch(pt.CommonCfg.FieldDataLoadMemoryLimitMB.Key,
+		config.NewHandler(pt.CommonCfg.FieldDataLoadMemoryLimitMB.Key,
+			fieldDataLoadHandler(pt.CommonCfg.FieldDataLoadMemoryLimitMB.Key)))
+	pt.Watch(pt.CommonCfg.FieldDataLoadBatchSizeMB.Key,
+		config.NewHandler(pt.CommonCfg.FieldDataLoadBatchSizeMB.Key,
+			fieldDataLoadHandler(pt.CommonCfg.FieldDataLoadBatchSizeMB.Key)))
+	pt.Watch(pt.CommonCfg.FieldDataLoadReadBufferSizeMB.Key,
+		config.NewHandler(pt.CommonCfg.FieldDataLoadReadBufferSizeMB.Key,
+			fieldDataLoadHandler(pt.CommonCfg.FieldDataLoadReadBufferSizeMB.Key)))
+	pt.Watch(pt.CommonCfg.FieldDataLoadMaxReadParallelism.Key,
+		config.NewHandler(pt.CommonCfg.FieldDataLoadMaxReadParallelism.Key,
+			fieldDataLoadHandler(pt.CommonCfg.FieldDataLoadMaxReadParallelism.Key)))
 	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
 		config.NewHandler("common.diskWriteMode", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,

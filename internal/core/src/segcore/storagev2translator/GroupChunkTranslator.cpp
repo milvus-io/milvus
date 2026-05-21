@@ -50,7 +50,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
-#include "storage/ChunkStreamUtils.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -365,7 +365,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
                                             std::move(cell_specs),
                                             std::move(factory),
                                             channel,
-                                            kFieldDataLoadBatchTargetBytes,
+                                            FieldDataLoadBatchTargetBytes(),
                                             load_priority_);
 
     LOG_INFO(

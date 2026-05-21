@@ -597,6 +597,42 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.FieldDataLoadMemoryLimitMB.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateFieldDataLoadMemoryLimitMB(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.FieldDataLoadBatchSizeMB.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateFieldDataLoadBatchSizeMB(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.FieldDataLoadReadBufferSizeMB.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateFieldDataLoadReadBufferSizeMB(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.FieldDataLoadMaxReadParallelism.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			parallelism, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateFieldDataLoadMaxReadParallelism(parallelism)
+			return nil
+		})
+
 		paramtable.Get().CommonCfg.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
