@@ -2072,179 +2072,6 @@ func subFieldHasData(subField *schemapb.FieldData) bool {
 	}
 }
 
-func checkStructElementCountPerRow(structName string, structSchema *schemapb.StructArrayFieldSchema, subFields []*schemapb.FieldData, rowCount int) error {
-	if rowCount <= 0 || len(subFields) <= 1 {
-		return nil
-	}
-
-	schemaByName := make(map[string]*schemapb.FieldSchema, len(structSchema.GetFields())*2)
-	for _, field := range structSchema.GetFields() {
-		fieldName := field.GetName()
-		schemaByName[fieldName] = field
-		if typeutil.IsStructSubField(fieldName) {
-			rawName, err := typeutil.ExtractStructFieldName(fieldName)
-			if err != nil {
-				return err
-			}
-			schemaByName[rawName] = field
-		} else {
-			schemaByName[typeutil.ConcatStructFieldName(structName, fieldName)] = field
-		}
-	}
-
-	type subFieldInfo struct {
-		field  *schemapb.FieldData
-		schema *schemapb.FieldSchema
-		dim    int
-		width  int
-	}
-
-	infos := make([]subFieldInfo, len(subFields))
-	for i, subField := range subFields {
-		fieldSchema := schemaByName[subField.GetFieldName()]
-		if fieldSchema == nil {
-			return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
-		}
-
-		info := subFieldInfo{
-			field:  subField,
-			schema: fieldSchema,
-		}
-		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfVector {
-			dim, err := typeutil.GetDim(fieldSchema)
-			if err != nil {
-				return fmt.Errorf("sub-field '%s' in struct '%s': %w", subField.GetFieldName(), structName, err)
-			}
-			if dim <= 0 {
-				return fmt.Errorf("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
-			}
-			info.dim = int(dim)
-			switch fieldSchema.GetElementType() {
-			case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
-				info.width = info.dim
-			case schemapb.DataType_BinaryVector:
-				info.width = (info.dim + 7) / 8
-			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-				info.width = info.dim * 2
-			default:
-				return fmt.Errorf("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
-					subField.GetFieldName(), structName, fieldSchema.GetElementType().String())
-			}
-		}
-		infos[i] = info
-	}
-
-	// For nullable struct, sub-field payload rows are compact: null struct rows are
-	// skipped in the actual payload and represented only by ValidData=false. The
-	// validator iterates physical payload rows, and maps them back to logical input
-	// row indexes only for error reporting.
-	physicalToLogical := make([]int, 0, rowCount)
-	if validData := infos[0].field.GetValidData(); len(validData) > 0 {
-		for logicalRow, valid := range validData {
-			if valid {
-				physicalToLogical = append(physicalToLogical, logicalRow)
-			}
-		}
-		if len(physicalToLogical) != rowCount {
-			return fmt.Errorf("invalid ValidData for struct '%s': true count %d does not match payload row count %d",
-				structName, len(physicalToLogical), rowCount)
-		}
-	}
-
-	logicalRow := func(physicalRow int) int {
-		if len(physicalToLogical) == 0 {
-			return physicalRow
-		}
-		return physicalToLogical[physicalRow]
-	}
-
-	countArrayOfVectorElements := func(row *schemapb.VectorField, info subFieldInfo) (int, error) {
-		if row.GetData() == nil {
-			return 0, fmt.Errorf("nil vector array data")
-		}
-
-		var payloadLen int
-		switch info.schema.GetElementType() {
-		case schemapb.DataType_FloatVector:
-			payloadLen = len(row.GetFloatVector().GetData())
-		case schemapb.DataType_BinaryVector:
-			payloadLen = len(row.GetBinaryVector())
-		case schemapb.DataType_Float16Vector:
-			payloadLen = len(row.GetFloat16Vector())
-		case schemapb.DataType_BFloat16Vector:
-			payloadLen = len(row.GetBfloat16Vector())
-		case schemapb.DataType_Int8Vector:
-			payloadLen = len(row.GetInt8Vector())
-		}
-		if payloadLen%info.width != 0 {
-			return 0, fmt.Errorf("payload length %d is not divisible by vector width %d", payloadLen, info.width)
-		}
-		return payloadLen / info.width, nil
-	}
-
-	countElements := func(info subFieldInfo, physicalRow int) (int, error) {
-		switch subFieldData := info.field.Field.(type) {
-		case *schemapb.FieldData_Scalars:
-			scalarArray := subFieldData.Scalars.GetArrayData()
-			if scalarArray == nil || physicalRow >= len(scalarArray.GetData()) {
-				return 0, fmt.Errorf("array row %d not found", physicalRow)
-			}
-			row := scalarArray.GetData()[physicalRow]
-			if row.GetData() == nil {
-				return 0, fmt.Errorf("nil array data")
-			}
-			switch info.schema.GetElementType() {
-			case schemapb.DataType_Bool:
-				return len(row.GetBoolData().GetData()), nil
-			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-				return len(row.GetIntData().GetData()), nil
-			case schemapb.DataType_Int64:
-				return len(row.GetLongData().GetData()), nil
-			case schemapb.DataType_Float:
-				return len(row.GetFloatData().GetData()), nil
-			case schemapb.DataType_Double:
-				return len(row.GetDoubleData().GetData()), nil
-			case schemapb.DataType_VarChar, schemapb.DataType_String:
-				return len(row.GetStringData().GetData()), nil
-			default:
-				return 0, fmt.Errorf("unsupported array element type %s", info.schema.GetElementType().String())
-			}
-		case *schemapb.FieldData_Vectors:
-			vectorArray := subFieldData.Vectors.GetVectorArray()
-			if vectorArray == nil || physicalRow >= len(vectorArray.GetData()) {
-				return 0, fmt.Errorf("vector array row %d not found", physicalRow)
-			}
-			return countArrayOfVectorElements(vectorArray.GetData()[physicalRow], info)
-		default:
-			return 0, fmt.Errorf("unexpected field data type")
-		}
-	}
-
-	// Each physical row represents one non-null struct row. Within that row, every
-	// sub-field must describe the same number of struct elements.
-	for physicalRow := 0; physicalRow < rowCount; physicalRow++ {
-		refCount, err := countElements(infos[0], physicalRow)
-		if err != nil {
-			return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
-				structName, logicalRow(physicalRow), infos[0].field.GetFieldName(), err)
-		}
-
-		for _, info := range infos[1:] {
-			count, err := countElements(info, physicalRow)
-			if err != nil {
-				return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
-					structName, logicalRow(physicalRow), info.field.GetFieldName(), err)
-			}
-			if count != refCount {
-				return fmt.Errorf("inconsistent struct element count in struct '%s' at row %d: '%s' has %d, '%s' has %d",
-					structName, logicalRow(physicalRow), infos[0].field.GetFieldName(), refCount, info.field.GetFieldName(), count)
-			}
-		}
-	}
-
-	return nil
-}
-
 // checkAndFlattenStructFieldData verifies the array length of the struct array field data in the insert message
 // and then flattens the data so that data node and query node have not to handle the struct array field data.
 func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
@@ -2343,15 +2170,90 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			}
 		}
 
-		// Check the array length of the struct array field data
+		subFieldSchemaByName := make(map[string]*schemapb.FieldSchema, len(structSchema.GetFields())*2)
+		for _, subFieldSchema := range structSchema.GetFields() {
+			subFieldSchemaByName[subFieldSchema.GetName()] = subFieldSchema
+			subFieldSchemaByName[storedStructSubFieldName(structName, subFieldSchema.GetName())] = subFieldSchema
+			if typeutil.IsStructSubField(subFieldSchema.GetName()) {
+				rawName, err := typeutil.ExtractStructFieldName(subFieldSchema.GetName())
+				if err != nil {
+					return err
+				}
+				subFieldSchemaByName[rawName] = subFieldSchema
+			}
+		}
+
+		vectorElementWidth := func(subField *schemapb.FieldData, subFieldSchema *schemapb.FieldSchema) (int, error) {
+			dim, err := typeutil.GetDim(subFieldSchema)
+			if err != nil {
+				return 0, fmt.Errorf("sub-field '%s' in struct '%s': %w", subField.GetFieldName(), structName, err)
+			}
+			if dim <= 0 {
+				return 0, fmt.Errorf("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
+			}
+			switch subFieldSchema.GetElementType() {
+			case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+				return int(dim), nil
+			case schemapb.DataType_BinaryVector:
+				return int((dim + 7) / 8), nil
+			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+				return int(dim * 2), nil
+			default:
+				return 0, fmt.Errorf("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
+					subField.GetFieldName(), structName, subFieldSchema.GetElementType().String())
+			}
+		}
+
+		// Check the payload row count and, while those rows are in hand, verify the
+		// per-row struct element count. The outer row count only proves that every
+		// sub-field has the same number of physical payload rows. For each such row,
+		// every sub-field must also describe the same number of struct elements.
 		expectedArrayLen := -1
+		var firstValidData []bool
+		type rowElementCounter struct {
+			name  string
+			count func(physicalRow int) (int, error)
+		}
+		rowElementCounters := make([]rowElementCounter, 0, totalSubFields)
 		for _, subField := range structArrays.StructArrays.Fields {
+			subFieldSchema := subFieldSchemaByName[subField.GetFieldName()]
+			if subFieldSchema == nil {
+				return fmt.Errorf("sub-field '%s' not found in struct schema '%s'", subField.GetFieldName(), structName)
+			}
+
 			var currentArrayLen int
 
 			switch subFieldData := subField.Field.(type) {
 			case *schemapb.FieldData_Scalars:
 				if scalarArray := subFieldData.Scalars.GetArrayData(); scalarArray != nil {
 					currentArrayLen = len(scalarArray.Data)
+					if totalSubFields > 1 {
+						rowElementCounters = append(rowElementCounters, rowElementCounter{
+							name: subField.GetFieldName(),
+							count: func(physicalRow int) (int, error) {
+								row := scalarArray.GetData()[physicalRow]
+								if row.GetData() == nil {
+									return 0, fmt.Errorf("nil array data")
+								}
+								switch subFieldSchema.GetElementType() {
+								case schemapb.DataType_Bool:
+									return len(row.GetBoolData().GetData()), nil
+								case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+									return len(row.GetIntData().GetData()), nil
+								case schemapb.DataType_Int64:
+									return len(row.GetLongData().GetData()), nil
+								case schemapb.DataType_Float:
+									return len(row.GetFloatData().GetData()), nil
+								case schemapb.DataType_Double:
+									return len(row.GetDoubleData().GetData()), nil
+								case schemapb.DataType_VarChar, schemapb.DataType_String:
+									return len(row.GetStringData().GetData()), nil
+								default:
+									return 0, fmt.Errorf("unsupported array element type %s", subFieldSchema.GetElementType().String())
+								}
+							},
+						})
+					}
 				} else {
 					return fmt.Errorf("scalar array data is nil in struct field '%s', sub-field '%s'",
 						structName, subField.FieldName)
@@ -2359,6 +2261,42 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			case *schemapb.FieldData_Vectors:
 				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
 					currentArrayLen = len(vectorArray.Data)
+					if totalSubFields > 1 {
+						var vectorWidth int
+						rowElementCounters = append(rowElementCounters, rowElementCounter{
+							name: subField.GetFieldName(),
+							count: func(physicalRow int) (int, error) {
+								if vectorWidth == 0 {
+									var err error
+									vectorWidth, err = vectorElementWidth(subField, subFieldSchema)
+									if err != nil {
+										return 0, err
+									}
+								}
+								row := vectorArray.GetData()[physicalRow]
+								if row.GetData() == nil {
+									return 0, fmt.Errorf("nil vector array data")
+								}
+								var payloadLen int
+								switch subFieldSchema.GetElementType() {
+								case schemapb.DataType_FloatVector:
+									payloadLen = len(row.GetFloatVector().GetData())
+								case schemapb.DataType_BinaryVector:
+									payloadLen = len(row.GetBinaryVector())
+								case schemapb.DataType_Float16Vector:
+									payloadLen = len(row.GetFloat16Vector())
+								case schemapb.DataType_BFloat16Vector:
+									payloadLen = len(row.GetBfloat16Vector())
+								case schemapb.DataType_Int8Vector:
+									payloadLen = len(row.GetInt8Vector())
+								}
+								if payloadLen%vectorWidth != 0 {
+									return 0, fmt.Errorf("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
+								}
+								return payloadLen / vectorWidth, nil
+							},
+						})
+					}
 				} else {
 					return fmt.Errorf("vector array data is nil in struct field '%s', sub-field '%s'",
 						structName, subField.FieldName)
@@ -2369,18 +2307,61 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 			if expectedArrayLen == -1 {
 				expectedArrayLen = currentArrayLen
+				firstValidData = subField.GetValidData()
 			} else if currentArrayLen != expectedArrayLen {
 				return fmt.Errorf("inconsistent array length in struct field '%s': expected %d, got %d for sub-field '%s'",
 					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 		}
 
-		if err := checkStructElementCountPerRow(structName, structSchema, structArrays.StructArrays.Fields, expectedArrayLen); err != nil {
-			return err
+		if totalSubFields > 1 && expectedArrayLen > 0 {
+			var physicalToLogical []int
+			if len(firstValidData) > 0 {
+				physicalToLogical = make([]int, 0, expectedArrayLen)
+				for logicalRow, valid := range firstValidData {
+					if valid {
+						physicalToLogical = append(physicalToLogical, logicalRow)
+					}
+				}
+				if len(physicalToLogical) != expectedArrayLen {
+					return fmt.Errorf("invalid ValidData for struct '%s': true count %d does not match payload row count %d",
+						structName, len(physicalToLogical), expectedArrayLen)
+				}
+			}
+			logicalRow := func(physicalRow int) int {
+				if len(physicalToLogical) == 0 {
+					return physicalRow
+				}
+				return physicalToLogical[physicalRow]
+			}
+
+			refCounter := rowElementCounters[0]
+			refElementCounts := make([]int, expectedArrayLen)
+			for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
+				count, err := refCounter.count(physicalRow)
+				if err != nil {
+					return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
+						structName, logicalRow(physicalRow), refCounter.name, err)
+				}
+				refElementCounts[physicalRow] = count
+			}
+			for _, counter := range rowElementCounters[1:] {
+				for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
+					count, err := counter.count(physicalRow)
+					if err != nil {
+						return fmt.Errorf("struct '%s' row %d sub-field '%s': %w",
+							structName, logicalRow(physicalRow), counter.name, err)
+					}
+					if count != refElementCounts[physicalRow] {
+						return fmt.Errorf("inconsistent struct element count in struct '%s' at row %d: '%s' has %d, '%s' has %d",
+							structName, logicalRow(physicalRow), refCounter.name, refElementCounts[physicalRow], counter.name, count)
+					}
+				}
+			}
 		}
 
 		for _, subField := range structArrays.StructArrays.Fields {
-			transformedFieldName := typeutil.ConcatStructFieldName(structName, subField.FieldName)
+			transformedFieldName := storedStructSubFieldName(structName, subField.FieldName)
 			subFieldCopy := &schemapb.FieldData{
 				FieldName: transformedFieldName,
 				FieldId:   subField.FieldId,
