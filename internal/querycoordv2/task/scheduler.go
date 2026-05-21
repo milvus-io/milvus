@@ -304,7 +304,7 @@ func (snapshot *SegmentTaskDeltaSnapshot) GetByNode(nodeID int64) int {
 	return snapshot.nodeDeltas[nodeID]
 }
 
-func (snapshot *SegmentTaskDeltaSnapshot) GetByNodeAndCollection(nodeID int64) int {
+func (snapshot *SegmentTaskDeltaSnapshot) GetByNodeInCollection(nodeID int64) int {
 	if snapshot == nil {
 		return 0
 	}
