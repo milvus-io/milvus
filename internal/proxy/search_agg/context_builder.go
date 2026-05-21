@@ -31,7 +31,12 @@ func BuildSearchAggregationContext(
 	if err := validateSearchAggregationResultEntries(nq, topK, groupSize, maxEntries); err != nil {
 		return nil, err
 	}
-	return NewContext(nq, resolved.levels, nil, resolved.extraOutputFieldIDs)
+	ctx, err := NewContext(nq, resolved.levels, nil, resolved.extraOutputFieldIDs)
+	if err != nil {
+		return nil, err
+	}
+	ctx.dynamicOutputFields = resolved.dynamicOutputFields
+	return ctx, nil
 }
 
 // NewContext assembles a SearchAggregationContext from already-resolved levels.
@@ -222,6 +227,8 @@ type resolvedAggregationSpec struct {
 	// metric source fields and top_hits sort fields. These must be appended to
 	// SearchRequest.OutputFieldsId so segcore writes them into fields_data.
 	extraOutputFieldIDs []int64
+	// dynamicOutputFields are dynamic-field keys proxy needs in Plan.DynamicFields.
+	dynamicOutputFields []string
 }
 
 // maxAggregationLevels caps SearchAggregation nesting depth to keep proxy
@@ -249,6 +256,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 	dynamicField := findDynamicField(schema)
 	groupBySeen := make(map[int64]struct{})
 	extraSeen := make(map[int64]struct{})
+	dynamicSeen := make(map[string]struct{})
 
 	resolved := &resolvedAggregationSpec{}
 	var walk func(spec *commonpb.SearchAggregationSpec) error
@@ -313,7 +321,7 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 				if strings.TrimSpace(alias) == "" {
 					return fmt.Errorf("metric alias cannot be empty")
 				}
-				metricSpec, metricSourceFieldID, err := buildMetricSpec(metric, schema, dynamicField)
+				metricSpec, metricSourceFieldID, dynamicOutputField, err := buildMetricSpec(metric, schema, dynamicField)
 				if err != nil {
 					return fmt.Errorf("invalid metric %q: %w", alias, err)
 				}
@@ -324,16 +332,20 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 				level.Metrics[alias] = metricSpec
 				level.metricPlans = append(level.metricPlans, plan)
 				appendUniqueFieldID(extraSeen, &resolved.extraOutputFieldIDs, metricSourceFieldID)
+				appendUniqueString(dynamicSeen, &resolved.dynamicOutputFields, dynamicOutputField)
 			}
 		}
 
-		topHits, topHitsFieldIDs, err := buildTopHitsConfig(spec.GetTopHits(), schema, dynamicField)
+		topHits, topHitsFieldIDs, topHitsDynamicFields, err := buildTopHitsConfig(spec.GetTopHits(), schema, dynamicField)
 		if err != nil {
 			return err
 		}
 		level.TopHits = topHits
 		for _, fieldID := range topHitsFieldIDs {
 			appendUniqueFieldID(extraSeen, &resolved.extraOutputFieldIDs, fieldID)
+		}
+		for _, fieldName := range topHitsDynamicFields {
+			appendUniqueString(dynamicSeen, &resolved.dynamicOutputFields, fieldName)
 		}
 
 		order, err := buildOrderCriteria(spec.GetOrder(), level.Metrics)
@@ -349,58 +361,66 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 	if err := walk(groupBy); err != nil {
 		return nil, err
 	}
+	sort.Strings(resolved.dynamicOutputFields)
 
 	return resolved, nil
 }
 
-func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (MetricSpec, int64, error) {
+func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (MetricSpec, int64, string, error) {
 	if metric == nil {
-		return MetricSpec{}, 0, fmt.Errorf("metric spec is nil")
+		return MetricSpec{}, 0, "", fmt.Errorf("metric spec is nil")
 	}
 
 	op := strings.ToLower(strings.TrimSpace(metric.GetOp()))
 	switch op {
 	case "avg", "sum", "count", "min", "max":
 	default:
-		return MetricSpec{}, 0, fmt.Errorf("unsupported metric op %q", metric.GetOp())
+		return MetricSpec{}, 0, "", fmt.Errorf("unsupported metric op %q", metric.GetOp())
 	}
 
 	fieldName := strings.TrimSpace(metric.GetFieldName())
 	if fieldName == "" {
-		return MetricSpec{}, 0, fmt.Errorf("metric field_name is empty")
+		return MetricSpec{}, 0, "", fmt.Errorf("metric field_name is empty")
 	}
 
 	switch fieldName {
 	case "_score":
 		// _score is a float32 produced by the engine; declare as Float so
 		// internal/agg's type check accepts it for sum/avg/min/max.
-		return MetricSpec{Op: op, FieldID: ScoreFieldID, FieldType: schemapb.DataType_Float}, 0, nil
+		return MetricSpec{Op: op, FieldID: ScoreFieldID, FieldType: schemapb.DataType_Float}, 0, "", nil
 	case "*":
 		if op != "count" {
-			return MetricSpec{}, 0, fmt.Errorf("field_name '*' only supports count op")
+			return MetricSpec{}, 0, "", fmt.Errorf("field_name '*' only supports count op")
 		}
 		// count(*) has no source field; DataType_None is what internal/agg
 		// expects for the synthetic always-1 input.
-		return MetricSpec{Op: op, FieldID: CountAllFieldID, FieldType: schemapb.DataType_None}, 0, nil
+		return MetricSpec{Op: op, FieldID: CountAllFieldID, FieldType: schemapb.DataType_None}, 0, "", nil
 	default:
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
-			return MetricSpec{}, 0, err
+			return MetricSpec{}, 0, "", err
+		}
+		if err := rejectUnsupportedJSONPathMetric(fieldName, schema, fieldID, dynamicField); err != nil {
+			return MetricSpec{}, 0, "", err
 		}
 		fieldType := schemapb.DataType_None
 		if field := typeutil.GetFieldByName(schema, fieldName); field != nil {
 			fieldType = field.GetDataType()
 		}
-		return MetricSpec{Op: op, FieldID: fieldID, FieldType: fieldType}, fieldID, nil
+		dynamicOutputField, err := resolveDynamicOutputFieldName(fieldName, schema, dynamicField, fieldID)
+		if err != nil {
+			return MetricSpec{}, 0, "", err
+		}
+		return MetricSpec{Op: op, FieldID: fieldID, FieldType: fieldType}, fieldID, dynamicOutputField, nil
 	}
 }
 
-func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (*TopHitsConfig, []int64, error) {
+func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (*TopHitsConfig, []int64, []string, error) {
 	if topHits == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if topHits.GetSize() < 0 {
-		return nil, nil, fmt.Errorf("top_hits size must be non-negative")
+		return nil, nil, nil, fmt.Errorf("top_hits size must be non-negative")
 	}
 
 	cfg := &TopHitsConfig{
@@ -409,19 +429,21 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 	}
 	sortFieldIDs := make([]int64, 0, len(topHits.GetSort()))
 	seen := make(map[int64]struct{})
+	dynamicSeen := make(map[string]struct{})
+	dynamicFieldNames := make([]string, 0)
 
 	for _, sortSpec := range topHits.GetSort() {
 		if sortSpec == nil {
-			return nil, nil, fmt.Errorf("top_hits.sort contains nil item")
+			return nil, nil, nil, fmt.Errorf("top_hits.sort contains nil item")
 		}
 		fieldName := strings.TrimSpace(sortSpec.GetFieldName())
 		if fieldName == "" {
-			return nil, nil, fmt.Errorf("top_hits.sort field_name is empty")
+			return nil, nil, nil, fmt.Errorf("top_hits.sort field_name is empty")
 		}
 
 		direction, err := normalizeDirection(sortSpec.GetDirection(), "desc")
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid top_hits.sort direction for %q: %w", fieldName, err)
+			return nil, nil, nil, fmt.Errorf("invalid top_hits.sort direction for %q: %w", fieldName, err)
 		}
 
 		if fieldName == "_score" {
@@ -430,18 +452,23 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 		}
 
 		if isJSONPathFieldExpr(fieldName) {
-			return nil, nil, fmt.Errorf("top_hits.sort JSON path is not yet supported: %q", fieldName)
+			return nil, nil, nil, fmt.Errorf("top_hits.sort JSON path is not yet supported: %q", fieldName)
 		}
 
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
+			return nil, nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
 		}
 		cfg.Sort = append(cfg.Sort, SortCriterion{FieldID: fieldID, Dir: direction, NullFirst: sortSpec.GetNullFirst()})
 		appendUniqueFieldID(seen, &sortFieldIDs, fieldID)
+		dynamicOutputField, err := resolveDynamicOutputFieldName(fieldName, schema, dynamicField, fieldID)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
+		}
+		appendUniqueString(dynamicSeen, &dynamicFieldNames, dynamicOutputField)
 	}
 
-	return cfg, sortFieldIDs, nil
+	return cfg, sortFieldIDs, dynamicFieldNames, nil
 }
 
 func buildOrderCriteria(orderSpecs []*commonpb.OrderSpec, metrics map[string]MetricSpec) ([]OrderCriterion, error) {
@@ -493,6 +520,43 @@ func normalizeDirection(direction string, defaultDir string) (string, error) {
 func isJSONPathFieldExpr(fieldExpr string) bool {
 	// TODO: Preserve parsed nested path in SortCriterion and extract it in the top_hits comparator.
 	return strings.Contains(fieldExpr, "[") && strings.Contains(fieldExpr, "]")
+}
+
+func rejectUnsupportedJSONPathMetric(fieldExpr string, schema *schemapb.CollectionSchema, fieldID int64, dynamicField *schemapb.FieldSchema) error {
+	if !isJSONPathFieldExpr(fieldExpr) {
+		return nil
+	}
+	field := typeutil.GetFieldByID(schema, fieldID)
+	if field == nil || field.GetDataType() != schemapb.DataType_JSON || (dynamicField != nil && fieldID == dynamicField.GetFieldID()) {
+		return nil
+	}
+	return fmt.Errorf("metric JSON path is not yet supported: %q", fieldExpr)
+}
+
+func resolveDynamicOutputFieldName(fieldExpr string, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema, fieldID int64) (string, error) {
+	if dynamicField == nil || fieldID != dynamicField.GetFieldID() {
+		return "", nil
+	}
+	if field := typeutil.GetFieldByName(schema, fieldExpr); field != nil {
+		return "", nil
+	}
+	nestedPath, err := typeutil2.ParseAndVerifyNestedPath(fieldExpr, schema, dynamicField.GetFieldID())
+	if err != nil {
+		return "", err
+	}
+	if nestedPath == "" {
+		return "", nil
+	}
+	parts := strings.Split(strings.TrimPrefix(nestedPath, "/"), "/")
+	if len(parts) != 1 || parts[0] == "" {
+		return "", fmt.Errorf("dynamic metric field %q must reference exactly one dynamic key", fieldExpr)
+	}
+	return unescapeJSONPointerToken(parts[0]), nil
+}
+
+func unescapeJSONPointerToken(token string) string {
+	token = strings.ReplaceAll(token, "~1", "/")
+	return strings.ReplaceAll(token, "~0", "~")
 }
 
 func resolveFieldID(fieldExpr string, schema *schemapb.CollectionSchema, dynamicField *schemapb.FieldSchema) (int64, error) {
@@ -552,4 +616,15 @@ func appendUniqueFieldID(seen map[int64]struct{}, fields *[]int64, fieldID int64
 	}
 	seen[fieldID] = struct{}{}
 	*fields = append(*fields, fieldID)
+}
+
+func appendUniqueString(seen map[string]struct{}, fields *[]string, field string) {
+	if field == "" {
+		return
+	}
+	if _, ok := seen[field]; ok {
+		return
+	}
+	seen[field] = struct{}{}
+	*fields = append(*fields, field)
 }

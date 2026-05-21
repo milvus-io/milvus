@@ -1775,6 +1775,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	FloatArray := []float32{1.0, 2.0}
 	DoubleArray := []float64{11.0, 22.0}
 	VarCharArray := []string{"a", "b"}
+	JSONArray := [][]byte{[]byte(`{"hello":0}`), []byte(`{"key":1}`)}
 	BinaryVector := []byte{0x12, 0x34}
 	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
 	Float16Vector := []byte{
@@ -1805,6 +1806,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	floatData := genFieldData(fieldName, fieldID, schemapb.DataType_Float, FloatArray, 1)
 	doubleData := genFieldData(fieldName, fieldID, schemapb.DataType_Double, DoubleArray, 1)
 	varCharData := genFieldData(fieldName, fieldID, schemapb.DataType_VarChar, VarCharArray, 1)
+	jsonData := genFieldData(fieldName, fieldID, schemapb.DataType_JSON, JSONArray, 1)
 	binVecData := genFieldData(fieldName, fieldID, schemapb.DataType_BinaryVector, BinaryVector, Dim)
 	floatVecData := genFieldData(fieldName, fieldID, schemapb.DataType_FloatVector, FloatVector, Dim)
 	float16VecData := genFieldData(fieldName, fieldID, schemapb.DataType_Float16Vector, Float16Vector, Dim)
@@ -1832,6 +1834,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		floatDataRes := getData(floatData, 0)
 		doubleDataRes := getData(doubleData, 0)
 		varCharDataRes := getData(varCharData, 0)
+		jsonDataRes := getData(jsonData, 0)
 		binVecDataRes := getData(binVecData, 0)
 		floatVecDataRes := getData(floatVecData, 0)
 		float16VecDataRes := getData(float16VecData, 0)
@@ -1848,6 +1851,7 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		assert.Equal(t, FloatArray[0], floatDataRes)
 		assert.Equal(t, DoubleArray[0], doubleDataRes)
 		assert.Equal(t, VarCharArray[0], varCharDataRes)
+		assert.Equal(t, JSONArray[0], jsonDataRes)
 		assert.ElementsMatch(t, BinaryVector[:Dim/8], binVecDataRes)
 		assert.ElementsMatch(t, FloatVector[:Dim], floatVecDataRes)
 		assert.ElementsMatch(t, Float16Vector[:2*Dim], float16VecDataRes)
@@ -1855,6 +1859,10 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 		assert.Equal(t, SparseFloatVector.Contents[0], sparseFloatDataRes)
 		assert.ElementsMatch(t, Int8Vector[:Dim], int8VecDataRes)
 		assert.Nil(t, invalidDataRes)
+	})
+
+	t.Run("test getScalarDataLen for JSON", func(t *testing.T) {
+		assert.Equal(t, len(JSONArray), getScalarDataLen(jsonData))
 	})
 }
 

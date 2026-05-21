@@ -633,7 +633,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			allFieldIDs.Insert(rerankInputFieldIDs...)
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
 			plan.OutputFieldIds = allFieldIDs.Collect()
-			plan.DynamicFields = t.userDynamicFields
+			plan.DynamicFields = search_agg.MergeDynamicOutputFields(t.userDynamicFields, t.aggCtx)
 		}
 		plan.Namespace = t.request.Namespace
 
@@ -864,7 +864,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		allFieldIDs.Insert(rerankInputFieldIDs...)
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
-		plan.DynamicFields = t.userDynamicFields
+		plan.DynamicFields = search_agg.MergeDynamicOutputFields(t.userDynamicFields, t.aggCtx)
 		// Merge highlight dynamic fields into plan.DynamicFields
 		if t.highlighter != nil {
 			highlightDynFields := t.highlighter.DynamicFieldNames()

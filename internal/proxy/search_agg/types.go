@@ -47,6 +47,11 @@ type SearchAggregationContext struct {
 	// SearchRequest.OutputFieldsId by the caller so segcore writes them.
 	// Stored sorted for deterministic downstream behavior.
 	extraOutputFieldIDs []int64
+
+	// dynamicOutputFields are dynamic-field keys required by metric sources or
+	// top_hits sort. The caller must add these to PlanNode.DynamicFields so
+	// QueryNode extracts the subfields into fields_data.
+	dynamicOutputFields []string
 }
 
 // IsGroupByField reports whether fieldID appears in any level's OwnFieldIDs.
@@ -59,6 +64,38 @@ func (c *SearchAggregationContext) IsGroupByField(fieldID int64) bool {
 // SearchRequest.OutputFieldsId.
 func (c *SearchAggregationContext) ExtraOutputFieldIDs() []int64 {
 	return c.extraOutputFieldIDs
+}
+
+// DynamicOutputFields returns dynamic-field keys required by metric sources or
+// top_hits sort.
+func (c *SearchAggregationContext) DynamicOutputFields() []string {
+	return c.dynamicOutputFields
+}
+
+// MergeDynamicOutputFields appends aggregation-required dynamic keys to a
+// caller-provided dynamic field list while preserving order and removing
+// duplicates.
+func MergeDynamicOutputFields(userDynamicFields []string, ctx *SearchAggregationContext) []string {
+	if ctx == nil || len(ctx.DynamicOutputFields()) == 0 {
+		return userDynamicFields
+	}
+	merged := make([]string, 0, len(userDynamicFields)+len(ctx.DynamicOutputFields()))
+	seen := make(map[string]struct{}, cap(merged))
+	appendUnique := func(fields []string) {
+		for _, field := range fields {
+			if field == "" {
+				continue
+			}
+			if _, ok := seen[field]; ok {
+				continue
+			}
+			seen[field] = struct{}{}
+			merged = append(merged, field)
+		}
+	}
+	appendUnique(userDynamicFields)
+	appendUnique(ctx.DynamicOutputFields())
+	return merged
 }
 
 // AllGroupByFieldIDs returns the flattened composite-key field list in the

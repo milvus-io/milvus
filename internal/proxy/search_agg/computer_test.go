@@ -811,6 +811,47 @@ func TestSearchAggregationComputerCountAll(t *testing.T) {
 	require.Equal(t, int64(1), n1)
 }
 
+func TestSearchAggregationComputerCountJSONField(t *testing.T) {
+	t.Parallel()
+
+	ctx := newTestAggregationContext(t, 1,
+		[]LevelContext{{
+			OwnFieldIDs: []int64{101},
+			Size:        100,
+			Metrics: map[string]MetricSpec{
+				"json_count": {Op: "count", FieldID: 108, FieldType: schemapb.DataType_JSON},
+			},
+			Order: []OrderCriterion{{Key: "_key", Dir: "asc"}},
+		}},
+		nil,
+		[]int64{108},
+	)
+
+	data := &schemapb.SearchResultData{
+		NumQueries: 1,
+		Topks:      []int64{4},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		Scores:     []float32{0.9, 0.8, 0.7, 0.6},
+		FieldsData: []*schemapb.FieldData{
+			testJSONFieldData(108, [][]byte{
+				[]byte(`{"tag":"a"}`),
+				[]byte(`{"tag":"b"}`),
+				[]byte(`{"tag":"c"}`),
+				[]byte(`{"tag":"d"}`),
+			}),
+		},
+		GroupByFieldValues: []*schemapb.FieldData{
+			testStringFieldData(101, []string{"A", "A", "A", "B"}),
+		},
+	}
+
+	result, err := NewSearchAggregationComputer(data, ctx).Compute(context.Background())
+	require.NoError(t, err)
+	require.Len(t, result[0], 2)
+	require.Equal(t, int64(3), result[0][0].Metrics["json_count"])
+	require.Equal(t, int64(1), result[0][1].Metrics["json_count"])
+}
+
 func TestSearchAggregationComputerScoreMetric(t *testing.T) {
 	t.Parallel()
 	// A metric whose source is the _score column (ScoreFieldID=-1). Exercises
@@ -1423,6 +1464,16 @@ func testNullableLongFieldData(fieldID int64, values []int64, validData []bool) 
 	fd := testLongFieldData(fieldID, values)
 	fd.ValidData = validData
 	return fd
+}
+
+func testJSONFieldData(fieldID int64, values [][]byte) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldId: fieldID,
+		Type:    schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: values}},
+		}},
+	}
 }
 
 func testInt32FieldData(fieldID int64, values []int32) *schemapb.FieldData {
