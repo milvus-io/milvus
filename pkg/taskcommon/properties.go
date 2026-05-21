@@ -189,13 +189,13 @@ func (p Properties) GetTaskVersion() int64 {
 	return version
 }
 
-func (p Properties) GetCollectionID() int64 {
+func (p Properties) GetCollectionID() (int64, error) {
 	if _, ok := p[CollectionIDKey]; !ok {
-		return 0
+		return 0, WrapErrTaskPropertyLack(CollectionIDKey, p[TaskIDKey])
 	}
 	collectionID, err := strconv.ParseInt(p[CollectionIDKey], 10, 64)
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return collectionID
+	return collectionID, nil
 }

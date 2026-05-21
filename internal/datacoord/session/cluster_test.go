@@ -769,11 +769,13 @@ func TestCluster_CreateProperties_CollectionID(t *testing.T) {
 	mockClient := mocks.NewMockDataNodeClient(t)
 	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
+	// The expectation is intentionally shared by all sub-tests; testify/mock
+	// allows unlimited calls unless Once/Times is specified.
 	mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
 		props := taskcommon.NewProperties(req.GetProperties())
-		assert.Equal(t, expectedCollectionID, props.GetCollectionID(),
+		collectionID, err := props.GetCollectionID()
+		return assert.NoError(t, err) && assert.Equal(t, expectedCollectionID, collectionID,
 			"collection_id must be propagated into task properties")
-		return true
 	})).Return(merr.Success(), nil)
 
 	t.Run("CreateCompaction", func(t *testing.T) {

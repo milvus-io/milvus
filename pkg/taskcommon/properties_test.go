@@ -64,31 +64,39 @@ func TestProperties_CollectionID(t *testing.T) {
 		props := NewProperties(nil)
 		props.AppendCollectionID(123456789)
 		assert.Equal(t, "123456789", props[CollectionIDKey])
-		assert.Equal(t, int64(123456789), props.GetCollectionID())
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(123456789), collectionID)
 	})
 
-	t.Run("get missing returns zero", func(t *testing.T) {
+	t.Run("get missing returns error", func(t *testing.T) {
 		props := NewProperties(nil)
-		assert.Equal(t, int64(0), props.GetCollectionID())
+		_, err := props.GetCollectionID()
+		assert.Error(t, err)
 	})
 
-	t.Run("get invalid returns zero", func(t *testing.T) {
+	t.Run("get invalid returns error", func(t *testing.T) {
 		props := NewProperties(map[string]string{
 			CollectionIDKey: "not_a_number",
 		})
-		assert.Equal(t, int64(0), props.GetCollectionID())
+		_, err := props.GetCollectionID()
+		assert.Error(t, err)
 	})
 
 	t.Run("zero value round-trip", func(t *testing.T) {
 		props := NewProperties(nil)
 		props.AppendCollectionID(0)
 		assert.Equal(t, "0", props[CollectionIDKey])
-		assert.Equal(t, int64(0), props.GetCollectionID())
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), collectionID)
 	})
 
 	t.Run("negative value round-trip", func(t *testing.T) {
 		props := NewProperties(nil)
 		props.AppendCollectionID(-1)
-		assert.Equal(t, int64(-1), props.GetCollectionID())
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-1), collectionID)
 	})
 }

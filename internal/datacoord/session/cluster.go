@@ -279,7 +279,6 @@ func (c *cluster) DropCompaction(nodeID int64, planID int64) error {
 }
 
 func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
-	// TODO: sheep, use taskSlot in request
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
