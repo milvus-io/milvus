@@ -34,40 +34,13 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from delayed_assert import assert_expectations
-from pymilvus import DataType, FunctionType, connections, utility
+from pymilvus import connections, utility
 from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
 from utils.util_log import test_log as log
 
-_VECTOR_DTYPES = {
-    DataType.FLOAT_VECTOR,
-    DataType.FLOAT16_VECTOR,
-    DataType.BFLOAT16_VECTOR,
-    DataType.BINARY_VECTOR,
-    DataType.SPARSE_FLOAT_VECTOR,
-    DataType.INT8_VECTOR,
-}
 
-
-def _build_checker_schema(dim=8):
-    """Build the shared all-datatype schema, stripped for the 2.6-latest image.
-
-    The chaos-test image used by milvus_cdc_chaos_test/verify_test rejects
-    two things the shared gen_all_datatype_collection_schema includes by
-    default:
-      - FunctionType.MINHASH (error: "check function params with unknown
-        function type")
-      - nullable=True on FLOAT_VECTOR (error: "vector type not support null")
-
-    Drop the MinHash function and its output field, and force nullable=False
-    on every vector field so the server accepts the schema.
-    """
-    schema = cf.gen_all_datatype_collection_schema(dim=dim)
-    schema.functions[:] = [f for f in schema.functions if f.type != FunctionType.MINHASH]
-    schema.fields[:] = [f for f in schema.fields if f.name != "minhash_emb"]
-    for f in schema.fields:
-        if f.dtype in _VECTOR_DTYPES:
-            f.nullable = False
-    return schema
+def _build_checker_schema(dim=8, enable_struct_array_field=True):
+    return cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field)
 
 
 class TestBase:
@@ -101,11 +74,12 @@ class TestOperations(TestBase):
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         schema = _build_checker_schema()
+        partial_update_schema = _build_checker_schema(enable_struct_array_field=False)
         checkers = {
             Op.create: CollectionCreateChecker(collection_name=c_name, schema=schema),
             Op.insert: InsertChecker(collection_name=c_name, schema=schema),
             Op.upsert: UpsertChecker(collection_name=c_name, schema=schema),
-            Op.partial_update: PartialUpdateChecker(collection_name=c_name, schema=schema),
+            Op.partial_update: PartialUpdateChecker(schema=partial_update_schema),
             Op.flush: FlushChecker(collection_name=c_name, schema=schema),
             Op.index: IndexCreateChecker(collection_name=c_name, schema=schema),
             Op.search: SearchChecker(collection_name=c_name, schema=schema),
