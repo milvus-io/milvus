@@ -414,4 +414,3 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
     EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
               Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
 }
-
