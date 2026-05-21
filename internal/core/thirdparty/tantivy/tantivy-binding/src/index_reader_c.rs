@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, *const u32, usize);
+pub(crate) type RegexMatchFn = extern "C" fn(*mut c_void, *const u8, usize) -> bool;
 
 #[no_mangle]
 pub extern "C" fn tantivy_load_index(
@@ -321,6 +322,21 @@ pub extern "C" fn tantivy_regex_query(
     let real = ptr as *mut IndexReaderWrapper;
     let pattern = ptr_to_str!(pattern, pattern_len);
     unsafe { (*real).regex_query(pattern, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_regex_match_query(
+    ptr: *mut c_void,
+    matcher_ctx: *mut c_void,
+    matcher: RegexMatchFn,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real)
+            .regex_match_query(matcher_ctx, matcher, bitset)
+            .into()
+    }
 }
 
 // -------------------------json query--------------------

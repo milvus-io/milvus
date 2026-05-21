@@ -1199,10 +1199,11 @@ func TestQueryWithTemplateParamInvalid(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-	// query with invalid template
-	// expr := "varchar like 'a%' "
-	_, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("varchar like {key1}").WithTemplateParam("key1", "'a%'"))
-	common.CheckErr(t, err2, false, "mismatched input '{' expecting StringLiteral")
+	// query with invalid template value type
+	_, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("varchar like {key1}").WithTemplateParam("key1", "a%"))
+	common.CheckErr(t, err2, true)
+	_, err2 = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("varchar like {key1}").WithTemplateParam("key1", 10))
+	common.CheckErr(t, err2, false, "the value of like expression template variable {key1} is not string")
 
 	// no template param
 	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 in {key1}"))

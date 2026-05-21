@@ -114,6 +114,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	var spawnOpts []meta.SpawnOption
 	if job.needWaitRGReady {
 		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+		spawnOpts = append(spawnOpts, meta.WithQueryInvisible())
 	}
 	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
@@ -141,7 +142,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
 			}
 
-			if transferErr := job.meta.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
+			if transferErr := job.meta.MoveReplica(job.ctx, collectionID, rg, replicas); transferErr != nil {
 				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
 				err = transferErr
 				return err

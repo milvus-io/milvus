@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -575,12 +577,13 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 			{Key: "index_type", Value: "IVF_FLAT"},
 			{Key: "nlist", Value: "1024"},
 		},
-		IndexFilePaths:      []string{"/idx/path1", "/idx/path2", "/idx/path3"},
-		SerializedSize:      16384,
-		IndexVersion:        5,
-		NumRows:             50000,
-		CurrentIndexVersion: 5,
-		MemSize:             32768,
+		IndexFilePaths:        []string{"/idx/path1", "/idx/path2", "/idx/path3"},
+		SerializedSize:        16384,
+		IndexVersion:          5,
+		NumRows:               50000,
+		CurrentIndexVersion:   5,
+		MemSize:               32768,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}
 
 	avroIndexInfo := convertIndexFilePathInfoToAvro(originalIndexInfo)
@@ -596,6 +599,7 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 	assert.Equal(t, originalIndexInfo.NumRows, resultIndexInfo.NumRows)
 	assert.Equal(t, originalIndexInfo.CurrentIndexVersion, resultIndexInfo.CurrentIndexVersion)
 	assert.Equal(t, originalIndexInfo.MemSize, resultIndexInfo.MemSize)
+	assert.Equal(t, originalIndexInfo.IndexStorePathVersion, resultIndexInfo.IndexStorePathVersion)
 
 	// Verify IndexParams
 	assert.Len(t, resultIndexInfo.IndexParams, len(originalIndexInfo.IndexParams))
@@ -607,6 +611,46 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 
 	// Verify IndexFilePaths
 	assert.Equal(t, originalIndexInfo.IndexFilePaths, resultIndexInfo.IndexFilePaths)
+}
+
+func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				SegmentID:      1001,
+				FieldID:        101,
+				IndexID:        201,
+				BuildID:        301,
+				IndexName:      "vec_idx",
+				IndexFilePaths: []string{"files/index_files/301/1/2001/1001/index_data"},
+			},
+		},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV1(), "index_store_path_version")
+	oldSchema, err := getManifestSchemaByVersion(1)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(oldSchema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "legacy_manifest.avro")
+	err = cm.Write(context.Background(), manifestPath, binaryData)
+	require.NoError(t, err)
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 1)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetIndexFiles(), 1)
+	assert.Equal(t,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		segments[0].GetIndexFiles()[0].GetIndexStorePathVersion())
 }
 
 // =========================== Integration Tests ===========================
@@ -1029,8 +1073,13 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_2_future",
-			version:     2,
+			name:    "version_2_current",
+			version: 2,
+			wantErr: false,
+		},
+		{
+			name:        "version_3_future",
+			version:     3,
 			wantErr:     true,
 			errContains: "too new",
 		},
@@ -1073,8 +1122,13 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_2_unsupported",
-			version:     2,
+			name:    "version_2_current",
+			version: 2,
+			wantErr: false,
+		},
+		{
+			name:        "version_3_unsupported",
+			version:     3,
 			wantErr:     true,
 			errContains: "unsupported manifest schema version",
 		},

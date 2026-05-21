@@ -501,6 +501,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         }
         case DataType::VECTOR_ARRAY: {
             auto obj = vector_array->mutable_vector_array();
+            obj->set_dim(dim);
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
             obj->mutable_data()->Reserve(count);
@@ -523,7 +524,8 @@ CreateEmptyVectorDataArray(int64_t count,
                            int64_t valid_count,
                            const void* valid_data,
                            const FieldMeta& field_meta) {
-    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr)
+    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr &&
+                          field_meta.get_data_type() != DataType::VECTOR_ARRAY)
                              ? valid_count
                              : count;
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);

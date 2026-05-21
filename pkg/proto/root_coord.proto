@@ -49,6 +49,15 @@ service RootCoord {
      */
     rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
 
+    /**
+     * @brief This method is used to add collection struct field.
+     *
+     * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+     *
+     * @return Status
+     */
+    rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
+
 
      /**
      * @brief This method is used to add/drop collection field/function.
@@ -109,6 +118,7 @@ service RootCoord {
    * @return Status
    */
     rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+    rpc CreatePartitionV2(milvus.CreatePartitionRequest) returns (CreatePartitionResponse) {}
 
     /**
      * @brief This method is used to drop partition
@@ -314,4 +324,9 @@ message DBCollections {
 message ShowCollectionIDsResponse {
   common.Status status = 1;
   repeated DBCollections db_collections = 2;
+}
+
+message CreatePartitionResponse {
+  common.Status status = 1;
+  int64 partitionID = 2;
 }

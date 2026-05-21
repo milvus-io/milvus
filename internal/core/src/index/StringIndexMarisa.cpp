@@ -40,6 +40,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
+#include "folly/ScopeGuard.h"
 #include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
@@ -597,11 +598,13 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
 
     if (op != proto::plan::OpType::Match &&
         op != proto::plan::OpType::PostfixMatch &&
-        op != proto::plan::OpType::InnerMatch) {
-        ThrowInfo(Unsupported,
-                  "StringIndexMarisa::PatternMatch only supports Match, "
-                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
-                  static_cast<int>(op));
+        op != proto::plan::OpType::InnerMatch &&
+        op != proto::plan::OpType::RegexMatch) {
+        ThrowInfo(
+            Unsupported,
+            "StringIndexMarisa::PatternMatch only supports Match, "
+            "PrefixMatch, PostfixMatch, InnerMatch, RegexMatch, got op: {}",
+            static_cast<int>(op));
     }
 
     // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys
@@ -619,7 +622,17 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
         }
     };
 
-    if (op == proto::plan::OpType::Match) {
+    if (op == proto::plan::OpType::RegexMatch) {
+        PartialRegexMatcher matcher(pattern);
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && matcher(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
+        }
+    } else if (op == proto::plan::OpType::Match) {
         LikePatternMatcher matcher(pattern);
         for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
             auto val = Reverse_Lookup(offsets[0]);
@@ -731,6 +744,7 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
                    O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
                    S_IRUSR | S_IWUSR | S_IXUSR);
     AssertInfo(fd != -1, "open file failed: {}", file);
+    auto close_fd = folly::makeGuard([fd]() { close(fd); });
 
     // Immediately unlink the file so it will be deleted when fd is closed,
     // even if an exception occurs or the process crashes
@@ -741,8 +755,6 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     auto size = get_file_size(fd);
     lseek(fd, 0, SEEK_SET);
     writer->WriteEntry(MARISA_TRIE_INDEX, fd, size);
-
-    close(fd);
 
     // Write str_ids
     auto str_ids_len = str_ids_.size() * sizeof(size_t);

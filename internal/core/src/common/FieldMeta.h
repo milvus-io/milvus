@@ -149,11 +149,12 @@ class FieldMeta {
               DataType element_type,
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
+              bool nullable,
               std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
-          nullable_(false),
+          nullable_(nullable),
           element_type_(element_type),
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
           external_field_mapping_(std::move(external_field_mapping)) {

@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -552,6 +553,53 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
 }
 
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePathVersion() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "idx_v0"},
+		301: {CollectionID: collectionID, FieldID: 102, IndexID: 301, IndexName: "idx_v1"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{indexMeta: im}
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			2001: {
+				FieldId:               101,
+				IndexId:               1001,
+				BuildId:               2001,
+				IndexName:             "idx_v0",
+				IndexFilePaths:        []string{"v0_file"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			},
+			2002: {
+				FieldId:               102,
+				IndexId:               1002,
+				BuildId:               2002,
+				IndexName:             "idx_v1",
+				IndexFilePaths:        []string{"v1_file"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	segIdxV0, ok := im.segmentBuildInfo.Get(2001)
+	s.True(ok)
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdxV0.IndexStorePathVersion)
+
+	segIdxV1, ok := im.segmentBuildInfo.Get(2002)
+	s.True(ok)
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, segIdxV1.IndexStorePathVersion)
+}
+
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerField() {
 	collectionID := int64(1)
 	segmentID := int64(100)
@@ -727,6 +775,48 @@ func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
 	assert.Nil(t, req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "source segment 999 not found")
+}
+
+func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "external_pk", ExternalField: "pk"},
+				},
+			},
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, PartitionId: 10},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	mockReadSnapshot := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mockReadSnapshot.UnPatch()
+
+	mockStorageConfig := mockey.Mock(createStorageConfig).Return(nil).Build()
+	defer mockStorageConfig.UnPatch()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.snapshotMeta = sm
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	assert.NoError(t, err)
+	assert.Len(t, req.GetSources(), 1)
+	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
 }
 
 func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {

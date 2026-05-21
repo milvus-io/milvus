@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -170,6 +171,10 @@ type shardDelegator struct {
 	// schema version
 	schemaChangeMutex sync.RWMutex
 	schemaVersion     uint64
+
+	// limits delegator-side post-load work after worker LoadSegments returns.
+	postLoadSem           *syncutil.Semaphore
+	postLoadConfigHandler config.EventHandler
 
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
@@ -1068,7 +1073,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 			zap.Duration("lag", lag),
 			zap.Duration("maxTsLag", maxLag),
 		)
-		return 0, WrapErrTsLagTooLarge(lag, maxLag)
+		return 0, WrapErrTsLagTooLarge(sd.vchannelName, lag, maxLag)
 	}
 
 	// Stall detection: if tSafe does not advance within stallTimeout, return
@@ -1094,7 +1099,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 				zap.Uint64("targetTs", ts),
 				zap.Duration("stallTimeout", stallTimeout),
 			)
-			return 0, WrapErrTsLagTooLarge(gt.Sub(st), stallTimeout)
+			return 0, WrapErrTsLagTooLarge(sd.vchannelName, gt.Sub(st), stallTimeout)
 		}
 		// Woken by broadcast with lock re-acquired, loop back to re-check condition.
 	}
@@ -1278,6 +1283,9 @@ func (sd *shardDelegator) Close() {
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
+	if sd.postLoadConfigHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
+	}
 }
 
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
@@ -1352,6 +1360,14 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
 	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
+	postLoadSem := syncutil.NewSemaphore(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+	postLoadConfigHandler := config.NewHandler(fmt.Sprintf("qn.delegator.postload.%s.%p", channel, postLoadSem), func(event *config.Event) {
+		if event.HasUpdated {
+			concurrency := paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.GetAsInt()
+			postLoadSem.SetCapacity(concurrency)
+			log.Info("resize delegator post-load concurrency", zap.Int("concurrency", concurrency))
+		}
+	})
 
 	sd := &shardDelegator{
 		collectionID:   collectionID,
@@ -1375,6 +1391,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		analyzerRunners:            make(map[UniqueID]function.Analyzer),
 		functionFieldType:          make(map[int64]schemapb.FunctionType),
 		l0ForwardPolicy:            policy,
+		postLoadSem:                postLoadSem,
+		postLoadConfigHandler:      postLoadConfigHandler,
 		catchingUpStreamingData:    atomic.NewBool(true),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
@@ -1442,6 +1460,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
+	paramtable.Get().Watch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, postLoadConfigHandler)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
 }

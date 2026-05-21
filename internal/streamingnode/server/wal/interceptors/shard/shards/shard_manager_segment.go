@@ -4,6 +4,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -156,7 +157,9 @@ func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.metrics.ObserveDelete(msg.Header().GetRows())
+	rows := msg.Header().GetRows()
+	m.metrics.ObserveDelete(rows)
+	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
 	return nil
 }
 

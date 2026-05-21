@@ -380,6 +380,11 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	if rwOptions.version == StorageV1 {
+		if err := ValidateStorageV1InsertWritableSchema(schema); err != nil {
+			return nil, err
+		}
+	}
 
 	blobsWriter := func(blobs []*Blob) error {
 		kvs := make(map[string][]byte, len(blobs))

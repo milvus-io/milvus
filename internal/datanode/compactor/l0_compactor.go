@@ -307,27 +307,17 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 
 			log.Info("L0 compaction write record success", zap.String("path", path), zap.Int64("entries", int64(len(deletes.pks))))
 
-			// Check if this is a V2 segment (has manifest)
+			// Check if this is a manifest segment
 			if segment.GetManifest() != "" {
-				// V2: Update manifest with new deltalog
-				newManifest, err := packed.AddDeltaLogsToManifestOverwrite(
-					segment.GetManifest(),
-					t.compactionParams.StorageConfig,
-					[]packed.DeltaLogEntry{{Path: path, NumEntries: int64(len(deletes.pks))}},
-				)
-				if err != nil {
-					log.Warn("L0 compaction update manifest fail", zap.Int64("segmentID", segmentID), zap.Error(err))
-					return nil, err
-				}
 				return &datapb.CompactionSegment{
 					SegmentID: segmentID,
 					Channel:   t.plan.GetChannel(),
-					Manifest:  newManifest,
 					NumOfRows: int64(len(deletes.pks)),
-					// Delta summary for compaction trigger decisions (no path, only stats)
+					// Delta summary for compaction trigger decisions and datacoord manifest commit.
 					Deltalogs: []*datapb.FieldBinlog{{
 						Binlogs: []*datapb.Binlog{{
 							LogID:      logID,
+							LogPath:    path,
 							EntriesNum: int64(len(deletes.pks)),
 							MemorySize: int64(writer.GetWrittenUncompressed()),
 						}},

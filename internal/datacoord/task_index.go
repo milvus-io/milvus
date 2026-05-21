@@ -303,13 +303,15 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
-	// Create the job request.
+	// Create the job request. The path layout (v0/v1) is propagated via
+	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	req := &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
-		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexPath),
+		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
 		BuildID:                   it.BuildID,
+		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 		IndexVersion:              segIndex.IndexVersion + 1,
 		StorageConfig:             createStorageConfig(),
 		IndexParams:               params,

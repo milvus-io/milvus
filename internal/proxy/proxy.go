@@ -116,11 +116,6 @@ type Proxy struct {
 	enableComplexDeleteLimit bool
 
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
-
-	// alterSchemaInFlight tracks collections that have an AlterCollectionSchema
-	// request in progress, keyed by "dbName/collectionName". Prevents concurrent
-	// requests from racing past the schema version consistency gate.
-	alterSchemaInFlight sync.Map
 }
 
 // NewProxy returns a Proxy struct.
@@ -337,6 +332,10 @@ func (node *Proxy) Stop() error {
 
 	if node.resourceManager != nil {
 		node.resourceManager.Close()
+	}
+
+	if globalMetaCache != nil {
+		globalMetaCache.Close()
 	}
 
 	node.cancel()

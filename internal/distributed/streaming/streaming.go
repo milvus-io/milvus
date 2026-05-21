@@ -2,6 +2,9 @@ package streaming
 
 import (
 	"context"
+	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -15,6 +18,11 @@ import (
 )
 
 var singleton WALAccesser = nil
+
+var (
+	ErrWALReleaseTimeout = errors.New("wal release timeout")
+	releaseTimeout       = 5 * time.Second
+)
 
 // Init initializes the wal accesser with the given etcd client.
 // should be called before any other operations.
@@ -30,10 +38,26 @@ func Init() {
 }
 
 // Release releases the resources of the wal accesser.
-func Release() {
+func Release() error {
 	if w, ok := singleton.(*walAccesserImpl); ok && w != nil {
-		w.Close()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			w.Close()
+		}()
+
+		if releaseTimeout <= 0 {
+			<-done
+			return nil
+		}
+		select {
+		case <-done:
+			return nil
+		case <-time.After(releaseTimeout):
+			return errors.Wrapf(ErrWALReleaseTimeout, "timeout=%s", releaseTimeout)
+		}
 	}
+	return nil
 }
 
 // WAL is the entrance to interact with the milvus write ahead log.

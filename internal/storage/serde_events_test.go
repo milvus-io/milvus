@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -181,6 +182,78 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		assert.Equal(t, 18, len(logs))
 		assert.Equal(t, 5, len(logs[0].Binlogs))
 	})
+}
+
+func TestValueSerializer_NullArrayOfVectorRoundTrip(t *testing.T) {
+	const (
+		pkFieldID          FieldID = common.StartOfUserFieldID
+		vectorArrayFieldID FieldID = common.StartOfUserFieldID + 1
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.RowIDField,
+				Name:     common.RowIDFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     common.TimeStampFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      pkFieldID,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:     vectorArrayFieldID,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	values := []*Value{
+		{
+			Value: map[FieldID]any{
+				common.RowIDField:     int64(11),
+				common.TimeStampField: int64(101),
+				pkFieldID:             int64(1),
+				vectorArrayFieldID:    makeFloatVec(4, 1, 2, 3, 4),
+			},
+		},
+		{
+			Value: map[FieldID]any{
+				common.RowIDField:     int64(12),
+				common.TimeStampField: int64(102),
+				pkFieldID:             int64(2),
+				vectorArrayFieldID:    nil,
+			},
+		},
+	}
+
+	record, err := ValueSerializer(values, schema)
+	require.NoError(t, err)
+	defer record.Release()
+	assert.True(t, record.Column(vectorArrayFieldID).IsNull(1))
+
+	roundTripValues := make([]*Value, record.Len())
+	err = ValueDeserializerWithSchema(record, roundTripValues, schema, true)
+	require.NoError(t, err)
+	assert.Nil(t, roundTripValues[1].Value.(map[FieldID]interface{})[vectorArrayFieldID])
+
+	rewrittenRecord, err := ValueSerializer(roundTripValues, schema)
+	require.NoError(t, err)
+	defer rewrittenRecord.Release()
+	assert.True(t, rewrittenRecord.Column(vectorArrayFieldID).IsNull(1))
 }
 
 func TestCompositeBinlogRecordWriter_TTLFieldCollection(t *testing.T) {

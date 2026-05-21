@@ -105,7 +105,7 @@ $ ruff format .                 # format in place
 $ ruff format --check .         # format check only (CI-friendly)
 ```
 
-Rules enabled: `E`, `F`, `W`, `I`, `UP`. Target Python version: `3.10`.
+Rules enabled: `E`, `F`, `W`, `I`, `UP`. Target Python version: `3.12`.
 
 #### Lint only PR-changed files (Python Lint CI parity)
 

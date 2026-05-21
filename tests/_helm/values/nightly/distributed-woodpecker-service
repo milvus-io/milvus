@@ -95,6 +95,8 @@ extraConfigFiles:
     common:
       storage:
         enablev2: true
+        # enable storage v3
+        useLoonFFI: true
     dataCoord:
       gc:
         interval: 1800

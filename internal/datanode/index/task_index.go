@@ -311,7 +311,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		TypeParams:                mapToKVPairs(it.newTypeParams),
 		StorePath:                 it.req.GetStorePath(),
 		StoreVersion:              it.req.GetStoreVersion(),
-		IndexStorePath:            it.req.GetIndexStorePath(),
+		IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
 		OptFields:                 optFields,
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
@@ -392,6 +392,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		uint64(indexStats.MemSize),
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
+		it.req.GetIndexStorePathVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())

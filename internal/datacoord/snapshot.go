@@ -61,7 +61,8 @@ const (
 	// Increment when making incompatible schema changes.
 	// Version 0: Legacy snapshots without version field (treated as version 1)
 	// Version 1: Initial version with format-version field in metadata
-	SnapshotFormatVersion = 1
+	// Version 2: Adds index_store_path_version to vector/scalar index files
+	SnapshotFormatVersion = 2
 )
 
 var (
@@ -71,6 +72,10 @@ var (
 	manifestSchema avro.Schema
 	// manifestSchemaErr stores any error that occurred during schema parsing.
 	manifestSchemaErr error
+
+	manifestSchemaV1Once sync.Once
+	manifestSchemaV1     avro.Schema
+	manifestSchemaV1Err  error
 )
 
 // getManifestSchema returns the cached Avro schema for manifest files.
@@ -83,12 +88,20 @@ func getManifestSchema() (avro.Schema, error) {
 	return manifestSchema, manifestSchemaErr
 }
 
+func getManifestSchemaV1() (avro.Schema, error) {
+	manifestSchemaV1Once.Do(func() {
+		manifestSchemaV1, manifestSchemaV1Err = avro.Parse(getAvroSchemaV1())
+	})
+	return manifestSchemaV1, manifestSchemaV1Err
+}
+
 // getManifestSchemaByVersion returns the Avro schema for the specified format version.
 // This function supports reading snapshots created with different schema versions.
 //
 // Version mapping:
-//   - Version 0, 1: Current schema (getProperAvroSchema)
-//   - Version 2+: Future schemas (to be added when needed)
+//   - Version 0, 1: Legacy schema without index_store_path_version
+//   - Version 2: Current schema with index_store_path_version
+//   - Version 3+: Future schemas (to be added when needed)
 //
 // When adding a new schema version:
 //  1. Create a new schema function (e.g., getAvroSchemaV2)
@@ -97,7 +110,9 @@ func getManifestSchema() (avro.Schema, error) {
 func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 	switch version {
 	case 0, 1:
-		// Version 0 (legacy) and 1 use the same schema
+		// Version 0 (legacy) and 1 use the same schema.
+		return getManifestSchemaV1()
+	case 2:
 		return getManifestSchema()
 	default:
 		return nil, fmt.Errorf("unsupported manifest schema version: %d", version)
@@ -249,6 +264,8 @@ type AvroIndexFilePathInfo struct {
 	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 	// MemSize is the estimated memory consumption when loaded.
 	MemSize int64 `avro:"mem_size"`
+	// IndexStorePathVersion records the object-storage path layout used by these index files.
+	IndexStorePathVersion int32 `avro:"index_store_path_version"`
 }
 
 // AvroKeyValuePair represents commonpb.KeyValuePair in Avro-compatible format.
@@ -1083,6 +1100,7 @@ func convertIndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFi
 		CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 		MemSize:                   int64(info.GetMemSize()), // uint64 -> int64
+		IndexStorePathVersion:     int32(info.GetIndexStorePathVersion()),
 		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
 	}
 
@@ -1138,6 +1156,7 @@ func convertAvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.Ind
 		CurrentIndexVersion:       avroInfo.CurrentIndexVersion,
 		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
 		MemSize:                   uint64(avroInfo.MemSize), // int64 -> uint64
+		IndexStorePathVersion:     indexpb.IndexStorePathVersion(avroInfo.IndexStorePathVersion),
 	}
 
 	// Convert key-value parameters
@@ -1431,7 +1450,8 @@ func getProperAvroSchema() string {
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
 								{"name": "mem_size", "type": "long"},
-								{"name": "current_scalar_index_version", "type": "int", "default": 0}
+								{"name": "current_scalar_index_version", "type": "int", "default": 0},
+								{"name": "index_store_path_version", "type": "int", "default": 0}
 							]
 						}
 					}
@@ -1495,4 +1515,12 @@ func getProperAvroSchema() string {
 				}
 			]
 	}`
+}
+
+func getAvroSchemaV1() string {
+	return strings.Replace(getProperAvroSchema(),
+		`,
+								{"name": "index_store_path_version", "type": "int", "default": 0}`,
+		"",
+		1)
 }

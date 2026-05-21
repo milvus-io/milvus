@@ -434,7 +434,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
-			isNullableVector := len(existField.GetValidData()) > 0 && typeutil.IsVectorType(existField.GetType())
+			isNullableVector := len(existField.GetValidData()) > 0 &&
+				typeutil.IsVectorType(existField.GetType()) &&
+				!typeutil.IsVectorArrayType(existField.GetType())
 			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
 			existSrcIndices := make([]int64, len(updateIdxInUpsert))
 			for i, existIdx := range existIndices {
@@ -539,7 +541,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 		// Process insert data by column (field), similar to update path
 		for _, srcField := range insertWithNullField {
-			isNullableVector := len(srcField.GetValidData()) > 0 && typeutil.IsVectorType(srcField.GetType())
+			isNullableVector := len(srcField.GetValidData()) > 0 &&
+				typeutil.IsVectorType(srcField.GetType()) &&
+				!typeutil.IsVectorArrayType(srcField.GetType())
 			srcComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{srcField})
 
 			// Find or create destination field in it.insertFieldData
@@ -1190,7 +1194,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
@@ -1312,6 +1316,10 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
 	if err != nil {
 		return err
+	}
+
+	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("partial upsert is not supported for collections with struct array fields")
 	}
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)

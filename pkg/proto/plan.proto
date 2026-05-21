@@ -22,6 +22,7 @@ enum OpType {
   TextMatch = 13;   // text match
   PhraseMatch = 14; // phrase match
   InnerMatch = 15; // substring (e.g., "%value%")
+  RegexMatch = 16; // regex substring match (e.g., =~ "pattern")
 };
 
 enum ArithOpType {

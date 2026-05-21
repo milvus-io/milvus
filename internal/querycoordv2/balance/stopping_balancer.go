@@ -122,8 +122,8 @@ func (b *StoppingBalancer) genChannelPlan(ctx context.Context, br *balanceReport
 
 	for _, nodeID := range roNodes {
 		// Get all channels on this stopping node
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(
-			replica.GetCollectionID(),
+		dmChannels := b.dist.ChannelDistManager.GetByFilter(
+			meta.WithCollectionID2Channel(replica.GetCollectionID()),
 			meta.WithNodeID2Channel(nodeID),
 		)
 

@@ -90,11 +90,12 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV),
-			names:       testDB,
-			aliases:     newNameDb(),
-			dbName2Meta: make(map[string]*model.Database),
-			collID2Meta: collID2Meta,
+			catalog:          rootcoord.NewCatalog(catalogKV),
+			names:            testDB,
+			aliases:          newNameDb(),
+			dbName2Meta:      make(map[string]*model.Database),
+			collID2Meta:      collID2Meta,
+			partitionName2ID: make(map[int64]map[string]int64),
 		}),
 		withValidMixCoord(),
 		withValidProxyManager(),

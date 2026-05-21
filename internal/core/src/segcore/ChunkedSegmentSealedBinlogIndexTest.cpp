@@ -674,6 +674,145 @@ INSTANTIATE_TEST_SUITE_P(MetricTypeParameters,
                          BinlogIndexTest,
                          ::testing::ValuesIn(GenerateTestParams()));
 
+TEST(test_chunk_segment,
+     NullableVectorProjectionFallsBackWhenLoadedIndexHasNoValidData) {
+    auto schema = std::make_shared<Schema>();
+    const int64_t dim = 8;
+    const int64_t data_n = 200;
+    auto vec_field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "16"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec_field_id, std::move(index_params), std::move(type_params));
+    IndexMetaPtr collection_index_meta = std::make_shared<CollectionIndexMeta>(
+        226985,
+        std::map<FieldId, FieldIndexMeta>{{vec_field_id, field_index_meta}});
+
+    auto segment = CreateSealedSegment(schema, collection_index_meta);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::vector<uint8_t> valid_data((data_n + 7) / 8, 0);
+    int64_t valid_count = 0;
+    for (int64_t i = 0; i < data_n; ++i) {
+        if ((i % 100) >= 50) {
+            valid_data[i >> 3] |= (1 << (i & 0x07));
+            ++valid_count;
+        }
+    }
+    ASSERT_EQ(valid_count, data_n / 2);
+
+    std::vector<float> vec_values(valid_count * dim);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vec_values[i * dim + d] = static_cast<float>(i * dim + d);
+        }
+    }
+
+    auto vec_field_data = milvus::storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    auto vec_field_data_impl =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::FloatVector>>(
+            vec_field_data);
+    ASSERT_NE(vec_field_data_impl, nullptr);
+    vec_field_data_impl->FillFieldData(
+        vec_values.data(), valid_data.data(), data_n, 0);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_field_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vec_field_id.get(),
+                                                          {vec_field_data},
+                                                          cm);
+    ASSERT_NO_THROW(segment->LoadFieldData(load_field_info));
+    ASSERT_TRUE(segment->HasFieldData(vec_field_id));
+    ASSERT_EQ(segment->get_row_count(), data_n);
+
+    auto raw_dataset =
+        knowhere::GenDataSet(valid_count, dim, vec_values.data());
+    raw_dataset->SetIsOwner(false);
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "16"}};
+    indexing->BuildWithDataset(raw_dataset, build_conf);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = vec_field_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index_params["metric_type"] = knowhere::metric::L2;
+    ASSERT_NO_THROW(segment->LoadIndex(load_info));
+    ASSERT_TRUE(segment->HasIndex(vec_field_id));
+
+    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto previous_prefer_field_data =
+        segcore_config.get_prefer_field_data_when_index_has_raw_data();
+    struct PreferFieldDataGuard {
+        milvus::segcore::SegcoreConfig& config;
+        bool previous_value;
+
+        ~PreferFieldDataGuard() {
+            config.set_prefer_field_data_when_index_has_raw_data(
+                previous_value);
+        }
+    } prefer_field_data_guard{segcore_config, previous_prefer_field_data};
+    segcore_config.set_prefer_field_data_when_index_has_raw_data(true);
+
+    std::vector<int64_t> null_offsets = {0, 1, 100, 101};
+    auto null_result = sealed->bulk_subscript(
+        nullptr, vec_field_id, null_offsets.data(), null_offsets.size());
+
+    ASSERT_EQ(null_result->valid_data_size(), null_offsets.size());
+    for (int i = 0; i < null_result->valid_data_size(); ++i) {
+        EXPECT_FALSE(null_result->valid_data(i));
+    }
+    EXPECT_TRUE(null_result->vectors().float_vector().data().empty());
+
+    std::vector<int64_t> offsets = {0, 50, 100, 150};
+    auto result = sealed->bulk_subscript(
+        nullptr, vec_field_id, offsets.data(), offsets.size());
+
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    EXPECT_FALSE(result->valid_data(0));
+    EXPECT_TRUE(result->valid_data(1));
+    EXPECT_FALSE(result->valid_data(2));
+    EXPECT_TRUE(result->valid_data(3));
+
+    const auto& returned = result->vectors().float_vector().data();
+    ASSERT_EQ(returned.size(), 2 * dim);
+    std::vector<int64_t> expected_physical_offsets = {0, 50};
+    for (int64_t i = 0;
+         i < static_cast<int64_t>(expected_physical_offsets.size());
+         ++i) {
+        auto physical_offset = expected_physical_offsets[i];
+        for (int64_t d = 0; d < dim; ++d) {
+            EXPECT_FLOAT_EQ(returned[i * dim + d],
+                            vec_values[physical_offset * dim + d]);
+        }
+    }
+}
+
 TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
 

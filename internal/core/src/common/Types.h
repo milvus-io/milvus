@@ -814,7 +814,7 @@ struct TypeTraits<DataType::DOUBLE> {
 
 template <>
 struct TypeTraits<DataType::TIMESTAMPTZ> {
-    using NativeType = double;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::TIMESTAMPTZ;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -1125,6 +1125,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::InnerMatch:
                 name = "InnerMatch";
+                break;
+            case milvus::OpType::RegexMatch:
+                name = "RegexMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

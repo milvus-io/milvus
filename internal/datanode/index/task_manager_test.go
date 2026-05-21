@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -126,4 +127,19 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 
 		s.Nil(s.manager.GetStatsTaskInfo(s.cluster, s.taskID))
 	})
+}
+
+func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
+	info := &IndexTaskInfo{
+		State:                 commonpb.IndexState_Finished,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+
+	s.Equal(
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		info.ToIndexTaskInfo(100).GetIndexStorePathVersion(),
+	)
+
+	cloned := info.Clone()
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 }

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/c_api_test_utils.h"
@@ -50,8 +51,7 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     AssertManifestHasColumn(const std::string& segment_path,
                             int64_t version,
                             FieldId field_id) {
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = GetDefaultArrowFileSystem();
         ASSERT_NE(fs, nullptr);
 
         auto txn_result = milvus_storage::api::transaction::Transaction::Open(

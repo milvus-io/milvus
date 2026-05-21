@@ -76,28 +76,27 @@ func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, e
 	return fsMetrics, nil
 }
 
-// Property keys matching milvus-storage/properties.h.
-// Duplicated from packed.PropertyFS* because cgo types are package-scoped.
-const (
-	propAddress             = "fs.address"
-	propBucketName          = "fs.bucket_name"
-	propAccessKeyID         = "fs.access_key_id"
-	propAccessKeyValue      = "fs.access_key_value"
-	propRootPath            = "fs.root_path"
-	propStorageType         = "fs.storage_type"
-	propCloudProvider       = "fs.cloud_provider"
-	propIAMEndpoint         = "fs.iam_endpoint"
-	propLogLevel            = "fs.log_level"
-	propRegion              = "fs.region"
-	propSSLCACert           = "fs.ssl_ca_cert"
-	propGCPCredentialJSON   = "fs.gcp_credential_json"
-	propUseSSL              = "fs.use_ssl"
-	propUseIAM              = "fs.use_iam"
-	propUseVirtualHost      = "fs.use_virtual_host"
-	propUseCustomPartUpload = "fs.use_custom_part_upload"
-	propRequestTimeoutMS    = "fs.request_timeout_ms"
-	propTLSMinVersion       = "fs.tls_min_version"
-	propUseCRC32CChecksum   = "fs.use_crc32c_checksum"
+// Property keys exported by milvus-storage/ffi_c.h.
+var (
+	propAddress             = C.GoString(C.loon_properties_fs_address)
+	propBucketName          = C.GoString(C.loon_properties_fs_bucket_name)
+	propAccessKeyID         = C.GoString(C.loon_properties_fs_access_key_id)
+	propAccessKeyValue      = C.GoString(C.loon_properties_fs_access_key_value)
+	propRootPath            = C.GoString(C.loon_properties_fs_root_path)
+	propStorageType         = C.GoString(C.loon_properties_fs_storage_type)
+	propCloudProvider       = C.GoString(C.loon_properties_fs_cloud_provider)
+	propIAMEndpoint         = C.GoString(C.loon_properties_fs_iam_endpoint)
+	propLogLevel            = C.GoString(C.loon_properties_fs_log_level)
+	propRegion              = C.GoString(C.loon_properties_fs_region)
+	propSSLCACert           = C.GoString(C.loon_properties_fs_ssl_ca_cert)
+	propGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
+	propUseSSL              = C.GoString(C.loon_properties_fs_use_ssl)
+	propUseIAM              = C.GoString(C.loon_properties_fs_use_iam)
+	propUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
+	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
+	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
+	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 )
 
 // makePropertiesFromConfig builds C.LoonProperties from a StorageConfig.

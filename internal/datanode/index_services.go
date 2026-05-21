@@ -68,7 +68,6 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
 		zap.Any("storepath", req.GetStorePath()),
 		zap.Any("storeversion", req.GetStoreVersion()),
-		zap.Any("indexstorepath", req.GetIndexStorePath()),
 		zap.Any("dim", req.GetDim()),
 	)
 	ctx, sp := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "DataNode-CreateIndex", trace.WithAttributes(
@@ -275,7 +274,6 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
 		zap.String("storePath", req.GetStorePath()),
 		zap.Int64("storeVersion", req.GetStoreVersion()),
-		zap.String("indexStorePath", req.GetIndexStorePath()),
 		zap.Int64("dim", req.GetDim()),
 		zap.Int64("fieldID", req.GetFieldID()),
 		zap.String("fieldType", req.GetFieldType().String()),
@@ -289,8 +287,9 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
-		Cancel: taskCancel,
-		State:  commonpb.IndexState_InProgress,
+		Cancel:                taskCancel,
+		State:                 commonpb.IndexState_InProgress,
+		IndexStorePathVersion: req.GetIndexStorePathVersion(),
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))

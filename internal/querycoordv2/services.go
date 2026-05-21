@@ -482,7 +482,25 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	}
 
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
-	s.jobScheduler.Add(syncJob)
+	go func() {
+		defer func() {
+			syncJob.PostExecute()
+			syncJob.Done()
+		}()
+
+		err := syncJob.PreExecute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+		err = syncJob.Execute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+	}()
 	err := syncJob.Wait()
 	if err != nil {
 		log.Warn(failedMsg, zap.Error(err))
@@ -813,7 +831,16 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	leaders, err := utils.GetShardLeaders(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, req.GetCollectionID(), req.GetWithUnserviceableShards())
+	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
+		s.meta,
+		s.targetMgr,
+		s.dist,
+		s.nodeMgr,
+		req.GetCollectionID(),
+		req.GetWithUnserviceableShards(),
+		func(replica *meta.Replica) bool {
+			return replica.IsQueryVisible()
+		})
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,

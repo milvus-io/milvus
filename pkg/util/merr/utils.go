@@ -57,8 +57,9 @@ func Code(err error) int32 {
 }
 
 func IsRetryableErr(err error) bool {
-	if err, ok := err.(milvusError); ok {
-		return err.retriable
+	var milvusErr milvusError
+	if errors.As(err, &milvusErr) {
+		return milvusErr.retriable
 	}
 
 	return false
@@ -199,7 +200,7 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrServiceDiskLimitExceeded.code():
 		return commonpb.ErrorCode_DiskQuotaExhausted
 
-	case ErrServiceTimeTickLongDelay.code():
+	case ErrServiceTimeTickLongDelay.code(), ErrChannelTSafeStalled.code():
 		return commonpb.ErrorCode_TimeTickLongDelay
 
 	case ErrServiceRateLimit.code():
@@ -756,6 +757,10 @@ func WrapErrChannelNotFound(name string, msg ...string) error {
 
 func WrapErrChannelCPExceededMaxLag(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelCPExceededMaxLag, name, msg...)
+}
+
+func WrapErrChannelTSafeStalled(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelTSafeStalled, name, msg...)
 }
 
 func WrapErrChannelLack(name string, msg ...string) error {

@@ -145,7 +145,7 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req 
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}

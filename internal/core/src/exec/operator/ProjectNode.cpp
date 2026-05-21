@@ -17,11 +17,11 @@
 #include "ProjectNode.h"
 
 #include <algorithm>
-#include <cstring>
 #include <utility>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldData.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
 #include "exec/operator/Operator.h"
@@ -95,23 +95,25 @@ PhyProjectNode::GetOutput() {
         auto field_id = fields_to_project_.at(i);
 
         if (field_id == SegmentOffsetFieldID) {
-            // Two-project mode: output segment offsets as INT64 column
-            // so that late materialization can fetch deferred fields.
-            auto offset_col =
-                std::make_shared<ColumnVector>(DataType::INT64, selected_count);
-            auto raw = static_cast<int64_t*>(offset_col->GetRawData());
-            std::memcpy(
-                raw, selected_offsets.data(), selected_count * sizeof(int64_t));
-            column_vectors.emplace_back(offset_col);
+            FixedVector<int64_t> offsets(selected_count);
+            std::copy(selected_offsets.begin(),
+                      selected_offsets.end(),
+                      offsets.begin());
+            auto field_data = std::make_shared<FieldData<int64_t>>(
+                DataType::INT64, false, std::move(offsets));
+            auto valid_map = TargetBitmap(selected_count, true);
+            auto offset_col = std::make_shared<ColumnVector>(
+                std::move(field_data), std::move(valid_map), 0);
+            column_vectors.emplace_back(std::move(offset_col));
             continue;
         }
 
         if (!segment_->is_field_exist(field_id)) {
-            // Schema evolution: field doesn't exist in this segment.
-            // Fill with all NULLs so SortBuffer handles them via
-            // nulls_first/nulls_last semantics.
+            auto field_data =
+                InitScalarFieldDataWithLength(column_type, selected_count);
+            auto valid_map = TargetBitmap(selected_count, false);
             auto col = std::make_shared<ColumnVector>(
-                column_type, selected_count, selected_count);
+                std::move(field_data), std::move(valid_map), selected_count);
             column_vectors.emplace_back(std::move(col));
             continue;
         }
@@ -125,8 +127,9 @@ PhyProjectNode::GetOutput() {
                                                  segment_,
                                                  valid_map,
                                                  true);
+        auto null_count = selected_count - valid_map.count();
         auto column_vector = std::make_shared<ColumnVector>(
-            std::move(field_data), std::move(valid_map));
+            std::move(field_data), std::move(valid_map), null_count);
         column_vectors.emplace_back(std::move(column_vector));
     }
     is_finished_ = true;

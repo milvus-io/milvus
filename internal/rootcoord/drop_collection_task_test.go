@@ -59,7 +59,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IsAlias(mock.Anything, mock.Anything, mock.Anything).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
 			Core: core,
@@ -75,7 +75,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IsAlias(mock.Anything, mock.Anything, mock.Anything).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID:        1,
 			DBID:                1,
 			State:               pb.CollectionState_CollectionCreated,
@@ -102,7 +102,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID:        1,
 			DBName:              "db1",
 			DBID:                1,

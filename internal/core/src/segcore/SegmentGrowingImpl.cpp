@@ -218,13 +218,9 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
-        const auto& field_name = field_meta.get_name().get();
-
-        // Check if field belongs to a struct: format = "struct_name[field_name]"
-        size_t bracket_pos = field_name.find('[');
-        if (bracket_pos != std::string::npos && bracket_pos > 0) {
-            std::string struct_name = field_name.substr(0, bracket_pos);
-            struct_fields[struct_name].push_back(field_id);
+        auto struct_name = GetStructNameForArrayField(field_meta);
+        if (struct_name.has_value()) {
+            struct_fields[*struct_name].push_back(field_id);
         }
     }
 
@@ -910,7 +906,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 fs,
                 file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties());
+                storage::GetReaderProperties(),
+                storage::GetArrowReaderProperties());
             AssertInfo(result.ok(),
                        "[StorageV2] Failed to create file row group reader: " +
                            result.status().ToString());
@@ -2116,6 +2113,11 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         }
 
         schema_ = sch;
+
+        auto row_count = insert_record_.row_count();
+        for (const auto& field_meta : *absent_fields) {
+            EnsureArrayOffsetsForStructField(field_meta, row_count);
+        }
     }
 
     UpdateResourceTracking();
@@ -2384,6 +2386,41 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
              field_meta.get_data_type(),
              field_id.get(),
              id_);
+}
+
+void
+SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+    const FieldMeta& field_meta, int64_t row_count) {
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value()) {
+        return;
+    }
+
+    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    for (const auto& [field_id, offsets] : array_offsets_map_) {
+        auto field_it = schema_->get_fields().find(field_id);
+        if (field_it == schema_->get_fields().end()) {
+            continue;
+        }
+
+        auto existing_struct_name =
+            GetStructNameForArrayField(field_it->second);
+        if (existing_struct_name == struct_name) {
+            array_offsets = offsets;
+            break;
+        }
+    }
+
+    if (!array_offsets) {
+        array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+        if (row_count > 0) {
+            std::vector<int32_t> empty_lengths(row_count, 0);
+            array_offsets->Insert(0, empty_lengths.data(), row_count);
+        }
+        struct_representative_fields_.insert(field_meta.get_id());
+    }
+
+    array_offsets_map_[field_meta.get_id()] = array_offsets;
 }
 
 void

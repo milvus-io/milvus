@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -58,6 +60,40 @@ func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
 	})
 	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
 	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_IndexStorePathVersionCapabilityFromSessionVersion(t *testing.T) {
+	m := newIndexEngineVersionManager()
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {
+			Version: common.Version,
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.AddNode(&sessionutil.Session{
+		Version: common.Version,
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.6.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 3,
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
 }
 
 func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {
@@ -428,7 +464,7 @@ func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testin
 	// empty - returns MaxInt32
 	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
 
-	// all nodes report Maximum=0 (old QNs)
+	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
 	m.Startup(map[string]*sessionutil.Session{
 		"1": {
 			SessionRaw: sessionutil.SessionRaw{
@@ -437,24 +473,28 @@ func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testin
 			},
 		},
 	})
-	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
 
-	// new QN with Maximum set
+	// new QN with Maximum set - old QN current constrains cluster max
 	m.AddNode(&sessionutil.Session{
 		SessionRaw: sessionutil.SessionRaw{
 			ServerID:                 2,
 			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
 		},
 	})
-	assert.Equal(t, int32(5), m.GetMaximumScalarIndexEngineVersion())
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
 
-	// another QN with lower Maximum
+	// another QN with lower Maximum - old QN current still constrains cluster max
 	m.AddNode(&sessionutil.Session{
 		SessionRaw: sessionutil.SessionRaw{
 			ServerID:                 3,
 			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 3},
 		},
 	})
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
+
+	// remove old QN - remaining new QNs report max directly
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	assert.Equal(t, int32(3), m.GetMaximumScalarIndexEngineVersion())
 }
 
@@ -686,6 +726,27 @@ func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
 
 		// force rebuild: target=1 < clusterMinimal=2, clamped to 2
 		// clusterCurrent = MIN(3,4) = 3, clusterMax = MIN(5,6) = 5
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("old QN without maximum constrains target by current", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 2, MaximumIndexVersion: 0},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 2,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 3, MaximumIndexVersion: 3},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// old QN (Max=0) => use CurrentIndexVersion as upper clamp
 		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
 	})
 }

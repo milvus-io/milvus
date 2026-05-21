@@ -678,11 +678,18 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        auto res = RustResultWrapper(tantivy_finish_index(writer_));
+        // Null writer_ before the FFI call because tantivy_finish_index
+        // always consumes (frees) the Rust-side IndexWriterWrapper via
+        // Box::from_raw, regardless of success or failure.  If we leave
+        // writer_ pointing at the now-freed memory and the AssertInfo
+        // below throws, the destructor path will call free() on a
+        // dangling pointer (use-after-free / SEGFAULT).
+        auto w = writer_;
+        writer_ = nullptr;
+        auto res = RustResultWrapper(tantivy_finish_index(w));
         AssertInfo(res.result_->success,
                    "failed to finish index: {}",
                    res.result_->error);
-        writer_ = nullptr;
         finished_ = true;
     }
 
@@ -991,6 +998,21 @@ struct TantivyIndexWrapper {
                    res.result_->error);
         AssertInfo(res.result_->value.tag == Value::Tag::None,
                    "TantivyIndexWrapper.regex_query: invalid result type");
+    }
+
+    void
+    regex_match_query(void* matcher_ctx,
+                      bool (*matcher)(void*, const uint8_t*, uintptr_t),
+                      void* bitset) {
+        auto array =
+            tantivy_regex_match_query(reader_, matcher_ctx, matcher, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.regex_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.regex_match_query: invalid result type");
     }
 
     void

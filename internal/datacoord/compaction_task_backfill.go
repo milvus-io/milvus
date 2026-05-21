@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -361,6 +362,9 @@ func (t *backfillCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanRe
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+		return err
+	}
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
 	if err != nil {
 		return err

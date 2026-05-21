@@ -491,6 +491,10 @@ func (s *mixCoordImpl) CreatePartition(ctx context.Context, req *milvuspb.Create
 	return s.rootcoordServer.CreatePartition(ctx, req)
 }
 
+func (s *mixCoordImpl) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.rootcoordServer.CreatePartitionV2(ctx, req)
+}
+
 func (s *mixCoordImpl) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.DropPartition(ctx, req)
 }
@@ -569,6 +573,10 @@ func (c *mixCoordImpl) ListAliases(ctx context.Context, in *milvuspb.ListAliases
 
 func (c *mixCoordImpl) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return c.rootcoordServer.AddCollectionField(ctx, in)
+}
+
+func (c *mixCoordImpl) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return c.rootcoordServer.AddCollectionStructField(ctx, in)
 }
 
 func (s *mixCoordImpl) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {

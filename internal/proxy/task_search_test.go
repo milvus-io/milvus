@@ -4409,6 +4409,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := shardclient.NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+			assert.Equal(t, map[string]int64{"mock_qn": 1}, workload.PreferredNodes)
 			err = workload.Exec(ctx, 0, qn, "")
 			assert.NoError(t, err)
 		}).Return(nil)
@@ -4446,7 +4447,9 @@ func TestSearchTask_Requery(t *testing.T) {
 			node:                   node,
 			translatedOutputFields: outputFields,
 			shardClientMgr:         mgr,
+			queryChannelsNode:      typeutil.NewConcurrentMap[string, int64](),
 		}
+		qt.queryChannelsNode.Insert("mock_qn", 1)
 		op, err := newRequeryOperator(qt, nil)
 		assert.NoError(t, err)
 		queryResult, storageCost, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
@@ -4586,6 +4589,47 @@ func TestSearchTask_Requery(t *testing.T) {
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
+}
+
+func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
+	ctx := context.Background()
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	const nodeID int64 = 101
+
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *querypb.SearchRequest) bool {
+		return len(req.GetDmlChannels()) == 1 && req.GetDmlChannels()[0] == channel
+	})).Return(&internalpb.SearchResults{
+		Status:          merr.Success(),
+		CostAggregation: &internalpb.CostAggregation{},
+	}, nil)
+
+	lb := shardclient.NewMockLBPolicy(t)
+	lb.EXPECT().UpdateCostMetrics(nodeID, mock.Anything).Return()
+
+	task := &searchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: paramtable.GetNodeID(),
+			},
+		},
+		request: &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_search_shard_records_node_hint",
+		},
+		Condition:         NewTaskCondition(ctx),
+		lb:                lb,
+		resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+	}
+
+	err := task.searchShard(ctx, nodeID, qn, channel)
+	require.NoError(t, err)
+	recordedNodeID, ok := task.queryChannelsNode.Get(channel)
+	require.True(t, ok)
+	assert.Equal(t, nodeID, recordedNodeID)
 }
 
 type GetPartitionIDsSuite struct {
@@ -6183,10 +6227,11 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	})
 }
 
-// TestSearchTask_ArrayOfVectorHybridSearch verifies that hybrid search rejects
-// range search, search iterator, and group-by on ArrayOfVector fields directly
-// at the initAdvancedSearchRequest layer (hybrid does not yet support the
-// element-level/embedding-list-level split, so all three are rejected).
+// TestSearchTask_ArrayOfVectorHybridSearch verifies that hybrid search allows
+// plain top-K on ArrayOfVector fields while rejecting range search, search
+// iterator, and group-by at the initAdvancedSearchRequest layer. Hybrid does
+// not yet apply the element-level/embedding-list-level split to these advanced
+// features, so all three are rejected for ArrayOfVector.
 func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -6214,13 +6259,13 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 	// rangeRadius != "" attaches a radius param to the sub-request; withIterator
 	// appends the iterator flag; groupByField != "" adds GroupByFieldKey to the
 	// outer rank params.
-	buildHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
+	buildHybridTaskWithMetric := func(annsField string, metricType string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
 		paramsJSON := `{"nprobe": 10}`
 		if rangeRadius != "" {
 			paramsJSON = `{"nprobe": 10, "radius": ` + rangeRadius + `}`
 		}
 		subParams := []*commonpb.KeyValuePair{
-			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: common.MetricTypeKey, Value: metricType},
 			{Key: ParamsKey, Value: paramsJSON},
 			{Key: AnnsFieldKey, Value: annsField},
 			{Key: TopKKey, Value: "10"},
@@ -6259,6 +6304,16 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 			tr:     timerecord.NewTimeRecorder("test"),
 		}
 	}
+
+	buildHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
+		return buildHybridTaskWithMetric(annsField, metric.L2, rangeRadius, withIterator, groupByField)
+	}
+
+	t.Run("hybrid with ArrayOfVector EmbList metric plain topK should succeed", func(t *testing.T) {
+		qt := buildHybridTaskWithMetric("emb_vec", metric.MaxSimCosine, "", false, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
 
 	t.Run("hybrid with ArrayOfVector range search should fail", func(t *testing.T) {
 		qt := buildHybridTask("emb_vec", "0.2", false, "")

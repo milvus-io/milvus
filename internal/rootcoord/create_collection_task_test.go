@@ -662,14 +662,18 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			StructArrayFields: []*schemapb.StructArrayFieldSchema{
 				{
-					Name: "struct_field",
+					Name:     "struct_field",
+					Nullable: true,
 					Fields: []*schemapb.FieldSchema{
 						{
 							Name:        "vector_array_field",
 							DataType:    schemapb.DataType_ArrayOfVector,
 							ElementType: schemapb.DataType_FloatVector,
 							Nullable:    true,
-							TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "128"},
+								{Key: common.MaxCapacityKey, Value: "100"},
+							},
 						},
 					},
 				},
@@ -822,6 +826,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "nested_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Array,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -850,6 +855,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "array_field",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_None,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -880,12 +886,14 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_VarChar,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.MaxLengthKey, Value: "100"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 						{
 							Name:        "int_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 						{
 							Name:        "vector_array",
@@ -893,6 +901,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_FloatVector,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.DimKey, Value: "128"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 					},
@@ -1649,7 +1658,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -1742,7 +1751,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		}).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 		defer cleanTestEnv()
 
 		collectionName := funcutil.GenRandomStr()
@@ -1805,7 +1814,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)

@@ -40,6 +40,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
+#include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -191,10 +192,15 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<InputStream>
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
-        auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
-                                              : GetRemoteTextLogPrefix();
-        remote_file_path += "/" + local_file_name;
+        std::string remote_file_path;
+        if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
+            remote_file_path = NormalizePath(filename);
+        } else {
+            auto local_file_name = GetFileName(filename);
+            remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                             : GetRemoteTextLogPrefix();
+            remote_file_path += "/" + local_file_name;
+        }
         auto remote_file = fs_->OpenInputFile(remote_file_path);
         AssertInfo(remote_file.ok(),
                    "failed to open remote file, reason: {}",
@@ -280,13 +286,23 @@ class FileManagerImpl : public milvus::FileManager {
         boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
-        boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1 =
-            std::to_string(index_meta_.build_id) + "/" +
-            std::to_string(index_meta_.index_version) + "/" +
-            std::to_string(field_meta_.partition_id) + "/" +
-            std::to_string(field_meta_.segment_id);
-        return NormalizePath(prefix / path / path1);
+        if (index_meta_.index_store_path_version >=
+            ::milvus::proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+            // {root}/index_v1/{coll}/{part}/{seg}/{build}/{ver}
+            return NormalizePath(prefix / std::string(INDEX_ROOT_PATH_V1) /
+                                 std::to_string(field_meta_.collection_id) /
+                                 std::to_string(field_meta_.partition_id) /
+                                 std::to_string(field_meta_.segment_id) /
+                                 std::to_string(index_meta_.build_id) /
+                                 std::to_string(index_meta_.index_version));
+        }
+        // {root}/index_files/{build}/{ver}/{part}/{seg}
+        return NormalizePath(prefix / std::string(INDEX_ROOT_PATH) /
+                             std::to_string(index_meta_.build_id) /
+                             std::to_string(index_meta_.index_version) /
+                             std::to_string(field_meta_.partition_id) /
+                             std::to_string(field_meta_.segment_id));
     }
 
     virtual std::string
@@ -311,6 +327,23 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
+    }
+
+    bool
+    ShouldOpenIndexFileDirectly(const std::string& filename,
+                                bool is_index_file) const {
+        if (!is_index_file || filename.find('/') == std::string::npos) {
+            return false;
+        }
+
+        // Absolute local paths are legacy caller inputs, not object keys.
+        // Local Arrow FS already applies its own root path.
+        if (milvus_storage::IsLocalFileSystem(fs_) &&
+            boost::filesystem::path(filename).is_absolute()) {
+            return false;
+        }
+
+        return true;
     }
 
     std::string

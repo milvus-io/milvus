@@ -13,6 +13,7 @@
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <iosfwd>
 #include <memory>
@@ -27,11 +28,13 @@
 #include "gtest/gtest.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 
@@ -40,6 +43,14 @@ using namespace milvus;
 using namespace milvus::storage;
 
 string bucketName = "a-bucket";
+
+void
+FreeErrorStatus(CStatus& status) {
+    if (status.error_msg != nullptr && status.error_msg[0] != '\0') {
+        free(const_cast<char*>(status.error_msg));
+        status.error_msg = nullptr;
+    }
+}
 
 CStorageConfig
 get_azure_storage_config() {
@@ -121,6 +132,50 @@ TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
 
 TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
+}
+
+TEST_F(StorageTest, InitArrowReaderConfig) {
+    auto default_cache_options =
+        parquet::default_arrow_reader_properties().cache_options();
+
+    auto status = InitArrowReaderConfig(CArrowReaderConfig{-1, 0});
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+    status = InitArrowReaderConfig(CArrowReaderConfig{0, -1});
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+    status = InitArrowReaderConfig(CArrowReaderConfig{64 * 1024, 32 * 1024});
+    EXPECT_NE(status.error_code, Success);
+    FreeErrorStatus(status);
+
+    status =
+        InitArrowReaderConfig(CArrowReaderConfig{32 * 1024, 4 * 1024 * 1024});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    auto cache_options = GetArrowReaderProperties().cache_options();
+    EXPECT_EQ(cache_options.hole_size_limit, 32 * 1024);
+    EXPECT_EQ(cache_options.range_size_limit, 4 * 1024 * 1024);
+
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+
+    auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
+    EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
+
+    auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
+        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
+    EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
+
+    status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    cache_options = GetArrowReaderProperties().cache_options();
+    EXPECT_EQ(cache_options.hole_size_limit,
+              default_cache_options.hole_size_limit);
+    EXPECT_EQ(cache_options.range_size_limit,
+              default_cache_options.range_size_limit);
 }
 
 class StorageUtilTest : public testing::Test {

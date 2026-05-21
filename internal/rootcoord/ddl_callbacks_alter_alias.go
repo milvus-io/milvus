@@ -46,7 +46,7 @@ func (c *Core) broadcastCreateAlias(ctx context.Context, req *milvuspb.CreateAli
 	if err != nil {
 		return err
 	}
-	collection, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	collection, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (c *Core) broadcastAlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 	if err != nil {
 		return err
 	}
-	collection, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	collection, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}

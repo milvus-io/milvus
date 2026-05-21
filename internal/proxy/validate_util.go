@@ -404,6 +404,16 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+
+			// ArrayOfVector is dense after fillWithValue: null rows are filled with empty
+			// per-row VectorField placeholders, so Data length must equal numRows.
+			if field.GetVectors() == nil || field.GetVectors().GetVectorArray() == nil {
+				if numRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
+			}
+
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
@@ -554,11 +564,69 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		}
 
 	case *schemapb.FieldData_Vectors:
+		// Only ArrayOfVector needs null-expansion. Regular vectors stay compact and
+		// rely on ValidData + isNullRow to carry null semantics downstream.
+		// ArrayOfVector is treated as a per-row array whose null rows are represented
+		// by an empty VectorField placeholder, so downstream consumers can read it
+		// uniformly as "row has zero vectors" without special null handling.
+		if field.Type == schemapb.DataType_ArrayOfVector {
+			vectorArray := field.GetVectors().GetVectorArray()
+			if vectorArray == nil {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("array of vector data is nil, field: %s", field.GetFieldName()))
+			}
+			expanded, err := fillVectorArrayNullValueImpl(vectorArray.GetData(), field.GetValidData(), vectorArray.GetDim(), vectorArray.GetElementType())
+			if err != nil {
+				return err
+			}
+			vectorArray.Data = expanded
+		}
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}
 
 	return nil
+}
+
+func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []bool, dim int64, elementType schemapb.DataType) ([]*schemapb.VectorField, error) {
+	n := getValidNumber(validData)
+	if len(array) != n {
+		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
+	}
+	if n == len(validData) {
+		return array, nil
+	}
+	res := make([]*schemapb.VectorField, len(validData))
+	srcIdx := 0
+	for i, v := range validData {
+		if v {
+			res[i] = array[srcIdx]
+			srcIdx++
+		} else {
+			res[i] = newEmptyPerRowVectorField(dim, elementType)
+		}
+	}
+	return res, nil
+}
+
+// newEmptyPerRowVectorField builds a placeholder VectorField representing a single
+// ArrayOfVector row with zero vectors. Dim matches the field schema, and the Data
+// oneof is populated with an empty container of the element type so that the
+// placeholder structure is consistent with non-null rows.
+func newEmptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	}
+	return vf
 }
 
 func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
@@ -1131,6 +1199,39 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
 	}
 
+	dim, err := typeutil.GetDim(fieldSchema)
+	if err != nil {
+		return err
+	}
+
+	var maxCapacity int64
+	if v.checkMaxCap {
+		maxCapacity, err = parameterutil.GetMaxCapacity(fieldSchema)
+		if err != nil {
+			return err
+		}
+	}
+
+	checkCapacity := func(vectorCount int) error {
+		if !v.checkMaxCap || int64(vectorCount) <= maxCapacity {
+			return nil
+		}
+		msg := fmt.Sprintf("the length (%d) of array of vector field %s exceeds max capacity (%d)", vectorCount, field.GetFieldName(), maxCapacity)
+		return merr.WrapErrParameterInvalid("valid length array", "array length exceeds max capacity", msg)
+	}
+
+	validateVectorCount := func(payloadLength int, elementsPerVector int) (int, error) {
+		if elementsPerVector <= 0 {
+			return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d for array of vector field %s", dim, field.GetFieldName())
+		}
+		if payloadLength%elementsPerVector != 0 {
+			msg := fmt.Sprintf("array of vector field %s has invalid payload length %d, should be divisible by vector width %d",
+				field.GetFieldName(), payloadLength, elementsPerVector)
+			return 0, merr.WrapErrParameterInvalid("valid array of vector payload length", "invalid payload length", msg)
+		}
+		return payloadLength / elementsPerVector, nil
+	}
+
 	switch fieldSchema.GetElementType() {
 	case schemapb.DataType_FloatVector:
 		for _, vector := range data.GetData() {
@@ -1138,6 +1239,13 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if floatVector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
+			}
+			vectorCount, err := validateVectorCount(len(floatVector.GetData()), int(dim))
+			if err != nil {
+				return err
+			}
+			if err := checkCapacity(vectorCount); err != nil {
+				return err
 			}
 			if v.checkNAN {
 				if err := typeutil.VerifyFloats32(floatVector.GetData()); err != nil {
@@ -1153,6 +1261,13 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need binary vector array", "got nil", msg)
 			}
+			vectorCount, err := validateVectorCount(len(binaryVector), int((dim+7)/8))
+			if err != nil {
+				return err
+			}
+			if err := checkCapacity(vectorCount); err != nil {
+				return err
+			}
 		}
 		return nil
 	case schemapb.DataType_Float16Vector:
@@ -1161,6 +1276,13 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if float16Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need float16 vector array", "got nil", msg)
+			}
+			vectorCount, err := validateVectorCount(len(float16Vector), int(dim)*2)
+			if err != nil {
+				return err
+			}
+			if err := checkCapacity(vectorCount); err != nil {
+				return err
 			}
 			if v.checkNAN {
 				if err := typeutil.VerifyFloats16(float16Vector); err != nil {
@@ -1176,6 +1298,13 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need bfloat16 vector array", "got nil", msg)
 			}
+			vectorCount, err := validateVectorCount(len(bfloat16Vector), int(dim)*2)
+			if err != nil {
+				return err
+			}
+			if err := checkCapacity(vectorCount); err != nil {
+				return err
+			}
 			if v.checkNAN {
 				if err := typeutil.VerifyBFloats16(bfloat16Vector); err != nil {
 					return err
@@ -1189,6 +1318,13 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if int8Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need int8 vector array", "got nil", msg)
+			}
+			vectorCount, err := validateVectorCount(len(int8Vector), int(dim))
+			if err != nil {
+				return err
+			}
+			if err := checkCapacity(vectorCount); err != nil {
+				return err
 			}
 		}
 		return nil

@@ -2003,39 +2003,65 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 }
 
-func TestFilterSegmentsWithMatchingSchemaVersion(t *testing.T) {
-	coll := &collectionInfo{
-		ID:     1,
-		Schema: &schemapb.CollectionSchema{Version: 5},
+func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(1)
+	partitionID := int64(10)
+	channel := "ch-1"
+	schema := newTestSchema()
+	schema.Version = 5
+	mt := &meta{
+		segments:    NewSegmentsInfo(),
+		indexMeta:   newSegmentIndexMeta(nil),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: schema})
+
+	for _, item := range []struct {
+		id            int64
+		schemaVersion int32
+	}{
+		{id: 101, schemaVersion: 3},
+		{id: 102, schemaVersion: 5},
+		{id: 103, schemaVersion: 4},
+	} {
+		mt.segments.SetSegment(item.id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            item.id,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			IsSorted:      true,
+			NumOfRows:     10,
+			MaxRowNum:     100,
+			SchemaVersion: item.schemaVersion,
+			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{EntriesNum: 10, MemorySize: 1}}}},
+		}})
 	}
 
-	// empty input → empty output
-	result := filterSegmentsWithMatchingSchemaVersion(nil, coll)
-	assert.Empty(t, result)
+	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}
+	trigger := newCompactionTrigger(mt, inspector, newMock0Allocator(t), newMockHandlerWithMeta(mt), newMockVersionManager())
+	err := trigger.handleSignal(&compactionSignal{
+		id:           1,
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		channel:      channel,
+		isForce:      true,
+	})
+	assert.NoError(t, err)
 
-	// all segments match → all returned
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-	}, coll)
-	assert.Equal(t, 2, len(result))
-
-	// mixed versions → only matching segments returned
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1, SchemaVersion: 5}},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 2, SchemaVersion: 4}},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 3, SchemaVersion: 5}},
-	}, coll)
-	assert.Equal(t, 2, len(result))
-	assert.Equal(t, int64(1), result[0].GetID())
-	assert.Equal(t, int64(3), result[1].GetID())
-
-	// all segments outdated → empty output
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 0}},
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 4}},
-	}, coll)
-	assert.Empty(t, result)
+	select {
+	case plan := <-inspector.spyChan:
+		var got []int64
+		for _, segment := range plan.GetSegmentBinlogs() {
+			got = append(got, segment.GetSegmentID())
+		}
+		assert.ElementsMatch(t, []int64{101, 102, 103}, got)
+	case <-time.After(time.Second):
+		assert.Fail(t, "expected compaction plan for mixed schema version segments")
+	}
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {

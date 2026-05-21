@@ -157,7 +157,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -185,7 +185,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -213,7 +213,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -244,7 +244,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -277,7 +277,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -298,7 +298,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -332,7 +332,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -361,7 +361,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -417,7 +417,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				},
 			},
 		}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -470,7 +470,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				ObjectName: util.AnyWord,
 			},
 		}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -518,7 +518,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				ObjectName: util.AnyWord,
 			},
 		}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -572,7 +572,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				ObjectName: "b",
 			},
 		}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,
@@ -630,7 +630,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				GroupName: "privilege_group",
 			},
 		}, nil).Once()
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
 			DBID:         1,

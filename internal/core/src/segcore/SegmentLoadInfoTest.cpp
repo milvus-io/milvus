@@ -11,8 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <algorithm>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -21,6 +24,8 @@
 #include <vector>
 
 #include "NamedType/underlying_functionalities.hpp"
+#include "common/Common.h"
+#include "common/Consts.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -1476,6 +1481,209 @@ TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesTextIndexes) {
     EXPECT_TRUE(str.find("102") != std::string::npos);
 }
 
+TEST_F(SegmentLoadInfoTest, ConvertJsonKeyStatsToLoadJsonKeyIndexInfo) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+    proto.set_priority(proto::common::LoadPriority::HIGH);
+
+    proto::segcore::JsonKeyStats json_stats;
+    json_stats.set_fieldid(102);
+    json_stats.set_version(3);
+    json_stats.set_buildid(5001);
+    json_stats.set_log_size(4096);
+    json_stats.set_memory_size(8192);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.set_base_path("/path/to/json_stats");
+    json_stats.add_files("meta.json");
+    json_stats.add_files("shared_key_index/file1");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto load_info = info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+        json_stats, FieldId(102));
+
+    EXPECT_NE(load_info, nullptr);
+    EXPECT_EQ(load_info->fieldid(), 102);
+    EXPECT_EQ(load_info->version(), 3);
+    EXPECT_EQ(load_info->buildid(), 5001);
+    EXPECT_EQ(load_info->stats_size(), 4096);
+    EXPECT_EQ(load_info->base_path(), "/path/to/json_stats");
+    EXPECT_EQ(load_info->files_size(), 2);
+    EXPECT_EQ(load_info->files(0), "meta.json");
+    EXPECT_EQ(load_info->files(1), "shared_key_index/file1");
+    EXPECT_EQ(load_info->collectionid(), 200);
+    EXPECT_EQ(load_info->partitionid(), 300);
+    EXPECT_EQ(load_info->load_priority(), proto::common::LoadPriority::HIGH);
+    EXPECT_TRUE(load_info->has_schema());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithJsonStats) {
+    LoadDiff diff;
+    EXPECT_FALSE(diff.HasChanges());
+
+    diff.json_stats_to_load[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    EXPECT_TRUE(diff.HasChanges());
+
+    diff.json_stats_to_load.clear();
+    diff.json_stats_to_replace[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    EXPECT_TRUE(diff.HasChanges());
+
+    diff.json_stats_to_replace.clear();
+    diff.json_stats_to_drop.insert(FieldId(102));
+    EXPECT_TRUE(diff.HasChanges());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesJsonStats) {
+    LoadDiff diff;
+    diff.json_stats_to_load[FieldId(102)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    diff.json_stats_to_replace[FieldId(103)] =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    diff.json_stats_to_drop.insert(FieldId(104));
+
+    auto str = diff.ToString();
+    EXPECT_TRUE(str.find("json_stats_to_load") != std::string::npos);
+    EXPECT_TRUE(str.find("102") != std::string::npos);
+    EXPECT_TRUE(str.find("json_stats_to_replace") != std::string::npos);
+    EXPECT_TRUE(str.find("103") != std::string::npos);
+    EXPECT_TRUE(str.find("json_stats_to_drop") != std::string::npos);
+    EXPECT_TRUE(str.find("104") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffJsonStatsFromStats) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    auto& json_stats = (*proto.mutable_jsonkeystatslogs())[102];
+    json_stats.set_fieldid(102);
+    json_stats.set_version(1);
+    json_stats.set_buildid(5001);
+    json_stats.set_log_size(4096);
+    json_stats.set_memory_size(8192);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.set_base_path("/path/to/json_stats");
+    json_stats.add_files("meta.json");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_EQ(diff.json_stats_to_load.size(), 1);
+    EXPECT_TRUE(diff.json_stats_to_load.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
+    const auto current_format = std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_collectionid(200);
+    current_proto.set_partitionid(300);
+    current_proto.set_num_of_rows(1000);
+    auto& current_stats = (*current_proto.mutable_jsonkeystatslogs())[102];
+    current_stats.set_fieldid(102);
+    current_stats.set_version(1);
+    current_stats.set_buildid(5001);
+    current_stats.set_log_size(4096);
+    current_stats.set_memory_size(8192);
+    current_stats.set_json_key_stats_data_format(current_format);
+    current_stats.set_base_path("/path/to/json_stats");
+    current_stats.add_files("meta.json");
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_same_info(new_proto, schema_);
+    auto same_diff = current_info.ComputeDiff(new_same_info);
+    EXPECT_TRUE(same_diff.json_stats_to_load.empty());
+    EXPECT_TRUE(same_diff.json_stats_to_replace.empty());
+    EXPECT_TRUE(same_diff.json_stats_to_drop.empty());
+
+    auto& new_stats = (*new_proto.mutable_jsonkeystatslogs())[103];
+    new_stats.set_fieldid(103);
+    new_stats.set_version(1);
+    new_stats.set_buildid(5002);
+    new_stats.set_log_size(1024);
+    new_stats.set_memory_size(2048);
+    new_stats.set_json_key_stats_data_format(current_format);
+    new_stats.set_base_path("/path/to/new_json_stats");
+    new_stats.add_files("meta.json");
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto new_diff = current_info.ComputeDiff(new_info);
+    EXPECT_EQ(new_diff.json_stats_to_load.size(), 1);
+    EXPECT_TRUE(new_diff.json_stats_to_load.count(FieldId(103)) > 0);
+
+    (*new_proto.mutable_jsonkeystatslogs())[102].set_version(2);
+    SegmentLoadInfo replace_info(new_proto, schema_);
+    auto replace_diff = current_info.ComputeDiff(replace_info);
+    EXPECT_EQ(replace_diff.json_stats_to_replace.size(), 1);
+    EXPECT_TRUE(replace_diff.json_stats_to_replace.count(FieldId(102)) > 0);
+
+    proto::segcore::SegmentLoadInfo drop_proto;
+    drop_proto.set_segmentid(100);
+    drop_proto.set_collectionid(200);
+    drop_proto.set_partitionid(300);
+    drop_proto.set_num_of_rows(1000);
+    SegmentLoadInfo drop_info(drop_proto, schema_);
+    auto drop_diff = current_info.ComputeDiff(drop_info);
+    EXPECT_EQ(drop_diff.json_stats_to_drop.size(), 1);
+    EXPECT_TRUE(drop_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+
+    proto::segcore::SegmentLoadInfo invalid_proto;
+    invalid_proto.set_segmentid(100);
+    invalid_proto.set_collectionid(200);
+    invalid_proto.set_partitionid(300);
+    invalid_proto.set_num_of_rows(1000);
+    auto& invalid_stats = (*invalid_proto.mutable_jsonkeystatslogs())[102];
+    invalid_stats.CopyFrom(current_stats);
+    invalid_stats.set_json_key_stats_data_format(current_format - 1);
+    SegmentLoadInfo invalid_info(invalid_proto, schema_);
+    auto invalid_diff = current_info.ComputeDiff(invalid_info);
+    EXPECT_TRUE(invalid_diff.json_stats_to_load.empty());
+    EXPECT_TRUE(invalid_diff.json_stats_to_replace.empty());
+    EXPECT_EQ(invalid_diff.json_stats_to_drop.size(), 1);
+    EXPECT_TRUE(invalid_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsDisabled) {
+    SetDefaultJSONKeyStatsEnable(false);
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_collectionid(200);
+    current_proto.set_partitionid(300);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto& json_stats = (*new_proto.mutable_jsonkeystatslogs())[102];
+    json_stats.set_fieldid(102);
+    json_stats.set_version(1);
+    json_stats.set_buildid(5001);
+    json_stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.add_files("meta.json");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.json_stats_to_load.empty());
+    EXPECT_TRUE(diff.json_stats_to_replace.empty());
+    EXPECT_TRUE(diff.json_stats_to_drop.empty());
+    SetDefaultJSONKeyStatsEnable(true);
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexMultipleFields) {
     // Test with multiple text stats fields in new_info
     proto::segcore::SegmentLoadInfo current_proto;
@@ -2442,6 +2650,29 @@ MakeColumnGroups(
     return cgs;
 }
 
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+MakeExternalColumnGroups(
+    std::initializer_list<
+        std::pair<std::vector<std::string>, std::vector<std::string>>> groups) {
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto& [columns, paths] : groups) {
+        auto cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        cg->format = "parquet";
+        for (const auto& column : columns) {
+            cg->columns.push_back(column);
+        }
+        for (const auto& p : paths) {
+            milvus_storage::api::ColumnGroupFile f;
+            f.path = p;
+            f.start_index = 0;
+            f.end_index = 0;
+            cg->files.push_back(std::move(f));
+        }
+        cgs->push_back(std::move(cg));
+    }
+    return cgs;
+}
+
 proto::segcore::SegmentLoadInfo
 MakeManifestProto(const std::string& manifest_path) {
     proto::segcore::SegmentLoadInfo p;
@@ -2451,7 +2682,243 @@ MakeManifestProto(const std::string& manifest_path) {
     return p;
 }
 
+SchemaPtr
+MakeSchemaWithFieldIds(std::initializer_list<int64_t> field_ids) {
+    auto schema = std::make_shared<Schema>();
+    for (auto field_id : field_ids) {
+        schema->AddField(FieldName("field_" + std::to_string(field_id)),
+                         FieldId(field_id),
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+    }
+    if (std::find(field_ids.begin(), field_ids.end(), 100) != field_ids.end()) {
+        schema->set_primary_field_id(FieldId(100));
+    }
+    return schema;
+}
+
 }  // namespace
+
+TEST_F(SegmentLoadInfoTest, ConstructSkipsIndexInfoForDroppedField) {
+    proto::segcore::SegmentLoadInfo p;
+    p.set_segmentid(100);
+    p.set_num_of_rows(1000);
+    auto* index_info = p.add_index_infos();
+    index_info->set_fieldid(102);
+    index_info->set_indexid(1002);
+    index_info->add_index_file_paths("/path/to/stale_index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo info(p, MakeSchemaWithFieldIds({100, 101}));
+
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(102)));
+    EXPECT_TRUE(info.GetIndexedFieldIds().empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewBinlogForDroppedField) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* stale_binlog = new_proto.add_binlog_paths();
+    stale_binlog->set_fieldid(102);
+    auto* log = stale_binlog->add_binlogs();
+    log->set_log_path("/path/to/stale_binlog");
+    log->set_entries_num(1000);
+
+    auto latest_schema = MakeSchemaWithFieldIds({100, 101});
+    SegmentLoadInfo current_info(current_proto, latest_schema);
+    SegmentLoadInfo new_info(new_proto, latest_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffFiltersDroppedChildFromMixedBinlogGroup) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* mixed_binlog = new_proto.add_binlog_paths();
+    mixed_binlog->set_fieldid(104);
+    mixed_binlog->add_child_fields(105);
+    mixed_binlog->add_child_fields(106);
+    auto* log = mixed_binlog->add_binlogs();
+    log->set_log_path("/path/to/mixed_binlog");
+    log->set_entries_num(1000);
+
+    auto latest_schema = MakeSchemaWithFieldIds({100, 105});
+    SegmentLoadInfo current_info(current_proto, latest_schema);
+    SegmentLoadInfo new_info(new_proto, latest_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffSkipsNewManifestColumnForDroppedField) {
+    auto latest_schema = MakeSchemaWithFieldIds({100, 101});
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"),
+                                 latest_schema);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), latest_schema);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/stale.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropsManifestFieldRemovedFromSchema) {
+    auto current_schema = MakeSchemaWithFieldIds({100, 102});
+    auto latest_schema = MakeSchemaWithFieldIds({100});
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"),
+                                 current_schema);
+    current_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/old.parquet"}}}));
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), latest_schema);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{102}, {"/path/to/stale.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsUsesNewSchema) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* current_binlog = current_proto.add_binlog_paths();
+    current_binlog->set_fieldid(100);
+    auto* current_log = current_binlog->add_binlogs();
+    current_log->set_log_path("/path/to/pk");
+    current_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+
+    SegmentLoadInfo current_info(current_proto, MakeSchemaWithFieldIds({100}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100, 101}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_EQ(diff.fields_to_fill_default.size(), 1);
+    EXPECT_EQ(diff.fields_to_fill_default[0].get(), 101);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffDropsResourcesForFieldRemovedFromSchema) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* index_info = current_proto.add_index_infos();
+    index_info->set_fieldid(102);
+    index_info->set_indexid(1002);
+    index_info->add_index_file_paths("/path/to/stale_index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+    auto* binlog = current_proto.add_binlog_paths();
+    binlog->set_fieldid(102);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/stale_binlog");
+    log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    SegmentLoadInfo current_info(current_proto,
+                                 MakeSchemaWithFieldIds({100, 102}));
+    SegmentLoadInfo new_info(new_proto, MakeSchemaWithFieldIds({100}));
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffExternalManifestWithNewIndexDoesNotParseColumnNames) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    auto cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}});
+
+    auto current_proto = MakeManifestProto("/manifest/v1");
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetColumnGroupsForTesting(cgs);
+
+    auto new_proto = MakeManifestProto("/manifest/v1");
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(2001);
+    index_info->set_buildid(3001);
+    index_info->set_index_version(1);
+    index_info->add_index_file_paths("/path/to/index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(cgs);
+
+    LoadDiff diff;
+    EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
+    ASSERT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_FALSE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffExternalManifestUpdateReloadsExternalManifest) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    auto current_cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id_v1.parquet"}},
+         {{"vector", "tenant"}, {"/external/data_v1.parquet"}}});
+    auto new_cgs = MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id_v2.parquet"}},
+         {{"vector", "tenant"}, {"/external/data_v2.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v2"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    LoadDiff diff;
+    EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
+    EXPECT_TRUE(diff.manifest_updated);
+    EXPECT_EQ(diff.new_manifest_path, "/manifest/v2");
+    EXPECT_TRUE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
 
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffColumnGroupSameIndexDifferentFilesTriggersReplace) {

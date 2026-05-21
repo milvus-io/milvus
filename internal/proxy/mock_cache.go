@@ -77,6 +77,38 @@ func (_c *MockCache_AllocID_Call) RunAndReturn(run func(context.Context) (int64,
 	return _c
 }
 
+// Close provides a mock function with no fields
+func (_m *MockCache) Close() {
+	_m.Called()
+}
+
+// MockCache_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockCache_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockCache_Expecter) Close() *MockCache_Close_Call {
+	return &MockCache_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockCache_Close_Call) Run(run func()) *MockCache_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCache_Close_Call) Return() *MockCache_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_Close_Call) RunAndReturn(run func()) *MockCache_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionID provides a mock function with given fields: ctx, database, collectionName
 func (_m *MockCache) GetCollectionID(ctx context.Context, database string, collectionName string) (int64, error) {
 	ret := _m.Called(ctx, database, collectionName)
@@ -871,6 +903,44 @@ func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call
 }
 
 func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabase_Call {
+	_c.Run(run)
+	return _c
+}
+
+// RemovePartition provides a mock function with given fields: ctx, database, collectionID, collectionName, partitionName, version
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
+	_m.Called(ctx, database, collectionID, collectionName, partitionName, version)
+}
+
+// MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
+type MockCache_RemovePartition_Call struct {
+	*mock.Call
+}
+
+// RemovePartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionID UniqueID
+//   - collectionName string
+//   - partitionName string
+//   - version uint64
+func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionID interface{}, collectionName interface{}, partitionName interface{}, version interface{}) *MockCache_RemovePartition_Call {
+	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, collectionName, partitionName, version)}
+}
+
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(UniqueID), args[3].(string), args[4].(string), args[5].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, UniqueID, string, string, uint64)) *MockCache_RemovePartition_Call {
 	_c.Run(run)
 	return _c
 }

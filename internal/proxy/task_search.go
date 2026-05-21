@@ -92,13 +92,14 @@ type searchTask struct {
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
-	mixCoord        types.MixCoordClient
-	node            types.ProxyComponent
-	lb              shardclient.LBPolicy
-	shardClientMgr  shardclient.ShardClientMgr
-	queryChannelsTs map[string]Timestamp
-	queryInfos      []*planpb.QueryInfo
-	relatedDataSize int64
+	mixCoord          types.MixCoordClient
+	node              types.ProxyComponent
+	lb                shardclient.LBPolicy
+	shardClientMgr    shardclient.ShardClientMgr
+	queryChannelsTs   map[string]Timestamp
+	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
+	queryInfos        []*planpb.QueryInfo
+	relatedDataSize   int64
 
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
@@ -545,11 +546,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
-		// Hybrid search does not yet support vector array (embedding list) fields:
-		// placeholder type is per sub-request and element-level vs embedding-list-level
-		// differentiation is not wired up on this path. Reject range search / iterator /
-		// group by on such fields here; plain top-K stays allowed for now (unchanged
-		// behavior).
+		// Hybrid search supports plain top-K on ArrayOfVector fields, including
+		// EmbList row-level search. This path does not yet use the per-sub-request
+		// placeholder type to distinguish EmbList from element-level search for
+		// advanced features, so reject range search / iterator / group by on
+		// ArrayOfVector here.
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
 			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
@@ -1076,6 +1077,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
+	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,
@@ -1314,6 +1316,9 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
+	}
+	if t.queryChannelsNode != nil {
+		t.queryChannelsNode.Insert(channel, nodeID)
 	}
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 

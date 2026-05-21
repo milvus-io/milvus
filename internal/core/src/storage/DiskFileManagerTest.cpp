@@ -57,6 +57,7 @@
 #include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
+#include "pb/index_coord.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -270,6 +271,58 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path_read);
     lcm->Remove(large_index_file_path);
     lcm->Remove(small_index_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V0BuildRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_BUILD_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_files/1000/1/20/30") != std::string::npos)
+        << "prefix=" << prefix;
+    EXPECT_TRUE(prefix.find("/index_v1/") == std::string::npos)
+        << "prefix=" << prefix;
+}
+
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_v1/100/20/30/1000/1") != std::string::npos)
+        << "prefix=" << prefix;
+    const std::string key = "vector_index_data";
+    auto composed = prefix + "/" + key;
+    EXPECT_TRUE(composed.find("/index_v1/100/20/30/1000/1/") !=
+                std::string::npos);
 }
 
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {

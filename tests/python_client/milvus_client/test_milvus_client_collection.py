@@ -3050,9 +3050,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 5. Load with replica_number=3 (should fail if only 2 querynodes available)
         error = {
-            ct.err_code: 999,
-            ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
-            "service resource insufficient[currentStreamingNode=2][expectedStreamingNode=3]",
+            ct.err_code: 65535,
+            ct.err_msg: "when load 3 replica count: service resource insufficient",
         }
         self.load_collection(
             client, collection_name, replica_number=3, check_task=CheckTasks.err_res, check_items=error
@@ -4261,6 +4260,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "functions": [],
             "aliases": [],
             "consistency_level": 0,
+            "consistency_level_name": "Strong",
             "properties": {"timezone": "UTC"},
             "num_partitions": 1,
             "enable_dynamic_field": True,

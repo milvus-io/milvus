@@ -394,6 +394,54 @@ func (coord *MixCoordMock) AddCollectionField(ctx context.Context, req *milvuspb
 	return merr.Success(), nil
 }
 
+func (coord *MixCoordMock) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection not exist",
+		}, nil
+	}
+
+	collInfo, exist := coord.collID2Meta[collID]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection info not exist",
+		}, nil
+	}
+	structField := proto.Clone(req.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	fieldIDStart := int64(common.StartOfUserFieldID + typeutil.GetTotalFieldsNum(collInfo.schema) + 1)
+	structField.FieldID = fieldIDStart
+	for i, field := range structField.GetFields() {
+		field.FieldID = fieldIDStart + int64(i) + 1
+	}
+	collInfo.schema.StructArrayFields = append(collInfo.schema.StructArrayFields, structField)
+	ts := uint64(time.Now().Nanosecond())
+	coord.collID2Meta[collID] = collectionMeta{
+		name:                 req.CollectionName,
+		id:                   collID,
+		schema:               collInfo.schema,
+		shardsNum:            collInfo.shardsNum,
+		virtualChannelNames:  collInfo.virtualChannelNames,
+		physicalChannelNames: collInfo.physicalChannelNames,
+		createdTimestamp:     ts,
+		createdUtcTimestamp:  ts,
+		properties:           collInfo.properties,
+	}
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -676,6 +724,10 @@ func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.Cr
 	}
 
 	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, nil
 }
 
 func (coord *MixCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

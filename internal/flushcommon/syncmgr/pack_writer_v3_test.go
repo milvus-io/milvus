@@ -371,7 +371,10 @@ func genInsertDataWithPKOffset(size int, pkOffset int, schema *schemapb.Collecti
 		}
 		data[101] = vector
 
-		vectorData := []float32{float32(i) * 0.1, float32(i) * 0.2}
+		vectorData := make([]float32, 2*128)
+		for j := range vectorData {
+			vectorData[j] = float32(i+j) * 0.001
+		}
 		vectorArray := &schemapb.VectorField{
 			Dim: 128,
 			Data: &schemapb.VectorField_FloatVector{

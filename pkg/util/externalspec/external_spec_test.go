@@ -113,7 +113,7 @@ func TestValidateExternalSource(t *testing.T) {
 			"s3://bucket/prefix",
 			"s3a://bucket/prefix",
 			"aws://bucket/prefix",
-			"minio://bucket/prefix",
+			"minio://localhost:9000/bucket/prefix",
 			"oss://bucket/prefix",
 			"gs://bucket/prefix",
 			"gcs://bucket/prefix",
@@ -143,6 +143,12 @@ func TestValidateExternalSource(t *testing.T) {
 
 	t.Run("empty_host_rejected", func(t *testing.T) {
 		err := ValidateExternalSource("s3:///bucket/path")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-empty host")
+	})
+
+	t.Run("minio_empty_endpoint_rejected", func(t *testing.T) {
+		err := ValidateExternalSource("minio:///bucket/path")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "non-empty host")
 	})
@@ -206,6 +212,19 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://localhost:9000/mybucket/path",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"minio"}}`)
 		assert.NoError(t, err)
+	})
+
+	t.Run("minio_scheme_selects_minio_validation_semantics", func(t *testing.T) {
+		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("minio_scheme_rejects_non_minio_cloud_provider", func(t *testing.T) {
+		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scheme=minio requires")
 	})
 
 	t.Run("gcs_scheme_does_not_require_region", func(t *testing.T) {

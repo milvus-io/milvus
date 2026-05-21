@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -155,6 +156,72 @@ func (suite *SegmentSuite) TestLoadInfo() {
 	suite.NotNil(suite.sealed.LoadInfo())
 	// growing segment has no load info
 	suite.NotNil(suite.growing.LoadInfo())
+}
+
+func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
+
+	segment := suite.sealed.(*LocalSegment)
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                5001,
+				Version:                3,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), loadInfo)
+
+	stats := segment.GetFieldJSONIndexStats()
+	suite.Require().Len(stats, 1)
+	suite.EqualValues(102, stats[102].GetFieldID())
+	suite.EqualValues(5001, stats[102].GetBuildID())
+	suite.EqualValues(3, stats[102].GetVersionID())
+	suite.EqualValues(common.JSONStatsDataFormatVersion, stats[102].GetDataFormatVersion())
+
+	stats[102].BuildID = 9999
+	suite.EqualValues(5001, segment.GetFieldJSONIndexStats()[102].GetBuildID())
+
+	invalidLoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                5002,
+				Version:                4,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion - 1,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), invalidLoadInfo)
+	suite.Empty(segment.GetFieldJSONIndexStats())
+
+	replacementLoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			103: {
+				FieldID:                103,
+				BuildID:                6001,
+				Version:                1,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), replacementLoadInfo)
+	stats = segment.GetFieldJSONIndexStats()
+	suite.Require().Len(stats, 1)
+	suite.Nil(stats[102])
+	suite.EqualValues(6001, stats[103].GetBuildID())
 }
 
 func (suite *SegmentSuite) TestResourceUsageEstimate() {

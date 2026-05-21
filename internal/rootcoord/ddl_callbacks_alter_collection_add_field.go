@@ -28,7 +28,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	defer broadcaster.Close()
 
 	// check if the collection is created.
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -52,11 +52,20 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	}
 
 	// check if the field already exists
+	fieldNames := typeutil.NewSet[string]()
 	for _, field := range coll.Fields {
-		if field.Name == fieldSchema.Name {
-			// TODO: idempotency check here.
-			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
+		fieldNames.Insert(field.Name)
+	}
+	for _, structField := range coll.StructArrayFields {
+		fieldNames.Insert(structField.Name)
+		for _, field := range structField.Fields {
+			fieldNames.Insert(field.Name)
+			fieldNames.Insert(storedRootStructSubFieldName(structField.Name, field.Name))
 		}
+	}
+	if fieldNames.Contain(fieldSchema.Name) {
+		// TODO: idempotency check here.
+		return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
 	}
 
 	// assign a new field id.

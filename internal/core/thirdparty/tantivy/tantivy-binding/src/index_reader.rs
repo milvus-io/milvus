@@ -13,7 +13,7 @@ use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
-use crate::index_reader_c::SetBitsetFn;
+use crate::index_reader_c::{RegexMatchFn, SetBitsetFn};
 use crate::log::init_log;
 use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::{c_ptr_to_str, make_bounds};
@@ -418,6 +418,56 @@ impl IndexReaderWrapper {
     pub fn regex_query(&self, pattern: &str, bitset: *mut c_void) -> Result<()> {
         let q = RegexQuery::from_pattern(&pattern, self.field)?;
         self.search(&q, bitset)
+    }
+
+    pub fn regex_match_query(
+        &self,
+        matcher_ctx: *mut c_void,
+        matcher: RegexMatchFn,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let searcher = self.reader.searcher();
+        let bitset_wrapper = BitsetWrapper::new(bitset, self.set_bitset);
+
+        for segment_reader in searcher.segment_readers() {
+            let inverted_index = segment_reader.inverted_index(self.field)?;
+            let term_dict = inverted_index.terms();
+            let mut stream = term_dict.stream()?;
+            let doc_id_column = if self.id_field.is_some() {
+                Some(segment_reader.fast_fields().i64("doc_id")?)
+            } else {
+                None
+            };
+
+            while stream.advance() {
+                let term = stream.key();
+                if !matcher(matcher_ctx, term.as_ptr(), term.len()) {
+                    continue;
+                }
+
+                let term_info = stream.value();
+                let mut block_segment_postings = inverted_index
+                    .read_block_postings_from_terminfo(term_info, IndexRecordOption::Basic)?;
+                loop {
+                    let docs = block_segment_postings.docs();
+                    if docs.is_empty() {
+                        break;
+                    }
+                    if let Some(column) = &doc_id_column {
+                        let doc_ids: Vec<_> = column
+                            .values_for_docs_flatten(docs)
+                            .into_iter()
+                            .map(|doc_id| doc_id as u32)
+                            .collect();
+                        bitset_wrapper.batch_set(&doc_ids);
+                    } else {
+                        bitset_wrapper.batch_set(docs);
+                    }
+                    block_segment_postings.advance();
+                }
+            }
+        }
+        Ok(())
     }
 
     // JSON related query methods

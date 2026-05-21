@@ -10,6 +10,30 @@ Coordinators manage metadata and scheduling; nodes execute work.
 - Nodes: proxy (user-facing), querynodev2, datanode, streamingnode
 - All component interfaces defined in `internal/types/types.go`
 
+## Subsystems & Code Map
+
+Each subsystem has a **top-level doc** (overview with links to sub-documents) and multiple **sub-documents** (detailed design, invariants, interfaces). The top-level doc alone is NOT sufficient — it is an index, not the content.
+
+### Mandatory reading procedure
+
+When your task modifies, explains, depends on, or affects a subsystem below, execute these steps IN ORDER before responding or writing code:
+
+**Step 1 — Read the top-level doc.** Identify all sub-documents it links to.
+
+**Step 2 — Read sub-documents.** The scope depends on task type:
+- **Design tasks** (new feature, architecture change, cross-component change): Read **every** sub-document under the subsystem. No exceptions — design requires full-picture understanding. Do NOT judge relevance yourself; read all of them.
+- **Targeted tasks** (bug fix, single-component change, code explanation): Read sub-documents that cover the components your task touches. When uncertain whether a sub-document is relevant, read it.
+
+**Step 3 — Read source code** listed in each doc's "Key Packages" section. At minimum read the files directly related to your task.
+
+**Step 4 — Cross-check** documentation against code. If they contradict, STOP and ask the user to resolve before proceeding.
+
+NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — this is the most common failure mode.
+
+### Subsystems Reference
+
+- [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
+
 ## Testing
 
 Go tests MUST use `-tags dynamic,test` and `-gcflags="all=-N -l"` (disable optimizations/inlining) or they won't compile / mockey-based monkey patching will fail:
@@ -42,7 +66,8 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 PR title format: `{type}: {description}`. Valid types: `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, `build(deps):`.
 PR body must be non-empty. Issue/doc linking rules:
 - `fix:` — must link issue (e.g. `issue: #123`)
-- `feat:` — must link issue + design doc from milvus-io/milvus-design-docs
+- `feat:` — must link issue + design doc under `docs/design-docs`
+- Every Milvus feature should have a related design doc under `docs/design-docs`; submit the doc in this repository and link it from the Milvus feature PR.
 - `enhance:` — must link issue if size L/XL/XXL
 - `doc:`, `test:` — no issue required
 - 2.x branch PRs must link the corresponding master PR (e.g. `pr: #123`)

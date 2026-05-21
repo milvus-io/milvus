@@ -43,7 +43,7 @@ func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	t.Rsp.Status = merr.Success()
 	ts := getTravelTs(t.Req)
 	// TODO: what if err != nil && common.IsCollectionNotExistError == false, should we consider this RPC as failure?
-	_, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), ts)
+	_, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), ts, false)
 	t.Rsp.Value = err == nil
 	return nil
 }

@@ -3,6 +3,7 @@ package parquet
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -957,4 +958,94 @@ func TestStructFieldReader_toScalarField_TypeMismatch(t *testing.T) {
 			assert.Contains(t, err.Error(), "expected")
 		})
 	}
+}
+
+func TestStructFieldReader_NullableArrayOfVector(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	structType := arrow.StructOf(arrow.Field{
+		Name:     "vector_array",
+		Type:     arrow.ListOf(arrow.PrimitiveTypes.Float32),
+		Nullable: true,
+	})
+	listBuilder := array.NewListBuilder(mem, structType)
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+	vectorBuilder := structBuilder.FieldBuilder(0).(*array.ListBuilder)
+	floatBuilder := vectorBuilder.ValueBuilder().(*array.Float32Builder)
+
+	appendVector := func(values ...float32) {
+		vectorBuilder.Append(true)
+		floatBuilder.AppendValues(values, nil)
+		structBuilder.Append(true)
+	}
+	listBuilder.Append(true)
+	appendVector(1, 2, 3, 4)
+	appendVector(5, 6, 7, 8)
+	listBuilder.Append(false)
+	listBuilder.Append(true)
+	appendVector(9, 10, 11, 12)
+
+	arr := listBuilder.NewArray()
+	listBuilder.Release()
+	defer arr.Release()
+
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+
+	reader := &StructFieldReader{
+		field: &schemapb.FieldSchema{
+			Name:        "struct_array[vector_array]",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "20"},
+			},
+		},
+		fieldIndex: 0,
+		dim:        4,
+	}
+
+	data, validData, err := reader.readArrayOfVectorField(chunked)
+	assert.NoError(t, err)
+
+	rows := data.([]*schemapb.VectorField)
+	assert.Equal(t, 3, len(rows))
+	assert.Equal(t, []bool{true, false, true}, validData.([]bool))
+	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, rows[0].GetFloatVector().GetData())
+	assert.Empty(t, rows[1].GetFloatVector().GetData())
+	assert.Equal(t, []float32{9, 10, 11, 12}, rows[2].GetFloatVector().GetData())
+}
+
+func TestBuildVectorArrayFieldRejectsInvalidFloat(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:        "struct_array[vector_array]",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+	}
+
+	t.Run("list format", func(t *testing.T) {
+		mem := memory.NewGoAllocator()
+		vectorBuilder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Float32)
+		floatBuilder := vectorBuilder.ValueBuilder().(*array.Float32Builder)
+		vectorBuilder.Append(true)
+		floatBuilder.AppendValues([]float32{1, float32(math.NaN()), 3, 4}, nil)
+		vectors := vectorBuilder.NewArray().(*array.List)
+		vectorBuilder.Release()
+		defer vectors.Release()
+
+		_, err := buildVectorArrayFieldFromList(field, 4, vectors, 0, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("fixed size binary format", func(t *testing.T) {
+		mem := memory.NewGoAllocator()
+		builder := array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: 16})
+		builder.Append(arrow.Float32Traits.CastToBytes([]float32{1, float32(math.Inf(1)), 3, 4}))
+		vectors := builder.NewArray().(*array.FixedSizeBinary)
+		builder.Release()
+		defer vectors.Release()
+
+		_, err := buildVectorArrayFieldFromFixedSizeBinary(field, 4, vectors, 0, 1)
+		assert.Error(t, err)
+	})
 }

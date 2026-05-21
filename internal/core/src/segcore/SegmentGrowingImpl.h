@@ -698,6 +698,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     fill_empty_field(const FieldMeta& field_meta);
 
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
+
     /**
      * @brief Update resource tracking by refunding old estimate and charging new
      *

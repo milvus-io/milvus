@@ -473,7 +473,11 @@ func (mr *MilvusRoles) Run() {
 	if mr.ServerType == typeutil.StandaloneRole || !mr.EnableDataNode {
 		// only datanode does not init streaming service
 		streaming.Init()
-		defer streaming.Release()
+		defer func() {
+			if err := streaming.Release(); err != nil {
+				log.Warn("release streaming service failed", zap.Error(err))
+			}
+		}()
 	}
 
 	local := mr.Local

@@ -61,6 +61,10 @@ type externalCollectionRefreshChecker struct {
 	// is delivered exactly once per jobID even when called concurrently
 	// from the eager task path and the periodic checker tick.
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob)
+	// applyJobInfo is invoked exactly before a job is persisted as Finished.
+	// It performs the collection-global segment update from all finished task
+	// results so progress polls cannot observe Finished before segments are visible.
+	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
 	// onJobFailed is the manager-side callback invoked when a job first
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
@@ -87,6 +91,7 @@ func newRefreshChecker(
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
+	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error,
 	onJobFailed func(jobID int64),
 	onJobGC func(jobID int64),
 	onInitJobPending func(jobID int64),
@@ -96,6 +101,7 @@ func newRefreshChecker(
 		refreshMeta:      refreshMeta,
 		closeChan:        closeChan,
 		onJobFinished:    onJobFinished,
+		applyJobInfo:     applyJobInfo,
 		onJobFailed:      onJobFailed,
 		onJobGC:          onJobGC,
 		onInitJobPending: onInitJobPending,
@@ -239,6 +245,40 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 						zap.Error(err))
 				}
 			}
+		}
+
+		if state == indexpb.JobState_JobStateFinished && c.applyJobInfo != nil {
+			applied, err := c.refreshMeta.UpdateJobStateWithPreApply(
+				job.GetJobId(),
+				state,
+				failReason,
+				func(latestJob *datapb.ExternalCollectionRefreshJob) error {
+					return c.applyJobInfo(c.ctx, latestJob)
+				})
+			if err != nil {
+				log.Warn("failed to apply external collection refresh result",
+					zap.Int64("jobID", job.GetJobId()),
+					zap.Error(err))
+				if applied && c.onJobFailed != nil {
+					c.onJobFailed(job.GetJobId())
+				}
+				return
+			}
+			if !applied {
+				// A concurrent path already drove the job into a terminal state
+				// and owns the one-time segment apply / callback side effects.
+				return
+			}
+
+			if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
+				log.Warn("failed to clear external collection refresh task results",
+					zap.Int64("jobID", job.GetJobId()),
+					zap.Error(err))
+			}
+
+			// processJobs calls ensureJobFinishedNotified right after this
+			// function returns, so we don't fire the callback here.
+			return
 		}
 
 		applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), state, failReason)

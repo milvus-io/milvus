@@ -20,9 +20,15 @@ extraConfigFiles:
         dir: /var/lib/milvus/etcd
     common:
       storageType: local
+      storage:
+        # enable storage v3
+        useLoonFFI: true
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    indexCoord:
+      scheduler:
+        interval: 100
 image:
   all:
     pullPolicy: Always
@@ -32,11 +38,6 @@ indexCoordinator:
   enabled: false
   gc:
     interval: 1
-extraConfigFiles:
-  user.yaml: |+
-    indexCoord:
-      scheduler:
-        interval: 100
 indexNode:
   enabled: false
   disk:

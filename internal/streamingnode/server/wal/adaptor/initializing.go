@@ -2,7 +2,6 @@ package adaptor
 
 import (
 	"context"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -18,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // buildInterceptorParams builds the interceptor params for the walimpls.
@@ -77,53 +75,23 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 		logger.Info("sync first time tick done", zap.String("msgID", msg.MessageID().String()), zap.Uint64("timetick", msg.TimeTick()))
 	}()
 
-	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: 5 * time.Second,
-		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 20 * time.Millisecond,
-			Multiplier:      2.0,
-			MaxInterval:     5 * time.Second,
-		},
-	})
-	backoffTimer.EnableBackoff()
-
-	var lastErr error
 	sourceID := paramtable.GetNodeID()
-	// Send first timetick message to wal before interceptor is ready.
-	for count := 0; ; count++ {
-		if count > 0 {
-			nextTimer, nextBalanceInterval := backoffTimer.NextTimer()
-			logger.Warn(
-				"send first time tick failed",
-				zap.Duration("nextBalanceInterval", nextBalanceInterval),
-				zap.Int("retryCount", count),
-				zap.Error(lastErr),
-			)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-nextTimer:
-			}
-		}
 
-		// Sent first timetick message to wal before ready.
-		// New TT is always greater than all tt on previous streamingnode.
-		// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
-		// Otherwise, the TT principle may be violated.
-		// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
-		// !!! Send a timetick message into walimpls directly is safe.
-		resource.Resource().TSOAllocator().Sync()
-		ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
-		if err != nil {
-			lastErr = errors.Wrap(err, "allocate timestamp failed")
-			continue
-		}
-		msg := timetick.NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, true)
-		msgID, err := underlyingWALImpls.Append(ctx, msg)
-		if err != nil {
-			lastErr = errors.Wrap(err, "send first timestamp message failed")
-			continue
-		}
-		return msg.IntoImmutableMessage(msgID), nil
+	// Send first timetick message to wal before interceptor is ready.
+	// New TT is always greater than all tt on previous streamingnode.
+	// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
+	// Otherwise, the TT principle may be violated.
+	// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
+	// !!! Send a timetick message into walimpls directly is safe.
+	resource.Resource().TSOAllocator().Sync()
+	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "allocate timestamp failed")
 	}
+	mutableMsg := timetick.NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, true)
+	msgID, err := underlyingWALImpls.Append(ctx, mutableMsg)
+	if err != nil {
+		return nil, errors.Wrap(err, "send first timestamp message failed")
+	}
+	return mutableMsg.IntoImmutableMessage(msgID), nil
 }

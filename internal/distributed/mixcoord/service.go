@@ -410,9 +410,17 @@ func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollect
 	return s.mixCoord.AddCollectionField(ctx, in)
 }
 
+func (s *Server) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AddCollectionStructField(ctx, in)
+}
+
 // CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreatePartition(ctx, in)
+}
+
+func (s *Server) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.mixCoord.CreatePartitionV2(ctx, in)
 }
 
 // DropPartition drops the specified partition.

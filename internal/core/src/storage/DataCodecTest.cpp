@@ -329,6 +329,55 @@ TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
 }
 
+TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
+    auto value_builder = std::make_shared<arrow::FloatBuilder>();
+    auto vector_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), value_builder);
+    arrow::ListBuilder array_builder(arrow::default_memory_pool(),
+                                     vector_builder);
+    auto& inner_list_builder =
+        dynamic_cast<arrow::ListBuilder&>(*array_builder.value_builder());
+    auto& float_builder =
+        dynamic_cast<arrow::FloatBuilder&>(*inner_list_builder.value_builder());
+
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(1.0F).ok());
+    ASSERT_TRUE(float_builder.Append(2.0F).ok());
+    ASSERT_TRUE(array_builder.AppendNull().ok());
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(3.0F).ok());
+    ASSERT_TRUE(float_builder.Append(4.0F).ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(5.0F).ok());
+    ASSERT_TRUE(float_builder.Append(6.0F).ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(array_builder.Finish(&list_array).ok());
+
+    auto nullable_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, 2);
+    auto normalized =
+        storage::NormalizeExternalArrow(list_array, nullable_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::LIST);
+
+    auto normalized_list =
+        std::static_pointer_cast<arrow::ListArray>(normalized);
+    EXPECT_EQ(normalized_list->length(), 3);
+    EXPECT_EQ(normalized_list->null_count(), 1);
+    EXPECT_TRUE(normalized_list->IsNull(1));
+    EXPECT_EQ(normalized_list->value_length(0), 1);
+    EXPECT_EQ(normalized_list->value_length(2), 2);
+    EXPECT_EQ(normalized_list->values()->type_id(),
+              arrow::Type::FIXED_SIZE_BINARY);
+
+    auto non_nullable_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, 2);
+    EXPECT_ANY_THROW(
+        storage::NormalizeExternalArrow(list_array, non_nullable_meta));
+}
+
 TEST(storage, ExternalBinaryVectorListNormalizeFails) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);

@@ -50,7 +50,6 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     BitsetView search_bitset = bitset;
     if (offset_mapping.IsEnabled()) {
         transformed_bitset = TransformBitset(bitset, offset_mapping);
-        search_bitset = BitsetView(transformed_bitset);
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * search_conf.topk_;
@@ -60,6 +59,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
             search_result.unity_topK_ = search_conf.topk_;
             return;
         }
+        search_bitset = search_result.PinBitset(std::move(transformed_bitset));
     }
 
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,

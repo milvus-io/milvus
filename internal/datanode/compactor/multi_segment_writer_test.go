@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -52,6 +53,43 @@ type MultiSegmentWriterSuite struct {
 	channel      string
 	batchSize    int
 	params       compaction.Params
+}
+
+type testCompactionAllocator struct {
+	next           int64
+	allocOneCalls  int
+	failAllocOneAt int
+}
+
+type closeErrSerializeWriter struct {
+	err error
+}
+
+func (w closeErrSerializeWriter) WriteValue(*storage.Value) error {
+	return nil
+}
+
+func (w closeErrSerializeWriter) Flush() error {
+	return nil
+}
+
+func (w closeErrSerializeWriter) Close() error {
+	return w.err
+}
+
+func (a *testCompactionAllocator) Alloc(count uint32) (int64, int64, error) {
+	start := a.next
+	a.next += int64(count)
+	return start, a.next, nil
+}
+
+func (a *testCompactionAllocator) AllocOne() (int64, error) {
+	a.allocOneCalls++
+	if a.failAllocOneAt > 0 && a.allocOneCalls == a.failAllocOneAt {
+		return 0, errors.New("ID is exhausted")
+	}
+	a.next++
+	return a.next, nil
 }
 
 func (s *MultiSegmentWriterSuite) SetupSuite() {
@@ -345,6 +383,58 @@ func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 	// Should have multiple segments
 	finalSegments := writer.GetCompactionSegments()
 	s.GreaterOrEqual(len(finalSegments), 2)
+}
+
+func (s *MultiSegmentWriterSuite) TestCloseAfterRotateAllocFailureDoesNotRecloseClosedWriter() {
+	schema := s.genSimpleSchema()
+	segmentAlloc := &testCompactionAllocator{next: 1000, failAllocOneAt: 2}
+	logAlloc := &testCompactionAllocator{next: 2000}
+	allocator := NewCompactionAllocator(segmentAlloc, logAlloc)
+
+	writer, err := NewMultiSegmentWriter(
+		context.Background(),
+		s.mockBinlogIO,
+		allocator,
+		1,
+		schema,
+		s.params,
+		1000,
+		s.partitionID,
+		s.collectionID,
+		s.channel,
+		1,
+		storage.WithStorageConfig(s.params.StorageConfig),
+	)
+	s.Require().NoError(err)
+
+	err = writer.WriteValue(s.genTestValue(1))
+	s.Require().NoError(err)
+	err = writer.WriteValue(s.genTestValue(2))
+	s.Require().Error(err)
+	s.Contains(err.Error(), "ID is exhausted")
+	s.Nil(writer.writer)
+	s.Len(writer.GetCompactionSegments(), 1)
+
+	err = writer.Close()
+	s.NoError(err)
+	s.Len(writer.GetCompactionSegments(), 1)
+}
+
+func (s *MultiSegmentWriterSuite) TestCloseFailureClearsWriter() {
+	closeErr := errors.New("close failed")
+	writer := &MultiSegmentWriter{
+		writer: &storage.BinlogValueWriter{
+			SerializeWriter: closeErrSerializeWriter{err: closeErr},
+		},
+	}
+
+	err := writer.closeWriter()
+	s.ErrorIs(err, closeErr)
+	s.Nil(writer.writer)
+	s.Empty(writer.GetCompactionSegments())
+
+	err = writer.Close()
+	s.NoError(err)
 }
 
 func (s *MultiSegmentWriterSuite) TestWriterMethods() {

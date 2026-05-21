@@ -198,7 +198,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             file,
                             schema,
                             reader_memory_limit,
-                            milvus::storage::GetReaderProperties());
+                            milvus::storage::GetReaderProperties(),
+                            milvus::storage::GetArrowReaderProperties());
                         AssertInfo(
                             result.ok(),
                             "[StorageV2] Failed to create row group reader: {}",
@@ -409,7 +410,8 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
                                   (*files)[batch_key],
                                   nullptr,
                                   reader_memory_limit,
-                                  milvus::storage::GetReaderProperties()));
+                                  milvus::storage::GetReaderProperties(),
+                                  milvus::storage::GetArrowReaderProperties()));
         auto close_guard =
             folly::makeGuard([&reader]() { (void)reader->Close(); });
         ARROW_RETURN_NOT_OK(

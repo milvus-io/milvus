@@ -137,7 +137,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
-		writer.Close()
+		if closeErr := writer.Close(); closeErr != nil {
+			log.Warn("failed to close writer after merge sort error", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 

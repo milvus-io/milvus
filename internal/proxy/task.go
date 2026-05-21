@@ -133,6 +133,7 @@ const (
 	DescribeDatabaseTaskName = "DescribeDatabaseTaskName"
 
 	AddFieldTaskName              = "AddFieldTaskName"
+	AddStructFieldTaskName        = "AddStructFieldTaskName"
 	AlterCollectionSchemaTaskName = "AlterCollectionSchemaTaskName"
 
 	// minFloat32 minimum float.
@@ -700,15 +701,221 @@ func (t *addCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type addCollectionStructFieldTask struct {
+	baseTask
+	Condition
+	*milvuspb.AddCollectionStructFieldRequest
+	ctx               context.Context
+	mixCoord          types.MixCoordClient
+	result            *commonpb.Status
+	structFieldSchema *schemapb.StructArrayFieldSchema
+	oldSchema         *schemapb.CollectionSchema
+}
+
+func (t *addCollectionStructFieldTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *addCollectionStructFieldTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *addCollectionStructFieldTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *addCollectionStructFieldTask) Name() string {
+	return AddStructFieldTaskName
+}
+
+func (t *addCollectionStructFieldTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *addCollectionStructFieldTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *addCollectionStructFieldTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *addCollectionStructFieldTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *addCollectionStructFieldTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_AddCollectionField
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *addCollectionStructFieldTask) PreExecute(ctx context.Context) error {
+	if t.oldSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("empty old schema in add struct field task")
+	}
+	if t.GetStructArrayFieldSchema() == nil {
+		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
+	}
+
+	t.structFieldSchema = proto.Clone(t.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	if err := validateAddStructFieldRequest(t.oldSchema, t.structFieldSchema); err != nil {
+		return err
+	}
+	transformStructArrayFieldSubNames(t.structFieldSchema)
+	t.StructArrayFieldSchema = t.structFieldSchema
+
+	log.Info("PreExecute addStructField task done", zap.Any("struct field schema", t.structFieldSchema))
+	return nil
+}
+
+func (t *addCollectionStructFieldTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.mixCoord.AddCollectionStructField(ctx, t.AddCollectionStructFieldRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *addCollectionStructFieldTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFieldSchema *schemapb.StructArrayFieldSchema) error {
+	if schema == nil {
+		return merr.WrapErrParameterInvalidMsg("empty old schema in add struct field task")
+	}
+	if structFieldSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
+	}
+	if !structFieldSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("added struct field must be nullable, please check it, struct field name = %s", structFieldSchema.GetName())
+	}
+	if err := validateFieldName(structFieldSchema.GetName()); err != nil {
+		return err
+	}
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, structFieldSchema.GetName()) {
+		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", structFieldSchema.GetName())
+	}
+	if err := ValidateStructArrayField(structFieldSchema, schema); err != nil {
+		return err
+	}
+	if err := validateAddStructSubFieldProperties(structFieldSchema); err != nil {
+		return err
+	}
+	if err := validateAddStructFieldNames(schema, structFieldSchema); err != nil {
+		return err
+	}
+
+	totalFieldsNum := typeutil.GetTotalFieldsNum(schema) + len(structFieldSchema.GetFields()) + 1
+	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+	}
+
+	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
+	for _, subField := range structFieldSchema.GetFields() {
+		if typeutil.IsVectorType(subField.GetDataType()) {
+			vectorFields++
+		}
+	}
+	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	}
+
+	return nil
+}
+
+func validateAddStructSubFieldProperties(structFieldSchema *schemapb.StructArrayFieldSchema) error {
+	for _, subField := range structFieldSchema.GetFields() {
+		if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, subField.GetName()) {
+			return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", subField.GetName())
+		}
+		if subField.GetIsPrimaryKey() {
+			return merr.WrapErrParameterInvalidMsg("primary key is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetAutoID() {
+			return merr.WrapErrParameterInvalidMsg("autoID is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetIsPartitionKey() {
+			return merr.WrapErrParameterInvalidMsg("partition key is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetIsClusteringKey() {
+			return merr.WrapErrParameterInvalidMsg("clustering key is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetDefaultValue() != nil {
+			return merr.WrapErrParameterInvalidMsg("default value is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetIsFunctionOutput() {
+			return merr.WrapErrParameterInvalidMsg("function output is not supported for struct field, field name = %s", subField.GetName())
+		}
+		if subField.GetExternalField() != "" {
+			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", subField.GetName())
+		}
+	}
+	return nil
+}
+
+func validateAddStructFieldNames(schema *schemapb.CollectionSchema, structFieldSchema *schemapb.StructArrayFieldSchema) error {
+	existingNames := typeutil.NewSet[string]()
+	for _, field := range schema.GetFields() {
+		existingNames.Insert(field.GetName())
+	}
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		existingNames.Insert(structArrayField.GetName())
+		for _, subField := range structArrayField.GetFields() {
+			if typeutil.IsStructSubField(subField.GetName()) {
+				existingNames.Insert(subField.GetName())
+			}
+			existingNames.Insert(storedStructSubFieldName(structArrayField.GetName(), subField.GetName()))
+		}
+	}
+
+	if existingNames.Contain(structFieldSchema.GetName()) {
+		return merr.WrapErrParameterInvalidMsg("duplicated field name %s", structFieldSchema.GetName())
+	}
+
+	newSubFieldNames := make(map[string]struct{})
+	for _, subField := range structFieldSchema.GetFields() {
+		if _, ok := newSubFieldNames[subField.GetName()]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", subField.GetName())
+		}
+		newSubFieldNames[subField.GetName()] = struct{}{}
+
+		transformedName := typeutil.ConcatStructFieldName(structFieldSchema.GetName(), subField.GetName())
+		if existingNames.Contain(transformedName) {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", transformedName)
+		}
+	}
+	return nil
+}
+
+func storedStructSubFieldName(structName string, fieldName string) string {
+	if typeutil.IsStructSubField(fieldName) {
+		return fieldName
+	}
+	return typeutil.ConcatStructFieldName(structName, fieldName)
+}
+
+func transformStructArrayFieldSubNames(structFieldSchema *schemapb.StructArrayFieldSchema) {
+	structName := structFieldSchema.GetName()
+	for _, field := range structFieldSchema.GetFields() {
+		field.Name = typeutil.ConcatStructFieldName(structName, field.GetName())
+	}
+}
+
 // validateAddFieldRequest validates both the old schema constraints and the new field properties
 // for an AddCollectionField request. It is the single source of truth for add-field validation.
 func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *schemapb.FieldSchema) error {
 	// --- old schema constraints ---
 	fieldList := typeutil.NewSet[string]()
-	for _, f := range schema.Fields {
-		fieldList.Insert(f.Name)
+	for _, field := range schema.GetFields() {
+		fieldList.Insert(field.GetName())
 	}
-	if len(fieldList) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		fieldList.Insert(structArrayField.GetName())
+	}
+	if typeutil.GetTotalFieldsNum(schema) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
 		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 		return merr.WrapErrParameterInvalidMsg(msg)
 	}
@@ -1333,6 +1540,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			Name:        structArrayField.Name,
 			Description: structArrayField.Description,
 			Fields:      make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
+			Nullable:    structArrayField.Nullable,
 		})
 		for _, field := range structArrayField.Fields {
 			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))
@@ -2224,7 +2432,11 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
-	t.result, err = t.mixCoord.CreatePartition(ctx, t.CreatePartitionRequest)
+	resp, err := t.mixCoord.CreatePartitionV2(ctx, t.CreatePartitionRequest)
+	if err != nil {
+		return err
+	}
+	t.result = resp.Status
 	if err := merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
@@ -2233,15 +2445,10 @@ func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 		t.result = merr.Status(err)
 		return err
 	}
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
-	if err != nil {
-		t.result = merr.Status(err)
-		return err
-	}
 	t.result, err = t.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
-		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition)),
 		CollectionID: collectionID,
-		PartitionID:  partitionID,
+		PartitionID:  resp.PartitionID,
 	})
 	return merr.CheckRPCCall(t.result, err)
 }

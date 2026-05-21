@@ -55,6 +55,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
+		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
+		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
+		params.Save(Params.ArrowReaderHoleSizeLimitBytes.Key, "1048576")
+		params.Save(Params.ArrowReaderRangeSizeLimitBytes.Key, "67108864")
+		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
+		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
+
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
 
@@ -512,6 +519,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(70*1024*1024), Params.DiskCacheCapacityLimit.GetAsSize())
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, hardware.GetCPUNum(), Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Save(Params.DelegatorPostLoadConcurrencyFactor.Key, "2")
+		assert.Equal(t, hardware.GetCPUNum()*2, Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Save(Params.DelegatorPostLoadConcurrencyFactor.Key, "0")
+		assert.Equal(t, hardware.GetCPUNum(), Params.DelegatorPostLoadConcurrencyFactor.GetAsInt())
+		params.Reset(Params.DelegatorPostLoadConcurrencyFactor.Key)
+
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
 		assert.Equal(t, true, Params.EnableSegmentFilter.GetAsBool())
 

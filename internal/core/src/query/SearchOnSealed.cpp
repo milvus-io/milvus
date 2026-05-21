@@ -100,7 +100,6 @@ SearchOnSealedIndex(const Schema& schema,
     BitsetView search_bitset = bitset;
     if (offset_mapping.IsEnabled()) {
         transformed_bitset = TransformBitset(bitset, offset_mapping);
-        search_bitset = BitsetView(transformed_bitset);
         if (offset_mapping.GetValidCount() == 0) {
             auto total_num = num_queries * topK;
             search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
@@ -109,6 +108,7 @@ SearchOnSealedIndex(const Schema& schema,
             search_result.unity_topK_ = topK;
             return;
         }
+        search_bitset = search_result.PinBitset(std::move(transformed_bitset));
     }
 
     if (search_info.iterator_v2_info_.has_value()) {
@@ -188,7 +188,6 @@ SearchOnSealedColumn(const Schema& schema,
             column->EnsureChunkOffsetMapping(c, op_context);
         }
         transformed_bitset = TransformBitset(bitview, offset_mapping);
-        search_bitview = BitsetView(transformed_bitset);
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * search_info.topk_;
@@ -198,6 +197,7 @@ SearchOnSealedColumn(const Schema& schema,
             result.unity_topK_ = search_info.topk_;
             return;
         }
+        search_bitview = result.PinBitset(std::move(transformed_bitset));
     }
 
     // For element-level search (embedding-search-embedding), the underlying
@@ -231,6 +231,8 @@ SearchOnSealedColumn(const Schema& schema,
         return;
     }
 
+    const bool use_vector_iterator =
+        milvus::exec::UseVectorIterator(search_info);
     auto num_chunk = column->num_chunks();
 
     SubSearchResult final_qr(num_queries,
@@ -269,7 +271,7 @@ SearchOnSealedColumn(const Schema& schema,
             raw_dataset.raw_data_offsets = offsets_pw.get();
         }
 
-        if (milvus::exec::UseVectorIterator(search_info)) {
+        if (use_vector_iterator) {
             AssertInfo(data_type != DataType::VECTOR_ARRAY,
                        "vector array(embedding list) is not supported for "
                        "vector iterator");
@@ -294,7 +296,7 @@ SearchOnSealedColumn(const Schema& schema,
         }
         offset += chunk_size;
     }
-    if (milvus::exec::UseVectorIterator(search_info)) {
+    if (use_vector_iterator) {
         bool larger_is_closer = PositivelyRelated(search_info.metric_type_);
         // Element-level search skips row-level mapping (element IDs are
         // not row-aligned); see ChunkMergeIterator ctor.

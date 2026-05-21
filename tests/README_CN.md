@@ -104,7 +104,7 @@ $ ruff format .                 # 原地格式化
 $ ruff format --check .         # 只检查不修改 (CI 友好)
 ```
 
-启用的规则：`E`、`F`、`W`、`I`、`UP`；目标 Python 版本：`3.10`。
+启用的规则：`E`、`F`、`W`、`I`、`UP`；目标 Python 版本：`3.12`。
 
 #### 仅检查 PR 修改的文件 (与 Python Lint CI 一致)
 

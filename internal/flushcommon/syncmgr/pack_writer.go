@@ -57,14 +57,14 @@ func NewBulkPackWriter(metaCache metacache.MetaCache,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
 	allocator allocator.Interface, writeRetryOpts ...retry.Option,
-) *BulkPackWriter {
+) (*BulkPackWriter, error) {
 	return &BulkPackWriter{
 		metaCache:      metaCache,
 		schema:         schema,
 		chunkManager:   chunkManager,
 		allocator:      allocator,
 		writeRetryOpts: writeRetryOpts,
-	}
+	}, nil
 }
 
 func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (

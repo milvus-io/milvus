@@ -35,37 +35,37 @@ import (
 // let other errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
-// Property keys - matching milvus-storage/properties.h
-const (
-	PropertyFSAddress             = "fs.address"
-	PropertyFSBucketName          = "fs.bucket_name"
-	PropertyFSAccessKeyID         = "fs.access_key_id"
-	PropertyFSAccessKeyValue      = "fs.access_key_value"
-	PropertyFSRootPath            = "fs.root_path"
-	PropertyFSStorageType         = "fs.storage_type"
-	PropertyFSCloudProvider       = "fs.cloud_provider"
-	PropertyFSIAMEndpoint         = "fs.iam_endpoint"
-	PropertyFSLogLevel            = "fs.log_level"
-	PropertyFSRegion              = "fs.region"
-	PropertyFSUseSSL              = "fs.use_ssl"
-	PropertyFSSSLCACert           = "fs.ssl_ca_cert"
-	PropertyFSUseIAM              = "fs.use_iam"
-	PropertyFSUseVirtualHost      = "fs.use_virtual_host"
-	PropertyFSRequestTimeoutMS    = "fs.request_timeout_ms"
-	PropertyFSGCPCredentialJSON   = "fs.gcp_credential_json"
-	PropertyFSUseCustomPartUpload = "fs.use_custom_part_upload"
-	PropertyFSMaxConnections      = "fs.max_connections"
-	PropertyFSTLSMinVersion       = "fs.tls_min_version"
-	PropertyFSUseCRC32CChecksum   = "fs.use_crc32c_checksum"
+// Property keys exported by milvus-storage/ffi_c.h.
+var (
+	PropertyFSAddress             = C.GoString(C.loon_properties_fs_address)
+	PropertyFSBucketName          = C.GoString(C.loon_properties_fs_bucket_name)
+	PropertyFSAccessKeyID         = C.GoString(C.loon_properties_fs_access_key_id)
+	PropertyFSAccessKeyValue      = C.GoString(C.loon_properties_fs_access_key_value)
+	PropertyFSRootPath            = C.GoString(C.loon_properties_fs_root_path)
+	PropertyFSStorageType         = C.GoString(C.loon_properties_fs_storage_type)
+	PropertyFSCloudProvider       = C.GoString(C.loon_properties_fs_cloud_provider)
+	PropertyFSIAMEndpoint         = C.GoString(C.loon_properties_fs_iam_endpoint)
+	PropertyFSLogLevel            = C.GoString(C.loon_properties_fs_log_level)
+	PropertyFSRegion              = C.GoString(C.loon_properties_fs_region)
+	PropertyFSUseSSL              = C.GoString(C.loon_properties_fs_use_ssl)
+	PropertyFSSSLCACert           = C.GoString(C.loon_properties_fs_ssl_ca_cert)
+	PropertyFSUseIAM              = C.GoString(C.loon_properties_fs_use_iam)
+	PropertyFSUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
+	PropertyFSRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	PropertyFSGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
+	PropertyFSUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
+	PropertyFSMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
+	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
-	PropertyWriterPolicy             = "writer.policy"
-	PropertyWriterSchemaBasedPattern = "writer.split.schema_based.patterns"
+	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
+	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
-	PropertyWriterEncEnable = "writer.enc.enable"    // Enable encryption for written data
-	PropertyWriterEncKey    = "writer.enc.key"       // Encryption key for data encryption
-	PropertyWriterEncMeta   = "writer.enc.meta"      // Encoded metadata containing zone ID, collection ID, and key version
-	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
+	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
+	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
 // ensureHTTPScheme prepends http:// or https:// to a bare address so it stays

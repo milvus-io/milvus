@@ -21,6 +21,7 @@
 #include <arrow/type.h>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -502,7 +503,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
-                               std::nullopt,
+                               std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
     schema->set_primary_field_id(info.int64_id);
@@ -1899,6 +1900,25 @@ TEST(InjectExtfsAllowlist, ExplicitCloudProviderRequiredForAwsFormSwap) {
     }
 }
 
+TEST(InjectExtfsAllowlist, MinIOSchemeUsesMilvusFormDefaults) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "minio://localhost:9000/bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "http://localhost:9000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "bucket");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "false");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")), "AK");
+    EXPECT_EQ(props.count("extfs.42.cloud_provider"), 0u);
+    EXPECT_EQ(props.count("extfs.42.region"), 0u);
+}
+
 // milvus-storage's fs.* property registry does not yet declare
 // PROPERTY_FS_ANONYMOUS. Until upstream registers the key,
 // InjectExternalSpecProperties must not zero-init extfs.{cid}.anonymous
@@ -1984,6 +2004,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          element_type,
                          dim,
                          std::nullopt,
+                         nullable,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -2011,7 +2032,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
-                         std::nullopt,
+                         std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }
     return FieldMeta(

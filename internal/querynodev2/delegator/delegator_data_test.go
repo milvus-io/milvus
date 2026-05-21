@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -989,6 +990,65 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	s.Require().Equal(1, len(sealed[0].Segments))
 	s.NotNil(sealed[0].Segments[0].Candidate)
 	s.False(sealed[0].Segments[0].Candidate.PkCandidateExist())
+}
+
+func (s *DelegatorDataSuite) TestPostLoadLimiter() {
+	s.Run("serializes_post_load_work", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		var current int32
+		var maxConcurrent int32
+		start := make(chan struct{})
+		errCh := make(chan error, 8)
+		wg := sync.WaitGroup{}
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				err := sd.withPostLoadLimit(context.Background(), func() error {
+					running := atomic.AddInt32(&current, 1)
+					for {
+						maxValue := atomic.LoadInt32(&maxConcurrent)
+						if running <= maxValue || atomic.CompareAndSwapInt32(&maxConcurrent, maxValue, running) {
+							break
+						}
+					}
+					time.Sleep(5 * time.Millisecond)
+					atomic.AddInt32(&current, -1)
+					return nil
+				})
+				errCh <- err
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			s.NoError(err)
+		}
+		s.Equal(int32(1), maxConcurrent)
+		s.Equal(0, sd.postLoadSem.Current())
+	})
+
+	s.Run("returns_context_error_while_waiting", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		s.NoError(sd.postLoadSem.Acquire(context.Background()))
+		defer sd.postLoadSem.Release()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		called := false
+		err := sd.withPostLoadLimit(ctx, func() error {
+			called = true
+			return nil
+		})
+		s.ErrorIs(err, context.DeadlineExceeded)
+		s.False(called)
+	})
 }
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {

@@ -282,6 +282,8 @@ func genEmptyArrayOfVectorFieldData(field *schemapb.FieldSchema) (*schemapb.Fiel
 				},
 			},
 		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
 	}, nil
 }
 

@@ -1053,6 +1053,9 @@ message CopySegmentSource {
   // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
   // When storage_version >= 3, binlog paths must be resolved from manifest_path
   int64 storage_version = 12;
+
+  // Whether the source segment belongs to an external collection.
+  bool is_external_collection = 13;
 }
 
 message CopySegmentTarget {
@@ -1108,6 +1111,7 @@ message VectorScalarIndexInfo {
   int32 current_index_version = 7;         // Index engine version
   int32 current_scalar_index_version = 8;  // Scalar index engine version
   string index_name = 9;                   // Index name for multi-index-per-field lookup
+  index.IndexStorePathVersion index_store_path_version = 10;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1402,6 +1406,7 @@ message RefreshExternalCollectionTaskRequest {
   string explore_manifest_path = 11;      // S3 manifest path for file discovery
   int64 file_index_begin = 12;            // File range start for this task
   int64 file_index_end = 13;              // File range end for this task
+  int64 partitionID = 14;                 // target partition for manifest path
 }
 
 message RefreshExternalCollectionTaskResponse {
@@ -1471,6 +1476,9 @@ message ExternalCollectionRefreshTask {
   string explore_manifest_path = 12;  // S3 manifest path for this job
   int64 file_index_begin = 13;        // File range start for this task
   int64 file_index_end = 14;          // File range end for this task
+  repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
+  repeated SegmentInfo updated_segments = 16;  // New segments created by this task result
+  bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
 }
 
 message GetRefreshExternalCollectionProgressResponse {

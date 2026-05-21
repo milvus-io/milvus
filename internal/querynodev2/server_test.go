@@ -276,6 +276,8 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	pt := paramtable.Get()
 	node := &QueryNode{}
 
+	assert.NotPanics(t, func() { node.ReconfigArrowReaderParams(&config.Event{HasUpdated: false}) })
+	assert.NotPanics(t, func() { node.ReconfigArrowReaderParams(&config.Event{HasUpdated: true}) })
 	assert.NotPanics(t, func() { node.RegisterSegcoreConfigWatcher() })
 
 	// verify watchers are triggered by saving config values
@@ -290,6 +292,12 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	})
 	assert.NotPanics(t, func() {
 		pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
 	})
 }
 

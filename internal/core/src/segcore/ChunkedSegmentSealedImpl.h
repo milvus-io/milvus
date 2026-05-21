@@ -201,6 +201,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       info_proto) override;
 
     void
+    LoadJsonKeyIndex(
+        milvus::OpContext* op_ctx,
+        std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>
+            info_proto);
+
+    void
+    LoadBatchJsonKeyIndexes(
+        milvus::OpContext* op_ctx,
+        const std::unordered_map<
+            FieldId,
+            std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
+            infos);
+
+    void
     RemoveJsonStats(FieldId field_id) override {
         std::unique_lock lck(mutex_);
         json_stats_.erase(field_id);
@@ -1135,6 +1149,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     fill_empty_field(const FieldMeta& field_meta);
+
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
 
     /**
      * @brief Fill default values for fields without data sources

@@ -627,7 +627,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         error = {"err_code": 999, "err_msg": "failed to create query plan: cannot parse expression"}
         if invalid_search_expr == 1:
-            error = {"err_code": 1, "err_msg": "'int' object has no attribute 'lower'"}
+            error = {"err_code": 1, "err_msg": "bad argument type for built-in operation"}
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
@@ -1264,14 +1264,34 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         expressions = [ct.default_bool_field_name, "true", "false"]
         for expression in expressions:
             log.debug(f"search with expression: {expression}")
-            self.search(client, collection_name,
-                        data=vectors[:default_nq], anns_field=default_search_field,
-                        search_params=default_search_params, limit=default_limit,
-                        filter=expression,
-                        check_task=CheckTasks.err_res,
-                        check_items={"err_code": 1100,
-                                     "err_msg": "failed to create query plan: predicate is not a "
-                                                "boolean expression: %s, data type: Bool" % expression})
+            if expression == "true":
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq, "limit": default_limit,
+                                         "metric": "COSINE", "enable_milvus_client_api": True,
+                                         "pk_name": ct.default_int64_field_name})
+            elif expression == "false":
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq, "limit": 0,
+                                         "metric": "COSINE", "enable_milvus_client_api": True,
+                                         "pk_name": ct.default_int64_field_name})
+            else:
+                self.search(client, collection_name,
+                            data=vectors[:default_nq], anns_field=default_search_field,
+                            search_params=default_search_params, limit=default_limit,
+                            filter=expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1100,
+                                         "err_msg": "failed to create query plan: predicate is not a "
+                                                    "boolean expression: %s, data type: Bool" % expression})
+
         expression = f"!{ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
@@ -1292,16 +1312,6 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     check_items={"err_code": 1100,
                                  "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}, "
                                             "error: 'and' can only be used between boolean expressions"})
-        expression = f"{ct.default_int64_field_name} > 0 or false"
-        log.debug(f"search with expression: {expression}")
-        self.search(client, collection_name,
-                    data=vectors[:default_nq], anns_field=default_search_field,
-                    search_params=default_search_params, limit=default_limit,
-                    filter=expression,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1100,
-                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 or false, "
-                                            "error: 'or' can only be used between boolean expressions"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_expression_invalid_array_one(self):
@@ -3423,12 +3433,13 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         if nullable:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
                      default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_string_field_name: str(i), "nullable_field": np.int8(i)} for i in range(default_nb)]
+                     default_string_field_name: str(i), "nullable_field": i % int8_bound} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. search
         vectors_to_search = rng.random((1, dim))
@@ -5121,10 +5132,11 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
                 value = np.int16(i)
             elif rerank_fields == DataType.INT32:
@@ -5217,10 +5229,11 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
+        int8_bound = np.iinfo(np.int8).max + 1
         rows = []
         for i in range(default_nb):
             if rerank_fields == DataType.INT8:
-                value = np.int8(i)
+                value = i % int8_bound
             elif rerank_fields == DataType.INT16:
                 value = np.int16(i)
             elif rerank_fields == DataType.INT32:

@@ -54,6 +54,7 @@ func TestFencedError(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
+	walimplstest.Reset()
 	initResourceForTest(t)
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
@@ -180,9 +181,9 @@ func (f *testOneWALFramework) Run() {
 			MustBuildMutable()
 
 		result, err := rwWAL.Append(ctx, createMsg)
+		walimplstest.DisableFenced(pChannel.Name)
 		require.Nil(f.t, result)
 		require.True(f.t, status.AsStreamingError(err).IsFenced())
-		walimplstest.DisableFenced(pChannel.Name)
 		rwWAL.Close()
 	}
 }

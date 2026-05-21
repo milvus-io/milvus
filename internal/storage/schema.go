@@ -15,7 +15,7 @@ import (
 )
 
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*arrow.Schema, error) {
-	fieldCount := typeutil.GetTotalFieldsNum(schema)
+	fieldCount := len(typeutil.GetAllFieldSchemas(schema))
 	arrowFields := make([]arrow.Field, 0, fieldCount)
 	appendArrowField := func(field *schemapb.FieldSchema) error {
 		if serdeMap[field.DataType].arrowType == nil {

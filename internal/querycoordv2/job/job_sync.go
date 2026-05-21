@@ -74,7 +74,6 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
-
 	// check if partition already existed
 	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
 		return nil
@@ -96,5 +95,5 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return errors.Wrap(err, msg)
 	}
 
-	return WaitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
+	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())
 }

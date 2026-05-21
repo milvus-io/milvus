@@ -65,25 +65,19 @@ func newMinIOClient(cfg minioConfig) (*miniogo.Client, error) {
 	})
 }
 
-// extTestURI wraps a MinIO-relative object path into a full Milvus-form URI
-// pointing at the configured bucket. External-table tests that used to pass
-// bare relative paths (e.g. "external-e2e-test/foo") must now construct a
-// fully qualified URI because the new validator rejects bare paths — extfs
-// is isolated from the fs.* baseline, so the endpoint+bucket must appear in
-// the URI or explicitly in spec.extfs. This helper keeps the test call-site
-// succinct while staying close to the original dataPath variable.
+// extTestURI wraps a MinIO-relative object path into a full MinIO URI pointing
+// at the configured bucket. The minio:// scheme is unambiguous, so tests do
+// not need to carry AWS-family region or provider fields just to disambiguate
+// s3:// from AWS S3.
 func extTestURI(cfg minioConfig, relPath string) string {
-	return fmt.Sprintf("s3://%s/%s/%s", cfg.address, cfg.bucket, relPath)
+	return fmt.Sprintf("minio://%s/%s/%s", cfg.address, cfg.bucket, relPath)
 }
 
 // extTestSpec returns an ExternalSpec JSON fragment for external-table tests
-// that target Milvus's own MinIO. It carries the real MinIO credentials and
-// region (required by ValidateExtfsComplete for s3-family schemes). No
-// cloud_provider: MinIO is not AWS, and cloud_provider=aws would trigger
-// Tier-2 endpoint derivation that redirects the URI at AWS S3.
+// that target Milvus's own MinIO.
 func extTestSpec(cfg minioConfig, format string) string {
 	return fmt.Sprintf(
-		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":%q,"extfs":{"cloud_provider":"minio","access_key_id":%q,"access_key_value":%q}}`,
 		format, cfg.accessKey, cfg.secretKey)
 }
 
@@ -152,6 +146,59 @@ func generateParquetBytes(numRows int64, startID int64) ([]byte, error) {
 		for d := 0; d < testVecDim; d++ {
 			vecValueBuilder.Append(float32(startID+i)*0.1 + float32(d))
 		}
+	}
+
+	record := builder.NewRecord()
+	defer record.Release()
+
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// generateSnapshotRestoreParquetBytes creates a compact Parquet file for the
+// snapshot restore e2e. It stores float vectors as FixedSizeBinary so the test
+// focuses on the snapshot restore path instead of list-vector decoding.
+func generateSnapshotRestoreParquetBytes(numRows int64, startID int64) ([]byte, error) {
+	arrowSchema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "value", Type: arrow.PrimitiveTypes.Float32},
+			{Name: "embedding", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim * 4}},
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, fmt.Errorf("create parquet writer: %w", err)
+	}
+
+	pool := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(pool, arrowSchema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	valueBuilder := builder.Field(1).(*array.Float32Builder)
+	embeddingBuilder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+
+	for i := int64(0); i < numRows; i++ {
+		idx := startID + i
+		idBuilder.Append(idx)
+		valueBuilder.Append(float32(idx) * 1.5)
+
+		raw := make([]byte, testVecDim*4)
+		for d := 0; d < testVecDim; d++ {
+			value := float32(idx)*0.1 + float32(d)
+			binary.LittleEndian.PutUint32(raw[d*4:(d+1)*4], math.Float32bits(value))
+		}
+		embeddingBuilder.Append(raw)
 	}
 
 	record := builder.NewRecord()
@@ -502,6 +549,104 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 }
 
 // --- E2E Tests ---
+
+func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_snapshot_restore", 6)
+	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	snapshotName := fmt.Sprintf("snapshot_%s", common.GenRandomString("ext", 6))
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	collectionsToClean := []string{collName, restoredCollName}
+
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+		for _, name := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name))
+		}
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, fmt.Sprintf("%s/", extPath))
+	})
+
+	const numRows = int64(100)
+	data, err := generateSnapshotRestoreParquetBytes(numRows, 0)
+	require.NoError(t, err)
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("value").
+			WithDataType(entity.FieldTypeFloat).
+			WithExternalField("value")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("external collection snapshot restore e2e"))
+	common.CheckErr(t, err, true)
+
+	jobID, err := mc.RestoreSnapshot(ctx, client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName))
+	common.CheckErr(t, err, true)
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 3*time.Minute)
+	common.CheckErr(t, err, true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, numRows, count)
+
+	filterRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 10").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 10, filterRes.GetColumn("id").Len())
+
+	vec := make([]float32, testVecDim)
+	for i := range vec {
+		vec[i] = float32(i) * 0.1
+	}
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(restoredCollName, 5,
+		[]entity.Vector{entity.FloatVector(vec)}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("embedding").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+}
 
 // TestRefreshExternalCollectionAndVerifySegments tests the full external collection workflow:
 //  1. Upload parquet test data to MinIO
@@ -2667,14 +2812,14 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	})
 
 	// ---------------------------------------------------------------
-	// Step 2: Create external collection with s3://external-bucket/path URI
+	// Step 2: Create external collection with minio://external-bucket/path URI
 	// ---------------------------------------------------------------
-	// The key difference: ExternalSource uses a full s3:// URI pointing to
+	// The key difference: ExternalSource uses a full minio:// URI pointing to
 	// a different bucket than Milvus's own bucket (a-bucket).
-	// URI format: s3://host:port/bucket/path — post-refactor validator
+	// URI format: minio://host:port/bucket/path — post-refactor validator
 	// requires explicit non-empty scheme + host. Empty-host shorthand
 	// (s3:///bucket/path) was dropped.
-	externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, extPath)
+	externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, extPath)
 	t.Logf("ExternalSource: %s (Milvus bucket: %s)", externalSource, minioCfg.bucket)
 
 	schema := entity.NewSchema().
@@ -2843,7 +2988,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll.Schema.ExternalSpec, `"region":`)
 
 	// ---------------------------------------------------------------
 	// Step 2: First refresh (with default source/spec) — establishes baseline
@@ -2881,7 +3026,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll2.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll2.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll2.Schema.ExternalSpec, `"region":`)
 	t.Logf("Verified: schema updated — source=%s, spec=%s", coll2.Schema.ExternalSource, coll2.Schema.ExternalSpec)
 	_ = specV2 // value used to drive the refresh; final spec compared structurally above.
 }
@@ -2922,18 +3067,10 @@ func TestExternalSourceFormats(t *testing.T) {
 	const rowsPerFile = int64(100)
 	const numRows = 100
 
-	// Build extfs credentials JSON fragment once — all subtests share the
-	// same MinIO credentials and region. Required by ValidateExtfsComplete.
-	//
-	// Deliberately do NOT set cloud_provider: MinIO is not AWS. Setting
-	// cloud_provider=aws would activate Tier-2 derivation and point
-	// effectiveAddr at `https://s3.us-east-1.amazonaws.com`, which then
-	// causes NormalizeExternalSource to rewrite the localhost MinIO URI
-	// into an AWS S3 URI with localhost:9000 as a path segment. Region is
-	// still required by ValidateExtfsComplete for s3-family schemes, but
-	// the endpoint must come from the URI host (Milvus form).
+	// Build extfs credentials JSON fragment once. The minio:// external source
+	// carries the endpoint and bucket, so tests only need credentials here.
 	extfsFragment := fmt.Sprintf(
-		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}`,
+		`"extfs":{"access_key_id":%q,"access_key_value":%q}`,
 		minioCfg.accessKey, minioCfg.secretKey)
 
 	type testCase struct {
@@ -2964,7 +3101,7 @@ func TestExternalSourceFormats(t *testing.T) {
 			// Fully qualified URI (scheme://endpoint/bucket/key) targeting
 			// the dedicated external bucket.
 			targetBucket := externalBucket
-			externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
+			externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
 
 			// Generate and upload test data
 			switch tc.format {
@@ -3441,7 +3578,7 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	// Embed secret credentials in extfs; they are persisted into etcd and
 	// must NOT flow back out unredacted through DescribeCollection.
 	rawSpec := fmt.Sprintf(
-		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q}}`,
 		"AKIAEXAMPLELEAKME", "supersecretvaluemustnotleak")
 
 	schema := entity.NewSchema().
@@ -3473,8 +3610,8 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	require.Contains(t, returnedSpec, `"access_key_value":"***"`,
 		"access_key_value must be redacted to ***")
 	// Non-secret values remain visible for operator troubleshooting.
-	require.Contains(t, returnedSpec, `"region":"us-east-1"`,
-		"non-secret extfs values must remain readable")
+	require.Contains(t, returnedSpec, `"format":"parquet"`,
+		"non-secret spec values must remain readable")
 }
 
 // Regression for issue #49335: a refresh_external_collection call carrying
