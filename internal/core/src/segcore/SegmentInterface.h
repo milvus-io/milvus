@@ -283,7 +283,7 @@ class SegmentInterface {
     }
 
     virtual void
-    LazyCheckSchema(SchemaPtr sch) = 0;
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) = 0;
 
     // reopen segment with new schema
     virtual void

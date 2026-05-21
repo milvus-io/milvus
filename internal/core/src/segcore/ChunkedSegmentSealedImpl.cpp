@@ -4113,16 +4113,27 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 }
 
 void
-ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
-    if (sch->get_schema_version() > schema_->get_schema_version()) {
+ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch,
+                                          milvus::OpContext* op_ctx) {
+    if (!sch) {
+        return;
+    }
+
+    uint64_t current_schema_version;
+    {
+        std::shared_lock lck(mutex_);
+        current_schema_version = schema_->get_schema_version();
+    }
+
+    if (sch->get_schema_version() > current_schema_version) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
             "current "
             "schema version {}, new schema version {}",
             id_,
-            schema_->get_schema_version(),
+            current_schema_version,
             sch->get_schema_version());
-        Reopen(sch);
+        Reopen(op_ctx, std::move(sch));
     }
 }
 
@@ -4329,13 +4340,23 @@ ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
 
 void
 ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
+    milvus::OpContext op_ctx;
+    Reopen(&op_ctx, std::move(sch));
+}
+
+void
+ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     if (!sch) {
         return;
     }
 
-    milvus::OpContext op_ctx;
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    if (sch->get_schema_version() <= schema_->get_schema_version()) {
+    SchemaPtr current_schema;
+    {
+        std::shared_lock lck(mutex_);
+        current_schema = schema_;
+    }
+    if (sch->get_schema_version() <= current_schema->get_schema_version()) {
         return;
     }
 
@@ -4358,7 +4379,7 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
                                std::memory_order_relaxed);
 
     ApplySchemaForReopen(sch);
-    ApplyLoadDiff(&op_ctx, new_local, diff);
+    ApplyLoadDiff(op_ctx, new_local, diff);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -4381,8 +4402,24 @@ ChunkedSegmentSealedImpl::Reopen(
     // std::atomic_load and never touch this mutex.
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
+    SchemaPtr current_schema;
+    {
+        std::shared_lock lck(mutex_);
+        current_schema = schema_;
+    }
+    if (new_schema && new_schema->get_schema_version() <
+                          current_schema->get_schema_version()) {
+        LOG_WARN(
+            "Skip stale reopen segment {}, current schema version {}, incoming "
+            "schema version {}",
+            id_,
+            current_schema->get_schema_version(),
+            new_schema->get_schema_version());
+        return;
+    }
+
     auto current = std::atomic_load(&segment_load_info_);
-    auto target_schema = new_schema ? std::move(new_schema) : schema_;
+    auto target_schema = new_schema ? std::move(new_schema) : current_schema;
 
     SegmentLoadInfo current_mutable(*current);
     SegmentLoadInfo new_local(new_load_info, target_schema);
@@ -5257,6 +5294,8 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
+    mutable_copy.SetFieldsFilledWithDefault(
+        snapshot->GetFieldsFilledWithDefault());
     for (auto fid : snapshot->GetCreatedTextIndexes()) {
         mutable_copy.SetTextIndexCreated(fid);
     }

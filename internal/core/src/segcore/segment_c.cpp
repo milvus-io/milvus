@@ -206,29 +206,49 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const void* schema_blob,
                    const int64_t schema_length,
                    const uint64_t schema_version) {
-    AssertInfo(load_info_blob, "load info is null");
-    milvus::proto::segcore::SegmentLoadInfo load_info;
-    auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
-    AssertInfo(suc, "unmarshal load info failed");
-    auto schema = ParseReopenSchema(schema_blob, schema_length, schema_version);
+    try {
+        AssertInfo(load_info_blob, "load info is null");
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
+        AssertInfo(suc, "unmarshal load info failed");
+        auto schema =
+            ParseReopenSchema(schema_blob, schema_length, schema_version);
 
-    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
-    auto future = milvus::futures::Future<bool>::async(
-        milvus::futures::getLoadCPUExecutor(),
-        milvus::futures::ExecutePriority::NORMAL,
-        [c_trace,
-         segment,
-         load_info = std::move(load_info),
-         schema = std::move(schema)](
-            folly::CancellationToken cancel_token) -> bool* {
-            milvus::OpContext op_ctx(cancel_token);
-            segment->Reopen(&op_ctx, load_info, schema);
-            return nullptr;
-        },
-        milvus::futures::PoolType::kLoad);
-    return static_cast<CFuture*>(static_cast<void*>(
-        static_cast<milvus::futures::IFuture*>(future.release())));
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [c_trace,
+             segment,
+             load_info = std::move(load_info),
+             schema = std::move(schema)](
+                folly::CancellationToken cancel_token) -> bool* {
+                milvus::OpContext op_ctx(cancel_token);
+                segment->Reopen(&op_ctx, load_info, schema);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (std::exception& e) {
+        std::string error_msg = e.what();
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [error_msg = std::move(error_msg)](
+                folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncReopenSegment preflight failed: {}",
+                          error_msg);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    }
 }
 
 CLoadCancellationSource
@@ -370,7 +390,8 @@ AsyncSearch(CTraceContext c_trace,
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
 
-            segment->LazyCheckSchema(plan->schema_);
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
 
             auto search_result = segment->Search(plan,
                                                  phg_ptr,
@@ -453,7 +474,8 @@ AsyncRetrieve(CTraceContext c_trace,
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-            segment->LazyCheckSchema(plan->schema_);
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx,

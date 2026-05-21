@@ -278,7 +278,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
            SchemaPtr new_schema) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
@@ -1293,6 +1293,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplyLoadDiff(milvus::OpContext* op_ctx,
                   SegmentLoadInfo& segment_load_info,
                   LoadDiff& load_diff);
+
+    void
+    Reopen(milvus::OpContext* op_ctx, SchemaPtr sch);
 
     void
     ApplySchemaForReopen(SchemaPtr sch);

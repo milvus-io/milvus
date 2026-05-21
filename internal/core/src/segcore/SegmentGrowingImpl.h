@@ -155,7 +155,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            SchemaPtr new_schema) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
