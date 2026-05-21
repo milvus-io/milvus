@@ -332,6 +332,7 @@ type requeryOperator struct {
 	partitionIDs       []int64
 	primaryFieldSchema *schemapb.FieldSchema
 	queryChannelsTs    map[string]Timestamp
+	queryChannelsNode  map[string]int64
 	consistencyLevel   commonpb.ConsistencyLevel
 	guaranteeTimestamp uint64
 
@@ -354,6 +355,13 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 			outputFieldNames.Insert(highlightDynFields...)
 		}
 	}
+	queryChannelsNode := make(map[string]int64)
+	if t.queryChannelsNode != nil {
+		t.queryChannelsNode.Range(func(channel string, nodeID int64) bool {
+			queryChannelsNode[channel] = nodeID
+			return true
+		})
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   outputFieldNames.Collect(),
@@ -362,6 +370,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		collectionName:     t.request.GetCollectionName(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
+		queryChannelsNode:  queryChannelsNode,
 		consistencyLevel:   t.GetConsistencyLevel(),
 		guaranteeTimestamp: t.GetGuaranteeTimestamp(),
 		notReturnAllMeta:   t.request.GetNotReturnAllMeta(),
@@ -408,6 +417,10 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
 	}
+	preferredNodes := make(map[string]int64)
+	for k, v := range op.queryChannelsNode {
+		preferredNodes[k] = v
+	}
 	qt := &queryTask{
 		ctx:       op.traceCtx,
 		Condition: NewTaskCondition(op.traceCtx),
@@ -427,6 +440,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		lb:             op.node.(*Proxy).lbPolicy,
 		shardclientMgr: op.node.(*Proxy).shardMgr,
 		channelsMvcc:   channelsMvcc,
+		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
 	}
