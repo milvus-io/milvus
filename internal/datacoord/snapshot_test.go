@@ -653,6 +653,73 @@ func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t
 		segments[0].GetIndexFiles()[0].GetIndexStorePathVersion())
 }
 
+// TestSnapshotManifest_CommitTimestampRoundtripV3 verifies that CommitTimestamp
+// survives a Marshal/Unmarshal cycle with the current (V3) schema. This is the
+// invariant the snapshot.go field comment promises ("preserved so that GC, TTL,
+// and MVCC protections survive snapshot/restore").
+func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	const wantCommitTs = uint64(1234567890)
+	segment := &datapb.SegmentDescription{
+		SegmentId:       1001,
+		PartitionId:     2001,
+		ChannelName:     "ch-0",
+		CommitTimestamp: wantCommitTs,
+	}
+	entry := convertSegmentToManifestEntry(segment)
+	require.Equal(t, int64(wantCommitTs), entry.CommitTimestamp)
+
+	assert.Contains(t, getAvroSchemaV3(), "commit_timestamp")
+	schema, err := getManifestSchemaByVersion(3)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v3_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 3)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Equal(t, wantCommitTs, segments[0].GetCommitTimestamp())
+}
+
+// TestSnapshotManifest_LegacyV2NoCommitTimestamp verifies that a manifest
+// written with the V2 schema (no commit_timestamp field) still decodes cleanly
+// under the V2 reader and surfaces CommitTimestamp=0. This guarantees that
+// pre-existing on-disk snapshots remain readable after the V3 bump.
+func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:       1001,
+		PartitionId:     2001,
+		ChannelName:     "ch-0",
+		CommitTimestamp: 999, // set on the struct; V2 schema must drop it
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV2(), "commit_timestamp")
+	v2Schema, err := getManifestSchemaByVersion(2)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v2Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v2_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 2)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Equal(t, uint64(0), segments[0].GetCommitTimestamp(),
+		"V2 manifest must decode with CommitTimestamp=0 (field absent in schema)")
+}
+
 // =========================== Integration Tests ===========================
 
 func TestSnapshotWriter_ManifestList_Roundtrip(t *testing.T) {
@@ -1073,13 +1140,18 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_2_current",
+			name:    "version_2_legacy",
 			version: 2,
 			wantErr: false,
 		},
 		{
-			name:        "version_3_future",
-			version:     3,
+			name:    "version_3_current",
+			version: 3,
+			wantErr: false,
+		},
+		{
+			name:        "version_4_future",
+			version:     4,
 			wantErr:     true,
 			errContains: "too new",
 		},
@@ -1122,13 +1194,18 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "version_2_current",
+			name:    "version_2_legacy",
 			version: 2,
 			wantErr: false,
 		},
 		{
-			name:        "version_3_unsupported",
-			version:     3,
+			name:    "version_3_current",
+			version: 3,
+			wantErr: false,
+		},
+		{
+			name:        "version_4_unsupported",
+			version:     4,
 			wantErr:     true,
 			errContains: "unsupported manifest schema version",
 		},

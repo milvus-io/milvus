@@ -1957,6 +1957,14 @@ func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, f
 // normalizePositionTimestamp updates a position's timestamp to commitTs if
 // commitTs is non-zero and larger. Used during compaction completion to
 // normalize import segment positions after row timestamps are rewritten.
+//
+// Note: this intentionally bumps Timestamp without advancing MsgID, so the
+// returned MsgPosition violates the usual Timestamp == TSO(MsgID) invariant.
+// Safe here because the result is only consumed as a *fallback* start/dml
+// position for compaction-output segments by ts-only callers — GC,
+// TruncateChannelByTime, GetEarliestTs — never seeked in the WAL by MsgID.
+// Any future caller that needs MsgID/Timestamp consistency (WAL seek,
+// resume-from-position) must NOT use this helper.
 func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.MsgPosition {
 	if commitTs == 0 || pos == nil || pos.Timestamp >= commitTs {
 		return pos
