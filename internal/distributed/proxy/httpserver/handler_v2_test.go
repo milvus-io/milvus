@@ -442,6 +442,26 @@ func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
 	assert.True(t, errors.Is(<-observed, context.Canceled))
 }
 
+func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
+	ginHandler := gin.Default()
+	app := ginHandler.Group("")
+	path := "/middleware/timeout/deadline"
+	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		deadline, ok := c.Request.Context().Deadline()
+		assert.True(t, ok)
+		assert.LessOrEqual(t, time.Until(deadline), 3*time.Second)
+		assert.Greater(t, time.Until(deadline), time.Second)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "3")
+	w := httptest.NewRecorder()
+
+	ginHandler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
