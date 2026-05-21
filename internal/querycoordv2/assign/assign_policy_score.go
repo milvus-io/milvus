@@ -291,7 +291,7 @@ func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(
 	nodeRowCount += delta.GetByNode(nodeID)
 
 	// Calculate executing task cost for collection
-	collectionRowCount := status.nodeCollectionRowCount[nodeID][collectionID] + delta.GetByNodeAndCollection(nodeID)
+	collectionRowCount := status.nodeCollectionRowCount[nodeID][collectionID] + delta.GetByNodeInCollection(nodeID)
 
 	// Final score: collection row count + global row count * factor
 	return collectionRowCount + int(float64(nodeRowCount)*
