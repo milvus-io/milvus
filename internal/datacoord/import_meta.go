@@ -360,6 +360,14 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 	// on retry (data stays invisible forever).
 	// The callback (setting is_importing=false) is idempotent, so re-execution on
 	// retry after a persist failure is safe.
+	//
+	// Visibility ordering note: the callback clears segment meta (is_importing=false)
+	// before this function persists job meta (committed_vchannels). Therefore a
+	// vchannel's imported data can become visible before the job-level transition
+	// to Completed (which happens later in checkCommittingJob once all vchannels
+	// have been recorded here). This is inherent to per-vchannel commit fences —
+	// 2PC for import is per-vchannel-atomic, not job-atomic. See MEP
+	// (milvus-io/milvus-design-docs#29) "Segment Visibility" section.
 	if err := callback(); err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -895,9 +896,10 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:      2,
-			State:      internalpb.ImportJobState_Uncommitted,
-			AutoCommit: false,
+			JobID:             2,
+			State:             internalpb.ImportJobState_Uncommitted,
+			AutoCommit:        false,
+			RequestedDiskSize: 1024 * 1024, // nonzero so we can observe release
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
@@ -908,10 +910,16 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
 	assert.NoError(t, err)
 
-	// Segment cleanup is handled by import inspector, not the callback.
+	// Segment cleanup is handled by the import inspector's processFailed (covered
+	// by ImportInspectorSuite.TestProcessFailed), not by this callback.
 	updatedJob := importMeta.GetJob(ctx, 2)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+	// UpdateJobState(Failed) also releases disk quota and arms GC eligibility.
+	assert.EqualValues(t, 0, updatedJob.GetRequestedDiskSize(),
+		"Failed transition must release RequestedDiskSize")
+	assert.Greater(t, updatedJob.GetCleanupTs(), uint64(0),
+		"Failed transition must set CleanupTs for GC eligibility")
 }
 
 func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
@@ -962,4 +970,125 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	updatedJob := importMeta.GetJob(ctx, 4)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+// TestImportAckCallbacks_CommitVsAbort_Race fires commit and rollback ack
+// callbacks concurrently against the same Uncommitted job. In production these
+// callbacks are serialized by the broadcaster's exclusive collection-level
+// resource-key lock (both CommitImport and RollbackImport are ExclusiveRequired
+// on NewExclusiveCollectionNameResourceKey), so this race is unreachable. The
+// test documents the invariant from the callback side and provides regression
+// coverage against future drift: the job must end in a deterministic terminal
+// state (Committing or Failed) without panicking or corrupting meta. Run with
+// `-race` to detect any unsynchronized access.
+func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
+	for iter := 0; iter < 32; iter++ {
+		ctx := context.Background()
+		importMeta, _ := newTestImportMeta(t)
+
+		const jobID int64 = 5
+		err := importMeta.AddJob(ctx, &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:      jobID,
+				State:      internalpb.ImportJobState_Uncommitted,
+				AutoCommit: false,
+			},
+			tr: timerecord.NewTimeRecorder("race"),
+		})
+		assert.NoError(t, err)
+
+		callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+
+		start := make(chan struct{})
+		var commitErr, rollbackErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			rollbackErr = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
+		}()
+		close(start)
+		wg.Wait()
+
+		assert.NoError(t, commitErr)
+		assert.NoError(t, rollbackErr)
+
+		final := importMeta.GetJob(ctx, jobID).GetState()
+		assert.Contains(t,
+			[]internalpb.ImportJobState{internalpb.ImportJobState_Committing, internalpb.ImportJobState_Failed},
+			final, "iter %d: terminal state must be Committing or Failed, got %s", iter, final)
+	}
+}
+
+// --------------------------------
+// broadcastCommitImportMessage / broadcastRollbackImportMessage Tests
+// --------------------------------
+
+// captureBroadcastAPI is a BroadcastAPI mock that records the message passed
+// to Broadcast so a test can assert its broadcast target vchannels.
+type captureBroadcastAPI struct {
+	captured message.BroadcastMutableMessage
+}
+
+func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	c.captured = msg
+	return &types.BroadcastAppendResult{BroadcastID: 1}, nil
+}
+
+func (c *captureBroadcastAPI) Close() {}
+
+func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	ctx := context.Background()
+	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
+
+	capture := &captureBroadcastAPI{}
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return capture, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{broker: mockBroker}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+			Vchannels:    wantVchannels,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := broadcastFn(server, ctx, job)
+	assert.NoError(t, err)
+	assert.NotNil(t, capture.captured, "Broadcast must have been called")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels, not the control channel")
+}
+
+// TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
+// CommitImport WAL message is broadcast to the job's data vchannels.
+// Control-channel-only broadcasts are dropped by the WAL flusher's
+// IsControlChannel guard before reaching the CommitImport case, so the
+// message must reach data vchannels for HandleCommitVchannel to run.
+func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
+	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+// TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
+// RollbackImport WAL message is broadcast to the job's data vchannels,
+// matching the CommitImport routing.
+func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
+	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
 }

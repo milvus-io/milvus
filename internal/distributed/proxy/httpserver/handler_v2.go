@@ -3289,8 +3289,10 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 		JobId: jobID,
 	}
 	c.Set(ContextRequest, req)
+	// Internal DataCoord-only RPC; not exposed on MilvusService. Use the real
+	// proto package in the trace/metric label so it reflects the actual method.
 	resp, err := wrapperProxy(ctx, c, req, false, false,
-		"/milvus.proto.milvus.MilvusService/CommitImport",
+		"/milvus.proto.data.DataCoord/CommitImport",
 		func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CommitImport(reqCtx, req.(*datapb.CommitImportRequest))
 		})
@@ -3330,8 +3332,9 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 		JobId: jobID,
 	}
 	c.Set(ContextRequest, req)
+	// Internal DataCoord-only RPC; not exposed on MilvusService.
 	resp, err := wrapperProxy(ctx, c, req, false, false,
-		"/milvus.proto.milvus.MilvusService/AbortImport",
+		"/milvus.proto.data.DataCoord/AbortImport",
 		func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.AbortImport(reqCtx, req.(*datapb.AbortImportRequest))
 		})

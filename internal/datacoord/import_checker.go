@@ -442,21 +442,18 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job build index done", zap.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
-	if c.unsetSegmentImporting(originSegmentIDs, statsSegmentIDs) {
-		return
-	}
-	// all finished, update import job state to `Completed`.
-	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
+	// 2PC: hand off to Uncommitted regardless of auto_commit. Segment visibility
+	// (is_importing=false) is cleared only by HandleCommitVchannel after the WAL
+	// commit fence is processed per vchannel; auto_commit=true jobs are then
+	// driven through the commit broadcast by checkUncommittedJob.
+	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	if err != nil {
-		log.Warn("failed to update job state to Completed", zap.Error(err))
+		log.Warn("failed to update job state to Uncommitted", zap.Error(err))
 		return
 	}
-	totalDuration := job.GetTR().ElapseSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
-
 	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
-	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
+	log.Info("import job indexes built, transitioned to Uncommitted",
+		zap.Bool("autoCommit", job.GetAutoCommit()))
 }
 
 // checkUncommittedJob handles jobs in the Uncommitted state.
@@ -469,8 +466,13 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 		return
 	}
 	// auto_commit=true: trigger commit by broadcasting the WAL message.
+	// Repeated invocations across ticks are safe: the broadcaster's exclusive
+	// collection-level resource-key lock serializes overlapping broadcasts, the
+	// ack callback only transitions when the job is still Uncommitted, and
+	// HandleCommitVchannel is idempotent on committed_vchannels.
 	if c.commitImportFn == nil {
-		panic("commitImportFn is nil but auto_commit=true; this is a programming error")
+		log.Error("commitImportFn is nil but auto_commit=true; this is a programming error")
+		return
 	}
 	if err := c.commitImportFn(c.ctx, job); err != nil {
 		log.Warn("auto-commit import failed", zap.Error(err))
@@ -498,35 +500,6 @@ func (c *importChecker) checkCommittingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
 	log.Info("import job Committing done, all vchannels committed",
 		zap.Duration("jobTimeCost/total", totalDuration))
-}
-
-// unsetSegmentImporting unsets the isImporting flag for segments.
-func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs []int64) bool {
-	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
-	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
-		segment := c.meta.GetSegment(c.ctx, segmentID)
-		if segment == nil {
-			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
-			return false
-		}
-		return segment.GetIsImporting()
-	})
-
-	if len(isImportingSegments) == 0 {
-		return false
-	}
-
-	// TODO: CommitTimestamp will be assigned by the 2PC commit flow (see companion PR).
-	for _, segmentID := range isImportingSegments {
-		err := c.meta.UpdateSegmentsInfo(c.ctx,
-			UpdateIsImporting(segmentID, false),
-		)
-		if err != nil {
-			log.Warn("update import segment failed", zap.Error(err))
-			return true
-		}
-	}
-	return false
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {

@@ -222,7 +222,9 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		}
 	}
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	// AlterSegments is no longer called from checkIndexBuildingJob (unsetSegmentImporting removed);
+	// the upstream checkImportingJob path may still invoke it. Loosen to .Maybe().
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
@@ -273,16 +275,17 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.checker.checkSortingJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
-	// test check IndexBuilding job
+	// test check IndexBuilding job — transitions to Uncommitted, segments keep is_importing=true
+	// until HandleCommitVchannel runs after the WAL commit fence.
 	s.checker.checkIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.importMeta.GetTask(context.TODO(), t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
 			segment := s.checker.meta.GetSegment(context.TODO(), id)
-			s.Equal(false, segment.GetIsImporting())
+			s.Equal(true, segment.GetIsImporting(), "is_importing must stay true until HandleCommitVchannel")
 		}
 	}
-	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
 func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
@@ -733,7 +736,9 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// check importing
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	// AlterSegments was previously driven by unsetSegmentImporting (removed in 2PC);
+	// the remaining segment writes in this flow may or may not hit it.
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
@@ -785,14 +790,14 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job index building")
 
-	// check index building
-	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(tsoutil.GetCurrentTime(), nil).Maybe()
+	// check index building → Uncommitted (2PC: no longer transitions directly to Completed;
+	// the test does not wire up a CommitImport broadcaster, so the job stops at Uncommitted).
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Completed
+		return job.GetState() == internalpb.ImportJobState_Uncommitted
 	}, 2*time.Second, 100*time.Millisecond)
-	log.Info("job completed")
+	log.Info("job uncommitted (awaiting CommitImport WAL fence)")
 }
 
 // ---------------------------------------------------------------------------
@@ -839,16 +844,43 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 }
 
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
-	// commitImportFn=nil with auto_commit=true is a programming error and should panic.
+	// commitImportFn=nil with auto_commit=true is a programming error; the checker
+	// must log an error and return without crashing (no panic in the ticker goroutine).
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
 		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
 		job.(*importJob).AutoCommit = true
 	})
 	s.checker.commitImportFn = nil
 
-	s.Panics(func() {
+	s.NotPanics(func() {
 		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	})
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// TestCheckUncommittedJob_RepeatedTicks_Safe verifies that ticker re-entry into
+// checkUncommittedJob before the ack callback transitions the job state is safe.
+// commitImportFn is invoked once per tick; correctness against the resulting
+// duplicate broadcasts is guaranteed by the broadcaster's resource-key lock,
+// the ack callback's state guard, and HandleCommitVchannel's idempotency.
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_RepeatedTicks_Safe() {
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
+	})
+
+	callCount := 0
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		callCount++
+		return nil
+	}
+
+	for i := 0; i < 3; i++ {
+		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	}
+	s.Equal(3, callCount, "each tick must call commitImportFn; broadcaster handles dedup")
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
+		"state must remain Uncommitted until the ack callback fires")
 }
 
 // ---------------------------------------------------------------------------

@@ -2839,7 +2839,10 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 }
 
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is sent to the control channel so that all vchannels receive the commit fence.
+// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
+// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
+// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
+// before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
@@ -2853,7 +2856,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(job.GetVchannels()).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -2861,6 +2864,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 }
 
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
+// Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
@@ -2874,7 +2878,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(job.GetVchannels()).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
