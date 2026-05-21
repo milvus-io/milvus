@@ -71,9 +71,6 @@ func (dh *distHandler) start(ctx context.Context) {
 	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(distInterval)
 	defer ticker.Stop()
-	flagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-	checkExecutedFlagTicker := time.NewTicker(flagInterval)
-	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
 		select {
@@ -83,25 +80,6 @@ func (dh *distHandler) start(ctx context.Context) {
 		case <-dh.c:
 			log.Info("close dist handler")
 			return
-		case <-checkExecutedFlagTicker.C:
-			executedFlagChan := dh.scheduler.GetExecutedFlag(dh.nodeID)
-			if executedFlagChan != nil {
-				select {
-				case <-executedFlagChan:
-					dh.pullDist(ctx, &failures, false)
-				default:
-				}
-			}
-			// only reset when interval updated
-			newFlagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-			if newFlagInterval != flagInterval {
-				flagInterval = newFlagInterval
-				select {
-				case <-checkExecutedFlagTicker.C:
-				default:
-				}
-				checkExecutedFlagTicker.Reset(flagInterval)
-			}
 		case <-ticker.C:
 			dh.pullDist(ctx, &failures, true)
 			// only reset when interval updated
