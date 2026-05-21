@@ -198,7 +198,8 @@ RemoteInputStream::Read(int fd, size_t size) {
         rest_size -= bytes_to_write;
     }
     auto fsync_ret = ::fsync(fd);
-    AssertInfo(fsync_ret == 0, "Failed to fsync file, errno: {}", errno);
+    int saved_errno = errno;
+    AssertInfo(fsync_ret == 0, "Failed to fsync file, errno: {}", saved_errno);
     return size;
 }
 
