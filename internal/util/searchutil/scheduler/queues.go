@@ -2,17 +2,13 @@ package scheduler
 
 import (
 	"container/ring"
-	"math"
 	"time"
-
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newMergeTaskQueue(group string) *mergeTaskQueue {
 	return &mergeTaskQueue{
 		name:             group,
 		tasks:            make([]*queuedTask, 0),
-		deadlineTasks:    newDeadlineTaskHeap(),
 		cleanupTimestamp: time.Now(),
 	}
 }
@@ -20,7 +16,6 @@ func newMergeTaskQueue(group string) *mergeTaskQueue {
 type mergeTaskQueue struct {
 	name             string
 	tasks            []*queuedTask
-	deadlineTasks    typeutil.Heap[*queuedTask]
 	count            int
 	cleanupTimestamp time.Time
 }
@@ -34,9 +29,6 @@ func (q *mergeTaskQueue) len() int {
 func (q *mergeTaskQueue) push(task *queuedTask) {
 	q.tasks = append(q.tasks, task)
 	q.count++
-	if _, ok := task.Context().Deadline(); ok {
-		q.deadlineTasks.Push(task)
-	}
 }
 
 // front returns the first element of taskQueue.
@@ -77,24 +69,8 @@ func (q *mergeTaskQueue) cleanup(now time.Time) []*queuedTask {
 	}
 
 	removed := make([]*queuedTask, 0)
-	for q.deadlineTasks.Len() > 0 {
-		task := q.deadlineTasks.Peek()
-		if !task.valid() {
-			q.deadlineTasks.Pop()
-			continue
-		}
-		if !task.cleanupReady(now) {
-			break
-		}
-		q.deadlineTasks.Pop()
-		removed = append(removed, q.markRemoved(task, now))
-	}
-
 	for _, task := range q.tasks {
-		if !task.valid() {
-			continue
-		}
-		if task.Context().Err() == nil {
+		if !task.cleanupReady(now) {
 			continue
 		}
 		removed = append(removed, q.markRemoved(task, now))
@@ -200,19 +176,6 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 		}
 	}
 	return false
-}
-
-func newDeadlineTaskHeap() typeutil.Heap[*queuedTask] {
-	return typeutil.NewObjectArrayBasedMinimumHeap[*queuedTask, int64](nil, func(task *queuedTask) int64 {
-		if !task.valid() {
-			return math.MaxInt64
-		}
-		deadline, ok := task.Context().Deadline()
-		if !ok {
-			return math.MaxInt64
-		}
-		return deadline.UnixNano()
-	})
 }
 
 // newFairPollingTaskQueue create a fair polling task queue.

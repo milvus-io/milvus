@@ -226,6 +226,33 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLi
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
+func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	expiredCtx, cancelExpired := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
+	defer cancelExpired()
+	expiredTask := newMockTask(mockTaskConfig{ctx: expiredCtx, nq: 1})
+	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
+	added, err := scheduler.policy.Push(queued)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	errCh := make(chan error, 1)
+	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
+		task: newMockTask(mockTaskConfig{nq: 1}),
+		err:  errCh,
+	}, 2, now)
+
+	s.False(keepConsuming)
+	s.NoError(<-errCh)
+	s.Equal(int64(2), scheduler.GetWaitingTaskTotal())
+	s.Equal(0, len(expiredTask.(*MockTask).notifier))
+}
+
 func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQueueLimit() {
 	paramtable.Init()
 	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
@@ -320,6 +347,37 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty()
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
+func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
+	paramtable.Init()
+	metrics.QueryNodeReadTaskQueueDuration.Reset()
+	defer metrics.QueryNodeReadTaskQueueDuration.Reset()
+
+	now := time.Now()
+	scheduler := &scheduler{
+		policy:           newFIFOPolicy(),
+		execChan:         make(chan Task),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	expiredCtx, cancelExpired := context.WithDeadline(context.Background(), now.Add(-time.Millisecond))
+	defer cancelExpired()
+	expiredTask := newMockTask(mockTaskConfig{ctx: expiredCtx, nq: 1})
+	queued := newQueuedTask(expiredTask, now.Add(-time.Second))
+	added, err := scheduler.policy.Push(queued)
+	s.NoError(err)
+	scheduler.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	task, nq, execChan := scheduler.setupExecListener(nil, now)
+
+	s.False(task.valid())
+	s.Zero(nq)
+	s.Nil(execChan)
+	s.Equal(int64(0), scheduler.GetWaitingTaskTotal())
+	s.ErrorIs(expiredTask.Wait(), context.DeadlineExceeded)
+	s.Equal(uint64(1), readTaskQueueDurationCount(readTaskQueueOutcomeExpired))
+	s.Equal(uint64(0), readTaskQueueDurationCount(readTaskQueueOutcomeScheduled))
+}
+
 func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	paramtable.Init()
 	metrics.QueryNodeReadTaskExecuteDuration.Reset()
@@ -394,6 +452,15 @@ func (s *SchedulerSuite) TestRecordReadTaskQueueDurationSkipsInvalidTask() {
 
 func readTaskExecuteDurationCount(outcome string) uint64 {
 	observer := metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(paramtable.GetStringNodeID(), outcome)
+	metric := &dto.Metric{}
+	if err := observer.(interface{ Write(*dto.Metric) error }).Write(metric); err != nil {
+		return 0
+	}
+	return metric.GetHistogram().GetSampleCount()
+}
+
+func readTaskQueueDurationCount(outcome string) uint64 {
+	observer := metrics.QueryNodeReadTaskQueueDuration.WithLabelValues(paramtable.GetStringNodeID(), outcome)
 	metric := &dto.Metric{}
 	if err := observer.(interface{ Write(*dto.Metric) error }).Write(metric); err != nil {
 		return 0
