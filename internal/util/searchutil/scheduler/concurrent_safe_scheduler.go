@@ -190,7 +190,9 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
 func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
-	s.cleanupExpiredTasks(now)
+	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
+		s.cleanupExpiredTasks(now)
+	}
 
 	if err := req.task.Context().Err(); err != nil {
 		log.Warn("task canceled before enqueue", zap.Error(err))
@@ -309,9 +311,20 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
-		lastWaitingTask = s.policy.Pop(now)
-		if lastWaitingTask.valid() {
+		for {
+			lastWaitingTask = s.policy.Pop(now)
+			if !lastWaitingTask.valid() {
+				break
+			}
+			if err := lastWaitingTask.Context().Err(); err != nil {
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				lastWaitingTask.Done(err)
+				lastWaitingTask = nil
+				continue
+			}
 			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
+			break
 		}
 	}
 	if lastWaitingTask.valid() {
