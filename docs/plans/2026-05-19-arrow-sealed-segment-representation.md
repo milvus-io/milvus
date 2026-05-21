@@ -15,6 +15,7 @@ The current POC implements the first narrow slice of the design:
 - Segment-side access interface: `Prune(...)`, `Iterate(...)`, and `Take(...)`.
 - Expression integration point: `PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData`.
 - Supported expression shape: simple `INT64` / `TIMESTAMPTZ` unary range filters.
+- Null handling: Arrow column validity bitmaps are the source of truth for field-level nulls.
 - Normal query path: `query::ExecuteQueryExpr(...)` and `FilterBitsNode`.
 
 The implemented flow is:
@@ -29,9 +30,8 @@ query::ExecuteQueryExpr(...)
   -> SegmentInternalInterface::Iterate(...)
   -> ArrowBatchIterator::Next()
   -> arrow::RecordBatch
-  -> arrow::Int64Array
-  -> arrow::Int64Array::raw_values()
-  -> existing UnaryElementFunc<T> logic over T*
+  -> Arrow unary evaluator reads arrow::Int64Array values and validity
+  -> existing typed comparison logic
 ```
 
 So the expression framework now owns the scalar filter semantics. Arrow supplies the physical batch. The normal path no longer uses a `FilterBitsNode -> segment executes whole expression` shortcut.
@@ -83,6 +83,8 @@ SealedSegment
 `LogicalArrowDataset` is a Milvus-side logical object. It is table-like, but it does not imply that the whole segment is materialized as one `arrow::Table` or one `arrow::RecordBatch`.
 
 `ArrowBatchView` is the unit consumed by expression execution. It is a logical view over aligned row ranges across requested columns. The expression framework should not know whether the data came from one Arrow `RecordBatch`, multiple Arrow arrays, a row group, an mmap file, or a cache cell. If the view references evictable data, it must hold the necessary cache pins for its lifetime.
+
+Nullability is field-level and column-local. A `RecordBatch` has no row-level null bitmap. Each Arrow array may carry its own validity bitmap, and expression execution must combine that field validity with delete visibility, candidate rows, and expression results.
 
 Internally, the Arrow dataset may still split data into cells for resource management:
 
@@ -324,10 +326,12 @@ The POC flow is narrower and still type-specific:
 4. The expression path calls `Prune(...)`; this is currently a no-op placeholder for physical pruning.
 5. The expression path calls `Iterate(...)`.
 6. The iterator pins one `RecordBatchCell` at a time and returns an `ArrowBatchView`.
-7. The expression operator extracts `arrow::Int64Array::raw_values()` as `const int64_t*`.
-8. Arrow nulls are converted into a temporary `FixedVector<bool>` only when needed.
-9. The existing Milvus unary batch evaluator runs over the `T*` data and produces the result bitmap.
+7. The Arrow-specific unary evaluator receives the `ArrowBatchView`.
+8. The evaluator reads `arrow::Int64Array` values and nulls directly from the Arrow array.
+9. The existing typed comparison logic produces the result bitmap.
 10. If Arrow is unsupported for the expression, the existing Milvus chunk path remains the fallback.
+
+The tests include nullable Arrow scalar and string arrays built with Arrow builders and `AppendNull()`. They verify that scalar filters exclude null field values using Arrow array validity, retrieve results preserve `valid_data`, and the legacy chunk bridge only materializes a Milvus validity vector when the Arrow array has nulls.
 
 This means the current POC validates the data-access direction, but it has not yet replaced all chunk-aware expression code with a general Arrow batch abstraction.
 

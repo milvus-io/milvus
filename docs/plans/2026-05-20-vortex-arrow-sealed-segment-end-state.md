@@ -98,6 +98,10 @@ Prune output:
 Expr must still evaluate a > 40 exactly over Arrow data from those candidates.
 ```
 
+For nullable fields, Vortex-side null counts or validity metadata may be used
+only for coarse pruning. Exact null semantics remain in Arrow expression
+evaluation after materialization.
+
 `Prune` must not own full Milvus expression semantics. It should operate on a
 narrow `PrunePredicate` extracted from the expression tree:
 
@@ -252,6 +256,26 @@ Arrow should be treated as the in-memory execution ABI:
   where practical
 
 Vortex is not the general expression engine. Arrow is not the cache manager.
+
+### Nullability Contract
+
+The execution ABI uses Arrow's built-in field null representation:
+
+- no separate `RecordBatch`-level row-null bitmap
+- each materialized Arrow array carries its own validity bitmap when the field
+  is nullable and the batch has nulls
+- expression evaluation combines Arrow field validity with delete visibility,
+  `CandidateSelection`, and operator results
+- retrieve/take materialization preserves field validity in returned Arrow
+  arrays before converting to Milvus `DataArray` output
+
+For the memory-only path, `ArrowRecordBatchCell` stores Arrow arrays with their
+validity buffers intact.
+
+For the Vortex file-backed path, Vortex may store validity in its native
+encoding and expose null counts for `Prune`, but `Iterate` and `Take` must
+materialize those bits as Arrow array validity bitmaps. Vortex null metadata
+must not become a second expression-facing null model.
 
 ## Cachinglayer Integration
 
@@ -411,8 +435,8 @@ expression operator
   -> Iterate(...)
   -> ArrowBatchIterator
   -> arrow::RecordBatch
-  -> Arrow array raw values
-  -> existing typed evaluator
+  -> Arrow evaluator reads array values and validity
+  -> typed expression result
 ```
 
 The next architectural steps are:

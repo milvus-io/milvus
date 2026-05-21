@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -68,6 +69,37 @@ BuildStringArray(const std::vector<std::string>& values) {
     return array;
 }
 
+std::shared_ptr<arrow::Array>
+BuildNullableInt64Array(const std::vector<std::optional<int64_t>>& values) {
+    arrow::Int64Builder builder;
+    for (const auto& value : values) {
+        auto status =
+            value.has_value() ? builder.Append(*value) : builder.AppendNull();
+        EXPECT_TRUE(status.ok()) << status.ToString();
+    }
+
+    std::shared_ptr<arrow::Array> array;
+    auto status = builder.Finish(&array);
+    EXPECT_TRUE(status.ok()) << status.ToString();
+    return array;
+}
+
+std::shared_ptr<arrow::Array>
+BuildNullableStringArray(
+    const std::vector<std::optional<std::string>>& values) {
+    arrow::StringBuilder builder;
+    for (const auto& value : values) {
+        auto status =
+            value.has_value() ? builder.Append(*value) : builder.AppendNull();
+        EXPECT_TRUE(status.ok()) << status.ToString();
+    }
+
+    std::shared_ptr<arrow::Array> array;
+    auto status = builder.Finish(&array);
+    EXPECT_TRUE(status.ok()) << status.ToString();
+    return array;
+}
+
 std::shared_ptr<arrow::RecordBatch>
 BuildBatch(const std::vector<int64_t>& pk,
            const std::vector<int64_t>& age,
@@ -80,6 +112,24 @@ BuildBatch(const std::vector<int64_t>& pk,
                                  arrow::field("name", arrow::utf8())});
     std::vector<std::shared_ptr<arrow::Array>> arrays = {
         BuildInt64Array(pk), BuildInt64Array(age), BuildStringArray(name)};
+    return arrow::RecordBatch::Make(
+        schema, static_cast<int64_t>(pk.size()), arrays);
+}
+
+std::shared_ptr<arrow::RecordBatch>
+BuildNullableBatch(const std::vector<int64_t>& pk,
+                   const std::vector<std::optional<int64_t>>& age,
+                   const std::vector<std::optional<std::string>>& name) {
+    EXPECT_EQ(pk.size(), age.size());
+    EXPECT_EQ(pk.size(), name.size());
+
+    auto schema = arrow::schema({arrow::field("pk", arrow::int64(), false),
+                                 arrow::field("age", arrow::int64(), true),
+                                 arrow::field("name", arrow::utf8(), true)});
+    std::vector<std::shared_ptr<arrow::Array>> arrays = {
+        BuildInt64Array(pk),
+        BuildNullableInt64Array(age),
+        BuildNullableStringArray(name)};
     return arrow::RecordBatch::Make(
         schema, static_cast<int64_t>(pk.size()), arrays);
 }
@@ -98,6 +148,30 @@ BuildSegment() {
         BuildBatch({102, 103, 104}, {31, 29, 42}, {"cara", "dina", "eric"})};
     fixture.segment =
         ArrowSealedSegment::FromRecordBatches(fixture.schema, batches, 1001);
+    return fixture;
+}
+
+ArrowSegmentFixture
+BuildNullableSegment() {
+    ArrowSegmentFixture fixture;
+    fixture.schema = std::make_shared<Schema>();
+    fixture.pk_fid = fixture.schema->AddDebugField("pk", DataType::INT64);
+    fixture.age_fid =
+        fixture.schema->AddDebugField("age", DataType::INT64, true);
+    fixture.name_fid =
+        fixture.schema->AddDebugField("name", DataType::VARCHAR, true);
+    fixture.schema->set_primary_field_id(fixture.pk_fid);
+
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches = {
+        BuildNullableBatch({100, 101},
+                           {20, std::nullopt},
+                           {std::string("alice"), std::string("bob")}),
+        BuildNullableBatch(
+            {102, 103, 104},
+            {31, 29, 42},
+            {std::nullopt, std::string("dina"), std::string("eric")})};
+    fixture.segment =
+        ArrowSealedSegment::FromRecordBatches(fixture.schema, batches, 1002);
     return fixture;
 }
 
@@ -203,6 +277,76 @@ TEST(ArrowSealedSegmentTest, SegcoreRetrieveUsesExprAndArrowFieldData) {
     EXPECT_EQ(name_data[2], "eric");
 }
 
+TEST(ArrowSealedSegmentTest, ArrowNullBitmapsDriveScalarFilter) {
+    auto fixture = BuildNullableSegment();
+    auto filter_node = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, BuildAgeGreaterThanExpr(fixture.age_fid, 30));
+
+    auto bitset = query::ExecuteQueryExpr(
+        filter_node,
+        fixture.segment.get(),
+        fixture.segment->get_active_count(MAX_TIMESTAMP),
+        MAX_TIMESTAMP);
+    BitsetTypeView view(bitset);
+
+    EXPECT_FALSE(view[0]);
+    EXPECT_FALSE(view[1]);
+    EXPECT_TRUE(view[2]);
+    EXPECT_FALSE(view[3]);
+    EXPECT_TRUE(view[4]);
+}
+
+TEST(ArrowSealedSegmentTest, RetrievePreservesArrowNullValidity) {
+    auto fixture = BuildNullableSegment();
+    auto plan = BuildRetrievePlan(fixture);
+
+    auto results = fixture.segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    ASSERT_EQ(results->offset().size(), 2);
+    EXPECT_EQ(results->offset(0), 2);
+    EXPECT_EQ(results->offset(1), 4);
+
+    ASSERT_EQ(results->fields_data_size(), 2);
+    const auto& pk_data = results->fields_data(0).scalars().long_data().data();
+    ASSERT_EQ(pk_data.size(), 2);
+    EXPECT_EQ(pk_data[0], 102);
+    EXPECT_EQ(pk_data[1], 104);
+
+    const auto& name_field = results->fields_data(1);
+    const auto& name_data = name_field.scalars().string_data().data();
+    ASSERT_EQ(name_data.size(), 2);
+    ASSERT_EQ(name_field.valid_data().size(), 2);
+    EXPECT_FALSE(name_field.valid_data(0));
+    EXPECT_TRUE(name_field.valid_data(1));
+    EXPECT_TRUE(name_data[0].empty());
+    EXPECT_EQ(name_data[1], "eric");
+}
+
+TEST(ArrowSealedSegmentTest, ChunkAccessPreservesArrowNullValidity) {
+    auto fixture = BuildNullableSegment();
+
+    auto first_age_chunk =
+        fixture.segment->chunk_data<int64_t>(nullptr, fixture.age_fid, 0);
+    ASSERT_NE(first_age_chunk.get().valid_data(), nullptr);
+    EXPECT_TRUE(first_age_chunk.get().valid_data()[0]);
+    EXPECT_FALSE(first_age_chunk.get().valid_data()[1]);
+
+    auto iterator =
+        fixture.segment->Iterate(nullptr,
+                                 {fixture.age_fid, fixture.name_fid},
+                                 CandidateSelection::RowRange(2, 1));
+    ASSERT_TRUE(iterator->HasNext());
+    auto view = iterator->Next();
+    auto ages = std::static_pointer_cast<arrow::Int64Array>(
+        view.batch.get()->column(0));
+    auto names = std::static_pointer_cast<arrow::StringArray>(
+        view.batch.get()->column(1));
+    EXPECT_EQ(ages->null_count(), 0);
+    EXPECT_EQ(names->null_count(), 1);
+    EXPECT_TRUE(names->IsNull(0));
+}
+
 TEST(ArrowSealedSegmentTest, CacheLayerSimulatesRecordBatchLoadEvictAndPin) {
     auto fixture = BuildSegment();
     auto segment = fixture.segment;
@@ -293,10 +437,10 @@ TEST(ArrowSealedSegmentTest,
     auto age_group = segment->ArrowFieldColumnGroupForTest(fixture.age_fid);
     auto name_group = segment->ArrowFieldColumnGroupForTest(fixture.name_fid);
 
-    auto iterator = segment->Iterate(
-        nullptr,
-        {fixture.age_fid, fixture.name_fid},
-        CandidateSelection::All(segment->get_row_count()));
+    auto iterator =
+        segment->Iterate(nullptr,
+                         {fixture.age_fid, fixture.name_fid},
+                         CandidateSelection::All(segment->get_row_count()));
     ASSERT_TRUE(iterator->HasNext());
 
     {
@@ -337,9 +481,7 @@ TEST(ArrowSealedSegmentTest, ArrowBatchIteratorHonorsCandidateRowRange) {
     auto fixture = BuildSegment();
     auto segment = fixture.segment;
     auto iterator = segment->Iterate(
-        nullptr,
-        {fixture.age_fid},
-        CandidateSelection::RowRange(1, 3));
+        nullptr, {fixture.age_fid}, CandidateSelection::RowRange(1, 3));
 
     ASSERT_TRUE(iterator->HasNext());
     auto first = iterator->Next();
