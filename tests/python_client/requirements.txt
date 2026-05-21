@@ -1,9 +1,9 @@
---extra-index-url https://test.pypi.org/simple/
+--find-links https://test.pypi.org/simple/pymilvus/
 pytest-cov==2.8.1
 requests>=2.32.4
 scikit-learn>=1.5.2
 timeout_decorator==0.5.0
-ujson==5.5.0
+ujson==5.10.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
 pytest-assume==2.4.3
@@ -16,15 +16,11 @@ pytest-xdist==2.5.0
 
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
-ndg-httpsclient
-pyopenssl
-pyasn1
 pytest-html==3.1.1
 delayed-assert==0.3.5
 kubernetes==17.17.0
-PyYAML==6.0
+PyYAML==6.0.2
 pytest-sugar==0.9.5
-pytest-parallel
 pytest-random-order
 
 # pymilvus
@@ -35,24 +31,23 @@ protobuf>=5.29.5
 
 # for customize config test
 python-benedict==0.24.3
-timeout-decorator==0.5.0
 
 # for bulk insert test
 minio==7.2.0
-npy-append-array==0.9.15
+npy-append-array==0.9.19
 Faker==19.2.0
 
 # for benchmark
-h5py==3.8.0
+h5py==3.11.0
 
 # for log
 loguru==0.7.0
 
 # util
-psutil==5.9.4
-pandas==1.5.3
-numpy==1.26.4
-tenacity==8.1.0
+psutil==5.9.8
+pandas==2.2.3
+numpy==2.2.6
+tenacity==8.2.3
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
@@ -60,11 +55,11 @@ deepdiff==8.6.1
 
 # for test result analyzer
 prettytable==3.8.0
-pyarrow==14.0.1
-fastparquet==2023.7.0
+pyarrow==23.0.1
+fastparquet==2024.11.0
 
 # for bf16 datatype
-ml-dtypes==0.2.0
+ml-dtypes==0.5.1
 
 # for full text search
 tantivy==0.22.0

@@ -9,7 +9,7 @@ import string
 import time
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from functools import singledispatch
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -1728,7 +1728,10 @@ def gen_array_dataframe_data(
     float_vec_values = gen_vectors(nb, dim)
     json_values = [{"number": i, "float": i * 1.0} for i in range(start, start + nb)]
 
-    int32_values = pd.Series(data=[[np.int32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
+    int32_bound = np.iinfo(np.int32).max + 1
+    int32_values = pd.Series(
+        data=[[j % int32_bound for j in range(i, i + array_length)] for i in range(start, start + nb)]
+    )
     float_values = pd.Series(
         data=[[np.float32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)]
     )
@@ -1820,9 +1823,12 @@ def gen_dataframe_all_data_type(
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
         int64_values = pd.Series(data=random.sample(range(start, start + nb), nb))
-    int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
-    int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
-    int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
+    int32_bound = np.iinfo(np.int32).max + 1
+    int32_values = pd.Series(data=[i % int32_bound for i in range(start, start + nb)], dtype="int32")
+    int16_bound = np.iinfo(np.int16).max + 1
+    int16_values = pd.Series(data=[i % int16_bound for i in range(start, start + nb)], dtype="int16")
+    int8_bound = np.iinfo(np.int8).max + 1
+    int8_values = pd.Series(data=[i % int8_bound for i in range(start, start + nb)], dtype="int8")
     bool_values = pd.Series(data=[np.bool_(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
@@ -1881,7 +1887,8 @@ def gen_general_list_all_data_type(
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
         int64_values = pd.Series(data=random.sample(range(start, start + nb), nb))
-    int32_data = [np.int32(i) for i in range(start, start + nb)]
+    int32_bound = np.iinfo(np.int32).max + 1
+    int32_data = [i % int32_bound for i in range(start, start + nb)]
     int32_values = pd.Series(data=int32_data, dtype="int32")
     if ct.default_int32_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int32_field_name])
@@ -1889,7 +1896,8 @@ def gen_general_list_all_data_type(
         int32_data = int32_data[: nb - null_number] + null_data
         int32_values = pd.Series(data=int32_data, dtype=object)
 
-    int16_data = [np.int16(i) for i in range(start, start + nb)]
+    int16_bound = np.iinfo(np.int16).max + 1
+    int16_data = [i % int16_bound for i in range(start, start + nb)]
     int16_values = pd.Series(data=int16_data, dtype="int16")
     if ct.default_int16_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int16_field_name])
@@ -1897,7 +1905,8 @@ def gen_general_list_all_data_type(
         int16_data = int16_data[: nb - null_number] + null_data
         int16_values = pd.Series(data=int16_data, dtype=object)
 
-    int8_data = [np.int8(i) for i in range(start, start + nb)]
+    int8_bound = np.iinfo(np.int8).max + 1
+    int8_data = [i % int8_bound for i in range(start, start + nb)]
     int8_values = pd.Series(data=int8_data, dtype="int8")
     if ct.default_int8_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int8_field_name])
@@ -2001,12 +2010,15 @@ def gen_default_rows_data_all_data_type(
     language=None,
 ):
     array = []
+    int32_bound = np.iinfo(np.int32).max + 1
+    int16_bound = np.iinfo(np.int16).max + 1
+    int8_bound = np.iinfo(np.int8).max + 1
     for i in range(start, start + nb):
         dict = {
             ct.default_int64_field_name: i,
-            ct.default_int32_field_name: i,
-            ct.default_int16_field_name: i,
-            ct.default_int8_field_name: i,
+            ct.default_int32_field_name: i % int32_bound,
+            ct.default_int16_field_name: i % int16_bound,
+            ct.default_int8_field_name: i % int8_bound,
             ct.default_bool_field_name: bool(i),
             ct.default_float_field_name: i * 1.0,
             ct.default_double_field_name: i * 1.0,
@@ -3010,7 +3022,7 @@ def gen_timestamptz_str():
         "2024-12-31T22:00:00-08:00"
         "2024-12-31T22:00:00Z"
     """
-    base = datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(
+    base = datetime(2024, 1, 1, tzinfo=UTC) + timedelta(
         days=random.randint(0, 365 * 3), seconds=random.randint(0, 86399)
     )
     # 2/3 chance to generate timezone-aware string, otherwise naive
