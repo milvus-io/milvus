@@ -321,7 +321,48 @@ TEST(LoadCellBatchAsync, ReadParallelismScalesWithBatchBudget) {
     }
 
     EXPECT_EQ(observed_parallelism.load(), 8);
-    EXPECT_EQ(observed_reader_memory_limit.load(), 16 * MB);
+    EXPECT_EQ(observed_reader_memory_limit.load(), 32 * MB);
+}
+
+TEST(LoadCellBatchAsync, FinalizeCellBeforePush) {
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 8 * MB},
+        {1, 0, 1, 1, 8 * MB},
+    };
+
+    std::atomic<int> finalized{0};
+    auto channel = std::make_shared<CellReaderChannel>();
+    auto futures = LoadCellBatchAsync(
+        nullptr,
+        std::move(specs),
+        MakeMockReaderFactory(),
+        channel,
+        32 * MB,
+        milvus::proto::common::LoadPriority::HIGH,
+        [&finalized](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                     int64_t /*cid*/) {
+            EXPECT_EQ(tables.size(), 1);
+            finalized.fetch_add(1);
+            return std::make_unique<milvus::GroupChunk>();
+        });
+
+    int received = 0;
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ASSERT_NE(cell_data, nullptr);
+        EXPECT_NE(cell_data->chunk, nullptr);
+        EXPECT_TRUE(cell_data->tables.empty());
+        EXPECT_EQ(cell_data->budget_bytes, 0);
+        ReleaseCellLoadResultBudget(cell_data);
+        ++received;
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    EXPECT_EQ(received, 2);
+    EXPECT_EQ(finalized.load(), 2);
 }
 
 TEST(LoadCellBatchAsync, FileBoundarySplit) {

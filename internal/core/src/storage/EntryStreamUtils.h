@@ -136,6 +136,11 @@ class TransientMemoryBudget {
         cv_.notify_all();
     }
 
+    void
+    NotifyCapacityUpdated() {
+        cv_.notify_all();
+    }
+
  private:
     TransientMemoryBudget() = default;
 
