@@ -8310,69 +8310,6 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 	})
 }
 
-func Test_newEmptyPerRowVectorField(t *testing.T) {
-	cases := []struct {
-		name  string
-		elem  schemapb.DataType
-		check func(t *testing.T, vf *schemapb.VectorField)
-	}{
-		{
-			name: "FloatVector",
-			elem: schemapb.DataType_FloatVector,
-			check: func(t *testing.T, vf *schemapb.VectorField) {
-				fv, ok := vf.GetData().(*schemapb.VectorField_FloatVector)
-				require.True(t, ok)
-				require.NotNil(t, fv.FloatVector)
-				assert.Empty(t, fv.FloatVector.GetData())
-			},
-		},
-		{
-			name: "BinaryVector",
-			elem: schemapb.DataType_BinaryVector,
-			check: func(t *testing.T, vf *schemapb.VectorField) {
-				bv, ok := vf.GetData().(*schemapb.VectorField_BinaryVector)
-				require.True(t, ok)
-				assert.Empty(t, bv.BinaryVector)
-			},
-		},
-		{
-			name: "Float16Vector",
-			elem: schemapb.DataType_Float16Vector,
-			check: func(t *testing.T, vf *schemapb.VectorField) {
-				fv, ok := vf.GetData().(*schemapb.VectorField_Float16Vector)
-				require.True(t, ok)
-				assert.Empty(t, fv.Float16Vector)
-			},
-		},
-		{
-			name: "BFloat16Vector",
-			elem: schemapb.DataType_BFloat16Vector,
-			check: func(t *testing.T, vf *schemapb.VectorField) {
-				bv, ok := vf.GetData().(*schemapb.VectorField_Bfloat16Vector)
-				require.True(t, ok)
-				assert.Empty(t, bv.Bfloat16Vector)
-			},
-		},
-		{
-			name: "Int8Vector",
-			elem: schemapb.DataType_Int8Vector,
-			check: func(t *testing.T, vf *schemapb.VectorField) {
-				iv, ok := vf.GetData().(*schemapb.VectorField_Int8Vector)
-				require.True(t, ok)
-				assert.Empty(t, iv.Int8Vector)
-			},
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			vf := newEmptyPerRowVectorField(8, c.elem)
-			require.NotNil(t, vf)
-			assert.EqualValues(t, 8, vf.Dim)
-			c.check(t, vf)
-		})
-	}
-}
-
 func Test_fillVectorArrayNullValueImpl(t *testing.T) {
 	makeCompact := func(k int) []*schemapb.VectorField {
 		out := make([]*schemapb.VectorField, k)
@@ -8430,5 +8367,12 @@ func Test_fillVectorArrayNullValueImpl(t *testing.T) {
 		res, err := fillVectorArrayNullValueImpl(compact, validData, 8, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		assert.Nil(t, res)
+	})
+
+	t.Run("unsupported element type returns error", func(t *testing.T) {
+		res, err := fillVectorArrayNullValueImpl(nil, []bool{false}, 8, schemapb.DataType_None)
+		require.Error(t, err)
+		assert.Nil(t, res)
+		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 	})
 }

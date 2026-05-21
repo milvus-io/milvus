@@ -638,6 +638,26 @@ func IsVectorArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_ArrayOfVector
 }
 
+// NewEmptyArrayOfVectorRow builds a row-dense ArrayOfVector placeholder for a null row.
+func NewEmptyArrayOfVectorRow(dim int64, elementType schemapb.DataType) (*schemapb.VectorField, error) {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	default:
+		return nil, fmt.Errorf("unsupported ArrayOfVector element type %s", elementType)
+	}
+	return vf, nil
+}
+
 // IsClusteringKeyType returns true if the data type is supported as a clustering key.
 // Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, FloatVector.
 func IsClusteringKeyType(dataType schemapb.DataType) bool {
