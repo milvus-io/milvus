@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -343,7 +344,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 	checkBucketFn := func() error {
 		bucket := client.Bucket(c.BucketName)
 		_, err = bucket.Attrs(ctx)
-		if errors.Is(err, storage.ErrBucketNotExist) && c.CreateBucket {
+		if stderrors.Is(err, storage.ErrBucketNotExist) && c.CreateBucket {
 			log.Info("gcs bucket does not exist, create bucket.", zap.String("bucket name", c.BucketName))
 			err = client.Bucket(c.BucketName).Create(ctx, projectId, nil)
 			if err != nil {

@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"io"
 	"net/http"
 	"strings"
@@ -577,10 +578,10 @@ func mapObjectStorageError(fileName string, err error) error {
 	}
 
 	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error)
-	if errors.Is(err, cstorage.ErrObjectNotExist) {
+	if stderrors.Is(err, cstorage.ErrObjectNotExist) {
 		return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 	}
-	if errors.Is(err, cstorage.ErrBucketNotExist) {
+	if stderrors.Is(err, cstorage.ErrBucketNotExist) {
 		return merr.WrapErrIoBucketNotFound(fileName, err)
 	}
 
