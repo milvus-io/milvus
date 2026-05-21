@@ -1141,6 +1141,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 type organizeOperator struct {
 	traceCtx           context.Context
 	primaryFieldSchema *schemapb.FieldSchema
+	schema             *schemapb.CollectionSchema
 	collectionID       int64
 }
 
@@ -1152,6 +1153,7 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &organizeOperator{
 		traceCtx:           t.TraceCtx(),
 		primaryFieldSchema: pkField,
+		schema:             t.schema.CollectionSchema,
 		collectionID:       t.GetCollectionID(),
 	}, nil
 }
@@ -1217,7 +1219,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 			allFieldData[idx] = emptyFields
 			continue
 		}
-		if fieldData, err := pickFieldData(ids, offsets, fields, op.collectionID); err != nil {
+		if fieldData, err := pickFieldData(ids, offsets, fields, op.schema, op.collectionID); err != nil {
 			return nil, err
 		} else {
 			allFieldData[idx] = fieldData
@@ -1226,7 +1228,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 	return []any{allFieldData}, nil
 }
 
-func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, collectionID int64) ([]*schemapb.FieldData, error) {
+func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, schema *schemapb.CollectionSchema, collectionID int64) ([]*schemapb.FieldData, error) {
 	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
 	// We should reorganize query results to keep the order of original queried ids. For example:
 	// ===========================================
@@ -1243,7 +1245,7 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
 	fieldsData := make([]*schemapb.FieldData, len(fields))
-	idxComputer := typeutil.NewFieldDataIdxComputer(fields)
+	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
@@ -2067,9 +2069,89 @@ func (op *orderByOperator) reorderResults(result *milvuspb.SearchResults, indice
 	return nil
 }
 
+func prepareNullableFieldDataReorder(field *schemapb.FieldData, indices []int) ([]bool, []int, int, error) {
+	validData := field.GetValidData()
+	if len(validData) == 0 {
+		return nil, nil, 0, nil
+	}
+
+	logicalToPhysical, validCount := typeutil.BuildNullableVectorDataIndices(validData)
+
+	newValidData := make([]bool, len(indices))
+	for newIdx, oldIdx := range indices {
+		if oldIdx < 0 || oldIdx >= len(validData) {
+			return nil, nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: index %d out of bounds for ValidData of field %s (len=%d)", oldIdx, field.GetFieldName(), len(validData)))
+		}
+		newValidData[newIdx] = validData[oldIdx]
+	}
+	return newValidData, logicalToPhysical, validCount, nil
+}
+
+func countValidRows(validData []bool) int {
+	validCount := 0
+	for _, valid := range validData {
+		if valid {
+			validCount++
+		}
+	}
+	return validCount
+}
+
+func reorderNullableFloatVectorData(field *schemapb.FieldData, data []float32, width int, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([]float32, error) {
+	expected := validCount * width
+	if len(data) != expected {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable FloatVector field %s has %d elements, expected compact %d (valid=%d, dim=%d)", field.GetFieldName(), len(data), expected, validCount, width))
+	}
+	newData := make([]float32, 0, countValidRows(newValidData)*width)
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		physicalIdx := logicalToPhysical[oldIdx]
+		srcStart := physicalIdx * width
+		newData = append(newData, data[srcStart:srcStart+width]...)
+	}
+	return newData, nil
+}
+
+func reorderNullableByteVectorData(field *schemapb.FieldData, typeName string, data []byte, width int, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([]byte, error) {
+	expected := validCount * width
+	if len(data) != expected {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable %s field %s has %d bytes, expected compact %d (valid=%d, width=%d)", typeName, field.GetFieldName(), len(data), expected, validCount, width))
+	}
+	newData := make([]byte, 0, countValidRows(newValidData)*width)
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		physicalIdx := logicalToPhysical[oldIdx]
+		srcStart := physicalIdx * width
+		newData = append(newData, data[srcStart:srcStart+width]...)
+	}
+	return newData, nil
+}
+
+func reorderNullableSparseVectorData(field *schemapb.FieldData, contents [][]byte, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([][]byte, error) {
+	if len(contents) != validCount {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable SparseFloatVector field %s has %d elements, expected compact %d", field.GetFieldName(), len(contents), validCount))
+	}
+	newContents := make([][]byte, 0, countValidRows(newValidData))
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		newContents = append(newContents, contents[logicalToPhysical[oldIdx]])
+	}
+	return newContents, nil
+}
+
 // reorderFieldData reorders field data based on indices
 func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 	n := len(indices)
+	newValidData, logicalToPhysical, validCount, err := prepareNullableFieldDataReorder(field, indices)
+	if err != nil {
+		return err
+	}
 	switch field.GetType() {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		if data := field.GetScalars().GetIntData(); data != nil && len(data.Data) > 0 {
@@ -2161,12 +2243,23 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_FloatVector:
 		vectors := field.GetVectors()
-		if vectors != nil && vectors.GetFloatVector() != nil {
+		if vectors != nil && (newValidData != nil || vectors.GetFloatVector() != nil) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for FloatVector field %s", dim, field.GetFieldName()))
 			}
-			data := vectors.GetFloatVector().GetData()
+			var data []float32
+			if vectors.GetFloatVector() != nil {
+				data = vectors.GetFloatVector().GetData()
+			}
+			if newValidData != nil {
+				newData, err := reorderNullableFloatVectorData(field, data, dim, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: newData}}
+				break
+			}
 			if len(data) != n*dim {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: FloatVector field %s has %d elements, expected %d (n=%d, dim=%d)", field.GetFieldName(), len(data), n*dim, n, dim))
 			}
@@ -2183,13 +2276,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_BinaryVector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetBinaryVector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetBinaryVector()) > 0) {
 			dim := int(vectors.GetDim())
 			bytesPerVector := dim / 8
 			if bytesPerVector <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for BinaryVector field %s", dim, field.GetFieldName()))
 			}
 			data := vectors.GetBinaryVector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "BinaryVector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_BinaryVector{BinaryVector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: BinaryVector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -2206,13 +2307,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_Float16Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetFloat16Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetFloat16Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for Float16Vector field %s", dim, field.GetFieldName()))
 			}
 			bytesPerVector := dim * 2 // 2 bytes per float16
 			data := vectors.GetFloat16Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "Float16Vector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Float16Vector{Float16Vector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: Float16Vector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -2229,13 +2338,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_BFloat16Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetBfloat16Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetBfloat16Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for BFloat16Vector field %s", dim, field.GetFieldName()))
 			}
 			bytesPerVector := dim * 2 // 2 bytes per bfloat16
 			data := vectors.GetBfloat16Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "BFloat16Vector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: BFloat16Vector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -2252,9 +2369,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_SparseFloatVector:
 		vectors := field.GetVectors()
-		if vectors != nil && vectors.GetSparseFloatVector() != nil {
+		if vectors != nil && (newValidData != nil || vectors.GetSparseFloatVector() != nil) {
 			sparseData := vectors.GetSparseFloatVector()
+			if sparseData == nil {
+				sparseData = &schemapb.SparseFloatArray{Dim: vectors.GetDim()}
+			}
 			contents := sparseData.GetContents()
+			if newValidData != nil {
+				newContents, err := reorderNullableSparseVectorData(field, contents, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				sparseData.Contents = newContents
+				vectors.Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: sparseData}
+				break
+			}
 			if len(contents) != n {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: SparseFloatVector field %s has %d elements, expected %d", field.GetFieldName(), len(contents), n))
 			}
@@ -2269,12 +2398,20 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_Int8Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetInt8Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetInt8Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for Int8Vector field %s", dim, field.GetFieldName()))
 			}
 			data := vectors.GetInt8Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "Int8Vector", data, dim, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Int8Vector{Int8Vector: newData}
+				break
+			}
 			if len(data) != n*dim {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: Int8Vector field %s has %d bytes, expected %d (n=%d, dim=%d)", field.GetFieldName(), len(data), n*dim, n, dim))
 			}
@@ -2294,14 +2431,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 	}
 
 	// Reorder valid data if present
-	if len(field.ValidData) > 0 {
-		newValidData := make([]bool, n)
-		for newIdx, oldIdx := range indices {
-			if oldIdx < 0 || oldIdx >= len(field.ValidData) {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: index %d out of bounds for ValidData of field %s (len=%d)", oldIdx, field.GetFieldName(), len(field.ValidData)))
-			}
-			newValidData[newIdx] = field.ValidData[oldIdx]
-		}
+	if newValidData != nil {
 		field.ValidData = newValidData
 	}
 	return nil

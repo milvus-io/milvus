@@ -192,7 +192,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp32_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float>>(
             DataType::NONE,
@@ -209,7 +209,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float16>>(
             DataType::NONE,
@@ -226,7 +226,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
             DataType::NONE,

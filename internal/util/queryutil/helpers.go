@@ -441,16 +441,7 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 				fd.GetFieldId(), fd.GetFieldName(), len(vd), numRows, ri)
 		}
 
-		idx := make([]int, numRows)
-		dataIdx := 0
-		for i := 0; i < numRows; i++ {
-			if vd[i] {
-				idx[i] = dataIdx
-				dataIdx++
-			} else {
-				idx[i] = -1
-			}
-		}
+		idx, _ := typeutil.BuildNullableVectorDataIndices(vd)
 		indices[ri] = idx
 	}
 	return indices, nil
@@ -915,16 +906,14 @@ func rangeSliceScalarField(sf *schemapb.ScalarField, start, end int) *schemapb.S
 }
 
 // rangeSliceVectorField extracts a contiguous range [start, end) from vector data.
-// validData is the field's ValidData bitmap. For nullable vectors in compact mode,
-// data indices must be computed by counting valid rows, not using logical row indices.
+// Supported nullable vectors use compact payload data, so logical rows must be
+// mapped to physical vector rows through ValidData.
 func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) (*schemapb.VectorField, error) {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
-	_, isVectorArray := vf.GetData().(*schemapb.VectorField_VectorArray)
 
-	// For compact mode: convert logical [start, end) to data [dataStart, dataEnd).
 	dataStart, dataEnd := start, end
-	if len(validData) > 0 && !isVectorArray {
+	if usesCompactNullableVectorData(vf, validData) {
 		dataStart = 0
 		for i := 0; i < start; i++ {
 			if validData[i] {
@@ -1199,28 +1188,16 @@ func sliceScalarField(sf *schemapb.ScalarField, indices []int) *schemapb.ScalarF
 }
 
 // sliceVectorField extracts vector data at the given logical indices.
-// validData is the field's ValidData bitmap for compact mode handling.
+// Supported nullable vectors use compact payload data, so logical rows must be
+// mapped to physical vector rows through ValidData.
 func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) (*schemapb.VectorField, error) {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
-	_, isVectorArray := vf.GetData().(*schemapb.VectorField_VectorArray)
 
-	// Pre-compute compact index mapping if nullable.
-	// compactIdx[logicalRow] = data index, or -1 if null.
 	var compactIdx []int
-	if len(validData) > 0 && !isVectorArray {
-		compactIdx = make([]int, len(validData))
-		di := 0
-		for i, v := range validData {
-			if v {
-				compactIdx[i] = di
-				di++
-			} else {
-				compactIdx[i] = -1
-			}
-		}
+	if usesCompactNullableVectorData(vf, validData) {
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(validData)
 	}
-	// toDataIdx converts logical index to data index, skipping null rows.
 	toDataIdx := func(logicalIdx int) int {
 		if compactIdx == nil {
 			return logicalIdx
@@ -1349,22 +1326,73 @@ func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool)
 	return newVf, nil
 }
 
+func usesCompactNullableVectorData(vf *schemapb.VectorField, validData []bool) bool {
+	if len(validData) == 0 {
+		return false
+	}
+	switch vf.GetData().(type) {
+	case *schemapb.VectorField_FloatVector,
+		*schemapb.VectorField_BinaryVector,
+		*schemapb.VectorField_Float16Vector,
+		*schemapb.VectorField_Bfloat16Vector,
+		*schemapb.VectorField_Int8Vector,
+		*schemapb.VectorField_SparseFloatVector:
+		return true
+	default:
+		return false
+	}
+}
+
 // calcRowSize computes the size in bytes of a single row in a RetrieveResult
 // by summing the per-element size of each field. This is used during the
 // merge selection phase (Phase 1) to track accumulated output size before
 // the actual memory-copy phase (Phase 2), enabling early termination
 // when maxOutputSize would be exceeded.
-func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
+type rowSizeCalculator struct {
+	result         *internalpb.RetrieveResults
+	compactIndices [][]int
+}
+
+func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator {
+	fieldsData := result.GetFieldsData()
+	c := &rowSizeCalculator{
+		result:         result,
+		compactIndices: make([][]int, len(fieldsData)),
+	}
+	for fieldIdx, fd := range fieldsData {
+		if typeutil.IsCompactNullableVectorFieldData(fd) {
+			indices, _ := typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+			c.compactIndices[fieldIdx] = indices
+		}
+	}
+	return c
+}
+
+func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
-	for _, fd := range result.GetFieldsData() {
-		size += calcFieldElementSize(fd, int(rowIdx))
+	for fieldIdx, fd := range c.result.GetFieldsData() {
+		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
 	}
 	return size
+}
+
+// calcRowSize is a convenience wrapper for one-off checks. Hot merge loops
+// should create one rowSizeCalculator per result and reuse it.
+func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
+	return newRowSizeCalculator(result).rowSize(rowIdx)
 }
 
 // calcFieldElementSize returns the byte size of a single
 // element at rowIdx within a FieldData.
 func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
+	var compactIdx []int
+	if typeutil.IsCompactNullableVectorFieldData(fd) {
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+	}
+	return calcFieldElementSizeWithCompactIndex(fd, rowIdx, compactIdx)
+}
+
+func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, compactIdx []int) int64 {
 	if scalars := fd.GetScalars(); scalars != nil {
 		switch data := scalars.GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
@@ -1424,6 +1452,11 @@ func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 		}
 	}
 	if vectors := fd.GetVectors(); vectors != nil {
+		if compactIdx != nil {
+			if rowIdx < 0 || rowIdx >= len(compactIdx) || compactIdx[rowIdx] < 0 {
+				return 0
+			}
+		}
 		dim := int(vectors.GetDim())
 		switch vectors.GetData().(type) {
 		case *schemapb.VectorField_FloatVector:
@@ -1437,9 +1470,13 @@ func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 		case *schemapb.VectorField_Int8Vector:
 			return int64(dim)
 		case *schemapb.VectorField_SparseFloatVector:
+			dataIdx := rowIdx
+			if compactIdx != nil {
+				dataIdx = compactIdx[rowIdx]
+			}
 			contents := vectors.GetSparseFloatVector().GetContents()
-			if rowIdx < len(contents) {
-				return int64(len(contents[rowIdx]))
+			if dataIdx < len(contents) {
+				return int64(len(contents[dataIdx]))
 			}
 			return 0
 		case *schemapb.VectorField_VectorArray:
@@ -1527,6 +1564,9 @@ func getRowCount(result *internalpb.RetrieveResults) int {
 	}
 
 	fd := result.GetFieldsData()[0]
+	if len(fd.GetValidData()) > 0 {
+		return len(fd.GetValidData())
+	}
 	if fd.GetScalars() != nil {
 		switch data := fd.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:

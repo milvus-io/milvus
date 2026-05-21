@@ -256,6 +256,192 @@ func TestValueSerializer_NullArrayOfVectorRoundTrip(t *testing.T) {
 	assert.True(t, rewrittenRecord.Column(vectorArrayFieldID).IsNull(1))
 }
 
+func TestValueDeserializerNullableDenseVectorBinaryRecord(t *testing.T) {
+	for _, tc := range nullableDenseVectorSerdeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := nullableDenseVectorSerdeSchema(tc.dataType, tc.dim)
+			insertData := nullableDenseVectorSerdeInsertData(t, tc, schema)
+
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+			defer builder.Release()
+			require.NoError(t, BuildRecord(builder, insertData, schema))
+			record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{
+				common.RowIDField:          0,
+				common.TimeStampField:      1,
+				nullableSerdePKFieldID:     2,
+				nullableSerdeVectorFieldID: 3,
+			})
+			defer record.Release()
+
+			require.IsType(t, &array.Binary{}, record.Column(nullableSerdeVectorFieldID))
+			require.True(t, record.Column(nullableSerdeVectorFieldID).IsNull(1))
+
+			values := make([]*Value, record.Len())
+			err = ValueDeserializerWithSchema(record, values, schema, true)
+			require.NoError(t, err)
+
+			got := values[0].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID]
+			assert.Equal(t, tc.row0, got)
+			assert.Nil(t, values[1].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
+			got = values[2].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID]
+			assert.Equal(t, tc.row2, got)
+		})
+	}
+}
+
+func TestValueSerializerNullableDenseVectorUsesBinaryArrow(t *testing.T) {
+	for _, tc := range nullableDenseVectorSerdeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := nullableDenseVectorSerdeSchema(tc.dataType, tc.dim)
+			values := []*Value{
+				{Value: map[FieldID]any{
+					common.RowIDField:          int64(11),
+					common.TimeStampField:      int64(101),
+					nullableSerdePKFieldID:     int64(1),
+					nullableSerdeVectorFieldID: tc.row0,
+				}},
+				{Value: map[FieldID]any{
+					common.RowIDField:          int64(12),
+					common.TimeStampField:      int64(102),
+					nullableSerdePKFieldID:     int64(2),
+					nullableSerdeVectorFieldID: nil,
+				}},
+				{Value: map[FieldID]any{
+					common.RowIDField:          int64(13),
+					common.TimeStampField:      int64(103),
+					nullableSerdePKFieldID:     int64(3),
+					nullableSerdeVectorFieldID: tc.row2,
+				}},
+			}
+
+			record, err := ValueSerializer(values, schema)
+			require.NoError(t, err)
+			defer record.Release()
+
+			require.IsType(t, &array.Binary{}, record.Column(nullableSerdeVectorFieldID))
+			require.True(t, record.Column(nullableSerdeVectorFieldID).IsNull(1))
+			simpleRecord := record.(*simpleArrowRecord)
+			dim, ok := simpleRecord.r.Schema().Field(3).Metadata.GetValue(common.DimKey)
+			require.True(t, ok)
+			assert.Equal(t, strconv.FormatInt(tc.dim, 10), dim)
+
+			roundTrip := make([]*Value, record.Len())
+			err = ValueDeserializerWithSchema(record, roundTrip, schema, true)
+			require.NoError(t, err)
+			assert.Equal(t, tc.row0, roundTrip[0].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
+			assert.Nil(t, roundTrip[1].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
+			assert.Equal(t, tc.row2, roundTrip[2].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
+		})
+	}
+}
+
+type nullableDenseVectorSerdeCase struct {
+	name     string
+	dataType schemapb.DataType
+	dim      int64
+	row0     any
+	row2     any
+}
+
+const (
+	nullableSerdePKFieldID     FieldID = common.StartOfUserFieldID
+	nullableSerdeVectorFieldID FieldID = common.StartOfUserFieldID + 1
+)
+
+func nullableDenseVectorSerdeCases() []nullableDenseVectorSerdeCase {
+	return []nullableDenseVectorSerdeCase{
+		{
+			name:     "FloatVector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      2,
+			row0:     []float32{1, 2},
+			row2:     []float32{3, 4},
+		},
+		{
+			name:     "BinaryVector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      16,
+			row0:     []byte{0x11, 0x12},
+			row2:     []byte{0x21, 0x22},
+		},
+		{
+			name:     "Float16Vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      2,
+			row0:     []byte{1, 2, 3, 4},
+			row2:     []byte{5, 6, 7, 8},
+		},
+		{
+			name:     "BFloat16Vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      2,
+			row0:     []byte{11, 12, 13, 14},
+			row2:     []byte{15, 16, 17, 18},
+		},
+		{
+			name:     "Int8Vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      2,
+			row0:     []int8{1, 2},
+			row2:     []int8{3, 4},
+		},
+	}
+}
+
+func nullableDenseVectorSerdeSchema(dataType schemapb.DataType, dim int64) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.RowIDField,
+				Name:     common.RowIDFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     common.TimeStampFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      nullableSerdePKFieldID,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  nullableSerdeVectorFieldID,
+				Name:     "nullable_vector",
+				DataType: dataType,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.FormatInt(dim, 10)},
+				},
+			},
+		},
+	}
+}
+
+func nullableDenseVectorSerdeInsertData(t *testing.T, tc nullableDenseVectorSerdeCase, schema *schemapb.CollectionSchema) *InsertData {
+	t.Helper()
+
+	vectorField := schema.GetFields()[3]
+	vectorData, err := NewFieldData(tc.dataType, vectorField, 3)
+	require.NoError(t, err)
+	require.NoError(t, vectorData.AppendRow(tc.row0))
+	require.NoError(t, vectorData.AppendRow(nil))
+	require.NoError(t, vectorData.AppendRow(tc.row2))
+
+	return &InsertData{
+		Data: map[FieldID]FieldData{
+			common.RowIDField:          &Int64FieldData{Data: []int64{11, 12, 13}},
+			common.TimeStampField:      &Int64FieldData{Data: []int64{101, 102, 103}},
+			nullableSerdePKFieldID:     &Int64FieldData{Data: []int64{1, 2, 3}},
+			nullableSerdeVectorFieldID: vectorData,
+		},
+	}
+}
+
 func TestCompositeBinlogRecordWriter_TTLFieldCollection(t *testing.T) {
 	ttlFieldID := FieldID(100)
 	w := &CompositeBinlogRecordWriter{

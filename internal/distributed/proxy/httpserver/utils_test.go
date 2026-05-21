@@ -1901,6 +1901,130 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 		assert.Nil(t, rows[1][FieldBookIntro])
 	})
 
+	t.Run("nullable vector rejects full row payload", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{
+								0.1, 0.2,
+								0.0, 0.0,
+								0.3, 0.4,
+							},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		_, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nullable vector field")
+	})
+
+	t.Run("nullable dense vector rejects partial row payload", func(t *testing.T) {
+		cases := []struct {
+			name      string
+			fieldData *schemapb.FieldData
+		}{
+			{
+				name: "float_vector",
+				fieldData: &schemapb.FieldData{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: FieldBookIntro,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3}},
+							},
+						},
+					},
+					ValidData: []bool{true, false},
+				},
+			},
+			{
+				name: "binary_vector",
+				fieldData: &schemapb.FieldData{
+					Type:      schemapb.DataType_BinaryVector,
+					FieldName: FieldBookIntro,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 16,
+							Data: &schemapb.VectorField_BinaryVector{
+								BinaryVector: []byte{0x01, 0x02, 0x03},
+							},
+						},
+					},
+					ValidData: []bool{true, false},
+				},
+			},
+			{
+				name: "float16_vector",
+				fieldData: &schemapb.FieldData{
+					Type:      schemapb.DataType_Float16Vector,
+					FieldName: FieldBookIntro,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_Float16Vector{
+								Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
+							},
+						},
+					},
+					ValidData: []bool{true, false},
+				},
+			},
+			{
+				name: "bfloat16_vector",
+				fieldData: &schemapb.FieldData{
+					Type:      schemapb.DataType_BFloat16Vector,
+					FieldName: FieldBookIntro,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_Bfloat16Vector{
+								Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
+							},
+						},
+					},
+					ValidData: []bool{true, false},
+				},
+			},
+			{
+				name: "int8_vector",
+				fieldData: &schemapb.FieldData{
+					Type:      schemapb.DataType_Int8Vector,
+					FieldName: FieldBookIntro,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_Int8Vector{
+								Int8Vector: []byte{0x01, 0x02, 0x03},
+							},
+						},
+					},
+					ValidData: []bool{true, false},
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{tc.fieldData}, nil, nil, true, nil)
+				require.Error(t, err)
+				assert.True(t,
+					strings.Contains(err.Error(), "row width") || strings.Contains(err.Error(), "divide the dim"),
+					"unexpected error: %s", err.Error())
+			})
+		}
+	})
+
 	t.Run("nullable scalar compact data uses physical index", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			Type:      schemapb.DataType_Int64,
