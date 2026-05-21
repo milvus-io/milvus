@@ -684,7 +684,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			}
 			// TextMatch upload returns relative filenames. Store full paths in
 			// metadata/task results for mixed-version compatibility.
-			files := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
+			statsFiles := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
@@ -692,7 +692,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				FieldID:                   field.GetFieldID(),
 				Version:                   0,
 				BuildID:                   taskID,
-				Files:                     files,
+				Files:                     statsFiles,
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
@@ -702,7 +702,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			log.Info("field enable match, create text index done",
 				zap.Int64("segmentID", segmentID),
 				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", files),
+				zap.Strings("files", statsFiles),
 			)
 			return nil
 		})
