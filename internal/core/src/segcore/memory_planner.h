@@ -110,8 +110,32 @@ constexpr double kChannelCapacityMultiplier = 1.5;
 constexpr const char* kFieldDataLoadOverheadGroup =
     "StorageV2FieldDataLoadOverhead";
 
-constexpr int64_t kFieldDataLoadBatchTargetBytes =
+constexpr int64_t kDefaultFieldDataLoadBatchTargetBytes =
     DEFAULT_FIELD_MAX_MEMORY_LIMIT / 4;
+
+constexpr int64_t kDefaultFieldDataReadWindowBytes =
+    DEFAULT_INDEX_FILE_SLICE_SIZE;
+
+constexpr int64_t kDefaultFieldDataMaxReadParallelism =
+    DEFAULT_FIELD_MAX_MEMORY_LIMIT / DEFAULT_INDEX_FILE_SLICE_SIZE;
+
+int64_t
+FieldDataLoadBatchTargetBytes();
+
+int64_t
+FieldDataReadWindowBytes();
+
+int64_t
+FieldDataMaxReadParallelism();
+
+void
+SetFieldDataLoadBatchTargetBytes(int64_t bytes);
+
+void
+SetFieldDataReadWindowBytes(int64_t bytes);
+
+void
+SetFieldDataMaxReadParallelism(int64_t parallelism);
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {
@@ -138,13 +162,15 @@ using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
 // batch_key: grouping key (file_idx for files, 0 for single reader)
 // rg_offset: start row group index for this batch
 // total_rg_count: total row groups across all cells in this batch
-// reader_memory_limit: memory budget for this batch's reader
+// reader_memory_limit: per-reader window size for this batch
+// read_parallelism: max number of readers/chunks to run within this batch
 using BatchReaderFactory =
     std::function<arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>(
         size_t batch_key,
         int64_t rg_offset,
         int64_t total_rg_count,
-        int64_t reader_memory_limit)>;
+        int64_t reader_memory_limit,
+        uint64_t read_parallelism)>;
 
 /**
  * Load cells in batches using a pluggable reader factory. Cells are sorted by

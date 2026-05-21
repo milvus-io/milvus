@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <future>
@@ -190,7 +191,8 @@ MakeMockReaderFactory() {
     return [](size_t /*batch_key*/,
               int64_t /*rg_offset*/,
               int64_t total_rg_count,
-              int64_t /*reader_memory_limit*/)
+              int64_t /*reader_memory_limit*/,
+              uint64_t /*read_parallelism*/)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         // Return one empty table per row group
         auto schema = arrow::schema({arrow::field("x", arrow::int64())});
@@ -276,6 +278,50 @@ TEST(LoadCellBatchAsync, SingleCellExceedsLimit) {
                                     /*memory_size=*/256 * MB}};
     auto batches = RunAndCountBatches(specs, 128 * MB);
     EXPECT_EQ(batches, 1);
+}
+
+TEST(LoadCellBatchAsync, ReadParallelismScalesWithBatchBudget) {
+    constexpr int64_t MB = 1 << 20;
+
+    std::atomic<uint64_t> observed_parallelism{0};
+    std::atomic<int64_t> observed_reader_memory_limit{0};
+    BatchReaderFactory factory = [&observed_parallelism,
+                                  &observed_reader_memory_limit](
+                                     size_t /*batch_key*/,
+                                     int64_t /*rg_offset*/,
+                                     int64_t total_rg_count,
+                                     int64_t reader_memory_limit,
+                                     uint64_t read_parallelism)
+        -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        observed_parallelism.store(read_parallelism);
+        observed_reader_memory_limit.store(reader_memory_limit);
+        auto schema = arrow::schema({arrow::field("x", arrow::int64())});
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            tables.push_back(arrow::Table::MakeEmpty(schema).ValueOrDie());
+        }
+        return tables;
+    };
+
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/8,
+                                    /*memory_size=*/128 * MB}};
+
+    auto channel = std::make_shared<CellReaderChannel>();
+    auto futures = LoadCellBatchAsync(
+        nullptr, std::move(specs), std::move(factory), channel, 32 * MB);
+    std::shared_ptr<CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
+        ReleaseCellLoadResultBudget(cell_data);
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+
+    EXPECT_EQ(observed_parallelism.load(), 8);
+    EXPECT_EQ(observed_reader_memory_limit.load(), 16 * MB);
 }
 
 TEST(LoadCellBatchAsync, FileBoundarySplit) {

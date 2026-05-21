@@ -81,6 +81,11 @@ class TransientMemoryBudget {
         return instance;
     }
 
+    static void
+    SetFieldDataLoadBudgetBytes(size_t bytes) {
+        GetFieldDataLoadBudget().SetCapacityBytes(bytes);
+    }
+
     /// Block until enough budget is available. Safe to call when the calling
     /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
@@ -118,22 +123,24 @@ class TransientMemoryBudget {
 
     size_t
     CapacityBytes() const {
-        if (fixed_capacity_bytes_ > 0) {
-            return fixed_capacity_bytes_;
-        }
-        return EntryStreamBudgetBytes();
+        std::lock_guard<std::mutex> lock(mu_);
+        return CapacityBytesLocked();
     }
 
     void
-    NotifyCapacityUpdated() {
+    SetCapacityBytes(size_t bytes) {
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            capacity_bytes_ = std::max<size_t>(bytes, 1);
+        }
         cv_.notify_all();
     }
 
  private:
     TransientMemoryBudget() = default;
 
-    explicit TransientMemoryBudget(size_t fixed_capacity_bytes)
-        : fixed_capacity_bytes_(std::max<size_t>(fixed_capacity_bytes, 1)) {
+    explicit TransientMemoryBudget(size_t capacity_bytes)
+        : capacity_bytes_(std::max<size_t>(capacity_bytes, 1)) {
     }
 
     static size_t
@@ -144,9 +151,17 @@ class TransientMemoryBudget {
         return std::max<size_t>(capacity, DefaultStreamSliceSize());
     }
 
+    size_t
+    CapacityBytesLocked() const {
+        if (capacity_bytes_ > 0) {
+            return capacity_bytes_;
+        }
+        return EntryStreamBudgetBytes();
+    }
+
     bool
     CanAcquireLocked(size_t bytes) const {
-        auto capacity_bytes = CapacityBytes();
+        auto capacity_bytes = CapacityBytesLocked();
         if (bytes > capacity_bytes) {
             return inflight_bytes_ == 0;
         }
@@ -154,10 +169,10 @@ class TransientMemoryBudget {
                bytes <= capacity_bytes - inflight_bytes_;
     }
 
-    std::mutex mu_;
+    mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
-    size_t fixed_capacity_bytes_{0};
+    size_t capacity_bytes_{0};
 };
 
 inline size_t

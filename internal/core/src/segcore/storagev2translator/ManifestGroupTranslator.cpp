@@ -51,7 +51,7 @@
 #include "segcore/memory_planner.h"
 #include "storage/ThreadPools.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "storage/ChunkStreamUtils.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/Util.h"
 
 #include <atomic>
@@ -317,7 +317,7 @@ ManifestGroupTranslator::get_cells(
                                             std::move(cell_specs),
                                             std::move(factory),
                                             channel,
-                                            kFieldDataLoadBatchTargetBytes,
+                                            FieldDataLoadBatchTargetBytes(),
                                             load_priority_);
 
     LOG_INFO(
