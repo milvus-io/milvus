@@ -2,7 +2,7 @@ use super::filter::FilterBuilder;
 use super::stop_words::fetch_language_stop_words;
 use super::util::*;
 use crate::analyzer::options::FileResourcePathHelper;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
 use serde_json as json;
 use tantivy::tokenizer::StopWordFilter;
 
@@ -97,5 +97,40 @@ mod tests {
                 .collect::<HashSet<&str>>(),
             HashSet::from(["simple", "test", "stop", "words", "filter", "indexing", "system"])
         );
+    }
+
+    #[test]
+    fn test_stop_words_filter_with_utf8_bom_and_crlf_file() {
+        init_log();
+        let dir = tempfile::tempdir().unwrap();
+        let stop_words_path = dir.path().join("stop_words.txt");
+        std::fs::write(&stop_words_path, b"\xEF\xBB\xBFthe\r\nand\r\n").unwrap();
+        let stop_words_path_str = stop_words_path.to_string_lossy().to_string();
+        let params = format!(
+            r#"{{
+                "type": "stop_words",
+                "stop_words_file": {{
+                    "type": "local",
+                    "path": "{stop_words_path_str}"
+                }}
+            }}"#
+        );
+
+        let json_params = json::from_str::<json::Value>(&params).unwrap();
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
+        assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
+
+        let builder = standard_builder().filter(filter.unwrap());
+        let mut analyzer = builder.build();
+        let mut stream = analyzer.token_stream("the quick and steady");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        assert_eq!(results, vec!["quick".to_string(), "steady".to_string()]);
     }
 }
