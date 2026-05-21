@@ -398,7 +398,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    BatchReaderFactory reader_factory,
                    std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority) {
+                   milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell) {
     if (cell_specs.empty()) {
         channel->close();
         return {};
@@ -493,6 +494,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
+    auto shared_finalizer =
+        std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
 
     std::vector<std::future<void>> futures;
     futures.reserve(batches.size());
@@ -510,6 +513,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                           read_parallelism,
                                           channel,
                                           remaining,
+                                          shared_finalizer,
                                           op_ctx]() {
             auto task_guard = folly::makeGuard([&channel, &remaining]() {
                 if (remaining->fetch_sub(1) == 1) {
@@ -551,15 +555,25 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
-                cell_result->budget_bytes = CellLoadingBudgetBytes(cell);
+                auto cell_budget_bytes = CellLoadingBudgetBytes(cell);
+                cell_result->budget_bytes = cell_budget_bytes;
                 cell_result->tables.reserve(cell.rg_count);
                 for (int64_t i = 0; i < cell.rg_count; ++i) {
                     cell_result->tables.push_back(
                         std::move(all_tables[table_offset + i]));
                 }
                 table_offset += cell.rg_count;
+                if (*shared_finalizer) {
+                    cell_result->chunk =
+                        (*shared_finalizer)(cell_result->tables, cell.cid);
+                    ReleaseCellLoadResultBudget(cell_result);
+                    transferred_budget_bytes += cell_budget_bytes;
+                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+                    channel->push(std::move(cell_result));
+                    continue;
+                }
                 channel->push(std::move(cell_result));
-                transferred_budget_bytes += CellLoadingBudgetBytes(cell);
+                transferred_budget_bytes += cell_budget_bytes;
             }
         }));
     }

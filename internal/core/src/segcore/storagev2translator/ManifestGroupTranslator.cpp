@@ -312,13 +312,18 @@ ManifestGroupTranslator::get_cells(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
 
-    auto load_futures =
-        milvus::segcore::LoadCellBatchAsync(ctx,
-                                            std::move(cell_specs),
-                                            std::move(factory),
-                                            channel,
-                                            FieldDataLoadBatchTargetBytes(),
-                                            load_priority_);
+    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+        ctx,
+        std::move(cell_specs),
+        std::move(factory),
+        channel,
+        FieldDataLoadBatchTargetBytes(),
+        load_priority_,
+        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+               int64_t cid) {
+            return load_group_chunk(
+                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+        });
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
@@ -327,7 +332,7 @@ ManifestGroupTranslator::get_cells(
         load_futures.size(),
         column_group_index_);
 
-    // Pop loop — convert each cell immediately, no ArrowTable accumulation
+    // Pop loop — batch tasks finalize cells before pushing.
     std::unordered_map<milvus::cachinglayer::cid_t,
                        std::unique_ptr<milvus::GroupChunk>>
         completed_cells;
@@ -339,8 +344,12 @@ ManifestGroupTranslator::get_cells(
             try {
                 CheckCancellation(
                     ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
-                completed_cells[cell_data->cid] =
-                    load_group_chunk(cell_data->tables, cell_data->cid);
+                AssertInfo(cell_data->chunk != nullptr,
+                           "[StorageV2] translator {} cell {} is not "
+                           "finalized by batch task",
+                           key_,
+                           cell_data->cid);
+                completed_cells[cell_data->cid] = std::move(cell_data->chunk);
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
             } catch (...) {
                 milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
