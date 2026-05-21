@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 
+#include "aws/core/client/ClientConfiguration.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
@@ -35,8 +36,16 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+
+// Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
+// helper so we can assert its effect on ClientConfiguration directly.
+class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
+ public:
+    using MinioChunkManager::ApplyChecksumConfigOverrides;
+};
 
 using namespace std;
 using namespace milvus;
@@ -383,3 +392,26 @@ TEST_F(StorageUtilTest, NormalizePath) {
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
 }
+
+TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
+    // Regression guard: AWS SDK C++ 1.11.x defaults the checksum policy to
+    // WHEN_SUPPORTED, which makes the V4 signer switch PutObject uploads to
+    // aws-chunked + STREAMING-UNSIGNED-PAYLOAD-TRAILER. Aliyun OSS rejects
+    // that combination (x-oss-ec=0017-00000804). MinioChunkManager must
+    // override both directions to WHEN_REQUIRED so the SDK only adds
+    // checksums when the operation model demands them.
+    Aws::Client::ClientConfiguration config;
+    // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_SUPPORTED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_SUPPORTED);
+
+    TestableMinioChunkManager::ApplyChecksumConfigOverrides(config);
+
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
+}
+
