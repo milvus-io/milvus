@@ -64,6 +64,18 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
 	})
 
+	s.Run("stale_version", func() {
+		currentSchema, currentVersion := s.cm.Get(1).SchemaAndVersion()
+		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
+
+		err := s.cm.UpdateSchema(1, staleSchema, currentVersion-1)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		s.Equal(currentVersion, updatedVersion)
+		s.Same(currentSchema, updatedSchema)
+	})
+
 	s.Run("not_exist_collection", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -79,7 +91,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil, 100)
+			err := s.cm.UpdateSchema(1, nil, 101)
 			s.Error(err)
 		})
 	})

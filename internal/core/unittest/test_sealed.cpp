@@ -3174,6 +3174,51 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));
 }
 
+TEST(SealedSegmentReopen, SchemaOnlyReopenPreservesCreatedTextIndexState) {
+    std::map<std::string, std::string> analyzer_params;
+    auto old_schema = std::make_shared<Schema>();
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = old_schema->AddDebugVarcharField(FieldName("text_field"),
+                                                     DataType::VARCHAR,
+                                                     /*max_length=*/65535,
+                                                     /*nullable=*/false,
+                                                     /*enable_match=*/true,
+                                                     /*enable_analyzer=*/true,
+                                                     analyzer_params,
+                                                     std::nullopt);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_text_fid =
+        new_schema->AddDebugVarcharField(FieldName("text_field"),
+                                         DataType::VARCHAR,
+                                         /*max_length=*/65535,
+                                         /*nullable=*/false,
+                                         /*enable_match=*/true,
+                                         /*enable_analyzer=*/true,
+                                         analyzer_params,
+                                         std::nullopt);
+    new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+    ASSERT_EQ(text_fid, new_text_fid);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->TestRecordTextIndexCreated(text_fid);
+    ASSERT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+}
+
 // Reproducer for issue #49076.
 //
 // Reopen on a sealed segment does:

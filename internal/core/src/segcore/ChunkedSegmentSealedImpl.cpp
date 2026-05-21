@@ -4340,13 +4340,17 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
     }
 
     auto current = std::atomic_load(&segment_load_info_);
-    LoadDiff diff;
-    diff.fields_to_fill_default =
-        current->GetFieldsToFillDefaultForSchema(sch);
+    SegmentLoadInfo current_mutable(*current);
     SegmentLoadInfo new_local(current->GetProto(), sch);
+    for (auto fid : current->GetCreatedTextIndexes()) {
+        new_local.SetTextIndexCreated(fid);
+    }
+
+    auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
-        current->GetDefaultFilledFieldsForNewInfo(new_local));
-    LOG_INFO("Schema-only reopen segment {} with diff {}", id_, diff.ToString());
+        current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    LOG_INFO(
+        "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     std::atomic_store(&segment_load_info_, published);
