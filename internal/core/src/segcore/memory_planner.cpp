@@ -157,31 +157,6 @@ BatchReadParallelism(size_t batch_budget_bytes, int64_t total_rg_count) {
                               static_cast<uint64_t>(total_rg_count));
 }
 
-std::vector<RowGroupBlock>
-SplitContiguousRange(int64_t rg_offset,
-                     int64_t total_rg_count,
-                     uint64_t read_parallelism) {
-    std::vector<RowGroupBlock> blocks;
-    if (total_rg_count <= 0) {
-        return blocks;
-    }
-
-    auto block_count = std::min<int64_t>(
-        total_rg_count,
-        static_cast<int64_t>(std::max<uint64_t>(read_parallelism, 1)));
-    blocks.reserve(block_count);
-    auto avg_block_size = (total_rg_count + block_count - 1) / block_count;
-    int64_t remaining = total_rg_count;
-    int64_t next_offset = rg_offset;
-    while (remaining > 0) {
-        auto count = std::min<int64_t>(avg_block_size, remaining);
-        blocks.push_back({next_offset, count});
-        next_offset += count;
-        remaining -= count;
-    }
-    return blocks;
-}
-
 arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>
 ReadFileRowGroupBlock(const milvus_storage::ArrowFileSystemPtr& fs,
                       const std::string& file,
@@ -526,10 +501,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         auto batch_budget_bytes = BatchLoadingBudgetBytes(batch.cells);
         auto read_parallelism =
             BatchReadParallelism(batch_budget_bytes, batch.rg_count);
-        auto reader_memory_limit = std::max<int64_t>(
-            BatchReaderMemoryLimit(batch.batch_memory, memory_limit) /
-                static_cast<int64_t>(read_parallelism),
-            FieldDataReadWindowBytes());
+        auto reader_memory_limit =
+            BatchReaderMemoryLimit(batch.batch_memory, memory_limit);
         futures.emplace_back(pool.Submit([batch = std::move(batch),
                                           shared_factory,
                                           batch_budget_bytes,
@@ -618,10 +591,9 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
                        int64_t rg_offset,
                        int64_t total_rg_count,
                        int64_t reader_memory_limit,
-                       uint64_t read_parallelism)
+                       uint64_t /*read_parallelism*/)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         const auto& file = (*files)[batch_key];
-        (void)read_parallelism;
         return ReadFileRowGroupBlock(
             fs, file, rg_offset, total_rg_count, reader_memory_limit);
     };
