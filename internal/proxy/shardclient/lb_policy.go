@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -39,12 +40,13 @@ import (
 type ExecuteFunc func(context.Context, UniqueID, types.QueryNodeClient, string) error
 
 type ChannelWorkload struct {
-	Db             string
-	CollectionName string
-	CollectionID   int64
-	Channel        string
-	Nq             int64
-	Exec           ExecuteFunc
+	Db              string
+	CollectionName  string
+	CollectionID    int64
+	Channel         string
+	Nq              int64
+	Exec            ExecuteFunc
+	PreferredNodeID int64
 }
 
 type CollectionWorkLoad struct {
@@ -53,6 +55,7 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	PreferredNodes map[string]int64
 }
 
 type LBPolicy interface {
@@ -129,19 +132,36 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
+func recordPreferredNodeSelection(status string) {
+	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
+		status,
+	).Inc()
+}
+
+func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
+	if workload.PreferredNodes == nil {
+		return 0
+	}
+	nodeID := workload.PreferredNodes[channel]
+	if nodeID == 0 {
+		recordPreferredNodeSelection(metrics.PreferredNodeMissLabel)
+	}
+	return nodeID
+}
+
 // try to select the best node from the available nodes
-func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, error) {
+func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", workload.CollectionID),
 		zap.String("channelName", workload.Channel),
 	)
 	// Select node using specified nodes
-	trySelectNode := func(withCache bool) (NodeInfo, error) {
+	trySelectNode := func(withCache bool) (NodeInfo, bool, error) {
 		shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
 		if err != nil {
 			log.Warn("failed to get shard delegator",
 				zap.Error(err))
-			return NodeInfo{}, err
+			return NodeInfo{}, false, err
 		}
 
 		// if all available delegator has been excluded even after refresh shard leader cache
@@ -189,10 +209,18 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 		if len(candidateNodes) == 0 {
 			err = merr.WrapErrChannelNotAvailable(workload.Channel, "no available shard leaders")
-			return NodeInfo{}, err
+			return NodeInfo{}, false, err
+		}
+
+		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
+			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
+			return preferredNode, false, nil
+		} else if workload.PreferredNodeID != 0 {
+			recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+
 		// prefer serviceable nodes
 		var targetNodeID int64
 		if len(serviceableNodes) > 0 {
@@ -201,30 +229,30 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
 		}
 		if err != nil {
-			return NodeInfo{}, err
+			return NodeInfo{}, false, err
 		}
 
 		if _, ok := candidateNodes[targetNodeID]; !ok {
 			err = merr.WrapErrNodeNotAvailable(targetNodeID)
-			return NodeInfo{}, err
+			return NodeInfo{}, false, err
 		}
 
-		return candidateNodes[targetNodeID], nil
+		return candidateNodes[targetNodeID], true, nil
 	}
 
 	// First attempt with current shard leaders cache
 	withShardLeaderCache := true
-	targetNode, err := trySelectNode(withShardLeaderCache)
+	targetNode, selectedByBalancer, err := trySelectNode(withShardLeaderCache)
 	if err != nil {
 		// Second attempt with fresh shard leaders
 		withShardLeaderCache = false
-		targetNode, err = trySelectNode(withShardLeaderCache)
+		targetNode, selectedByBalancer, err = trySelectNode(withShardLeaderCache)
 		if err != nil {
-			return NodeInfo{}, err
+			return NodeInfo{}, false, err
 		}
 	}
 
-	return targetNode, nil
+	return targetNode, selectedByBalancer, nil
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
@@ -237,7 +265,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	excludeNodes := typeutil.NewUniqueSet()
 	tryExecute := func() (bool, error) {
 		balancer := lb.getBalancer()
-		targetNode, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -250,7 +278,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, err
 		}
 		// cancel work load which assign to the target node
-		defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
+		if selectedByBalancer {
+			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
+		}
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
@@ -309,17 +339,31 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
+	// Single channel fast path: skip errgroup/goroutine overhead
+	if len(channelList) == 1 {
+		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channelList[0],
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: preferredNodeID(workload, channelList[0]),
+		})
+	}
+
 	wg, _ := errgroup.WithContext(ctx)
 	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				Db:             workload.Db,
-				CollectionName: workload.CollectionName,
-				CollectionID:   workload.CollectionID,
-				Channel:        channel,
-				Nq:             workload.Nq,
-				Exec:           workload.Exec,
+				Db:              workload.Db,
+				CollectionName:  workload.CollectionName,
+				CollectionID:    workload.CollectionID,
+				Channel:         channel,
+				Nq:              workload.Nq,
+				Exec:            workload.Exec,
+				PreferredNodeID: preferredNodeID(workload, channel),
 			})
 		})
 	}
@@ -337,12 +381,13 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// let every request could retry at least twice, which could retry after update shard leader cache
 	for _, channel := range channelList {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:             workload.Db,
-			CollectionName: workload.CollectionName,
-			CollectionID:   workload.CollectionID,
-			Channel:        channel,
-			Nq:             workload.Nq,
-			Exec:           workload.Exec,
+			Db:              workload.Db,
+			CollectionName:  workload.CollectionName,
+			CollectionID:    workload.CollectionID,
+			Channel:         channel,
+			Nq:              workload.Nq,
+			Exec:            workload.Exec,
+			PreferredNodeID: preferredNodeID(workload, channel),
 		})
 	}
 	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
