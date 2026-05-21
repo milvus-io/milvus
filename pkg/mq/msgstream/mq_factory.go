@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/rest"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/streamnative/pulsarctl/pkg/cli"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -163,9 +163,9 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 				log.Warn("failed to get topic name", zap.Error(err))
 				return retry.Unrecoverable(err)
 			}
-			err = admin.Subscriptions().Delete(*topic, subname, true)
+			err = admin.Subscriptions().ForceDelete(*topic, subname)
 			if err != nil {
-				pulsarErr, ok := err.(cli.Error)
+				pulsarErr, ok := err.(rest.Error)
 				if ok {
 					// subscription not found, ignore error
 					if strings.Contains(pulsarErr.Reason, "Subscription not found") {
