@@ -184,6 +184,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		if err == nil {
 			timeout = time.Duration(timeoutSecond) * time.Second
 		}
+		gCtx.Set(ContextRequestTimeout, timeout)
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
 

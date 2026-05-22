@@ -307,6 +307,18 @@ func (s *GrpcAccessInfoSuite) TestClientRequestTime() {
 	s.NotEqual(Unknown, Get(s.info, "$client_request_time")[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestRequestTimeout() {
+	s.Equal(Unknown, Get(s.info, "$request_timeout")[0])
+
+	start := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), start.Add(2*time.Second))
+	defer cancel()
+	s.info.ctx = ctx
+	s.info.start = start
+
+	s.Equal("2s", Get(s.info, "$request_timeout")[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestTemplateValueLength() {
 	// params := []*commonpb.KeyValuePair{{Key: "test_key", Value: "test_value"}}
 	exprTemplValues := map[string]*schemapb.TemplateValue{
