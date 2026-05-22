@@ -1378,6 +1378,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              *vec_ptr,
                                              seg_offsets,
                                              count,
+                                             valid_data,
                                              result->mutable_vectors()
                                                  ->mutable_vector_array()
                                                  ->mutable_data());
@@ -1716,15 +1717,22 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
     const VectorBase& vec_raw,
     const int64_t* seg_offsets,
     int64_t count,
+    const bool* valid_data,
     google::protobuf::RepeatedPtrField<T>* dst) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<VectorArray>*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+        if (offset == INVALID_SEG_OFFSET ||
+            (valid_data != nullptr && !valid_data[i])) {
+            continue;
         }
+        auto value = vec.get_element(offset);
+        AssertInfo(value != nullptr,
+                   "Cannot find VECTOR_ARRAY data at segment offset {}",
+                   offset);
+        dst->at(i) = value->output_data();
     }
 }
 
