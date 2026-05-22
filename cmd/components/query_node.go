@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -57,10 +57,10 @@ func (q *QueryNode) Prepare() error {
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
-		log.Ctx(q.ctx).Error("QueryNode starts error", zap.Error(err))
+		mlog.Error(q.ctx, "QueryNode starts error", zap.Error(err))
 		return err
 	}
-	log.Ctx(q.ctx).Info("QueryNode successfully started")
+	mlog.Info(q.ctx, "QueryNode successfully started")
 	return nil
 }
 

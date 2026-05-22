@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -101,7 +101,7 @@ func (c *QueryCluster) updateLoop() {
 	for {
 		select {
 		case <-c.ch:
-			log.Info("cluster closed")
+			mlog.Info(context.TODO(), "cluster closed")
 			return
 		case <-ticker.C:
 			nodes := c.getAllNodeIDs()
@@ -430,7 +430,7 @@ func (c *clients) close(nodeID int64) {
 	defer c.Unlock()
 	if cli, ok := c.clients[nodeID]; ok {
 		if err := cli.Close(); err != nil {
-			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 		delete(c.clients, nodeID)
 	}
@@ -441,7 +441,7 @@ func (c *clients) closeAll() {
 	defer c.Unlock()
 	for nodeID, cli := range c.clients {
 		if err := cli.Close(); err != nil {
-			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
+			mlog.Warn(context.TODO(), "error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 	}
 }

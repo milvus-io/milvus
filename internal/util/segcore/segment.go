@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -480,7 +480,7 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 	if src.GetStorageVersion() == storage.StorageV3 {
 		result := packed.NewStatsResolverFromLoadInfo(src).TextAndJSONIndexStatsWithBasePaths()
 		if result.Err() != nil {
-			log.Warn("failed to resolve stats from manifest for segcore load info",
+			mlog.Warn(context.TODO(), "failed to resolve stats from manifest for segcore load info",
 				zap.Int64("segmentID", src.GetSegmentID()),
 				zap.String("manifestPath", src.GetManifestPath()),
 				zap.Error(result.Err()))
@@ -612,7 +612,7 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			}
 			files = stripped
 		}
-		log.Info("convertTextIndexStats",
+		mlog.Info(context.TODO(), "convertTextIndexStats",
 			zap.Int64("fieldID", v.GetFieldID()),
 			zap.Int64("buildID", v.GetBuildID()),
 			zap.Int64("version", v.GetVersion()),
@@ -660,7 +660,7 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 			}
 			files = stripped
 		}
-		log.Info("convertJSONKeyStats",
+		mlog.Info(context.TODO(), "convertJSONKeyStats",
 			zap.Int64("fieldID", v.GetFieldID()),
 			zap.Int64("buildID", v.GetBuildID()),
 			zap.Int64("version", v.GetVersion()),

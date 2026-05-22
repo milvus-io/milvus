@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,10 +42,10 @@ func NewKeyManager(
 	meta IMetaTable,
 ) *KeyManager {
 	if hookutil.GetCipherWithState() == nil {
-		log.Info("KeyManager disabled (cipher plugin not loaded)")
+		mlog.Info(ctx, "KeyManager disabled (cipher plugin not loaded)")
 		return nil
 	}
-	log.Info("KeyManager enabled")
+	mlog.Info(ctx, "KeyManager enabled")
 	return &KeyManager{
 		ctx:  ctx,
 		meta: meta,
@@ -63,7 +63,7 @@ func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 		if currentState != hookutil.KeyStateEnabled {
 			db, err := km.getDatabaseByEzID(ezID)
 			if err != nil {
-				log.Warn("KeyManager: failed to get database for ezID", zap.Int64("ezID", ezID), zap.Error(err))
+				mlog.Warn(km.ctx, "KeyManager: failed to get database for ezID", zap.Int64("ezID", ezID), zap.Error(err))
 				continue
 			}
 

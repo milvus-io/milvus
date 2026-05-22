@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type UndoList struct {
@@ -52,12 +52,12 @@ func NewUndoList(ctx context.Context, meta *meta.Meta,
 }
 
 func (u *UndoList) RollBack() {
-	log := log.Ctx(u.ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", u.CollectionID),
 		zap.Int64s("partitionIDs", u.LackPartitions),
 	)
 
-	log.Warn("rollback failed loading request...",
+	log.Warn(u.ctx, "rollback failed loading request...",
 		zap.Bool("isNewCollection", u.IsNewCollection),
 		zap.Bool("isReplicaCreated", u.IsReplicaCreated),
 		zap.Bool("isTargetUpdated", u.IsTargetUpdated),
@@ -70,7 +70,7 @@ func (u *UndoList) RollBack() {
 		err = u.meta.RemovePartition(u.ctx, u.CollectionID, u.LackPartitions...)
 	}
 	if err != nil {
-		log.Warn("failed to rollback collection from meta", zap.Error(err))
+		log.Warn(u.ctx, "failed to rollback collection from meta", zap.Error(err))
 	}
 
 	if u.IsTargetUpdated {

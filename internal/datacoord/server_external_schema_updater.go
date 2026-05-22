@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -51,7 +51,7 @@ func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID in
 		return err
 	}
 
-	log.Info("updated external schema via RootCoord after refresh",
+	mlog.Info(ctx, "updated external schema via RootCoord after refresh",
 		zap.Int64("collectionID", collectionID),
 		zap.String("externalSource", externalSource),
 		zap.String("externalSpec", externalspec.RedactExternalSpec(externalSpec)))

@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -22,7 +22,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 	r.metrics.ObserveStateChange(recoveryStorageStateStreamRecovering)
 	r.metrics.ObServePersistedMetrics(r.checkpoint.TimeTick)
 	r.SetLogger(resource.Resource().Logger().With(
-		log.FieldComponent(componentRecoveryStorage),
+		mlog.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("startMessageID", r.checkpoint.MessageID.String()),
 		zap.Uint64("fromTimeTick", r.checkpoint.TimeTick),
@@ -30,7 +30,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 		zap.String("state", recoveryStorageStateStreamRecovering),
 	))
 
-	r.Logger().Info("recover from wal stream...")
+	r.Logger().Info(ctx, "recover from wal stream...")
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		EndTimeTick:     lastTimeTickMessage.TimeTick(),
@@ -38,7 +38,7 @@ func (r *recoveryStorageImpl) recoverFromStream(
 	defer func() {
 		rs.Close()
 		if err != nil {
-			r.Logger().Warn("recovery from wal stream failed", zap.Error(err))
+			r.Logger().Warn(ctx, "recovery from wal stream failed", zap.Error(err))
 			return
 		}
 	}()
@@ -73,7 +73,7 @@ L:
 			zap.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
 		)
 	}
-	r.Logger().Info("recovery from wal stream done", logFields...)
+	r.Logger().Info(ctx, "recovery from wal stream done", logFields...)
 	return snapshot, nil
 }
 

@@ -17,12 +17,13 @@
 package meta
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -69,7 +70,7 @@ func (l *FailedLoadCache) Get(collectionID int64) error {
 			err = info.err
 		}
 	}
-	log.Warn("FailedLoadCache hits failed record",
+	mlog.Warn(context.TODO(), "FailedLoadCache hits failed record",
 		zap.Int64("collectionID", collectionID),
 		zap.Error(err),
 	)
@@ -94,7 +95,7 @@ func (l *FailedLoadCache) Put(collectionID int64, err error) {
 	l.records[collectionID][code].count++
 	l.records[collectionID][code].err = err
 	l.records[collectionID][code].lastTime = time.Now()
-	log.Warn("FailedLoadCache put failed record",
+	mlog.Warn(context.TODO(), "FailedLoadCache put failed record",
 		zap.Int64("collectionID", collectionID),
 		zap.Error(err),
 	)
@@ -104,7 +105,7 @@ func (l *FailedLoadCache) Remove(collectionID int64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.records, collectionID)
-	log.Info("FailedLoadCache removes cache", zap.Int64("collectionID", collectionID))
+	mlog.Info(context.TODO(), "FailedLoadCache removes cache", zap.Int64("collectionID", collectionID))
 }
 
 func (l *FailedLoadCache) TryExpire() {
@@ -118,7 +119,7 @@ func (l *FailedLoadCache) TryExpire() {
 		}
 		if len(l.records[col]) == 0 {
 			delete(l.records, col)
-			log.Info("FailedLoadCache expires cache", zap.Int64("collectionID", col))
+			mlog.Info(context.TODO(), "FailedLoadCache expires cache", zap.Int64("collectionID", col))
 		}
 	}
 }

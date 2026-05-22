@@ -27,7 +27,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 )
@@ -85,7 +85,7 @@ func optimizeGOGC() {
 
 	// currently we assume 20 ms as long gc pause
 	if (m.PauseNs[(m.NumGC+255)%256] / uint64(time.Millisecond)) < 20 {
-		log.Ctx(context.TODO()).Debug("GC Tune done", zap.Uint32("previous GOGC", previousGOGC),
+		mlog.Debug(context.TODO(), "GC Tune done", zap.Uint32("previous GOGC", previousGOGC),
 			zap.Uint64("heapuse ", logutil.ToMB(heapuse)),
 			zap.Uint64("total memory", logutil.ToMB(totaluse)),
 			zap.Uint64("next GC", logutil.ToMB(m.NextGC)),
@@ -94,7 +94,7 @@ func optimizeGOGC() {
 			zap.Uint64("gc-pause-end", m.PauseEnd[(m.NumGC+255)%256]),
 		)
 	} else {
-		log.Ctx(context.TODO()).Warn("GC Tune done, and the gc is slow", zap.Uint32("previous GOGC", previousGOGC),
+		mlog.Warn(context.TODO(), "GC Tune done, and the gc is slow", zap.Uint32("previous GOGC", previousGOGC),
 			zap.Uint64("heapuse ", logutil.ToMB(heapuse)),
 			zap.Uint64("total memory", logutil.ToMB(totaluse)),
 			zap.Uint64("next GC", logutil.ToMB(m.NextGC)),
@@ -126,13 +126,13 @@ func NewTuner(targetPercent float64, minimumGOGCConfig uint32, maximumGOGCConfig
 
 		totalMemory := hardware.GetMemoryCount()
 		if totalMemory == 0 {
-			log.Warn("Failed to get memory count, disable gc auto tune", zap.Int("Initial GoGC", defaultGOGC))
+			mlog.Warn(context.TODO(), "Failed to get memory count, disable gc auto tune", zap.Int("Initial GoGC", defaultGOGC))
 			// noop
 			action = func(uint32) {}
 			return
 		}
 		memoryThreshold = uint64(float64(totalMemory) * targetPercent)
-		log.Info("GC Helper initialized.", zap.Uint32("Initial GoGC", previousGOGC),
+		mlog.Info(context.TODO(), "GC Helper initialized.", zap.Uint32("Initial GoGC", previousGOGC),
 			zap.Uint32("minimumGOGC", minGOGC),
 			zap.Uint32("maximumGOGC", maxGOGC),
 			zap.Uint64("memoryThreshold", memoryThreshold))

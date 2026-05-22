@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -73,7 +73,7 @@ func GetEtcdClient(
 	minVersion string,
 	opts ...ClientOption,
 ) (*clientv3.Client, error) {
-	log.Info("create etcd client",
+	mlog.Info(context.TODO(), "create etcd client",
 		zap.Bool("useEmbedEtcd", useEmbedEtcd),
 		zap.Bool("useSSL", useSSL),
 		zap.Any("endpoints", endpoints),
@@ -179,7 +179,7 @@ func CreateEtcdClient(
 	if !enableAuth || useEmbedEtcd {
 		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion, opts...)
 	}
-	log.Info("create etcd client(enable auth)",
+	mlog.Info(context.TODO(), "create etcd client(enable auth)",
 		zap.Bool("useSSL", useSSL),
 		zap.Any("endpoints", endpoints),
 		zap.String("minVersion", minVersion))

@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -40,8 +40,7 @@ func StartLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
 }
 
 func runLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
-	logger := log.Ctx(ctx)
-	logger.Info("legacy snapshot GC started",
+	mlog.Info(ctx, "legacy snapshot GC started",
 		zap.String("prefix", SnapshotPrefix+"/"),
 		zap.Int("batchSize", legacyGCBatchSize),
 		zap.Duration("interval", legacyGCInterval))
@@ -55,26 +54,26 @@ func runLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("legacy snapshot GC stopped (context canceled)",
+			mlog.Info(ctx, "legacy snapshot GC stopped (context canceled)",
 				zap.Int("totalDeleted", totalDeleted),
 				zap.Duration("totalElapsed", time.Since(startTime)))
 			return
 		case <-ticker.C:
 			deleted, err := gcLegacySnapshotBatch(ctx, metaKV)
 			if err != nil {
-				logger.Warn("legacy snapshot GC batch error",
+				mlog.Warn(ctx, "legacy snapshot GC batch error",
 					zap.Error(err),
 					zap.Int("totalDeleted", totalDeleted))
 				continue
 			}
 			if deleted == 0 {
-				logger.Info("legacy snapshot GC complete",
+				mlog.Info(ctx, "legacy snapshot GC complete",
 					zap.Int("totalDeleted", totalDeleted),
 					zap.Duration("totalElapsed", time.Since(startTime)))
 				return
 			}
 			totalDeleted += deleted
-			logger.Info("legacy snapshot GC batch done",
+			mlog.Info(ctx, "legacy snapshot GC batch done",
 				zap.Int("deleted", deleted),
 				zap.Int("totalDeleted", totalDeleted),
 				zap.Duration("elapsed", time.Since(startTime)))
@@ -116,7 +115,7 @@ func gcLegacySnapshotBatch(ctx context.Context, metaKV kv.MetaKv) (int, error) {
 	relativeKeys := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if !strings.HasPrefix(key, snapshotFullPrefix) {
-			log.Warn("legacy snapshot GC: key not under expected prefix, skipping",
+			mlog.Warn(ctx, "legacy snapshot GC: key not under expected prefix, skipping",
 				zap.String("key", key), zap.String("expectedPrefix", snapshotFullPrefix))
 			continue
 		}

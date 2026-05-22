@@ -412,7 +412,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	body := result.Message.MustBody()
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
-			log.Ctx(ctx).Warn("alter a non-existent collection, ignore it", log.FieldMessage(result.Message))
+			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
 			return nil
 		}
 		return merr.Wrap(err, "failed to alter collection")
@@ -428,7 +428,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", zap.Error(err))
 				return nil
 			}
 			return merr.Wrap(err, "failed to update load config")
@@ -449,7 +449,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection rename, skipping", zap.Error(err))
+				mlog.Warn(ctx, "failed to refresh RBAC policy cache after collection rename, skipping", zap.Error(err))
 			}
 			break
 		}

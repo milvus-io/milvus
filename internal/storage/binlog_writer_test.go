@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -26,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestBinlogReaderWriterCipher(t *testing.T) {
@@ -71,7 +72,7 @@ func TestBinlogReaderWriterCipher(t *testing.T) {
 	binlogReader, err := NewBinlogReader(buffer, WithReaderDecryptionContext(1, 1))
 	assert.NoError(t, err)
 
-	log.Info("binlogReader", zap.Any("descriptorEvent", binlogReader.descriptorEvent))
+	mlog.Info(context.TODO(), "binlogReader", zap.Any("descriptorEvent", binlogReader.descriptorEvent))
 
 	gotsafeKey, ok := binlogReader.GetEdek()
 	assert.True(t, ok)

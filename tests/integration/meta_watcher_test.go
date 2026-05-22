@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration/cluster"
@@ -45,9 +45,9 @@ func (s *MetaWatcherSuite) TestShowSessions() {
 	sessions, err := s.Cluster.ShowSessions()
 	s.NoError(err)
 	for _, session := range sessions {
-		log.Info("ShowSessions result", zap.Any("session", session))
+		mlog.Info(context.TODO(), "ShowSessions result", zap.Any("session", session))
 	}
-	log.Info("TestShowSessions succeed")
+	mlog.Info(context.TODO(), "TestShowSessions succeed")
 }
 
 func (s *MetaWatcherSuite) TestShowSegments() {
@@ -112,11 +112,11 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.NoError(err)
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := NewFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := GenerateHashKeys(rowNum)
@@ -149,7 +149,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 		s.NoError(err)
 		if len(segments) != 0 {
 			for _, segment := range segments {
-				log.Info("ShowSegments result", zap.String("segment", segment.String()))
+				mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
 			}
 			return true
 		}
@@ -218,15 +218,15 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := NewFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := GenerateHashKeys(rowNum)
@@ -252,7 +252,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 		s.NoError(err)
 		if len(segments) != 0 {
 			for _, segment := range segments {
-				log.Info("ShowSegments result", zap.String("segment", segment.String()))
+				mlog.Info(context.TODO(), "ShowSegments result", zap.String("segment", segment.String()))
 			}
 			return true
 		}
@@ -292,7 +292,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	})
 	s.NoError(err)
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
@@ -305,7 +305,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
@@ -325,10 +325,10 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	s.NoError(err)
 	s.NotEmpty(replicas)
 	for _, replica := range replicas {
-		log.Info("ShowReplicas result", zap.String("replica", cluster.PrettyReplica(replica)))
+		mlog.Info(context.TODO(), "ShowReplicas result", zap.String("replica", cluster.PrettyReplica(replica)))
 	}
 
-	log.Info("TestShowReplicas succeed")
+	mlog.Info(context.TODO(), "TestShowReplicas succeed")
 }
 
 func TestMetaWatcher(t *testing.T) {

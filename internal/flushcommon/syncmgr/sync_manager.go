@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -71,7 +71,7 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	cpuNum := hardware.GetCPUNum()
 	initPoolSize := cpuNum * params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
 	dispatcher := newKeyLockDispatcher[int64](initPoolSize)
-	log.Info("sync manager initialized", zap.Int("initPoolSize", initPoolSize), zap.Int("cpuNum", cpuNum))
+	mlog.Info(context.TODO(), "sync manager initialized", zap.Int("initPoolSize", initPoolSize), zap.Int("cpuNum", cpuNum))
 
 	syncMgr := &syncManager{
 		keyLockDispatcher: dispatcher,
@@ -88,20 +88,20 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 
 func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	if evt.HasUpdated {
-		log := log.Ctx(context.Background()).With(
+		log := mlog.With(
 			zap.String("key", evt.Key),
 			zap.String("value", evt.Value),
 		)
 		cpuNum := hardware.GetCPUNum()
 		size, err := strconv.ParseInt(evt.Value, 10, 64)
 		if err != nil {
-			log.Warn("failed to parse new datanode syncmgr pool size", zap.Error(err))
+			log.Warn(context.TODO(), "failed to parse new datanode syncmgr pool size", zap.Error(err))
 			return
 		}
 		newPoolSize := cpuNum * int(size)
 		err = mgr.workerPool.Resize(newPoolSize)
 		if err != nil {
-			log.Warn("failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
+			log.Warn(context.TODO(), "failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
 			return
 		}
 		semCap := newPoolSize * 2
@@ -109,7 +109,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 			semCap = 4
 		}
 		mgr.SetSemaphoreCapacity(semCap)
-		log.Info("sync mgr pool size updated", zap.Int64("newSize", size), zap.Int("semaphoreCapacity", semCap))
+		log.Info(context.TODO(), "sync mgr pool size updated", zap.Int64("newSize", size), zap.Int("semaphoreCapacity", semCap))
 	}
 }
 
@@ -166,7 +166,7 @@ func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callba
 		return err
 	}
 	callbacks = append([]func(error) error{handler}, callbacks...)
-	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
+	mlog.Info(ctx, "sync mgr sumbit task with key", zap.Int64("key", key))
 
 	return mgr.Submit(ctx, key, task, callbacks...)
 }
@@ -179,7 +179,7 @@ func (mgr *syncManager) TaskStatsJSON() string {
 
 	ret, err := json.Marshal(tasks)
 	if err != nil {
-		log.Warn("failed to marshal sync task stats", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal sync task stats", zap.Error(err))
 		return ""
 	}
 	return string(ret)

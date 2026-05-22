@@ -25,13 +25,14 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -98,7 +99,7 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		coll, err := handler.GetCollection(timeoutCtx, collection)
 		cancel()
 		if err != nil {
-			log.Warn("failed to get collection schema", zap.Error(err))
+			mlog.Warn(ctx, "failed to get collection schema", zap.Error(err))
 			continue
 		}
 
@@ -355,11 +356,11 @@ func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
 		if collectionID == -1 {
-			log.RatedWarn(60, "can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
+			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", zap.String("vchannel", channel))
 			continue
 		}
 		if meta.GetCollection(collectionID) == nil {
-			log.RatedWarn(60, "corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
+			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", zap.String("vchannel", channel))
 			continue
 		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)

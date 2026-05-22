@@ -17,9 +17,10 @@
 package importv2
 
 import (
+	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type TaskManager interface {
@@ -45,7 +46,7 @@ func (m *taskManager) Add(task Task) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.tasks[task.GetTaskID()]; ok {
-		log.Warn("duplicated task", WrapLogFields(task)...)
+		mlog.Warn(context.TODO(), "duplicated task", WrapLogFields(task)...)
 		return
 	}
 	m.tasks[task.GetTaskID()] = task

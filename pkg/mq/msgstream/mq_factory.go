@@ -27,8 +27,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
@@ -138,7 +138,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	auth, err := pulsar.NewAuthentication(f.PulsarAuthPlugin, f.PulsarAuthParams)
 	if err != nil {
-		log.Error("build authencation from config failed, please check it!",
+		mlog.Error(context.TODO(), "build authencation from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
 			zap.Error(err))
 		return nil, merr.WrapErrParameterInvalidMsg("build authencation from config failed")
@@ -160,7 +160,7 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 			}
 			topic, err := utils.GetTopicName(fullTopicName)
 			if err != nil {
-				log.Warn("failed to get topic name", zap.Error(err))
+				mlog.Warn(ctx, "failed to get topic name", zap.Error(err))
 				return retry.Unrecoverable(err)
 			}
 			err = admin.Subscriptions().ForceDelete(*topic, subname)
@@ -172,7 +172,7 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 						return nil
 					}
 				}
-				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
+				mlog.Warn(ctx, "failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
 					zap.String("topic", channel), zap.String("subname", subname), zap.Error(err))
 			}
 		}
@@ -228,9 +228,9 @@ func NewKmsFactory(config *paramtable.ServiceParam) Factory {
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.
 func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) Factory {
 	if err := server.InitRocksMQ(path); err != nil {
-		log.Fatal("fail to init rocksmq", zap.Error(err))
+		mlog.Fatal(context.TODO(), "fail to init rocksmq", zap.Error(err))
 	}
-	log.Info("init rocksmq msgstream success", zap.String("path", path))
+	mlog.Info(context.TODO(), "init rocksmq msgstream success", zap.String("path", path))
 
 	return &CommonFactory{
 		Newer:             rmq.NewClientWithDefaultOptions,

@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	common2 "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -227,7 +227,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 	}
 
-	log.Info("create parquet column readers", zap.Any("readFields", readFields))
+	mlog.Info(ctx, "create parquet column readers", zap.Any("readFields", readFields))
 	return crs, nil
 }
 

@@ -13,8 +13,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
@@ -50,13 +50,13 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Ctx(context.Background()).Info("create minio handler finish while building wp opener")
+		mlog.Info(context.TODO(), "create minio handler finish while building wp opener")
 	}
 	etcdCli, err := getEtcdClient(context.TODO())
 	if err != nil {
 		return nil, err
 	}
-	log.Ctx(context.Background()).Info("create etcd client finish while building wp opener")
+	mlog.Info(context.TODO(), "create etcd client finish while building wp opener")
 	var wpClient woodpecker.Client
 	if cfg.Woodpecker.Storage.IsStorageService() {
 		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
@@ -67,7 +67,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Ctx(context.Background()).Info("build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
+	mlog.Info(context.TODO(), "build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
 	return &openerImpl{
 		c: wpClient,
 	}, nil
@@ -172,7 +172,7 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 	if bufferPoolsJSON != "" {
 		var bufferPools []config.QuorumBufferPool
 		if err := json.Unmarshal([]byte(bufferPoolsJSON), &bufferPools); err != nil {
-			log.Ctx(context.Background()).Warn("failed to parse quorum buffer pools JSON, using empty configuration",
+			mlog.Warn(context.TODO(), "failed to parse quorum buffer pools JSON, using empty configuration",
 				zap.String("json", bufferPoolsJSON),
 				zap.Error(err))
 		} else {
@@ -190,7 +190,7 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 	if customPlacementJSON != "" {
 		var customPlacements []config.CustomPlacement
 		if err := json.Unmarshal([]byte(customPlacementJSON), &customPlacements); err != nil {
-			log.Ctx(context.Background()).Warn("failed to parse custom placement JSON, using empty configuration",
+			mlog.Warn(context.TODO(), "failed to parse custom placement JSON, using empty configuration",
 				zap.String("json", customPlacementJSON),
 				zap.Error(err))
 		} else {
@@ -202,7 +202,6 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
-	log := log.Ctx(ctx)
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -217,7 +216,7 @@ func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		log.Warn("Woodpecker create connection to etcd failed", zap.Error(err))
+		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", zap.Error(err))
 		return nil, err
 	}
 	return etcdCli, nil

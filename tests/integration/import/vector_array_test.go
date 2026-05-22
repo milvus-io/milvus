@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -253,7 +253,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 	s.NotNil(importResp)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
 
-	log.Info("Import response", zap.Any("resp", importResp))
+	mlog.Info(context.TODO(), "Import response", zap.Any("resp", importResp))
 	jobID := importResp.GetJobID()
 
 	// Wait for import to complete

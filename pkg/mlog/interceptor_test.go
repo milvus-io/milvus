@@ -294,7 +294,6 @@ func TestRegularFieldsNotPropagated(t *testing.T) {
 }
 
 func Test_extractPropagatedWithTraceContext(t *testing.T) {
-	// Create a span context with TraceID and SpanID
 	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
 	spanID, _ := trace.SpanIDFromHex("0102030405060708")
 	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -305,18 +304,11 @@ func Test_extractPropagatedWithTraceContext(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	// Verify TraceID and SpanID are added as fields (not propagated)
-	fields := FieldsFromContext(ctx)
-	fieldMap := make(map[string]string)
-	for _, f := range fields {
-		fieldMap[f.Key] = f.String
-	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
+	// TraceID and SpanID are appended dynamically at log time, not cached as context fields.
+	assert.Nil(t, FieldsFromContext(ctx))
 }
 
 func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
-	// Create span context
 	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
 	spanID, _ := trace.SpanIDFromHex("0102030405060708")
 	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -333,16 +325,16 @@ func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	// Verify all fields are present
+	// Verify only mlog metadata fields are cached on context.
 	fields := FieldsFromContext(ctx)
-	assert.Len(t, fields, 3)
+	assert.Len(t, fields, 1)
 
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
+	assert.NotContains(t, fieldMap, keyTraceID)
+	assert.NotContains(t, fieldMap, keySpanID)
 
 	// Propagated field should be accessible via GetPropagated
 	props := GetPropagated(ctx)

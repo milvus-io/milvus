@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -295,7 +295,7 @@ func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResul
 // Returns:
 //   - []*conc.Future[any]: Futures for all segment copy operations (nil if validation fails)
 func (t *CopySegmentTask) Execute() []*conc.Future[any] {
-	log.Info("start copy segment task", WrapLogFields(t)...)
+	mlog.Info(t.ctx, "start copy segment task", WrapLogFields(t)...)
 
 	// Step 1: Update task state to InProgress
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
@@ -375,12 +375,13 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		zap.Int("jsonKeyIndexFieldCount", len(source.GetJsonKeyIndexFiles())),
 	)
 
-	log.Info("start copying single segment", logFields...)
+	mlog.Info(t.ctx, "start copying single segment", logFields...)
 
 	// Step 1: Validate source has required binlogs
 	if len(source.GetInsertBinlogs()) == 0 && len(source.GetDeltaBinlogs()) == 0 {
 		reason := "no insert/delete binlogs for segment"
-		log.Error(reason, logFields...)
+		mlog.Error(t.ctx,
+			reason, logFields...)
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil, merr.WrapErrParameterInvalidMsg(reason)
 	}
@@ -401,7 +402,8 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 
 	if err != nil {
 		reason := fmt.Sprintf("failed to copy segment files: %v", err)
-		log.Error(reason, logFields...)
+		mlog.Error(t.ctx,
+			reason, logFields...)
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil, err
 	}
@@ -409,7 +411,7 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 	// Step 4: Update segment result in task with complete metadata (binlogs + indexes)
 	t.manager.Update(t.GetTaskID(), UpdateSegmentResult(segmentResult))
 
-	log.Info("successfully copied single segment",
+	mlog.Info(t.ctx, "successfully copied single segment",
 		append(logFields, zap.Int("copiedFileCount", len(copiedFiles)))...)
 	return nil, nil
 }
@@ -474,11 +476,11 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 
 	// Step 2: Early return if no files to cleanup
 	if len(files) == 0 {
-		log.Info("no files to cleanup", zap.Int64("taskID", t.taskID))
+		mlog.Info(t.ctx, "no files to cleanup", zap.Int64("taskID", t.taskID))
 		return
 	}
 
-	log.Info("cleaning up copied files for failed task",
+	mlog.Info(t.ctx, "cleaning up copied files for failed task",
 		zap.Int64("taskID", t.taskID),
 		zap.Int64("jobID", t.jobID),
 		zap.Int("fileCount", len(files)))
@@ -489,13 +491,13 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 
 	if err := t.cm.MultiRemove(ctx, files); err != nil {
 		// Cleanup failure is logged but doesn't block task removal
-		log.Error("failed to cleanup copied files",
+		mlog.Error(t.ctx, "failed to cleanup copied files",
 			zap.Int64("taskID", t.taskID),
 			zap.Int64("jobID", t.jobID),
 			zap.Int("fileCount", len(files)),
 			zap.Error(err))
 	} else {
-		log.Info("successfully cleaned up copied files",
+		mlog.Info(t.ctx, "successfully cleaned up copied files",
 			zap.Int64("taskID", t.taskID),
 			zap.Int64("jobID", t.jobID),
 			zap.Int("fileCount", len(files)))

@@ -40,7 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -2764,7 +2764,7 @@ func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 
 	s.Equal(1, len(buckets))
 	s.Equal(2, len(buckets[0]))
-	log.Info("buckets", zap.Any("buckets", buckets))
+	mlog.Info(context.TODO(), "buckets", zap.Any("buckets", buckets))
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {

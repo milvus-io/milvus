@@ -53,7 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2121,7 +2121,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	mockDelegator := delegator.NewMockShardDelegator(suite.T())
 	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-			log.Info("version", zap.Int64("versionInload", req.GetVersion()))
+			mlog.Info(context.TODO(), "version", zap.Int64("versionInload", req.GetVersion()))
 			versionMatch = req.GetVersion() == segmentVersion
 			return nil
 		})

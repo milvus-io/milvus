@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -25,8 +26,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -65,14 +66,14 @@ func newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter LastestMVCCTimeTickGet
 func updateThresholdWithConfiguration() {
 	params := paramtable.Get()
 	interval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
-	log.Info("delegator empty time tick max filter interval initialized", zap.Duration("interval", interval))
+	mlog.Info(context.TODO(), "delegator empty time tick max filter interval initialized", zap.Duration("interval", interval))
 	thresholdUpdateIntervalMs.Store(interval.Milliseconds())
 	params.Watch(params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key, config.NewHandler(
 		params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key,
 		func(_ *config.Event) {
 			previousInterval := thresholdUpdateIntervalMs.Load()
 			newInterval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
-			log.Info("delegator empty time tick max filter interval updated",
+			mlog.Info(context.TODO(), "delegator empty time tick max filter interval updated",
 				zap.Duration("previousInterval", time.Duration(previousInterval)),
 				zap.Duration("interval", newInterval))
 			thresholdUpdateIntervalMs.Store(newInterval.Milliseconds())

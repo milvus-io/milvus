@@ -1,12 +1,13 @@
 package util
 
 import (
+	"context"
 	"sort"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -94,7 +95,7 @@ func (p *ConfigChannelProvider) onConfigChange() {
 	})
 	if len(newChannels) > 0 {
 		sort.Strings(newChannels)
-		log.Info("ConfigChannelProvider detected new channels",
+		mlog.Info(context.TODO(), "ConfigChannelProvider detected new channels",
 			zap.Strings("newChannels", newChannels))
 		select {
 		case p.ch <- newChannels:

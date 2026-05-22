@@ -36,7 +36,7 @@
 //
 // https://github.com/uber-go/zap/blob/0c427222737cbbbdc53ebdf852c511f7aca0818b/zaptest/logger.go
 
-package log
+package mlog
 
 import (
 	"bytes"

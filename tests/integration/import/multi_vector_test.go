@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -168,7 +168,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -185,7 +185,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	log.Info("Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", zap.Any("segments", segments))
 
 	// load refresh
 	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

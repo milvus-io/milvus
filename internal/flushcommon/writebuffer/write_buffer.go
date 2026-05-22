@@ -11,6 +11,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -22,8 +23,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -320,7 +321,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		growingSourceRetryInterval: growingSourceRetryInterval,
 	}
 
-	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
+	wb.logger = mlog.With(zap.Int64("collectionID", wb.collectionID),
 		zap.String("channel", wb.channelName))
 	wb.cpRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
 	wb.growingSourceRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_growing_source_%s", wb.channelName), 1, 60)
@@ -508,14 +509,14 @@ func (wb *writeBufferBase) MemorySize() int64 {
 }
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
-	log := wb.logger
+	logger := wb.logger
 
 	wb.mut.Lock()
 
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
 		wb.mut.Unlock()
-		log.Warn("evict buffer before buffering data")
+		logger.Warn(context.TODO(), "evict buffer before buffering data")
 		return
 	}
 
@@ -524,7 +525,7 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 	var futures []*conc.Future[struct{}]
 	if len(segmentIDs) > 0 {
-		log.Info("evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
+		logger.Info(context.TODO(), "evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
 		futures = wb.syncSegments(context.Background(), segmentIDs)
 	}
 
@@ -536,7 +537,7 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
-	log := wb.cpRatedLogger
+	logger := wb.cpRatedLogger
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
@@ -562,11 +563,11 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 
 	if checkpoint == nil {
 		// all buffer are empty
-		log.RatedDebug(60, "checkpoint from latest consumed msg", zap.Uint64("cpTimestamp", wb.checkpoint.GetTimestamp()))
+		logger.RatedDebug(context.TODO(), rate.Limit(60), "checkpoint from latest consumed msg", zap.Uint64("cpTimestamp", wb.checkpoint.GetTimestamp()))
 		return wb.checkpoint
 	}
 
-	log.RatedDebug(20, "checkpoint evaluated",
+	logger.RatedDebug(context.TODO(), rate.Limit(20), "checkpoint evaluated",
 		zap.String("cpSource", checkpoint.source),
 		zap.Int64("segmentID", checkpoint.segmentID),
 		zap.Uint64("cpTimestamp", checkpoint.position.GetTimestamp()))
@@ -812,7 +813,7 @@ func (wb *writeBufferBase) updateGrowingSourceBufferedRows(progress *growingSour
 func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp(), wb.syncPolicies...)
 	if len(segmentsToSync) > 0 {
-		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
+		mlog.Info(context.TODO(), "write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
 		// ignore future here, use callback to handle error
 		wb.syncSegments(context.Background(), segmentsToSync)
 	}
@@ -820,7 +821,7 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	return segmentsToSync
 }
 
-func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64) error {
 	existingIDs := make([]int64, 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		_, ok := wb.metaCache.GetSegmentByID(segmentID)
@@ -831,7 +832,7 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 					zap.String("channel", wb.channelName))
 				return merr.WrapErrSegmentNotFound(segmentID)
 			}
-			log.Info("segment not found in WriteBuffer metaCache, skipping seal",
+			mlog.Info(ctx, "segment not found in WriteBuffer metaCache, skipping seal",
 				zap.Int64("segmentID", segmentID),
 				zap.String("channel", wb.channelName))
 			continue
@@ -852,7 +853,7 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 
 func (wb *writeBufferBase) sealAllSegments(ctx context.Context) error {
 	allSegmentIds := wb.metaCache.GetSegmentIDsBy()
-	log.Ctx(ctx).Info("seal all segments", zap.Int64s("segmentIDs", allSegmentIds))
+	mlog.Info(ctx, "seal all segments", zap.Int64s("segmentIDs", allSegmentIds))
 	// mark segment flushing if segment was growing
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(allSegmentIds...),
@@ -869,13 +870,12 @@ func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
-	log := log.Ctx(ctx)
 	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
 			if errors.Is(err, merr.ErrSegmentNotFound) {
-				log.Warn("segment not found in meta", zap.Int64("segmentID", segmentID))
+				mlog.Warn(ctx, "segment not found in meta", zap.Int64("segmentID", segmentID))
 				continue
 			} else if errors.Is(err, errGrowingSourceUnavailable) && wb.hasGrowingSourceProgress(segmentID) {
 				wb.rollbackGrowingSourceSyncCandidate(segmentID)
@@ -885,7 +885,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 					zap.Error(err))
 				continue
 			} else {
-				log.Fatal("failed to get sync task", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Fatal(ctx, "failed to get sync task", zap.Int64("segmentID", segmentID), zap.Error(err))
 			}
 		}
 
@@ -952,7 +952,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 
 			if syncTask.IsFlush() {
 				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
-				log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
+				mlog.Info(ctx, "flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
 			}
 			return nil
 		})
@@ -975,7 +975,7 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 	for _, policy := range policies {
 		result := policy.SelectSegments(buffers, ts)
 		if len(result) > 0 {
-			log.Info("SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))
+			mlog.Info(context.TODO(), "SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))
 			segments.Insert(result...)
 		}
 	}
@@ -1272,7 +1272,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
+		mlog.Info(context.TODO(), "add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
 	}
 }
 
@@ -1284,12 +1284,9 @@ func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKe
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("segmentID", segmentID),
-	)
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
-		log.Warn("segment info not found in meta cache", zap.Int64("segmentID", segmentID))
+		mlog.Warn(ctx, "segment info not found in meta cache", zap.Int64("segmentID", segmentID))
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
 	if progress, ok := wb.growingSourceProgress[segmentID]; ok && !wb.hasWriteBufferInsertPayload(segmentID) {
@@ -1469,7 +1466,6 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 }
 
 func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
-	log := wb.logger
 	// sink all data and call Drop for meta writer
 	wb.mut.Lock()
 	wb.closed = true
@@ -1540,13 +1536,13 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		log.Error("failed to sink write buffer data", zap.Error(err))
+		mlog.Error(ctx, "failed to sink write buffer data", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}
 	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
 	if err != nil {
-		log.Error("failed to drop channel", zap.Error(err))
+		mlog.Error(ctx, "failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}
@@ -1581,7 +1577,7 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 		for _, msg := range msgs {
 			data, err := storage.InsertMsgToInsertData(msg, collSchema)
 			if err != nil {
-				log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to transfer insert msg to insert data", zap.Error(err))
 				return nil, err
 			}
 

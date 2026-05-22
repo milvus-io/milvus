@@ -4591,12 +4591,12 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
-						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+						mlog.Fatal(context.TODO(), "failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 					}
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					mlog.Fatal(context.TODO(), "failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
 			}
@@ -4830,7 +4830,7 @@ user-task-polling:
 		Export: true,
 		Formatter: func(v string) string {
 			if getAsInt64(v) <= 0 {
-				log.Warn("queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
 					zap.String("configured", v))
 				return "4194304"
 			}
@@ -6968,7 +6968,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Formatter: func(v string) string {
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
-				log.Warn("positive parallel task number, reset to default 16", zap.String("value", v))
+				mlog.Warn(context.TODO(), "positive parallel task number, reset to default 16", zap.String("value", v))
 				return "16" // MaxParallelSyncMgrTasksPerCPUCore must >= 1
 			}
 			return strconv.FormatInt(int64(concurrency), 10)
@@ -7026,7 +7026,7 @@ Setting this parameter too small causes the system to store a small amount of da
 			Export:       true,
 		}
 	} else {
-		log.Info("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+		mlog.Info(context.TODO(), "DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
 		p.MemoryForceSyncWatermark = ParamItem{
 			Key:          "dataNode.memory.forceSyncWatermark",
 			Version:      "2.4.0",
@@ -7218,7 +7218,7 @@ if this parameter <= 0, will set it as 10`,
 		Formatter: func(v string) string {
 			percentage := getAsFloat(v)
 			if percentage <= 0 || percentage > 100 {
-				log.Warn("invalid import memory limit percentage, using default 10%")
+				mlog.Warn(context.TODO(), "invalid import memory limit percentage, using default 10%")
 				return "10"
 			}
 			return fmt.Sprintf("%f", percentage)
@@ -8291,7 +8291,7 @@ func getLocalStoragePath(base *BaseTable) string {
 	localStoragePath := base.Get("localStorage.path")
 	if len(localStoragePath) == 0 {
 		localStoragePath = defaultLocalStoragePath
-		log.Warn("localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
+		mlog.Warn(context.TODO(), "localStorage.path is not set, using default value", zap.String("localStorage.path", localStoragePath))
 	}
 	return localStoragePath
 }

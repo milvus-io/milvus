@@ -35,7 +35,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -405,7 +405,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 
 	// test recover loading collection reach limit
 	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
-		log.Info("stupid", zap.Int("count", i))
+		mlog.Info(suite.ctx, "stupid", zap.Int("count", i))
 		suite.clearMemory()
 		err = mgr.Recover(ctx, suite.broker)
 		suite.NoError(err)

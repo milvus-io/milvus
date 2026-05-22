@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,8 +29,8 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // theadWatcher is the utility to update milvus process thread number metrics.
@@ -105,7 +106,7 @@ func (thw *threadWatcher) watchThreadNum() {
 	pid := os.Getpid()
 	p, err := process.NewProcess(int32(pid))
 	if err != nil {
-		log.Warn("thread watcher failed to get milvus process info, quit", zap.Int("pid", pid), zap.Error(err))
+		mlog.Warn(context.TODO(), "thread watcher failed to get milvus process info, quit", zap.Int("pid", pid), zap.Error(err))
 		return
 	}
 	for {
@@ -113,14 +114,14 @@ func (thw *threadWatcher) watchThreadNum() {
 		case <-ticker.C:
 			threadNum, err := p.NumThreads()
 			if err != nil {
-				log.Warn("thread watcher failed to get process", zap.Int("pid", pid), zap.Error(err))
+				mlog.Warn(context.TODO(), "thread watcher failed to get process", zap.Int("pid", pid), zap.Error(err))
 				continue
 			}
-			log.Debug("thread watcher observe thread num", zap.Int32("threadNum", threadNum))
+			mlog.Debug(context.TODO(), "thread watcher observe thread num", zap.Int32("threadNum", threadNum))
 			metrics.ThreadNum.Set(float64(threadNum))
 			thw.updateNamedThreadCPUActiveNum()
 		case <-thw.ch:
-			log.Info("thread watcher exit")
+			mlog.Info(context.TODO(), "thread watcher exit")
 			return
 		}
 	}
@@ -133,7 +134,7 @@ func (thw *threadWatcher) updateNamedThreadCPUActiveNum() {
 
 	current, err := collectNamedThreadStats()
 	if err != nil {
-		log.Warn("thread watcher failed to collect named thread stats", zap.Error(err))
+		mlog.Warn(context.TODO(), "thread watcher failed to collect named thread stats", zap.Error(err))
 		return
 	}
 

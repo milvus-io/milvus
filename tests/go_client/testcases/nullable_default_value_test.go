@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -871,7 +871,7 @@ func TestNullableQuery(t *testing.T) {
 		{expr: fmt.Sprintf("%s is not null and %d <= %s < %d", common.DefaultVarcharFieldName, common.DefaultNb*3, common.DefaultInt64FieldName, common.DefaultNb*4), count: common.DefaultNb},
 	}
 	for _, exprCount := range exprCounts {
-		log.Info("exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+		mlog.Info(context.TODO(), "exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
 		countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		common.CheckErr(t, err, true)
 		count, _ := countRes.Fields[0].GetAsInt64(0)
@@ -929,7 +929,7 @@ func TestDefaultValueQuery(t *testing.T) {
 			{expr: fmt.Sprintf("%s == 'test'", common.DefaultVarcharFieldName), count: common.DefaultNb * 3 / 2},
 		}
 		for _, exprCount := range exprCounts {
-			log.Info("exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+			mlog.Info(context.TODO(), "exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
 			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 			common.CheckErr(t, err, true)
 			count, _ := countRes.Fields[0].GetAsInt64(0)

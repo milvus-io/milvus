@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -43,7 +43,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	channelCps := make(map[string]*msgpb.MsgPosition)
 
 	flushTs := t.BeginTs()
-	log.Ctx(ctx).Info("flushTaskByStreamingService.Execute", zap.Int("collectionNum", len(t.CollectionNames)), zap.Uint64("flushTs", flushTs))
+	mlog.Info(ctx, "flushTaskByStreamingService.Execute", zap.Int("collectionNum", len(t.CollectionNames)), zap.Uint64("flushTs", flushTs))
 	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
@@ -109,7 +109,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 
 // sendManualFlushToWAL sends a manual flush message to WAL.
 func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
-	logger := log.Ctx(ctx).With(zap.Int64("collectionID", collID), zap.String("vchannel", vchannel))
+	logger := mlog.With(zap.Int64("collectionID", collID), zap.String("vchannel", vchannel))
 	flushMsg, err := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.ManualFlushMessageHeader{
@@ -119,7 +119,7 @@ func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, fl
 		WithBody(&message.ManualFlushMessageBody{}).
 		BuildMutable()
 	if err != nil {
-		logger.Warn("build manual flush message failed", zap.Error(err))
+		logger.Warn(ctx, "build manual flush message failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -127,16 +127,16 @@ func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, fl
 		BarrierTimeTick: flushTs,
 	})
 	if err != nil {
-		logger.Warn("append manual flush message to wal failed", zap.Error(err))
+		logger.Warn(ctx, "append manual flush message to wal failed", zap.Error(err))
 		return nil, err
 	}
 
 	var flushMsgResponse message.ManualFlushExtraResponse
 	if err := appendResult.GetExtra(&flushMsgResponse); err != nil {
-		logger.Warn("get extra from append result failed", zap.Error(err))
+		logger.Warn(ctx, "get extra from append result failed", zap.Error(err))
 		return nil, err
 	}
-	logger.Info("append manual flush message to wal successfully")
+	logger.Info(ctx, "append manual flush message to wal successfully")
 
 	return flushMsgResponse.GetSegmentIds(), nil
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -95,13 +95,13 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 	versionReqStr := paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.GetValue()
 	versionRequirement, err := semver.Parse(versionReqStr)
 	if err != nil {
-		log.Warn("failed to parse storage version upgrade version requirement", zap.String("versionStr", versionReqStr), zap.Error(err))
+		mlog.Warn(ctx, "failed to parse storage version upgrade version requirement", zap.String("versionStr", versionReqStr), zap.Error(err))
 		return map[CompactionTriggerType][]CompactionView{}, err
 	}
 
 	minVersion := policy.versionManager.GetMinimalSessionVer()
 	if minVersion.LT(versionRequirement) {
-		log.Info("storage version upgrade policy skipped due to minimal querynode version does not satisfy requirement", zap.String("minVersion", minVersion.String()), zap.String("requirement", versionRequirement.String()))
+		mlog.Info(ctx, "storage version upgrade policy skipped due to minimal querynode version does not satisfy requirement", zap.String("minVersion", minVersion.String()), zap.String("requirement", versionRequirement.String()))
 		return map[CompactionTriggerType][]CompactionView{}, nil
 	}
 
@@ -120,14 +120,14 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 			break
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			log.Info("skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
+			mlog.Info(ctx, "skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
 				zap.Int64("collectionID", collection.ID))
 			continue
 		}
 		collectionViews, err := policy.triggerOneCollection(ctx, collection.ID, maxCount)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
-			log.Warn("fail to trigger storage version compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
+			mlog.Warn(ctx, "fail to trigger storage version compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 			continue
 		}
 		views = append(views, collectionViews...)
@@ -136,15 +136,15 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 }
 
 func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Context, collectionID int64, maxCount int) ([]CompactionView, error) {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(zap.Int64("collectionID", collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn("fail to apply storageVersionUpgradePolicy, unable to get collection from handler",
+		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to get collection from handler",
 			zap.Error(err))
 		return nil, err
 	}
 	if collection == nil {
-		log.Warn("fail to apply storageVersionUpgradePolicy, collection not exist")
+		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, collection not exist")
 		return nil, nil
 	}
 	if collection.IsExternal() {
@@ -154,13 +154,13 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
-		log.Warn("failed to apply storageVersionUpgradePolicy, get collection ttl failed")
+		log.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
 		return nil, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn("fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", zap.Error(err))
+		log.Warn(ctx, "fail to apply storageVersionUpgradePolicy, unable to allocate triggerID", zap.Error(err))
 		return nil, err
 	}
 
@@ -172,7 +172,7 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 	if targetVersion < storage.StorageV3 {
 		for _, field := range collection.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_Text {
-				log.Warn("storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
+				log.Warn(ctx, "storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
 					zap.Int64("targetVersion", targetVersion),
 					zap.Int64("requiredVersion", storage.StorageV3))
 				return nil, nil

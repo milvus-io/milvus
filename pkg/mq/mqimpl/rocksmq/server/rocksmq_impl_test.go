@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -26,7 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -501,7 +502,7 @@ func TestRocksmq_Throughout(t *testing.T) {
 	}
 	pt1 := time.Now().UnixNano() / int64(time.Millisecond)
 	pDuration := pt1 - pt0
-	log.Info("Rocksmq_Throughout",
+	mlog.Info(context.TODO(), "Rocksmq_Throughout",
 		zap.Int("Total produce item number", entityNum),
 		zap.Int64("Total cost (ms)", pDuration),
 		zap.Int64("Total throughout (s)", int64(entityNum)*1000/pDuration))
@@ -521,7 +522,7 @@ func TestRocksmq_Throughout(t *testing.T) {
 	}
 	ct1 := time.Now().UnixNano() / int64(time.Millisecond)
 	cDuration := ct1 - ct0
-	log.Info("Rocksmq_Throughout",
+	mlog.Info(context.TODO(), "Rocksmq_Throughout",
 		zap.Int("Total produce item number", entityNum),
 		zap.Int64("Total cost (ms)", cDuration),
 		zap.Int64("Total throughout (s)", int64(entityNum)*1000/cDuration))

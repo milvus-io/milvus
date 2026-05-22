@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -356,7 +356,7 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	paramtable.Init()
 
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	// Task 1: PENDING state with pending (unacked) messages -> should be returned
 	pendingProto := createNewBroadcastTask(1, []string{"v1", "v2"})
@@ -538,7 +538,7 @@ func createAlterReplicateConfigBroadcastMsg(vchannels []string, forcePromote boo
 func TestIsAlterReplicateConfigMessage(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	t.Run("alter_replicate_config_message", func(t *testing.T) {
 		msg := createAlterReplicateConfigBroadcastMsg([]string{"v1"}, false).WithBroadcastID(1)
@@ -559,7 +559,7 @@ func TestIsAlterReplicateConfigMessage(t *testing.T) {
 func TestIsForcePromoteMessage(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	t.Run("force_promote_true", func(t *testing.T) {
 		msg := createAlterReplicateConfigBroadcastMsg([]string{"v1"}, true).WithBroadcastID(1)
@@ -589,7 +589,7 @@ func TestIsForcePromoteMessage(t *testing.T) {
 func TestPendingBroadcastMessages(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	t.Run("all_pending", func(t *testing.T) {
 		msg := createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(1)
@@ -627,14 +627,14 @@ func TestMarkIgnore(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		msg := createAlterReplicateConfigBroadcastMsg([]string{"v1", "v2"}, false).WithBroadcastID(10)
 		proto := createNewWaitAckBroadcastTaskFromMessage(msg,
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x00, 0x00})
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
-		task.SetLogger(log.With())
+		task.SetLogger(mlog.With())
 
 		err := task.MarkIgnore()
 		assert.NoError(t, err)
@@ -647,11 +647,11 @@ func TestMarkIgnore(t *testing.T) {
 
 	t.Run("non_alter_replicate_config", func(t *testing.T) {
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		proto := createNewBroadcastTask(11, []string{"v1"})
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
-		task.SetLogger(log.With())
+		task.SetLogger(mlog.With())
 
 		err := task.MarkIgnore()
 		assert.Error(t, err)
@@ -661,7 +661,7 @@ func TestMarkIgnore(t *testing.T) {
 func TestSortByControlChannelTimeTick(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	// Use single-vchannel (control channel only) tasks to avoid proto round-trip ordering issues
 	makeTask := func(broadcastID uint64, vchannel string, timeTick uint64) *broadcastTask {
@@ -701,7 +701,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		f.Set(rc)
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		bm := &broadcastTaskManager{
 			mu:    &sync.Mutex{},
@@ -729,14 +729,14 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		alterMsg := createAlterReplicateConfigBroadcastMsg([]string{"v1", "v2"}, false).WithBroadcastID(100)
 		alterProto := createNewWaitAckBroadcastTaskFromMessage(alterMsg,
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01, 0x00})
 		alterTask := newBroadcastTaskFromProto(alterProto, metrics, ackScheduler)
-		alterTask.SetLogger(log.With())
+		alterTask.SetLogger(mlog.With())
 
 		mw := mock_streaming.NewMockWALAccesser(t)
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
@@ -759,7 +759,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			lifetime:           typeutil.NewLifetime(),
 			mu:                 &sync.Mutex{},
 			tasks:              map[uint64]*broadcastTask{100: alterTask},
-			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+			broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
@@ -789,14 +789,14 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		dropMsg := createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(200)
 		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01, 0x00, 0x00})
 		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
-		dropTask.SetLogger(log.With())
+		dropTask.SetLogger(mlog.With())
 
 		appendedCount := atomic.NewInt32(0)
 		mw := mock_streaming.NewMockWALAccesser(t)
@@ -822,7 +822,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			lifetime:           typeutil.NewLifetime(),
 			mu:                 &sync.Mutex{},
 			tasks:              map[uint64]*broadcastTask{200: dropTask},
-			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+			broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
@@ -849,14 +849,14 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		dropMsg := createNewBroadcastMsg([]string{"v1", "v2"}).WithBroadcastID(300)
 		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01, 0x00})
 		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
-		dropTask.SetLogger(log.With())
+		dropTask.SetLogger(mlog.With())
 
 		// First call fails, subsequent calls succeed
 		callCount := atomic.NewInt32(0)
@@ -885,7 +885,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			lifetime:           typeutil.NewLifetime(),
 			mu:                 &sync.Mutex{},
 			tasks:              map[uint64]*broadcastTask{300: dropTask},
-			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+			broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
@@ -913,7 +913,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		// Create an incomplete task (v2 not acked)
 		dropMsg := createNewBroadcastMsg([]string{"v1", "v2"}).WithBroadcastID(500)
@@ -921,7 +921,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01, 0x00})
 		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
-		dropTask.SetLogger(log.With())
+		dropTask.SetLogger(mlog.With())
 
 		mw := mock_streaming.NewMockWALAccesser(t)
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
@@ -943,7 +943,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			lifetime:           typeutil.NewLifetime(),
 			mu:                 &sync.Mutex{},
 			tasks:              map[uint64]*broadcastTask{500: dropTask},
-			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+			broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
@@ -969,14 +969,14 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		dropMsg := createNewBroadcastMsg([]string{"v1", "v2"}).WithBroadcastID(600)
 		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01, 0x00})
 		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
-		dropTask.SetLogger(log.With())
+		dropTask.SetLogger(mlog.With())
 
 		// WAL mock succeeds but never acks
 		mw := mock_streaming.NewMockWALAccesser(t)
@@ -999,7 +999,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			lifetime:           typeutil.NewLifetime(),
 			mu:                 &sync.Mutex{},
 			tasks:              map[uint64]*broadcastTask{600: dropTask},
-			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+			broadcastScheduler: newBroadcasterScheduler(nil, mlog.With()),
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
@@ -1046,7 +1046,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 		streaming.SetWALForTest(mw)
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		// Create a force promote task that is already all acked
 		fpMsg := createAlterReplicateConfigBroadcastMsg([]string{"v1"}, true).WithBroadcastID(400)
@@ -1054,7 +1054,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x01}) // already acked
 		fpTask := newBroadcastTaskFromProto(fpProto, metrics, ackScheduler)
-		fpTask.SetLogger(log.With())
+		fpTask.SetLogger(mlog.With())
 
 		// No incomplete tasks in the bm
 		bm := &broadcastTaskManager{
@@ -1090,7 +1090,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 		resource.InitForTest()
 
 		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
+		ackScheduler := newAckCallbackScheduler(mlog.With())
 
 		// Create a force promote task that is NOT all acked
 		fpMsg := createAlterReplicateConfigBroadcastMsg([]string{"v1", "v2"}, true).WithBroadcastID(401)
@@ -1098,7 +1098,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			[]byte{0x00, 0x00}) // not acked
 		fpTask := newBroadcastTaskFromProto(fpProto, metrics, ackScheduler)
-		fpTask.SetLogger(log.With())
+		fpTask.SetLogger(mlog.With())
 
 		bm := &broadcastTaskManager{
 			mu:    &sync.Mutex{},

@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
@@ -37,7 +37,7 @@ type Server struct {
 
 // Init initializes the streamingnode server.
 func (s *Server) init() {
-	log.Info("init streamingnode server...")
+	mlog.Info(context.TODO(), "init streamingnode server...")
 	// init all basic components.
 	s.initBasicComponent()
 
@@ -47,22 +47,22 @@ func (s *Server) init() {
 	// init file resource manager
 	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
 
-	log.Info("init query segcore...")
+	mlog.Info(context.TODO(), "init query segcore...")
 	if err := initcore.InitQueryNode(context.TODO()); err != nil {
 		panic(fmt.Sprintf("init query node segcore failed, %+v", err))
 	}
 
-	log.Info("streamingnode server initialized")
+	mlog.Info(context.TODO(), "streamingnode server initialized")
 }
 
 // Stop stops the streamingnode server.
 func (s *Server) Stop() {
-	log.Info("stopping streamingnode server...")
-	log.Info("close wal manager...")
+	mlog.Info(context.TODO(), "stopping streamingnode server...")
+	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
-	log.Info("release streamingnode resources...")
+	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()
-	log.Info("streamingnode server stopped")
+	mlog.Info(context.TODO(), "streamingnode server stopped")
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.

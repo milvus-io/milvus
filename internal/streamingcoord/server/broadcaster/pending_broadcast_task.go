@@ -49,29 +49,29 @@ type pendingBroadcastTask struct {
 // Same semantics as the `Poll` operation in eventloop.
 func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	if err := b.InitializeRecovery(ctx); err != nil {
-		b.Logger().Warn("broadcast task initialize recovery failed", zap.Error(err))
+		b.Logger().Warn(ctx, "broadcast task initialize recovery failed", zap.Error(err))
 		return err
 	}
 
 	if len(b.pendingMessages) > 0 {
-		b.Logger().Debug("broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
+		b.Logger().Debug(ctx, "broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
 		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
 			if resp.Error != nil {
-				b.Logger().Warn("broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
+				b.Logger().Warn(ctx, "broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
 				newPendings = append(newPendings, b.pendingMessages[idx])
 				continue
 			}
 			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
 		}
 		b.pendingMessages = newPendings
-		b.Logger().Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
+		b.Logger().Info(ctx, "broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
 		// trigger a fast ack operation when the broadcast operation is done.
 		if err := b.FastAck(ctx, b.appendResult); err != nil {
-			b.Logger().Warn("broadcast task save task failed", zap.Error(err))
+			b.Logger().Warn(ctx, "broadcast task save task failed", zap.Error(err))
 			return err
 		}
 		return nil

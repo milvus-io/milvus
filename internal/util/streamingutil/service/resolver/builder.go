@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -26,7 +26,7 @@ var idAllocator = typeutil.NewIDAllocator()
 func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 	b := newBuilder(ChannelAssignmentResolverScheme,
 		discoverer.NewChannelAssignmentDiscoverer(w),
-		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", ChannelAssignmentResolverScheme)))
+		mlog.With(mlog.FieldComponent("grpc-resolver"), zap.String("scheme", ChannelAssignmentResolverScheme)))
 	return b
 }
 
@@ -34,12 +34,12 @@ func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 // Multiple sessions are allowed, use the role as prefix.
 func NewSessionBuilder(c *clientv3.Client, sessionDiscovererOptions ...discoverer.SessionDiscovererOption) Builder {
 	sd := discoverer.NewSessionDiscoverer(c, sessionDiscovererOptions...)
-	b := newBuilder(SessionResolverScheme, sd, sd.Logger().With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme)))
+	b := newBuilder(SessionResolverScheme, sd, sd.Logger().With(mlog.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme)))
 	return b
 }
 
 // newBuilder creates a new resolver builder.
-func newBuilder(scheme string, d discoverer.Discoverer, logger *log.MLogger) Builder {
+func newBuilder(scheme string, d discoverer.Discoverer, logger *mlog.Logger) Builder {
 	resolver := newResolverWithDiscoverer(d, 1*time.Second, logger) // configurable.
 	b := &builderImpl{
 		lifetime: typeutil.NewLifetime(),
@@ -52,7 +52,7 @@ func newBuilder(scheme string, d discoverer.Discoverer, logger *log.MLogger) Bui
 
 // builderImpl implements resolver.Builder.
 type builderImpl struct {
-	log.Binder
+	mlog.Binder
 	lifetime *typeutil.Lifetime
 	scheme   string
 	resolver *resolverWithDiscoverer

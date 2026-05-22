@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	storage "github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -83,7 +83,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	}
 
 	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
-	log.Info("SaveBinlogPath",
+	mlog.Info(ctx, "SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
 		zap.Int64("CollectionID", pack.collectionID),
 		zap.Int64("ParitionID", pack.partitionID),
@@ -127,16 +127,16 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		// Segment not found during stale segment flush. Segment might get compacted already.
 		// Stop retry and still proceed to the end, ignoring this error.
 		if !pack.pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
-			log.Warn("stale segment not found, could be compacted",
+			mlog.Warn(ctx, "stale segment not found, could be compacted",
 				zap.Int64("segmentID", pack.segmentID))
-			log.Warn("failed to SaveBinlogPaths",
+			mlog.Warn(ctx, "failed to SaveBinlogPaths",
 				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
 			return false, nil
 		}
 		// meta error, datanode handles a virtual channel does not belong here
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
-			log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", pack.channelName))
+			mlog.Warn(ctx, "meta error found, skip sync and start to drop virtual channel", zap.String("channel", pack.channelName))
 			return false, nil
 		}
 
@@ -147,7 +147,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		return false, nil
 	}, b.opts...)
 	if err != nil {
-		log.Warn("failed to SaveBinlogPaths",
+		mlog.Warn(ctx, "failed to SaveBinlogPaths",
 			zap.Int64("segmentID", pack.segmentID),
 			zap.Error(err))
 		return err
@@ -248,7 +248,7 @@ func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) 
 		return false, nil
 	}, b.opts...)
 	if err != nil {
-		log.Warn("failed to DropChannel",
+		mlog.Warn(ctx, "failed to DropChannel",
 			zap.String("channel", channelName),
 			zap.Error(err))
 	}

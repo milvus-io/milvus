@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -100,7 +100,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
 		if index != nil && !index.close {
-			log.Error("there is leakage in index object, please check.")
+			mlog.Error(context.TODO(), "there is leakage in index object, please check.")
 		}
 	})
 
@@ -110,7 +110,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
+		mlog.Warn(ctx, "marshal buildIndexInfo failed",
 			zap.String("clusterID", buildIndexInfo.GetClusterID()),
 			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
 			zap.Error(err))
@@ -129,7 +129,7 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
 		if index != nil && !index.close {
-			log.Error("there is leakage in index object, please check.")
+			mlog.Error(ctx, "there is leakage in index object, please check.")
 		}
 	})
 
@@ -146,7 +146,7 @@ type JSONKeyStatsResult struct {
 func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (*JSONKeyStatsResult, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
+		mlog.Warn(ctx, "marshal buildIndexInfo failed",
 			zap.String("clusterID", buildIndexInfo.GetClusterID()),
 			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
 			zap.Error(err))

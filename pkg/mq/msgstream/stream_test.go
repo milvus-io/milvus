@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -199,7 +199,7 @@ func testSendAndRecv(t *testing.T, p mqwrapper.Producer, c mqwrapper.Consumer) {
 	go func() {
 		defer wg.Done()
 		producerIDs = sendMessages(ctx, t, p, msg)
-		log.Debug("producing finished", zap.Any("id", producerIDs[0].Serialize()), zap.Any("ids", producerIDs))
+		mlog.Debug(context.TODO(), "producing finished", zap.Any("id", producerIDs[0].Serialize()), zap.Any("ids", producerIDs))
 	}()
 
 	go func() {

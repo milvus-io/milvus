@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/cdc/meta"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -55,7 +55,7 @@ func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logger := log.With(zap.String("key", channel.Key), zap.Int64("modRevision", channel.ModRevision))
+	logger := mlog.With(zap.String("key", channel.Key), zap.Int64("modRevision", channel.ModRevision))
 	repKey := buildReplicatorKey(channel.Key, channel.ModRevision)
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	if !strings.Contains(channel.Value.GetSourceChannelName(), currentClusterID) {
@@ -63,14 +63,14 @@ func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
 	}
 	_, ok := r.replicators[repKey]
 	if ok {
-		logger.Debug("replicator already exists, skip create replicator")
+		logger.Debug(r.ctx, "replicator already exists, skip create replicator")
 		return
 	}
 	replicator := NewChannelReplicator(channel)
 	replicator.StartReplication()
 	r.replicators[repKey] = replicator
 	r.replicatorChannels[repKey] = channel
-	logger.Info("created replicator for replicate pchannel")
+	logger.Info(r.ctx, "created replicator for replicate pchannel")
 }
 
 func (r *replicateManager) RemoveReplicator(key string, modRevision int64) {
@@ -80,17 +80,17 @@ func (r *replicateManager) RemoveReplicator(key string, modRevision int64) {
 }
 
 func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) {
-	logger := log.With(zap.String("key", key), zap.Int64("modRevision", modRevision))
+	logger := mlog.With(zap.String("key", key), zap.Int64("modRevision", modRevision))
 	repKey := buildReplicatorKey(key, modRevision)
 	replicator, ok := r.replicators[repKey]
 	if !ok {
-		logger.Info("replicator not found, skip remove")
+		logger.Info(r.ctx, "replicator not found, skip remove")
 		return
 	}
 	replicator.StopReplication()
 	delete(r.replicators, repKey)
 	delete(r.replicatorChannels, repKey)
-	logger.Info("removed replicator for replicate pchannel")
+	logger.Info(r.ctx, "removed replicator for replicate pchannel")
 }
 
 func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel) {

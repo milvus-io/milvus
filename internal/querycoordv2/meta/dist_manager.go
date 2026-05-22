@@ -17,11 +17,13 @@
 package meta
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -54,7 +56,7 @@ func (dm *DistributionManager) GetDistributionJSON(collectionID int64) string {
 
 	v, err := json.Marshal(dist)
 	if err != nil {
-		log.Warn("failed to marshal dist", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal dist", zap.Error(err))
 		return ""
 	}
 	return string(v)

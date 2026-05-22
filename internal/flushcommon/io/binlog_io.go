@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -71,16 +71,16 @@ func (b *BinlogIoImpl) AsyncDownload(ctx context.Context, paths []string) []*con
 			var err error
 
 			start := time.Now()
-			log.Ctx(ctx).Debug("BinlogIO download", zap.String("path", path))
+			mlog.Debug(ctx, "BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
 				if err != nil {
-					log.Warn("BinlogIO fail to download", zap.String("path", path), zap.Error(err))
+					mlog.Warn(ctx, "BinlogIO fail to download", zap.String("path", path), zap.Error(err))
 				}
 				return err
 			})
 
-			log.Ctx(ctx).Debug("BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
+			mlog.Debug(ctx, "BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
 				zap.Error(err))
 
 			return val, err
@@ -106,15 +106,15 @@ func (b *BinlogIoImpl) AsyncUpload(ctx context.Context, kvs map[string][]byte) [
 		future := b.pool.Submit(func() (any, error) {
 			var err error
 			start := time.Now()
-			log.Ctx(ctx).Debug("BinlogIO upload", zap.String("paths", innerK))
+			mlog.Debug(ctx, "BinlogIO upload", zap.String("paths", innerK))
 			err = retry.Do(ctx, func() error {
 				err = b.Write(ctx, innerK, innerV)
 				if err != nil {
-					log.Warn("BinlogIO fail to upload", zap.String("paths", innerK), zap.Error(err))
+					mlog.Warn(ctx, "BinlogIO fail to upload", zap.String("paths", innerK), zap.Error(err))
 				}
 				return err
 			})
-			log.Ctx(ctx).Debug("BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
+			mlog.Debug(ctx, "BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
 			return struct{}{}, err
 		})
 		futures = append(futures, future)

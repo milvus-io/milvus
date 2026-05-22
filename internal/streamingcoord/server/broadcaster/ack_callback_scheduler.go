@@ -11,14 +11,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // newAckCallbackScheduler creates a new ack callback scheduler.
-func newAckCallbackScheduler(logger *log.MLogger) *ackCallbackScheduler {
+func newAckCallbackScheduler(logger *mlog.Logger) *ackCallbackScheduler {
 	s := &ackCallbackScheduler{
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
 		pending:            make(chan *broadcastTask, 16),
@@ -32,7 +32,7 @@ func newAckCallbackScheduler(logger *log.MLogger) *ackCallbackScheduler {
 }
 
 type ackCallbackScheduler struct {
-	log.Binder
+	mlog.Binder
 
 	notifier           *syncutil.AsyncTaskNotifier[struct{}]
 	pending            chan *broadcastTask
@@ -101,9 +101,13 @@ func (s *ackCallbackScheduler) Close() {
 func (s *ackCallbackScheduler) background() {
 	defer func() {
 		s.notifier.Finish(struct{}{})
-		s.Logger().Info("ack scheduler background exit")
+		s.Logger().Info(context.TODO(),
+
+			"ack scheduler background exit")
 	}()
-	s.Logger().Info("ack scheduler background start")
+	s.Logger().Info(context.TODO(),
+
+		"ack scheduler background start")
 
 	// it's weired to find that FastLock may be failure even if there's no resource-key locked,
 	// also see: #45285
@@ -153,7 +157,9 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn("lock is occupied, delay the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID), zap.Error(err))
+			s.Logger().Warn(context.TODO(),
+
+				"lock is occupied, delay the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID), zap.Error(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -173,15 +179,15 @@ func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadca
 	ctx := s.notifier.Context()
 
 	if err := bt.BlockUntilAllAck(ctx); err != nil {
-		logger.Warn("force promote BlockUntilAllAck failed", zap.Error(err))
+		logger.Warn(context.TODO(), "force promote BlockUntilAllAck failed", zap.Error(err))
 		return
 	}
 
 	if err := s.fixIncompleteBroadcastsForForcePromote(ctx); err != nil {
-		logger.Warn("force promote fix incomplete broadcasts aborted", zap.Error(err))
+		logger.Warn(context.TODO(), "force promote fix incomplete broadcasts aborted", zap.Error(err))
 		return
 	}
-	logger.Info("completed fixing incomplete broadcasts for force promote")
+	logger.Info(context.TODO(), "completed fixing incomplete broadcasts for force promote")
 
 	// Acquire resource key lock before executing ack callback.
 	g := s.rkLocker.Lock(bt.Header().ResourceKeys.Collect()...)
@@ -200,11 +206,15 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 	})
 
 	if len(incompleteTasks) == 0 {
-		s.Logger().Info("No incomplete broadcasts to fix for force promote")
+		s.Logger().Info(ctx,
+
+			"No incomplete broadcasts to fix for force promote")
 		return nil
 	}
 
-	s.Logger().Info("Fixing incomplete broadcasts for force promote",
+	s.Logger().Info(ctx,
+
+		"Fixing incomplete broadcasts for force promote",
 		zap.Int("incompleteTasks", len(incompleteTasks)))
 
 	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
@@ -214,7 +224,9 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		if !task.IsAlterReplicateConfigMessage() {
 			continue
 		}
-		s.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
+		s.Logger().Info(ctx,
+
+			"Marking AlterReplicateConfig task with ignore=true",
 			zap.Uint64("broadcastID", task.Header().BroadcastID))
 
 		if err := task.MarkIgnore(); err != nil {
@@ -233,7 +245,9 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		for i, msg := range pending.pendingMessages {
 			pending.pendingMessages[i] = message.ClearReplicateHeader(msg)
 		}
-		s.Logger().Info("Delegating incomplete task to broadcastScheduler",
+		s.Logger().Info(ctx,
+
+			"Delegating incomplete task to broadcastScheduler",
 			zap.Uint64("broadcastID", task.Header().BroadcastID),
 			zap.String("messageType", task.msg.MessageType().String()),
 			zap.Int("pendingVChannels", len(pending.pendingMessages)))
@@ -241,7 +255,9 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 			return merr.Wrapf(err, "failed to supplement task %d via broadcastScheduler", task.Header().BroadcastID)
 		}
 	}
-	s.Logger().Info("All incomplete broadcasts fixed and tombstoned")
+	s.Logger().Info(ctx,
+
+		"All incomplete broadcasts fixed and tombstoned")
 	return nil
 }
 
@@ -255,16 +271,16 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 
 		s.triggerChan <- struct{}{}
 		if err == nil {
-			logger.Info("execute ack callback done")
+			logger.Info(context.TODO(), "execute ack callback done")
 		} else {
-			logger.Warn("execute ack callback failed", zap.Error(err))
+			logger.Warn(context.TODO(), "execute ack callback failed", zap.Error(err))
 		}
 	}()
-	logger.Info("start to execute ack callback")
+	logger.Info(context.TODO(), "start to execute ack callback")
 	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
 		return err
 	}
-	logger.Debug("all vchannels are acked")
+	logger.Debug(context.TODO(), "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
 	makeMap := make(map[string]*message.AppendResult, len(result))
@@ -282,7 +298,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	}
 	bt.ObserveAckCallbackDone()
 
-	logger.Debug("ack callback done")
+	logger.Debug(context.TODO(), "ack callback done")
 	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
@@ -305,8 +321,10 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 			return nil
 		}
 		nextInterval := backoff.NextBackOff()
-		s.Logger().Warn("failed to call message ack callback, wait for retry...",
-			log.FieldMessage(msg),
+		s.Logger().Warn(ctx,
+
+			"failed to call message ack callback, wait for retry...",
+			mlog.FieldMessage(msg),
 			zap.Duration("nextInterval", nextInterval),
 			zap.Error(err))
 		select {

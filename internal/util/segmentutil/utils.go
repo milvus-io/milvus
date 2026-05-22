@@ -1,9 +1,11 @@
 package segmentutil
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
@@ -14,7 +16,7 @@ import (
 func ReCalcRowCount(seg, segCloned *datapb.SegmentInfo) {
 	// `segment` is not mutated but only cloned above and is safe to be referred here.
 	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() && newCount > 0 {
-		log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
+		mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
 			zap.Int64("segmentID", seg.GetID()),
 			zap.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
 			zap.Int64("segment bin log row count (correct)", newCount))

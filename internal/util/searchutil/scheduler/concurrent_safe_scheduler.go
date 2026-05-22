@@ -11,8 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -31,7 +31,7 @@ const (
 // newScheduler create a scheduler with given schedule policy.
 func newScheduler(policy schedulePolicy) Scheduler {
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
-	log.Info("query node use concurrent safe scheduler", zap.Int("max_concurrency", maxReadConcurrency))
+	mlog.Info(context.TODO(), "query node use concurrent safe scheduler", zap.Int("max_concurrency", maxReadConcurrency))
 	return &scheduler{
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
@@ -101,7 +101,7 @@ func (s *scheduler) Add(task Task) (err error) {
 		err = ctx.Err()
 	}
 
-	return
+	return err
 }
 
 func (s *scheduler) ClearQueued(ctx context.Context, filter TaskFilter, reason string) (ClearResult, error) {
@@ -169,14 +169,14 @@ func (s *scheduler) schedule() {
 		select {
 		case req, ok := <-s.receiveChan:
 			if !ok {
-				log.Info("receiveChan closed, processing remaining request")
+				mlog.Info(context.TODO(), "receiveChan closed, processing remaining request")
 				// drain policy maintained task
 				for task.valid() {
 					execChan <- task.Task
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
-				log.Info("all task put into exeChan, schedule worker exit")
+				mlog.Info(context.TODO(), "all task put into exeChan, schedule worker exit")
 				close(s.execChan)
 				return
 			}
@@ -229,7 +229,7 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	}
 
 	if err := req.task.Context().Err(); err != nil {
-		log.Warn("task canceled before enqueue", zap.Error(err))
+		mlog.Warn(context.TODO(), "task canceled before enqueue", zap.Error(err))
 		req.err <- err
 	} else if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		err := merr.WrapErrTooManyRequests(
@@ -279,21 +279,21 @@ func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 // exec exec the ready task in background continuously.
 func (s *scheduler) exec() {
 	defer s.wg.Done()
-	log.Info("start execute loop")
+	mlog.Info(context.TODO(), "start execute loop")
 	for {
 		t, ok := <-s.execChan
 		if !ok {
-			log.Info("scheduler execChan closed, worker exit")
+			mlog.Info(context.TODO(), "scheduler execChan closed, worker exit")
 			return
 		}
 		// Skip this task if task is canceled.
 		if err := t.Context().Err(); err != nil {
-			log.Warn("task canceled before executing", zap.Error(err))
+			mlog.Warn(context.TODO(), "task canceled before executing", zap.Error(err))
 			t.Done(err)
 			continue
 		}
 		if err := t.PreExecute(); err != nil {
-			log.Warn("failed to pre-execute task", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to pre-execute task", zap.Error(err))
 			t.Done(err)
 			continue
 		}

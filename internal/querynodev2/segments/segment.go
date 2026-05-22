@@ -52,8 +52,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -345,7 +345,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	})
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
-		log.Warn("unreachable: failed to get resource usage estimate of segment", zap.Error(err), zap.Int64("collectionID", s.Collection()), zap.Int64("segmentID", s.ID()))
+		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", zap.Error(err), zap.Int64("collectionID", s.Collection()), zap.Int64("segmentID", s.ID()))
 		return ResourceUsage{}
 	}
 	s.resourceUsageCache.Store(usage)
@@ -403,7 +403,6 @@ func NewSegment(ctx context.Context,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (Segment, error) {
-	log := log.Ctx(ctx)
 	/*
 		CStatus
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
@@ -427,7 +426,7 @@ func NewSegment(ctx context.Context,
 		return nil, merr.WrapErrServiceInternalMsg("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
 	}
 
-	logger := log.With(
+	logger := mlog.With(
 		zap.Int64("collectionID", loadInfo.GetCollectionID()),
 		zap.Int64("partitionID", loadInfo.GetPartitionID()),
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
@@ -447,10 +446,10 @@ func NewSegment(ctx context.Context,
 		})
 		return nil, err
 	}).Await(); err != nil {
-		logger.Warn("create segment failed", zap.Error(err))
+		logger.Warn(ctx, "create segment failed", zap.Error(err))
 		return nil, err
 	}
-	logger.Info("create segment done")
+	logger.Info(ctx, "create segment done")
 
 	segment := &LocalSegment{
 		baseSegment:        base,
@@ -747,7 +746,7 @@ func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
 	filterOnly := searchReq.FilterOnly()
-	log := log.Ctx(ctx).WithLazy(
+	log := mlog.WithLazy(
 		zap.Uint64("mvcc", searchReq.MVCC()),
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("segmentID", s.ID()),
@@ -763,36 +762,36 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 
 	hasIndex := s.ExistIndex(searchReq.SearchFieldID())
 	log = log.With(zap.Bool("withIndex", hasIndex))
-	log.Debug("search segment...")
+	log.Debug(ctx, "search segment...")
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")
 	result, err := s.csegment.Search(ctx, searchReq)
 	if err != nil {
-		log.Warn("Search failed")
+		log.Warn(ctx, "Search failed")
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if filterOnly {
-		log.Debug("search filter only segment done", zap.Int64("validCount", result.ValidCount()))
+		log.Debug(ctx, "search filter only segment done", zap.Int64("validCount", result.ValidCount()))
 	} else {
-		log.Debug("search segment done")
+		log.Debug(ctx, "search segment done")
 	}
 	return result, nil
 }
 
-func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *zap.Logger) (*segcore.RetrieveResult, error) {
+func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *mlog.Logger) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.Unpin()
 
-	log.Debug("begin to retrieve")
+	log.Debug(ctx, "begin to retrieve")
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 	result, err := s.csegment.Retrieve(ctx, plan)
 	if err != nil {
-		log.Warn("Retrieve failed")
+		log.Warn(ctx, "Retrieve failed")
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(),
@@ -801,7 +800,7 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	log := log.Ctx(ctx).WithLazy(
+	log := mlog.WithLazy(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -820,25 +819,25 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 
 	retrieveResult, err := result.GetResult()
 	if err != nil {
-		log.Warn("unmarshal retrieve result failed", zap.Error(err))
+		log.Warn(ctx, "unmarshal retrieve result failed", zap.Error(err))
 		return nil, err
 	}
-	log.Debug("retrieve segment done", zap.Int("resultNum", len(retrieveResult.Offset)))
+	log.Debug(ctx, "retrieve segment done", zap.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
 
-func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *zap.Logger) (*segcore.RetrieveResult, error) {
+func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *mlog.Logger) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.Unpin()
 
-	log.Debug("begin to retrieve by offsets")
+	log.Debug(ctx, "begin to retrieve by offsets")
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
 	result, err := s.csegment.RetrieveByOffsets(ctx, plan)
 	if err != nil {
-		log.Warn("RetrieveByOffsets failed")
+		log.Warn(ctx, "RetrieveByOffsets failed")
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(),
@@ -847,7 +846,7 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-	log := log.Ctx(ctx).WithLazy(zap.Int64("collectionID", s.Collection()),
+	log := mlog.WithLazy(zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("msgID", plan.MsgID()),
@@ -866,10 +865,10 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 
 	retrieveResult, err := result.GetResult()
 	if err != nil {
-		log.Warn("unmarshal retrieve by offsets result failed", zap.Error(err))
+		log.Warn(ctx, "unmarshal retrieve by offsets result failed", zap.Error(err))
 		return nil, err
 	}
-	log.Debug("retrieve by segment offsets done", zap.Int("resultNum", len(retrieveResult.Offset)))
+	log.Debug(ctx, "retrieve by segment offsets done", zap.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
 
@@ -977,14 +976,14 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadFieldData-%d-%d", s.ID(), fieldID))
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", fieldID),
 		zap.Int64("rowCount", rowCount),
 	)
-	log.Info("start loading field data for field")
+	log.Info(ctx, "start loading field data for field")
 
 	// TODO retrieve_enable should be considered
 	collection := s.collection
@@ -1015,15 +1014,15 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
 		_, err = s.csegment.LoadFieldData(ctx, req)
-		log.Info("submitted loadFieldData task to load pool")
+		log.Info(ctx, "submitted loadFieldData task to load pool")
 		return nil, nil
 	}).Await()
 
 	if err != nil {
-		log.Warn("LoadFieldData failed", zap.Error(err))
+		log.Warn(ctx, "LoadFieldData failed", zap.Error(err))
 		return err
 	}
-	log.Info("load field done")
+	log.Info(ctx, "load field done")
 	return nil
 }
 
@@ -1040,7 +1039,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	}
 	defer s.ptrLock.Unpin()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -1097,7 +1096,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	s.rowNum.Store(-1)
 	s.advanceLastDeltaTimestamp(tss)
 
-	log.Info("load deleted record done",
+	log.Info(ctx, "load deleted record done",
 		zap.Int64("rowNum", rowNum),
 		zap.String("segmentType", s.Type().String()))
 	return nil
@@ -1140,13 +1139,13 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	// Add warmup policy to index_params if not already present
 	// C++ will pass it to Knowhere for index loading
 	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
-		log.Ctx(ctx).Info("warmup policy already in index params (from QueryCoord)",
+		mlog.Info(ctx, "warmup policy already in index params (from QueryCoord)",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
 			zap.Int64("fieldID", indexInfo.GetFieldID()),
 			zap.String("warmup", existingWarmup))
 	} else {
 		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo)
-		log.Ctx(ctx).Info("warmup policy from getIndexWarmupPolicy",
+		mlog.Info(ctx, "warmup policy from getIndexWarmupPolicy",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
 			zap.Int64("fieldID", indexInfo.GetFieldID()),
 			zap.String("warmup", warmupPolicy))
@@ -1176,14 +1175,14 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 
 	// 2.
 	if err := loadIndexInfo.appendLoadIndexInfo(ctx, indexInfoProto); err != nil {
-		log.Warn("fail to append load index info", zap.Error(err))
+		mlog.Warn(ctx, "fail to append load index info", zap.Error(err))
 		return err
 	}
 	return f(loadIndexInfo)
 }
 
 func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -1194,7 +1193,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	old := s.GetIndexByID(indexInfo.GetIndexID())
 	// the index loaded
 	if old != nil && old.IsLoaded {
-		log.Warn("index already loaded")
+		log.Warn(ctx, "index already loaded")
 		return nil
 	}
 
@@ -1214,7 +1213,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 
 	// // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
 	if s.IsSorted() && fieldSchema.GetIsPrimaryKey() {
-		log.Info("skip loading index for pk field in sorted segment")
+		log.Info(ctx, "skip loading index for pk field in sorted segment")
 		// set field index, preventing repeated loading index task
 		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
@@ -1241,7 +1240,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 
 			if err := loadIndexInfo.loadIndex(ctx); err != nil {
 				if loadIndexInfo.cleanLocalData(ctx) != nil {
-					log.Warn("failed to clean cached data on disk after append index failed",
+					mlog.Warn(ctx, "failed to clean cached data on disk after append index failed",
 						zap.Int64("buildID", indexInfo.BuildID),
 						zap.Int64("index version", indexInfo.IndexVersion))
 				}
@@ -1259,7 +1258,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 			}
 			updateIndexInfoSpan := tr.RecordSpan()
 
-			log.Info("Finish loading index",
+			mlog.Info(ctx, "Finish loading index",
 				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 				zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
@@ -1267,7 +1266,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 			return nil
 		})
 	if err != nil {
-		log.Warn("load index failed", zap.Error(err))
+		mlog.Warn(ctx, "load index failed", zap.Error(err))
 	}
 	return err
 }
@@ -1279,23 +1278,22 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	defer s.ptrLock.Unpin()
 
 	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-		log.Ctx(ctx).Warn("load json key index failed, json key stats is not enabled")
+		mlog.Warn(ctx, "load json key index failed, json key stats is not enabled")
 		return nil
 	}
 
 	// for compatibility, we only support load data format version equal to the current data format version
 	// if the data format version is less than the current version, wait for trigger a stats task again
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
-		log.Ctx(ctx).Warn("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+		mlog.Warn(ctx, "load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
-
-	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+	mlog.Info(ctx, "load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 	s.fieldJSONStatsMu.RLock()
 	_, loaded := s.fieldJSONStats[jsonKeyStats.GetFieldID()]
 	s.fieldJSONStatsMu.RUnlock()
 	if loaded {
-		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+		mlog.Warn(ctx, "JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
 
@@ -1353,7 +1351,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
@@ -1385,7 +1383,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		IndexInfo: indexInfo,
 		IsLoaded:  true,
 	})
-	log.Info("updateSegmentIndex done")
+	log.Info(ctx, "updateSegmentIndex done")
 	return nil
 }
 
@@ -1404,8 +1402,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	if err := HandleCStatus(ctx, &status, "updateFieldRawDataSize failed"); err != nil {
 		return err
 	}
-
-	log.Ctx(ctx).Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
+	mlog.Info(ctx, "updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
 
 	return nil
 }
@@ -1413,7 +1410,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) {
 	jsonStatsInfo := make(map[int64]*querypb.JsonStatsInfo)
 	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-		log.Ctx(ctx).Warn("skip sync json key stats, json key stats is not enabled", zap.Int64("segmentID", s.ID()))
+		mlog.Warn(ctx, "skip sync json key stats, json key stats is not enabled", zap.Int64("segmentID", s.ID()))
 		s.fieldJSONStatsMu.Lock()
 		s.fieldJSONStats = jsonStatsInfo
 		s.fieldJSONStatsMu.Unlock()
@@ -1423,7 +1420,7 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
 	jsonKeyStats := statsResult.JSONKeyStats
 	if statsResult.Err() != nil {
-		log.Ctx(ctx).Warn("failed to resolve json key stats from manifest",
+		mlog.Warn(ctx, "failed to resolve json key stats from manifest",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
 			zap.String("manifestPath", loadInfo.GetManifestPath()),
 			zap.Error(statsResult.Err()))
@@ -1435,7 +1432,7 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 			continue
 		}
 		if stats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
-			log.Ctx(ctx).Warn("skip sync json key stats, data format invalid",
+			mlog.Warn(ctx, "skip sync json key stats, data format invalid",
 				zap.Int64("segmentID", loadInfo.GetSegmentID()),
 				zap.Int64("fieldID", fieldID),
 				zap.Int64("buildID", stats.GetBuildID()),
@@ -1523,7 +1520,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// release will never fail
 	defer stateLockGuard.Done(nil)
 
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", s.Collection()),
+	log := mlog.With(zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
@@ -1534,7 +1531,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	ptr := s.ptr
 	if options.Scope == ReleaseScopeData {
 		s.ReleaseSegmentData()
-		log.Info("release segment data done and the field indexes info has been set lazy load=true")
+		log.Info(ctx, "release segment data done and the field indexes info has been set lazy load=true")
 		return
 	}
 
@@ -1562,7 +1559,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		s.binlogSize.Store(0)
 	}
 
-	log.Info("delete segment from memory")
+	log.Info(ctx, "delete segment from memory")
 }
 
 // ReleaseSegmentData releases the segment data.

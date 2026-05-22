@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -51,7 +51,7 @@ func resolveCollectionNames(ctx context.Context, collectionID int64) (string, st
 	}
 	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", "", collectionID)
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to resolve collection names from ID",
+		mlog.Warn(ctx, "failed to resolve collection names from ID",
 			zap.Int64("collectionID", collectionID), zap.Error(err))
 		return "", ""
 	}
@@ -135,7 +135,7 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (cst *createSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy create snapshot",
+	mlog.Info(ctx, "proxy create snapshot",
 		zap.String("snapshotName", cst.req.GetName()),
 		zap.String("collectionName", cst.req.GetCollectionName()),
 		zap.Int64("collectionID", cst.collectionID),
@@ -232,7 +232,7 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy drop snapshot",
+	mlog.Info(ctx, "proxy drop snapshot",
 		zap.String("snapshotName", dst.req.GetName()),
 		zap.String("collectionName", dst.req.GetCollectionName()),
 		zap.Int64("collectionID", dst.collectionID),
@@ -327,7 +327,7 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy describe snapshot",
+	mlog.Info(ctx, "proxy describe snapshot",
 		zap.String("snapshotName", dst.req.GetName()),
 	)
 
@@ -350,7 +350,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 
 	collectionName, err := globalMetaCache.GetCollectionName(ctx, "", snapshotInfo.GetCollectionId())
 	if err != nil {
-		log.Ctx(ctx).Warn("DescribeSnapshot fail to get collection name",
+		mlog.Warn(ctx, "DescribeSnapshot fail to get collection name",
 			zap.Error(err))
 		return err
 	}
@@ -358,7 +358,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 	for _, partitionID := range snapshotInfo.GetPartitionIds() {
 		partitionName, err := globalMetaCache.GetPartitionName(ctx, "", collectionName, partitionID)
 		if err != nil {
-			log.Ctx(ctx).Warn("DescribeSnapshot fail to get partition name",
+			mlog.Warn(ctx, "DescribeSnapshot fail to get partition name",
 				zap.Int64("partitionID", partitionID),
 				zap.Error(err))
 		}
@@ -459,7 +459,7 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 }
 
 func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy list snapshots",
+	mlog.Info(ctx, "proxy list snapshots",
 		zap.String("collectionName", lst.req.GetCollectionName()),
 		zap.Int64("collectionID", lst.collectionID),
 	)
@@ -572,7 +572,7 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 }
 
 func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy restore snapshot",
+	mlog.Info(ctx, "proxy restore snapshot",
 		zap.String("snapshotName", rst.req.GetName()),
 		zap.String("sourceCollection", rst.req.GetCollectionName()),
 		zap.String("sourceDb", rst.req.GetDbName()),
@@ -591,7 +591,7 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		SourceCollectionId:   rst.collectionID,
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot failed",
+		mlog.Warn(ctx, "RestoreSnapshot failed",
 			zap.Error(err))
 		rst.result = &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}
 		return err
@@ -663,7 +663,7 @@ func (grst *getRestoreSnapshotStateTask) PreExecute(ctx context.Context) error {
 }
 
 func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy get restore snapshot state",
+	mlog.Info(ctx, "proxy get restore snapshot state",
 		zap.Int64("jobID", grst.req.GetJobId()),
 	)
 
@@ -784,7 +784,7 @@ func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy list restore snapshot jobs",
+	mlog.Info(ctx, "proxy list restore snapshot jobs",
 		zap.String("collectionName", lrst.req.GetCollectionName()),
 		zap.Int64("collectionID", lrst.collectionID),
 	)
@@ -916,7 +916,7 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 }
 
 func (pst *pinSnapshotDataTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy pin snapshot data",
+	mlog.Info(ctx, "proxy pin snapshot data",
 		zap.String("snapshotName", pst.req.GetName()),
 		zap.String("collectionName", pst.req.GetCollectionName()),
 		zap.Int64("collectionID", pst.collectionID),
@@ -1007,7 +1007,7 @@ func (ust *unpinSnapshotDataTask) PreExecute(ctx context.Context) error {
 }
 
 func (ust *unpinSnapshotDataTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy unpin snapshot data",
+	mlog.Info(ctx, "proxy unpin snapshot data",
 		zap.Int64("pinID", ust.req.GetPinId()),
 	)
 

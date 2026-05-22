@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -123,7 +123,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := registry.CallMessageAckCallback(ctx, dropSnapshotsMsg, map[string]*message.AppendResult{
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
-				log.Ctx(ctx).Warn("best-effort drop collection snapshots failed, will be cleaned up by GC",
+				mlog.Warn(ctx, "best-effort drop collection snapshots failed, will be cleaned up by GC",
 					zap.Int64("collectionID", collectionID), zap.Error(err))
 			}
 
@@ -151,7 +151,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheRefresh),
 	}); err != nil {
-		log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection drop, skipping",
+		mlog.Warn(ctx, "failed to refresh RBAC policy cache after collection drop, skipping",
 			zap.Int64("collectionID", header.CollectionId), zap.Error(err))
 	}
 	// expire the collection meta cache on proxy.

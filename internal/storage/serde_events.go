@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"math"
@@ -34,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -340,7 +341,7 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Debug("Binlog stream writer encrypted cipher text",
+		mlog.Debug(context.TODO(), "Binlog stream writer encrypted cipher text",
 			zap.Int64("collectionID", bsw.collectionID),
 			zap.Int64("segmentID", bsw.segmentID),
 			zap.Int64("fieldID", bsw.fieldSchema.FieldID),

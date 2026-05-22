@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -130,7 +130,7 @@ func (m *ExternalCollectionManager) Close() {
 		if m.pool != nil {
 			m.pool.Release()
 		}
-		log.Info("external collection manager closed")
+		mlog.Info(m.ctx, "external collection manager closed")
 	})
 }
 
@@ -238,7 +238,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		// Task already exists — this is a duplicate dispatch (e.g. from
 		// scheduler TOCTOU race between Enqueue dedup check and Push).
 		// Treat as idempotent success since the task is already running.
-		log.Info("task already exists, treating as idempotent success",
+		mlog.Info(m.ctx, "task already exists, treating as idempotent success",
 			zap.Int64("taskID", taskID),
 			zap.Int64("collectionID", req.GetCollectionID()))
 		return nil
@@ -253,7 +253,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		defer func() {
 			if r := recover(); r != nil {
 				stack := debug.Stack()
-				log.Error("external collection task panicked",
+				mlog.Error(m.ctx, "external collection task panicked",
 					zap.Int64("taskID", taskID),
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Any("panic", r),
@@ -264,7 +264,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
 			}
 		}()
-		log.Info("executing external collection task in pool",
+		mlog.Info(m.ctx, "executing external collection task in pool",
 			zap.Int64("taskID", taskID),
 			zap.Int64("collectionID", req.GetCollectionID()))
 
@@ -272,7 +272,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
 			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
-			log.Warn("external collection task failed",
+			mlog.Warn(m.ctx, "external collection task failed",
 				zap.Int64("taskID", taskID),
 				zap.Error(err))
 			return nil, err
@@ -285,7 +285,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
 		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
-		log.Info("external collection task completed",
+		mlog.Info(m.ctx, "external collection task completed",
 			zap.Int64("taskID", taskID))
 		return nil, nil
 	})

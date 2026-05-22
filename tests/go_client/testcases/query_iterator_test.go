@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -322,7 +323,7 @@ func TestQueryIteratorExpr(t *testing.T) {
 		expectCount, err := rs.GetColumn("count(*)").GetAsInt64(0)
 		common.CheckErr(t, err, true)
 
-		log.Info("case expr is", zap.String("expr", exprLimit.expr), zap.Int64("expectedCount", expectCount))
+		mlog.Info(context.TODO(), "case expr is", zap.String("expr", exprLimit.expr), zap.Int64("expectedCount", expectCount))
 		itr, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithBatchSize(batch).WithFilter(exprLimit.expr))
 		common.CheckErr(t, err, true)
 		common.CheckQueryIteratorResult(ctx, t, itr, int(expectCount), common.WithExpBatchSize(hp.GenBatchSizes(int(expectCount), batch)))
@@ -439,7 +440,7 @@ func TestQueryIteratorConsistencyLevel(t *testing.T) {
 				if err == io.EOF {
 					break
 				}
-				log.Error("QueryIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "QueryIterator next gets error", zap.Error(err))
 				break
 			}
 			actualLimit = actualLimit + rs.ResultCount

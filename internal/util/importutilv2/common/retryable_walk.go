@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -41,7 +41,7 @@ func WalkWithPrefixRetry(ctx context.Context, cm storage.ChunkManager,
 		if err == nil {
 			return nil
 		}
-		log.Ctx(ctx).Warn("WalkWithPrefix failed, checking retryability",
+		mlog.Warn(ctx, "WalkWithPrefix failed, checking retryability",
 			zap.String("prefix", prefix),
 			zap.Error(err),
 		)

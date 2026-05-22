@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -32,12 +32,12 @@ import (
 func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", zap.Error(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", zap.Error(err))
 	}
 
 	rootCoordTopology := metricsinfo.RootCoordTopology{

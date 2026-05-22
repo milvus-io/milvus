@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"time"
@@ -24,7 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -103,10 +104,10 @@ func (v *ForceMergeSegmentView) GetTriggerID() int64 {
 }
 
 func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64, targetCount int64) {
-	log := log.With(zap.Int64("triggerID", v.triggerID), zap.String("label", v.label.String()))
+	log := mlog.With(zap.Int64("triggerID", v.triggerID), zap.String("label", v.label.String()))
 	maxSafeSize = v.calculateMaxSafeSize()
 	if maxSafeSize < v.configMaxSize {
-		log.Info("maxSafeSize is less than configMaxSize, set to configMaxSize",
+		log.Info(context.TODO(), "maxSafeSize is less than configMaxSize, set to configMaxSize",
 			zap.Float64("maxSafeSize", maxSafeSize),
 			zap.Float64("configMaxSize", v.configMaxSize))
 		maxSafeSize = v.configMaxSize
@@ -114,12 +115,12 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 
 	if v.expectedTargetSize > 0 {
 		if v.expectedTargetSize <= maxSafeSize {
-			log.Info("using user-provided target size",
+			log.Info(context.TODO(), "using user-provided target size",
 				zap.Float64("expectedTargetSize", v.expectedTargetSize),
 				zap.Float64("maxSafeSize", maxSafeSize))
 			maxSafeSize = v.expectedTargetSize
 		} else {
-			log.Warn("user-provided target size exceeds maxSafeSize, using maxSafeSize",
+			log.Warn(context.TODO(), "user-provided target size exceeds maxSafeSize, using maxSafeSize",
 				zap.Float64("expectedTargetSize", v.expectedTargetSize),
 				zap.Float64("maxSafeSize", maxSafeSize))
 		}
@@ -148,7 +149,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 		if totalSize/float64(desiredCount) >= v.configMaxSize {
 			targetCount = desiredCount
 			maxSafeSize = totalSize / float64(targetCount)
-			log.Info("adjusted target count for parallel loading per shard",
+			log.Info(context.TODO(), "adjusted target count for parallel loading per shard",
 				zap.Int64("queryNodeCount", queryNodeCount),
 				zap.Int64("numReplicas", numReplicas),
 				zap.Int64("numShards", numShards),
@@ -158,7 +159,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 		}
 	}
 
-	log.Info("topology-aware force merge calculation",
+	log.Info(context.TODO(), "topology-aware force merge calculation",
 		zap.Int64("targetSegmentCount", targetCount),
 		zap.Float64("targetSegmentSize", maxSafeSize),
 		zap.Int64("queryNodeCount", queryNodeCount),
@@ -212,14 +213,14 @@ func adaptiveGroupSegments(segments []*SegmentView, targetSize float64) [][]*Seg
 	// Use maxFull for small segment counts to maximize full segments
 	// Use larger for large segment counts for O(n) performance
 	if n <= threshold {
-		log.Info("adaptiveGroupSegments: using maxFullSegmentsGrouping algorithm",
+		mlog.Info(context.TODO(), "adaptiveGroupSegments: using maxFullSegmentsGrouping algorithm",
 			zap.Int("segmentCount", n),
 			zap.Int("threshold", threshold),
 			zap.Float64("targetSize", targetSize))
 		return maxFullSegmentsGrouping(segments, targetSize)
 	}
 
-	log.Info("adaptiveGroupSegments: using largerGroupingSegments algorithm",
+	mlog.Info(context.TODO(), "adaptiveGroupSegments: using largerGroupingSegments algorithm",
 		zap.Int("segmentCount", n),
 		zap.Int("threshold", threshold),
 		zap.Float64("targetSize", targetSize))
@@ -364,9 +365,9 @@ func maxFullSegmentsGrouping(segments []*SegmentView, targetSize float64) [][]*S
 }
 
 func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
-	log := log.With(zap.Int64("triggerID", v.triggerID), zap.String("label", v.label.String()))
+	log := mlog.With(zap.Int64("triggerID", v.triggerID), zap.String("label", v.label.String()))
 	if len(v.topology.QueryNodeMemory) == 0 || len(v.topology.DataNodeMemory) == 0 {
-		log.Warn("No querynodes or datanodes in topology, using config size")
+		log.Warn(context.TODO(), "No querynodes or datanodes in topology, using config size")
 		return v.configMaxSize
 	}
 
@@ -380,7 +381,7 @@ func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
 
 	maxSafeSize := min(qnMaxSafeSize, dnMaxSafeSize)
 	if v.topology.IsStandaloneMode && !v.topology.IsPooling {
-		log.Info("force merge on standalone not pooling mode, half the max size",
+		log.Info(context.TODO(), "force merge on standalone not pooling mode, half the max size",
 			zap.Float64("qnMaxSafeSize", qnMaxSafeSize),
 			zap.Float64("dnMaxSafeSize", dnMaxSafeSize),
 			zap.Float64("maxSafeSize/2", maxSafeSize/2),
@@ -389,7 +390,7 @@ func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
 		return maxSafeSize * 0.5
 	}
 
-	log.Info("force merge on cluster/pooling mode",
+	log.Info(context.TODO(), "force merge on cluster/pooling mode",
 		zap.Float64("qnMaxSafeSize", qnMaxSafeSize),
 		zap.Float64("dnMaxSafeSize", dnMaxSafeSize),
 		zap.Float64("maxSafeSize", maxSafeSize),

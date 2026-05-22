@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -38,12 +38,18 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
-		rs.Logger().Info("recovery storage background task, perform a graceful exit...")
+		rs.Logger().Info(context.TODO(),
+
+			"recovery storage background task, perform a graceful exit...")
 		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-			rs.Logger().Warn("failed to persist dirty snapshot when closing", zap.Error(err))
+			rs.Logger().Warn(context.TODO(),
+
+				"failed to persist dirty snapshot when closing", zap.Error(err))
 		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
-		rs.Logger().Info("recovery storage background task exit")
+		rs.Logger().Info(context.TODO(),
+
+			"recovery storage background task exit")
 	}()
 
 	for {
@@ -93,16 +99,16 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zap
 	)
 	defer func() {
 		if err != nil {
-			logger.Warn("failed to persist dirty snapshot", zap.Error(err))
+			logger.Warn(ctx, "failed to persist dirty snapshot", zap.Error(err))
 			return
 		}
 		rs.pendingPersistSnapshot = nil
-		logger.Log(lvl, "persist dirty snapshot")
+		logger.Log(ctx, lvl, "persist dirty snapshot")
 		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
 	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
-		logger.Warn("failed to drop all virtual channels", zap.Error(err))
+		logger.Warn(ctx, "failed to drop all virtual channels", zap.Error(err))
 		return err
 	}
 
@@ -208,7 +214,7 @@ func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs ma
 }
 
 // retryOperationWithBackoff retries the operation with exponential backoff.
-func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *log.MLogger, op func(ctx context.Context) error) error {
+func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func(ctx context.Context) error) error {
 	backoff := rs.newBackoff()
 	for {
 		err := op(ctx)
@@ -222,7 +228,7 @@ func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, lo
 		}
 
 		nextInterval := backoff.NextBackOff()
-		logger.Warn("failed to persist operation, wait for retry...", zap.Duration("nextRetryInterval", nextInterval), zap.Error(err))
+		logger.Warn(ctx, "failed to persist operation, wait for retry...", zap.Duration("nextRetryInterval", nextInterval), zap.Error(err))
 		select {
 		case <-time.After(nextInterval):
 		case <-ctx.Done():

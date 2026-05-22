@@ -66,13 +66,13 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 		logger = logger.With(zap.Stringer("lastConfirmedMessageID", lastConfirmedMessageID))
 	}
 
-	logger.Info("start to sync first time tick")
+	logger.Info(ctx, "start to sync first time tick")
 	defer func() {
 		if err != nil {
-			logger.Error("sync first time tick failed", zap.Error(err))
+			logger.Error(ctx, "sync first time tick failed", zap.Error(err))
 			return
 		}
-		logger.Info("sync first time tick done", zap.String("msgID", msg.MessageID().String()), zap.Uint64("timetick", msg.TimeTick()))
+		logger.Info(ctx, "sync first time tick done", zap.String("msgID", msg.MessageID().String()), zap.Uint64("timetick", msg.TimeTick()))
 	}()
 
 	sourceID := paramtable.GetNodeID()

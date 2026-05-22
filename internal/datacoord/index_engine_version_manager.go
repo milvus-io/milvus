@@ -1,15 +1,17 @@
 package datacoord
 
 import (
+	"context"
 	"math"
 
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
@@ -140,7 +142,7 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID),
+	mlog.Info(context.TODO(), "addOrUpdate version", zap.Int64("nodeId", session.ServerID),
 		zap.String("sessionVersion", session.Version.String()),
 		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
 		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
@@ -283,12 +285,12 @@ func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion) in
 // clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
 func clampVersion(v, minV, maxV int32, name string) int32 {
 	if v < minV {
-		log.RatedWarn(60, name+" below cluster minimum, clamping",
+		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" below cluster minimum, clamping",
 			zap.Int32("target", v), zap.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
-		log.RatedWarn(60, name+" exceeds cluster maximum, clamping",
+		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" exceeds cluster maximum, clamping",
 			zap.Int32("target", v), zap.Int32("maximum", maxV))
 		v = maxV
 	}
@@ -333,7 +335,7 @@ func (m *versionManagerImpl) GetIndexNonEncoding() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.indexNonEncoding) == 0 {
-		log.Info("indexNonEncoding map is empty")
+		mlog.Info(context.TODO(), "indexNonEncoding map is empty")
 		// by default, we fall back to old index format for safety
 		return false
 	}

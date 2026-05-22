@@ -56,7 +56,7 @@ func (sd *shardDelegator) executeFilterStage(
 	filterResults, err := sd.executeSearchSubTasks(ctx, req, sealed, []SegmentEntry{}, sealedRowCount)
 	if err != nil {
 		log := sd.getLogger(ctx)
-		log.Warn("Two-stage search: filter stage failed", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: filter stage failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -115,7 +115,7 @@ func (sd *shardDelegator) twoStageSearch(
 	// restores request flags before returning so fallback sees the original mode.
 	expectedSegments := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	if len(validCounts) != expectedSegments {
-		log.Debug("Two-stage search: FilterValidCounts incomplete, falling back to normal search",
+		log.Debug(ctx, "Two-stage search: FilterValidCounts incomplete, falling back to normal search",
 			zap.Int("expected", expectedSegments),
 			zap.Int("got", len(validCounts)),
 		)
@@ -125,23 +125,23 @@ func (sd *shardDelegator) twoStageSearch(
 
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, validCounts, req.GetReq().GetTopk())
 
-	log.Debug("Two-stage search: filter stage completed",
+	log.Debug(ctx, "Two-stage search: filter stage completed",
 		zap.Int64s("validCounts", validCounts),
 		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
 	// ==================== Optimize with actual stats ====================
-	log.Debug("Optimizing search params with actual stats")
+	log.Debug(ctx, "Optimizing search params with actual stats")
 	const isSecondStageSearch = true
 	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
-		log.Warn("Two-stage search: failed to optimize search params", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: failed to optimize search params", zap.Error(err))
 		return nil, false, err
 	}
 
 	// ==================== STAGE 2: Normal Search with optimized params ====================
 	// Filter bitset is read from ExprResCacheManager (cached in Stage 1), skipping re-execution
-	log.Debug("Starting vector search stage with optimized params")
+	log.Debug(ctx, "Starting vector search stage with optimized params")
 	optimizedReq.EnableExprCache = true
 	// vector search stage need to search both sealed and growing segments
 	stage2Start := time.Now()
@@ -149,10 +149,10 @@ func (sd *shardDelegator) twoStageSearch(
 	stage2Dur := float64(time.Since(stage2Start).Milliseconds())
 	metrics.QueryNodeTwoStageSearchLatency.WithLabelValues(nodeID, collectionID).Observe(stage2Dur)
 	if err != nil {
-		log.Warn("Two-stage search: vector search stage failed", zap.Error(err))
+		log.Warn(ctx, "Two-stage search: vector search stage failed", zap.Error(err))
 		return nil, false, err
 	}
 
-	log.Debug("Two-stage search completed", zap.Int("results", len(results)))
+	log.Debug(ctx, "Two-stage search completed", zap.Int("results", len(results)))
 	return results, false, nil
 }

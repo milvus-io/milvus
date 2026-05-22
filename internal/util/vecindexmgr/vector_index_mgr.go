@@ -26,13 +26,14 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -117,7 +118,7 @@ func (mgr *vecIndexMgrImpl) IsAISAQ(indexType IndexType) bool {
 func (mgr *vecIndexMgrImpl) init() {
 	size := int(C.GetIndexListSize())
 	if size == 0 {
-		log.Error("get empty vector index features from vector index engine")
+		mlog.Error(context.TODO(), "get empty vector index features from vector index engine")
 		return
 	}
 	vecIndexList := make([]unsafe.Pointer, size)
@@ -131,7 +132,7 @@ func (mgr *vecIndexMgrImpl) init() {
 		mgr.features[key] = vecIndexFeatures[i]
 		featureLog.WriteString(key + " : " + fmt.Sprintf("%d", vecIndexFeatures[i]) + ",")
 	}
-	log.Info("init vector indexes with features : " + featureLog.String())
+	mlog.Info(context.TODO(), "init vector indexes with features : "+featureLog.String())
 }
 
 func (mgr *vecIndexMgrImpl) isVectorTypeSupported(indexType IndexType, vectorFlag uint64, isEmbeddingList bool) bool {

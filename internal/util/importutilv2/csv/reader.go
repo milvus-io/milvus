@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -63,7 +63,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	csvReader.Comma = sep
 
 	header, err := csvReader.Read()
-	log.Info("csv header parsed", zap.Strings("header", header))
+	mlog.Info(ctx, "csv header parsed", zap.Strings("header", header))
 	if err != nil {
 		return nil, merr.WrapErrImportSysFailedMsg("failed to read csv header, error: %v", err)
 	}

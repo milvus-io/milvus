@@ -55,7 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
@@ -157,13 +157,13 @@ func waitForGrpcReady(opt *WaitOption) {
 	select {
 	case err := <-ch:
 		if err != nil {
-			log.Error("grpc service not ready",
+			mlog.Error(context.TODO(), "grpc service not ready",
 				zap.Error(err),
 				zap.Any("option", opt))
 			panic(err)
 		}
 	case <-timer.C:
-		log.Error("grpc service not ready",
+		mlog.Error(context.TODO(), "grpc service not ready",
 			zap.Any("option", opt))
 		panic("grpc service not ready")
 	}

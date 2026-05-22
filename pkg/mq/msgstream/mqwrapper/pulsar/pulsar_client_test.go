@@ -32,7 +32,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 
 func getPulsarAddress() string {
 	pulsarAddress := Params.PulsarCfg.Address.GetValue()
-	log.Info("pulsar address", zap.String("address", pulsarAddress))
+	mlog.Info(context.TODO(), "pulsar address", zap.String("address", pulsarAddress))
 	if len(pulsarAddress) != 0 {
 		return pulsarAddress
 	}
@@ -80,7 +80,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
-	log.Info("Produce start")
+	mlog.Info(ctx, "Produce start")
 
 	for _, v := range arr {
 		msg := &mqcommon.ProducerMessage{
@@ -89,21 +89,21 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 		}
 		_, err = producer.Send(ctx, msg)
 		assert.NoError(t, err)
-		log.Info("Pub", zap.Any("SND", v))
+		mlog.Info(ctx, "Pub", zap.Any("SND", v))
 	}
 
-	log.Info("Produce done")
+	mlog.Info(ctx, "Produce done")
 }
 
 func VerifyMessage(t *testing.T, msg mqcommon.Message) {
 	pload := BytesToInt(msg.Payload())
-	log.Info("RECV", zap.Any("v", pload))
+	mlog.Info(context.TODO(), "RECV", zap.Any("v", pload))
 	pm := msg.(*pulsarMessage)
 	topic := pm.Topic()
 	assert.NotEmpty(t, topic)
-	log.Info("RECV", zap.Any("t", topic))
+	mlog.Info(context.TODO(), "RECV", zap.Any("t", topic))
 	prop := pm.Properties()
-	log.Info("RECV", zap.Any("p", len(prop)))
+	mlog.Info(context.TODO(), "RECV", zap.Any("p", len(prop)))
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
@@ -118,7 +118,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	log.Info("Consume1 start")
+	mlog.Info(ctx, "Consume1 start")
 
 	// get random number between 1 ~ 5
 	rand.Seed(time.Now().UnixNano())
@@ -128,7 +128,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume1 channel closed")
+			mlog.Info(ctx, "Consume1 channel closed")
 			return
 		case msg = <-consumer.Chan():
 			consumer.Ack(msg)
@@ -139,8 +139,8 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	}
 	c <- msg.ID()
 
-	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
-	log.Info("Consume1 done")
+	mlog.Info(ctx, "Consume1 randomly RECV", zap.Any("number", cnt))
+	mlog.Info(ctx, "Consume1 done")
 }
 
 // Consume2 will consume messages from specified MessageID
@@ -162,12 +162,12 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	mm := <-consumer.Chan()
 	consumer.Ack(mm)
 
-	log.Info("Consume2 start")
+	mlog.Info(ctx, "Consume2 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume2 channel closed")
+			mlog.Info(ctx, "Consume2 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
@@ -189,12 +189,12 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	log.Info("Consume3 start")
+	mlog.Info(ctx, "Consume3 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume3 channel closed")
+			mlog.Info(ctx, "Consume3 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
@@ -216,7 +216,7 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	log.Info("Consume1 start")
+	mlog.Info(ctx, "Consume1 start")
 
 	// get random number between 1 ~ 5
 	rand.Seed(time.Now().UnixNano())
@@ -226,20 +226,20 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume1 channel closed")
+			mlog.Info(ctx, "Consume1 channel closed")
 			return
 		case msg = <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", zap.Any("v", v))
 			(*total)++
 			// log.Debug("total", zap.Int("val", *total))
 		}
 	}
 	c <- &pulsarID{messageID: msg.ID()}
 
-	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
-	log.Info("Consume1 done")
+	mlog.Info(ctx, "Consume1 randomly RECV", zap.Any("number", cnt))
+	mlog.Info(ctx, "Consume1 done")
 }
 
 // Consume2 will consume messages from specified MessageID
@@ -261,17 +261,17 @@ func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	mm := <-consumer.Chan()
 	consumer.Ack(mm)
 
-	log.Info("Consume2 start")
+	mlog.Info(ctx, "Consume2 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume2 channel closed")
+			mlog.Info(ctx, "Consume2 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", zap.Any("v", v))
 			(*total)++
 			// log.Debug("total", zap.Int("val", *total))
 		}
@@ -289,17 +289,17 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	log.Info("Consume3 start")
+	mlog.Info(ctx, "Consume3 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Consume3 channel closed")
+			mlog.Info(ctx, "Consume3 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			mlog.Info(ctx, "RECV", zap.Any("v", v))
 			(*total)++
 			// log.Debug("total", zap.Int("val", *total))
 		}
@@ -322,7 +322,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
-	log.Info("Produce start")
+	mlog.Info(context.TODO(), "Produce start")
 
 	arr := []int{1, 2, 3}
 	for _, v := range arr {
@@ -334,7 +334,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	log.Info("Produced")
+	mlog.Info(context.TODO(), "Produced")
 
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       topic,
@@ -355,11 +355,11 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 		case msg := <-msgChan:
 			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			mlog.Info(context.TODO(), "RECV", zap.Any("v", v))
 			assert.Equal(t, v, 4)
 			loop = false
 		case <-ticker.C:
-			log.Info("after 2 seconds")
+			mlog.Info(context.TODO(), "after 2 seconds")
 			msg := &mqcommon.ProducerMessage{
 				Payload:    IntToBytes(4),
 				Properties: map[string]string{},

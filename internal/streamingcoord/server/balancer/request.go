@@ -38,16 +38,16 @@ func newOpUpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePo
 				for _, field := range req.UpdateMask.Paths {
 					switch field {
 					case types.UpdateMaskPathWALBalancePolicyAllowRebalance:
-						updateAllowRebalance(impl, req.GetConfig().GetAllowRebalance())
+						updateAllowRebalance(ctx, impl, req.GetConfig().GetAllowRebalance())
 					}
 				}
 			} else {
 				// otherwise update all fields.
-				updateAllowRebalance(impl, req.GetConfig().GetAllowRebalance())
+				updateAllowRebalance(ctx, impl, req.GetConfig().GetAllowRebalance())
 			}
 			// apply the freeze streaming nodes.
 			if len(req.GetNodes().GetFreezeNodeIds()) > 0 || len(req.GetNodes().GetDefreezeNodeIds()) > 0 {
-				impl.Logger().Info("update freeze nodes", zap.Int64s("freezeNodeIDs", req.GetNodes().GetFreezeNodeIds()), zap.Int64s("defreezeNodeIDs", req.GetNodes().GetDefreezeNodeIds()))
+				impl.Logger().Info(ctx, "update freeze nodes", zap.Int64s("freezeNodeIDs", req.GetNodes().GetFreezeNodeIds()), zap.Int64s("defreezeNodeIDs", req.GetNodes().GetDefreezeNodeIds()))
 				impl.freezeNodes.Upsert(req.GetNodes().GetFreezeNodeIds()...)
 				impl.freezeNodes.Remove(req.GetNodes().GetDefreezeNodeIds()...)
 			}
@@ -63,9 +63,9 @@ func newOpUpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePo
 }
 
 // updateAllowRebalance update the allow rebalance.
-func updateAllowRebalance(impl *balancerImpl, allowRebalance bool) {
+func updateAllowRebalance(ctx context.Context, impl *balancerImpl, allowRebalance bool) {
 	old := paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.SwapTempValue(strconv.FormatBool(allowRebalance))
-	impl.Logger().Info("update allow_rebalance", zap.Bool("new", allowRebalance), zap.String("old", old))
+	impl.Logger().Info(ctx, "update allow_rebalance", zap.Bool("new", allowRebalance), zap.String("old", old))
 }
 
 // newOpMarkAsUnavailable is a operation to mark some channels as unavailable.

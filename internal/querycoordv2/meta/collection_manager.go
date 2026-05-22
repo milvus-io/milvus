@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -130,7 +130,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	if err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("recover collections from kv store", zap.Duration("dur", time.Since(start)))
+	mlog.Info(ctx, "recover collections from kv store", zap.Duration("dur", time.Since(start)))
 
 	start = time.Now()
 	partitions, err := m.catalog.GetPartitions(ctx, lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
@@ -140,13 +140,13 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		return err
 	}
 
-	ctx = log.WithTraceID(ctx, strconv.FormatInt(time.Now().UnixNano(), 10))
-	ctxLog := log.Ctx(ctx)
-	ctxLog.Info("recover partitions from kv store", zap.Duration("dur", time.Since(start)))
+	ctx = mlog.WithTraceID(ctx, strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	mlog.Info(ctx, "recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
 	for _, collection := range collections {
 		if collection.GetReplicaNumber() <= 0 {
-			ctxLog.Info("skip recovery and release collection due to invalid replica number",
+			mlog.Info(ctx, "skip recovery and release collection due to invalid replica number",
 				zap.Int64("collectionID", collection.GetCollectionID()),
 				zap.Int32("replicaNumber", collection.GetReplicaNumber()))
 			m.catalog.ReleaseCollection(ctx, collection.GetCollectionID())
@@ -156,7 +156,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		if collection.GetStatus() != querypb.LoadStatus_Loaded {
 			if collection.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
 				m.catalog.ReleaseCollection(ctx, collection.CollectionID)
-				ctxLog.Info("recover loading collection times reach limit, release collection",
+				mlog.Info(ctx, "recover loading collection times reach limit, release collection",
 					zap.Int64("collectionID", collection.CollectionID),
 					zap.Int32("recoverTimes", collection.RecoverTimes))
 				break
@@ -170,9 +170,9 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		err := m.upgradeLoadFields(ctx, collection, broker)
 		if err != nil {
 			if errors.Is(err, merr.ErrCollectionNotFound) {
-				log.Warn("collection not found, skip upgrade logic and wait for release")
+				mlog.Warn(ctx, "collection not found, skip upgrade logic and wait for release")
 			} else {
-				log.Warn("upgrade load field failed", zap.Error(err))
+				mlog.Warn(ctx, "upgrade load field failed", zap.Error(err))
 				return err
 			}
 		}
@@ -193,7 +193,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 			if partition.GetStatus() != querypb.LoadStatus_Loaded {
 				if partition.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
 					m.catalog.ReleaseCollection(ctx, collection)
-					ctxLog.Info("recover loading partition times reach limit, release collection",
+					mlog.Info(ctx, "recover loading partition times reach limit, release collection",
 						zap.Int64("collectionID", collection),
 						zap.Int32("recoverTimes", partition.RecoverTimes))
 					released = true

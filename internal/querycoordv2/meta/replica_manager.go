@@ -24,12 +24,13 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -120,7 +121,7 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
 			grouped[rep.GetCollectionID()] = append(grouped[rep.GetCollectionID()], rep)
-			log.Info("recover replica",
+			mlog.Info(ctx, "recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("rwNodes", replica.GetNodes()),
@@ -133,7 +134,7 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 			if err != nil {
 				return err
 			}
-			log.Info("clear stale replica",
+			mlog.Info(ctx, "clear stale replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("nodes", replica.GetNodes()),
@@ -237,7 +238,7 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			replica = mutableReplica.IntoReplica()
 		}
 		replicas = append(replicas, replica)
-		log.Ctx(ctx).Info("spawn replica for collection",
+		mlog.Info(ctx, "spawn replica for collection",
 			zap.Int64("collectionID", params.CollectionID),
 			zap.Int64("replicaID", config.GetReplicaId()),
 			zap.String("resourceGroup", config.GetResourceGroupName()),
@@ -506,7 +507,7 @@ func (m *ReplicaManager) MoveReplica(ctx context.Context, collectionID typeutil.
 		replicas = append(replicas, mutableReplica.IntoReplica())
 		replicaIDs = append(replicaIDs, replica.GetID())
 	}
-	log.Info("move replicas to resource group", zap.String("dstRGName", dstRGName), zap.Int64s("replicas", replicaIDs))
+	mlog.Info(ctx, "move replicas to resource group", zap.String("dstRGName", dstRGName), zap.Int64s("replicas", replicaIDs))
 	return m.put(ctx, collectionID, replicas...)
 }
 
@@ -563,7 +564,7 @@ func (m *ReplicaManager) RemoveReplicas(ctx context.Context, collectionID typeut
 		return nil
 	}
 
-	log.Info("release replicas", zap.Int64("collectionID", collectionID), zap.Int64s("replicas", replicaIDs))
+	mlog.Info(ctx, "release replicas", zap.Int64("collectionID", collectionID), zap.Int64s("replicas", replicaIDs))
 	return m.removeReplicas(ctx, collectionID, replicaIDs...)
 }
 
@@ -700,7 +701,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 			if replica.NeedWaitRGReady() {
 				rgName := replica.GetResourceGroup()
 				if rg := rgs[rgName]; rg != nil && rg.MissingNumOfNodes() > 0 {
-					log.RatedInfo(10, "defer node assignment for new replica, resource group not ready",
+					mlog.RatedInfo(ctx, rate.Limit(10), "defer node assignment for new replica, resource group not ready",
 						zap.Int64("collectionID", collectionID),
 						zap.Int64("replicaID", replica.GetID()),
 						zap.String("rgName", rgName),
@@ -728,8 +729,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 			if mutableReplica.NeedWaitRGReady() {
 				mutableReplica.SetWaitRGReadyAt(time.Time{})
 			}
-			log.Info(
-				"new replica recovery found",
+			mlog.Info(ctx, "new replica recovery found",
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
@@ -836,7 +836,7 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 			collectionInfo := meta.GetCollection(ctx, r.GetCollectionID())
 			dbID := util.InvalidDBID
 			if collectionInfo == nil {
-				log.Ctx(ctx).Warn("failed to get collection info", zap.Int64("collectionID", r.GetCollectionID()))
+				mlog.Warn(ctx, "failed to get collection info", zap.Int64("collectionID", r.GetCollectionID()))
 			} else {
 				dbID = collectionInfo.GetDbID()
 			}
@@ -855,7 +855,7 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 	})
 	ret, err := json.Marshal(allReplicas)
 	if err != nil {
-		log.Warn("failed to marshal replicas", zap.Error(err))
+		mlog.Warn(ctx, "failed to marshal replicas", zap.Error(err))
 		return ""
 	}
 	return string(ret)
@@ -894,8 +894,7 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 			mutableReplica.AddROSQNode(roNodes...)
 			mutableReplica.AddRWSQNode(recoverableNodes...)
 			mutableReplica.AddRWSQNode(incomingNode...)
-			log.Info(
-				"new replica recovery streaming query node found",
+			mlog.Info(ctx, "new replica recovery streaming query node found",
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.String("resourceGroup", rgName),

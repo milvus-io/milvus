@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -66,7 +66,7 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	if err := storage.ValidateStorageV1InsertWritableSchema(s.schema); err != nil {
 		return nil, err
 	}
-	log := log.Ctx(ctx)
+
 	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData...)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	for _, blob := range blobs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			log.Error("serialize buffer failed ... cannot parse string to fieldID ..", zap.Error(err))
+			mlog.Error(ctx, "serialize buffer failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, err
 		}
 

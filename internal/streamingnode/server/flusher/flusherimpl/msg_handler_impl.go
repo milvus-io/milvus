@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -48,13 +48,13 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 	if err := impl.createNewGrowingSegment(ctx, vchannel, h); err != nil {
 		return err
 	}
-	logger := log.With(log.FieldMessage(createSegmentMsg))
+	logger := mlog.With(mlog.FieldMessage(createSegmentMsg))
 
 	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
-		logger.Warn("fail to create new growing segment")
+		logger.Warn(ctx, "fail to create new growing segment")
 		return err
 	}
-	log.Info("create new growing segment")
+	mlog.Info(ctx, "create new growing segment")
 	return nil
 }
 
@@ -72,7 +72,7 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 	if err != nil {
 		return err
 	}
-	logger := log.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
+	logger := mlog.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
 	return retry.Do(ctx, func() (err error) {
 		// TODO: propagate SchemaVersion from CreateSegmentMessageHeader into AllocSegmentRequest
 		// so that DataCoord records the correct schema version for streaming-created segments.
@@ -88,10 +88,10 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 			SchemaVersion:        h.SchemaVersion,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			logger.Warn("failed to alloc growing segment at datacoord")
+			logger.Warn(ctx, "failed to alloc growing segment at datacoord")
 			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
 		}
-		logger.Info("alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
+		logger.Info(ctx, "alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
 		return nil
 	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 }
@@ -149,7 +149,7 @@ func (impl *msgHandlerImpl) HandleTruncateCollection(flushMsg message.ImmutableT
 // This ensures all buffered data is persisted before switching to the new WAL implementation.
 func (impl *msgHandlerImpl) HandleAlterWAL(ctx context.Context, alterWALMsg message.ImmutableAlterWALMessageV2, currentVChannel string) error {
 	vchannel := currentVChannel
-	logger := log.With(
+	logger := mlog.With(
 		zap.String("vchannel", vchannel),
 		zap.Uint64("alterWALTimeTick", alterWALMsg.TimeTick()),
 		zap.String("currentWALName", alterWALMsg.WALName().String()),
@@ -157,16 +157,16 @@ func (impl *msgHandlerImpl) HandleAlterWAL(ctx context.Context, alterWALMsg mess
 
 	// Seal all segments in the current vchannel before WAL switch
 	if err := impl.wbMgr.SealAllSegments(ctx, vchannel); err != nil {
-		logger.Warn("failed to seal all segments for WAL switch", zap.Error(err))
+		logger.Warn(ctx, "failed to seal all segments for WAL switch", zap.Error(err))
 		return errors.Wrap(err, "failed to seal all segments")
 	}
-	logger.Info("sealed all segments for WAL switch")
+	logger.Info(ctx, "sealed all segments for WAL switch")
 
 	// Flush channel to persist buffered data before switching WAL
 	if err := impl.wbMgr.FlushChannel(ctx, vchannel, alterWALMsg.TimeTick()); err != nil {
-		logger.Warn("failed to flush channel for WAL switch", zap.Error(err))
+		logger.Warn(ctx, "failed to flush channel for WAL switch", zap.Error(err))
 		return errors.Wrap(err, "failed to flush channel")
 	}
-	logger.Info("flushed channel for WAL switch")
+	logger.Info(ctx, "flushed channel for WAL switch")
 	return nil
 }

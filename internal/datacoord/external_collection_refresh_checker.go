@@ -23,7 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -115,14 +115,14 @@ func newRefreshChecker(
 // restart between task completion and the eager call).
 func (c *externalCollectionRefreshChecker) run() {
 	checkInterval := Params.DataCoordCfg.ExternalCollectionCheckInterval.GetAsDuration(time.Second)
-	log.Info("start external collection checker", zap.Duration("checkInterval", checkInterval))
+	mlog.Info(c.ctx, "start external collection checker", zap.Duration("checkInterval", checkInterval))
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.closeChan:
-			log.Info("external collection checker exited")
+			mlog.Info(c.ctx, "external collection checker exited")
 			return
 		case <-ticker.C:
 			c.processJobs()
@@ -240,7 +240,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			// This captures the last known progress at failure time
 			if progress != job.GetProgress() {
 				if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), progress); err != nil {
-					log.Warn("failed to update job progress before failure",
+					mlog.Warn(c.ctx, "failed to update job progress before failure",
 						zap.Int64("jobID", job.GetJobId()),
 						zap.Error(err))
 				}
@@ -256,7 +256,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 					return c.applyJobInfo(c.ctx, latestJob)
 				})
 			if err != nil {
-				log.Warn("failed to apply external collection refresh result",
+				mlog.Warn(c.ctx, "failed to apply external collection refresh result",
 					zap.Int64("jobID", job.GetJobId()),
 					zap.Error(err))
 				if applied && c.onJobFailed != nil {
@@ -271,7 +271,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 			}
 
 			if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
-				log.Warn("failed to clear external collection refresh task results",
+				mlog.Warn(c.ctx, "failed to clear external collection refresh task results",
 					zap.Int64("jobID", job.GetJobId()),
 					zap.Error(err))
 			}
@@ -283,7 +283,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 
 		applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), state, failReason)
 		if err != nil {
-			log.Warn("failed to update job state from task aggregation",
+			mlog.Warn(c.ctx, "failed to update job state from task aggregation",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Error(err))
 			return
@@ -315,7 +315,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		if state != indexpb.JobState_JobStateFailed && state != indexpb.JobState_JobStateFinished {
 			if progress != job.GetProgress() {
 				if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), progress); err != nil {
-					log.Warn("failed to update job progress",
+					mlog.Warn(c.ctx, "failed to update job progress",
 						zap.Int64("jobID", job.GetJobId()),
 						zap.Error(err))
 				}
@@ -324,7 +324,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	} else if progress != job.GetProgress() {
 		// Only progress changed
 		if err := c.refreshMeta.UpdateJobProgress(job.GetJobId(), progress); err != nil {
-			log.Warn("failed to update job progress",
+			mlog.Warn(c.ctx, "failed to update job progress",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Error(err))
 		}
@@ -364,7 +364,7 @@ func (c *externalCollectionRefreshChecker) logJobStats(jobs map[int64]*datapb.Ex
 	}
 
 	if len(jobs) > 0 {
-		log.Info("external collection job stats", zap.Any("stateNum", stateNum))
+		mlog.Info(c.ctx, "external collection job stats", zap.Any("stateNum", stateNum))
 	}
 }
 
@@ -383,7 +383,7 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 	age := time.Since(startTime)
 
 	if age > timeout {
-		log.Warn("external collection job timeout",
+		mlog.Warn(c.ctx, "external collection job timeout",
 			zap.Int64("jobID", job.GetJobId()),
 			zap.Int64("collectionID", job.GetCollectionId()),
 			zap.Duration("age", age),
@@ -394,7 +394,7 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			indexpb.JobState_JobStateFailed,
 			"timeout")
 		if err != nil {
-			log.Warn("failed to mark job as timed out",
+			mlog.Warn(c.ctx, "failed to mark job as timed out",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Error(err))
 			return
@@ -406,7 +406,7 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			// the manager's notifiedJobs dedup map and cause a subsequent
 			// handleJobFinished to skip the schemaUpdater. Bail out and let
 			// the path that actually persisted the transition do cleanup.
-			log.Info("skip timeout fail path, job already in terminal state",
+			mlog.Info(c.ctx, "skip timeout fail path, job already in terminal state",
 				zap.Int64("jobID", job.GetJobId()))
 			return
 		}
@@ -450,7 +450,7 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 	age := time.Since(endTime)
 
 	if age > retention {
-		log.Info("external collection job has reached GC retention",
+		mlog.Info(c.ctx, "external collection job has reached GC retention",
 			zap.Int64("jobID", job.GetJobId()),
 			zap.Int64("collectionID", job.GetCollectionId()),
 			zap.Duration("age", age),
@@ -460,12 +460,12 @@ func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectio
 		// so the next tick will naturally retry if etcd was temporarily unavailable.
 		err := c.refreshMeta.DropJob(c.ctx, job.GetJobId())
 		if err != nil {
-			log.Warn("failed to remove external collection job during GC, will retry on next check",
+			mlog.Warn(c.ctx, "failed to remove external collection job during GC, will retry on next check",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Error(err))
 			return
 		}
-		log.Info("external collection job removed", zap.Int64("jobID", job.GetJobId()))
+		mlog.Info(c.ctx, "external collection job removed", zap.Int64("jobID", job.GetJobId()))
 		// Release per-job bookkeeping in the manager (notifiedJobs dedup map)
 		// so it stays bounded across DataCoord lifetime.
 		if c.onJobGC != nil {

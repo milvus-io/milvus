@@ -38,8 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -441,7 +441,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
-	log.Info("start to run embedding function")
+	mlog.Info(context.TODO(), "start to run embedding function")
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties())
 	if err := embedding.RunAll(context.Background(), schema, data, embedding.RunOptions{
@@ -502,7 +502,7 @@ func LogStats(manager TaskManager) {
 		byState := lo.GroupBy(tasks, func(t Task) datapb.ImportTaskStateV2 {
 			return t.GetState()
 		})
-		log.Info("import task stats", zap.String("type", taskType.String()),
+		mlog.Info(context.TODO(), "import task stats", zap.String("type", taskType.String()),
 			zap.Int("pending", len(byState[datapb.ImportTaskStateV2_Pending])),
 			zap.Int("inProgress", len(byState[datapb.ImportTaskStateV2_InProgress])),
 			zap.Int("completed", len(byState[datapb.ImportTaskStateV2_Completed])),

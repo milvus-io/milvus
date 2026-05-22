@@ -36,7 +36,7 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 			continue
 		}
 		if errors.Is(err, errChannelLifetimeUnrecoverable) {
-			impl.logger.Warn("channel has been dropped, skip to recover flusher for vchannel", zap.String("vchannel", vchannel[i]))
+			impl.logger.Warn(ctx, "channel has been dropped, skip to recover flusher for vchannel", zap.String("vchannel", vchannel[i]))
 			continue
 		}
 		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", vchannel[i])
@@ -68,25 +68,25 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 		resp, err = dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
 		err = merr.CheckRPCCall(resp, err)
 		if errors.Is(err, merr.ErrChannelNotAvailable) {
-			logger.Warn("channel not available because of collection dropped", zap.Error(err))
+			logger.Warn(ctx, "channel not available because of collection dropped", zap.Error(err))
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			if retryCnt >= defaultCollectionNotFoundTolerance {
 				// TODO: It's not strong guarantee to make no resource lost or leak. Should be removed after wal-driven-ddl framework is ready.
-				logger.Warn("too many collection not found, the create collection may undone by coord", zap.Error(err))
+				logger.Warn(ctx, "too many collection not found, the create collection may undone by coord", zap.Error(err))
 				return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 			}
-			logger.Warn("collection not found, maybe the create collection is not done or create collection undone by coord", zap.Error(err))
+			logger.Warn(ctx, "collection not found, maybe the create collection is not done or create collection undone by coord", zap.Error(err))
 			return err
 		}
 		if err != nil {
-			logger.Warn("get channel recovery info failed", zap.Error(err))
+			logger.Warn(ctx, "get channel recovery info failed", zap.Error(err))
 			return err
 		}
 		// The channel has been dropped, skip to recover it.
 		if isDroppedChannel(resp) {
-			logger.Info("channel has been dropped, the vchannel can not be recovered")
+			logger.Info(ctx, "channel has been dropped, the vchannel can not be recovered")
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		return nil

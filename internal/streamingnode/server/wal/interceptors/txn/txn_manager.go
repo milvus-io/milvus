@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -49,8 +49,10 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 		metrics:                   m,
 	}
 	txnManager.notifyRecoverDone()
-	txnManager.SetLogger(resource.Resource().Logger().With(log.FieldComponent("txn-manager")))
-	txnManager.Logger().Info("txn manager recovered with txn", zap.Int64s("txnIDs", sessionIDs))
+	txnManager.SetLogger(resource.Resource().Logger().With(mlog.FieldComponent("txn-manager")))
+	txnManager.Logger().Info(context.TODO(),
+
+		"txn manager recovered with txn", zap.Int64s("txnIDs", sessionIDs))
 	return txnManager
 }
 
@@ -58,7 +60,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	log.Binder
+	mlog.Binder
 
 	mu                        sync.Mutex
 	recoveredSessions         map[message.TxnID]struct{}
@@ -142,7 +144,9 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 		}
 	}
 	if len(ids) > 0 {
-		m.Logger().Info("transaction interrupted", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+		m.Logger().Info(context.TODO(),
+
+			"transaction interrupted", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
 	}
 	m.notifyRecoverDone()
 }
@@ -195,11 +199,15 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 	defer m.mu.Unlock()
 
 	if len(m.sessions) == 0 {
-		m.Logger().Info("No in-flight transactions to rollback")
+		m.Logger().Info(context.TODO(),
+
+			"No in-flight transactions to rollback")
 		return
 	}
 
-	m.Logger().Info("Rolling back all in-flight transactions", zap.Int("sessionCount", len(m.sessions)))
+	m.Logger().Info(context.TODO(),
+
+		"Rolling back all in-flight transactions", zap.Int("sessionCount", len(m.sessions)))
 
 	ids := make([]int64, 0, len(m.sessions))
 	for txnID, session := range m.sessions {
@@ -209,7 +217,9 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 		delete(m.recoveredSessions, txnID)
 	}
 
-	m.Logger().Info("Rolled back in-flight transactions",
+	m.Logger().Info(context.TODO(),
+
+		"Rolled back in-flight transactions",
 		zap.Int64s("txnIDs", ids))
 
 	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
@@ -231,7 +241,9 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 			m.closed.Close()
 		}
 	}
-	m.Logger().Info("graceful close txn manager", zap.Int("activeTxnCount", len(m.sessions)))
+	m.Logger().Info(ctx,
+
+		"graceful close txn manager", zap.Int("activeTxnCount", len(m.sessions)))
 	m.mu.Unlock()
 
 	select {

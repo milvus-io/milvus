@@ -142,7 +142,7 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 			// if the transaction is expired,
 			// there may be wal is transferred to another streaming node,
 			// retry it with new transaction.
-			g.producer.Logger().Warn("transaction expired, retrying", zap.String("vchannel", msgs[0].VChannel()), zap.Error(err))
+			g.producer.Logger().Warn(ctx, "transaction expired, retrying", zap.String("vchannel", msgs[0].VChannel()), zap.Error(err))
 			continue
 		}
 		if err != nil {

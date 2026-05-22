@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -55,7 +55,7 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 ) *scannerAdaptorImpl {
 	name := "recovery"
 	logger := resource.Resource().Logger().With(
-		log.FieldComponent("scanner"),
+		mlog.FieldComponent("scanner"),
 		zap.String("name", name),
 		zap.String("channel", l.Channel().String()),
 		zap.String("startMessageID", startMessageID.String()),
@@ -98,7 +98,7 @@ func newScannerAdaptor(
 	}
 	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
-		log.FieldComponent("scanner"),
+		mlog.FieldComponent("scanner"),
 		zap.String("name", name),
 		zap.String("channel", l.Channel().Name),
 	)
@@ -124,7 +124,7 @@ func newScannerAdaptor(
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
 	recovery      bool
-	logger        *log.MLogger
+	logger        *mlog.Logger
 	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
 	filterFunc    func(message.ImmutableMessage) bool
@@ -171,9 +171,9 @@ func (s *scannerAdaptorImpl) execute() {
 	defer func() {
 		s.readOption.MesasgeHandler.Close()
 		s.Finish(nil)
-		s.logger.Info("scanner is closed")
+		s.logger.Info(context.TODO(), "scanner is closed")
 	}()
-	s.logger.Info("scanner start background task")
+	s.logger.Info(context.TODO(), "scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
 
@@ -184,18 +184,18 @@ func (s *scannerAdaptorImpl) execute() {
 		defer close(ch)
 		err := s.produceEventLoop(msgChan)
 		if errors.Is(err, context.Canceled) {
-			s.logger.Info("the produce event loop of scanner is closed")
+			s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
 			return
 		}
-		s.logger.Warn("the produce event loop of scanner is closed with unexpected error", zap.Error(err))
+		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", zap.Error(err))
 	}()
 
 	err := s.consumeEventLoop(msgChan)
 	if errors.Is(err, context.Canceled) {
-		s.logger.Info("the consuming event loop of scanner is closed")
+		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
 		return
 	}
-	s.logger.Warn("the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
+	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
@@ -215,7 +215,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
-	s.logger.Info("start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
+	s.logger.Info(context.TODO(), "start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
 			// if the scanner is working with rate limit control,
@@ -237,7 +237,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		}
 		m := getScannerModel(scanner)
 		s.metrics.SwitchModel(m)
-		s.logger.Info("switch scanner model", zap.String("model", m))
+		s.logger.Info(context.TODO(), "switch scanner model", zap.String("model", m))
 	}
 }
 
@@ -292,12 +292,12 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 		paramtable.Get().Watch(watchKey, handler)
 		defer paramtable.Get().Unwatch(watchKey, handler)
 
-		s.logger.Info("pause consumption...")
+		s.logger.Info(context.TODO(), "pause consumption...")
 		select {
 		case <-resumeChan:
-			s.logger.Info("continue to consume messages")
+			s.logger.Info(context.TODO(), "continue to consume messages")
 		case <-s.Context().Done():
-			s.logger.Info("pause consumption is canceled")
+			s.logger.Info(context.TODO(), "pause consumption is canceled")
 		}
 	}
 }
@@ -362,12 +362,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
-			if s.logger.Level().Enabled(zap.DebugLevel) {
+			if s.logger.LevelEnabled(zap.DebugLevel) {
 				for _, m := range msgs {
-					s.logger.Debug(
-						"push message into pending queue",
+					s.logger.Debug(context.TODO(), "push message into pending queue",
 						zap.Uint64("committedTimeTick", msg.TimeTick()),
-						log.FieldMessage(m),
+						mlog.FieldMessage(m),
 					)
 				}
 			}
@@ -397,8 +396,8 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		if errors.Is(err, utility.ErrTimeTickVoilation) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
-		s.logger.Warn("failed to push message into reorder buffer",
-			log.FieldMessage(msg),
+		s.logger.Warn(context.TODO(), "failed to push message into reorder buffer",
+			mlog.FieldMessage(msg),
 			zap.Bool("tailing", isTailing),
 			zap.Error(err))
 	}

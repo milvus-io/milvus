@@ -31,7 +31,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -114,7 +114,6 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	log := log.Ctx(ctx)
 	bw.initialManifestPath = bw.manifestPath
 
 	// Drain deferred metaCache actions on successful Write only. If we
@@ -154,19 +153,19 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	}()
 
 	if inserts, insertFiles, err = bw.writeInserts(ctx, pack, basePath); err != nil {
-		log.Warn("failed to write insert data", zap.Error(err))
+		mlog.Warn(ctx, "failed to write insert data", zap.Error(err))
 		return
 	}
 	if stats, statEntries, err = bw.writeStats(ctx, pack, basePath); err != nil {
-		log.Warn("failed to process stats blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process stats blob", zap.Error(err))
 		return
 	}
 	if deltas, deltaEntries, err = bw.writeDelta(ctx, pack, basePath); err != nil {
-		log.Warn("failed to process delta blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process delta blob", zap.Error(err))
 		return
 	}
 	if bm25Stats, bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath); err != nil {
-		log.Warn("failed to process bm25 stats blob", zap.Error(err))
+		mlog.Warn(ctx, "failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
 
@@ -243,7 +242,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	textColumnConfigs := buildTextColumnConfigs(bw.schema, partitionBasePath)
 	var w packedBatchWriter
 	if len(textColumnConfigs) > 0 {
-		log.Ctx(ctx).Info("using TEXT-aware writer for import",
+		mlog.Info(ctx, "using TEXT-aware writer for import",
 			zap.Int("textFieldCount", len(textColumnConfigs)),
 			zap.String("basePath", basePath))
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
@@ -271,7 +270,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	}()
 
 	if err = w.Write(rec); err != nil {
-		log.Ctx(ctx).Warn("failed to write inserts",
+		mlog.Warn(ctx, "failed to write inserts",
 			zap.Int64("collectionID", pack.collectionID),
 			zap.Int64("segmentID", pack.segmentID),
 			zap.Error(err))

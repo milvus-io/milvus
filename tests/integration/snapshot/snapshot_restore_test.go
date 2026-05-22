@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -103,7 +103,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createResp.GetErrorCode())
-	log.Info("Created collection", zap.String("name", collectionName))
+	mlog.Info(context.TODO(), "Created collection", zap.String("name", collectionName))
 
 	// Step 2: Create indexes
 	// Vector index (HNSW)
@@ -132,7 +132,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 
 	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, "embeddings", "vec_idx")
 	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, "metadata", "idx_category")
-	log.Info("Indexes built")
+	mlog.Info(context.TODO(), "Indexes built")
 
 	// Step 3: Insert data with JSON content
 	idData := make([]int64, rowNum)
@@ -199,7 +199,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, insertResult.GetStatus().GetErrorCode())
-	log.Info("Inserted data", zap.Int("rows", rowNum))
+	mlog.Info(context.TODO(), "Inserted data", zap.Int("rows", rowNum))
 
 	// Step 4: Flush
 	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
@@ -212,7 +212,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 	s.WaitForFlush(ctx, segmentIDs.GetData(), flushTs, "", collectionName)
-	log.Info("Flushed")
+	mlog.Info(context.TODO(), "Flushed")
 
 	// Step 5: Load and verify initial data
 	loadResp, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -231,7 +231,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 	initialCount := queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	s.Equal(int64(rowNum), initialCount)
-	log.Info("Verified initial data", zap.Int64("count", initialCount))
+	mlog.Info(context.TODO(), "Verified initial data", zap.Int64("count", initialCount))
 
 	// Step 6: Create snapshot
 	snapshotName := fmt.Sprintf("snap_%s", funcutil.GenRandomStr())
@@ -242,7 +242,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	err = merr.CheckRPCCall(createSnapResp, err)
 	s.NoError(err)
-	log.Info("Created snapshot", zap.String("name", snapshotName))
+	mlog.Info(context.TODO(), "Created snapshot", zap.String("name", snapshotName))
 
 	// Step 7: Insert more data after snapshot (to verify point-in-time restore)
 	extraIDs := make([]int64, 1000)
@@ -293,11 +293,11 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	err = merr.CheckRPCCall(restoreResp, err)
 	s.NoError(err)
 	jobID := restoreResp.GetJobId()
-	log.Info("Restore started", zap.Int64("jobID", jobID), zap.String("target", restoredCollName))
+	mlog.Info(context.TODO(), "Restore started", zap.Int64("jobID", jobID), zap.String("target", restoredCollName))
 
 	// Step 9: Wait for restore to complete
 	s.waitForRestoreComplete(ctx, jobID)
-	log.Info("Restore completed")
+	mlog.Info(context.TODO(), "Restore completed")
 
 	// Step 10: Load restored collection - this is where the bug manifests
 	// (LoadCollection would hang at ~90% if json_key_index buildIDs were remapped)
@@ -307,7 +307,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, loadRestored.GetErrorCode())
 	s.WaitForLoad(ctx, restoredCollName)
-	log.Info("Loaded restored collection")
+	mlog.Info(context.TODO(), "Loaded restored collection")
 
 	// Step 11: Verify restored data count matches snapshot point-in-time
 	queryRestored, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
@@ -319,7 +319,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	s.Equal(commonpb.ErrorCode_Success, queryRestored.GetStatus().GetErrorCode())
 	restoredCount := queryRestored.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	s.Equal(int64(rowNum), restoredCount, "Restored count should match snapshot point-in-time, not include post-snapshot inserts")
-	log.Info("Verified restored data count", zap.Int64("count", restoredCount))
+	mlog.Info(context.TODO(), "Verified restored data count", zap.Int64("count", restoredCount))
 
 	// Step 12: Verify JSON path index is functional via filter query
 	categoryQuery, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
@@ -332,7 +332,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	categoryCount := categoryQuery.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	// "electronics" is categories[0], assigned to i%5==0, so count = rowNum/5
 	s.Equal(int64(rowNum/5), categoryCount, "JSON path index filter should return correct count")
-	log.Info("Verified JSON path index query", zap.Int64("electronicsCount", categoryCount))
+	mlog.Info(context.TODO(), "Verified JSON path index query", zap.Int64("electronicsCount", categoryCount))
 
 	// Step 13: Verify search works on restored collection
 	searchVec := make([]float32, dim)
@@ -348,7 +348,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.NotEmpty(searchResult.GetResults().GetIds())
-	log.Info("Verified search on restored collection")
+	mlog.Info(context.TODO(), "Verified search on restored collection")
 
 	// Cleanup
 	dropSnap, err := c.MilvusClient.DropSnapshot(ctx, &milvuspb.DropSnapshotRequest{
@@ -356,7 +356,7 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	})
 	err = merr.CheckRPCCall(dropSnap, err)
 	s.NoError(err)
-	log.Info("Test completed: snapshot restore with dynamic field and JSON path index verified")
+	mlog.Info(context.TODO(), "Test completed: snapshot restore with dynamic field and JSON path index verified")
 }
 
 // waitForRestoreComplete polls GetRestoreSnapshotState until the restore job completes or fails.
@@ -378,7 +378,7 @@ func (s *SnapshotRestoreSuite) waitForRestoreComplete(ctx context.Context, jobID
 
 		info := resp.GetInfo()
 		state := info.GetState()
-		log.Info("Restore progress", zap.Int32("progress", info.GetProgress()), zap.String("state", state.String()))
+		mlog.Info(ctx, "Restore progress", zap.Int32("progress", info.GetProgress()), zap.String("state", state.String()))
 
 		switch state {
 		case milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted:

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -71,7 +71,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(ctx, "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -90,7 +90,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(ctx, "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < rowNum/batch; i++ {
 		// insert
@@ -128,7 +128,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.True(has)
 		s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-		log.Info("insert done", zap.Int("i", i))
+		mlog.Info(ctx, "insert done", zap.Int("i", i))
 	}
 
 	showSegments := func() {
@@ -140,7 +140,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.True(len(segments) > 0)
 
 		for _, segment := range segments {
-			log.Info("show segment result", zap.Any("segment", segment))
+			mlog.Info(ctx, "show segment result", zap.Any("segment", segment))
 		}
 	}
 
@@ -159,7 +159,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
 
-		log.Info("ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
+		mlog.Info(ctx, "ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
 			zap.Int("len(compactToSegments)", len(compactToSegments)))
 
 		// The small segments can be merged based on dataCoord.compaction.min.segment
@@ -250,7 +250,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	// err = merr.CheckRPCCall(status, err)
 	// s.NoError(err)
 
-	log.Info("Test compaction succeed")
+	mlog.Info(context.TODO(), "Test compaction succeed")
 }
 
 func (s *CompactionSuite) TestMixCompactionV2() {

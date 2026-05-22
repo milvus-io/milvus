@@ -21,7 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -39,7 +39,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 		hasV2 := cg != nil && len(cg.GetColumnGroups()) > 0
 		switch {
 		case hasV2 && hasV3:
-			log.Ctx(ctx).Warn("batch update manifest item has both V2 and V3 payload; skipping",
+			mlog.Warn(ctx, "batch update manifest item has both V2 and V3 payload; skipping",
 				zap.Int64("segmentID", segID))
 			continue
 		case hasV2:
@@ -49,17 +49,17 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
-			log.Ctx(ctx).Warn("batch update manifest item has no payload; skipping",
+			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",
 				zap.Int64("segmentID", segID))
 		}
 	}
 	if len(operators) > 0 {
 		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-			log.Ctx(ctx).Warn("batch update manifest failed", zap.Error(err))
+			mlog.Warn(ctx, "batch update manifest failed", zap.Error(err))
 			return err
 		}
 	}
-	log.Ctx(ctx).Info("batch update manifest handled",
+	mlog.Info(ctx, "batch update manifest handled",
 		zap.Int("itemCount", len(body.GetItems())),
 		zap.Int("v3Count", v3Count),
 		zap.Int("v2Count", v2Count))

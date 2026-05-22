@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -75,25 +75,25 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	err error,
 ) {
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
-		log.Error("failed to write insert data", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to write insert data", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		log.Error("failed to process stats blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process stats blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
-		log.Error("failed to process delta blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process delta blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, size, err
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		log.Error("failed to process bm25 stats blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process bm25 stats blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, size, err
 	}
 
 	size = bw.sizeWritten
 
-	return
+	return inserts, deltas, stats, bm25Stats, size, err
 }
 
 func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte) error {

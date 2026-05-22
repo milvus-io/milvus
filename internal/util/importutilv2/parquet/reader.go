@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -74,7 +74,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		retryableReader.Close()
 		return nil, merr.WrapErrImportSysFailedMsg("new parquet reader failed, err=%v", err)
 	}
-	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
+	mlog.Info(ctx, "parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
@@ -159,7 +159,7 @@ func (r *reader) Size() (int64, error) {
 func (r *reader) Close() {
 	err := r.r.Close()
 	if err != nil {
-		log.Warn("close parquet reader failed", zap.Error(err))
+		mlog.Warn(r.ctx, "close parquet reader failed", zap.Error(err))
 	}
 	if r.cmr != nil {
 		r.cmr.Close()

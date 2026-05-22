@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -154,7 +154,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", zap.Error(err))
 				return nil
 			}
 			return merr.Wrap(err, "failed to update load config")

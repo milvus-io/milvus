@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -136,7 +136,7 @@ func (t *PreImportTask) Clone() Task {
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
-	log.Info("start to preimport", WrapLogFields(t,
+	mlog.Info(t.ctx, "start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("files", t.req.GetImportFiles()),
@@ -151,7 +151,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 	fn := func(i int, file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
 		if err != nil {
-			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
@@ -160,12 +160,12 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		start := time.Now()
 		err = t.readFileStat(reader, i)
 		if err != nil {
-			log.Warn("preimport failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "preimport failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
-		log.Info("read file stat done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
+		mlog.Info(t.ctx, "read file stat done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
 	}
@@ -222,7 +222,7 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		size := data.GetMemorySize()
 		totalRows += rows
 		totalSize += size
-		log.Info("reading file stat...", WrapLogFields(t, zap.Int("readRows", rows), zap.Int("readSize", size))...)
+		mlog.Info(t.ctx, "reading file stat...", WrapLogFields(t, zap.Int("readRows", rows), zap.Int("readSize", size))...)
 	}
 
 	stat := &datapb.ImportFileStats{

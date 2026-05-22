@@ -27,8 +27,8 @@ import (
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin/config"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -53,7 +53,7 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 		var c pulsar.Client
 		c, err = pulsar.NewClient(opts)
 		if err != nil {
-			log.Error("Failed to set pulsar client: ", zap.Error(err))
+			mlog.Error(context.TODO(), "Failed to set pulsar client: ", zap.Error(err))
 			return
 		}
 		cli := &pulsarClient{
@@ -140,7 +140,7 @@ func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.Consume
 
 func GetFullTopicName(tenant string, namespace string, topic string) (string, error) {
 	if len(tenant) == 0 || len(namespace) == 0 || len(topic) == 0 {
-		log.Error("build full topic name failed",
+		mlog.Error(context.TODO(), "build full topic name failed",
 			zap.String("tenant", tenant),
 			zap.String("namesapce", namespace),
 			zap.String("topic", topic))

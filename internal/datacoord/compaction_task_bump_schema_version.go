@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -310,7 +310,7 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			log.Warn("bumpSchemaVersionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
 	default:
-		log.Error("not support compaction task state", zap.String("state", result.GetState().String()))
+		log.Error(context.TODO(), "not support compaction task state", zap.String("state", result.GetState().String()))
 		reason := fmt.Sprintf("unsupported compaction state: %s", result.GetState().String())
 		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
 			setFailReason(reason)); err != nil {

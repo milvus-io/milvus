@@ -43,8 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -154,12 +154,11 @@ func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
-	log := log.Ctx(node.ctx)
-	log.Debug("node begin to register to etcd", zap.String("serverName", node.session.ServerName), zap.Int64("ServerID", node.session.ServerID))
+	mlog.Debug(node.ctx, "node begin to register to etcd", zap.String("serverName", node.session.ServerName), zap.Int64("ServerID", node.session.ServerID))
 	node.session.Register()
 
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
-	log.Info("DataNode Register Finished")
+	mlog.Info(node.ctx, "DataNode Register Finished")
 	return nil
 }
 
@@ -184,16 +183,16 @@ func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
-		log.Ctx(node.ctx).Info("DataNode server initializing")
+		mlog.Info(node.ctx, "DataNode server initializing")
 		if err := node.initSession(); err != nil {
-			log.Error("DataNode server init session failed", zap.Error(err))
+			mlog.Error(node.ctx, "DataNode server init session failed", zap.Error(err))
 			initError = err
 			return
 		}
 
 		serverID := node.GetNodeID()
-		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
-		log.Info("DataNode server init succeeded")
+		log := mlog.With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
+		log.Info(node.ctx, "DataNode server init succeeded")
 
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
@@ -202,12 +201,12 @@ func (node *DataNode) Init() error {
 		if fileMode == fileresource.SyncMode {
 			storageConfig := compaction.CreateStorageConfig()
 			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
-				log.Info("No storage address configured in yaml, file resource sync mode is disabled")
+				log.Info(node.ctx, "No storage address configured in yaml, file resource sync mode is disabled")
 				fileresource.InitManager(nil, fileresource.CloseMode)
 			} else {
 				cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
 				if err != nil {
-					log.Error("Init chunk manager for file resource manager failed", zap.Error(err))
+					log.Error(node.ctx, "Init chunk manager for file resource manager failed", zap.Error(err))
 					initError = err
 					return
 				}
@@ -226,7 +225,7 @@ func (node *DataNode) Init() error {
 		}
 
 		analyzer.InitOptions()
-		log.Info("init datanode done", zap.String("Address", node.address))
+		log.Info(node.ctx, "init datanode done", zap.String("Address", node.address))
 	})
 	return initError
 }
@@ -241,12 +240,11 @@ func (node *DataNode) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.syncMgr.TaskStatsJSON(), nil
 		})
-	log.Ctx(node.ctx).Info("register metrics actions finished")
+	mlog.Info(node.ctx, "register metrics actions finished")
 }
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
-	log := log.Ctx(node.ctx)
 	var startErr error
 	node.startOnce.Do(func() {
 		go node.compactionExecutor.Start(node.ctx)
@@ -260,7 +258,7 @@ func (node *DataNode) Start() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Info("datanode start successfully")
+		mlog.Info(node.ctx, "datanode start successfully")
 	})
 	return startErr
 }
@@ -297,7 +295,7 @@ func (node *DataNode) Stop() error {
 		if node.syncMgr != nil {
 			err := node.syncMgr.Close()
 			if err != nil {
-				log.Error("sync manager close failed", zap.Error(err))
+				mlog.Error(node.ctx, "sync manager close failed", zap.Error(err))
 			}
 		}
 

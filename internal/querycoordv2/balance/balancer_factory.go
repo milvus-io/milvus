@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
@@ -25,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -60,7 +61,7 @@ func InitGlobalBalancerFactory(
 ) {
 	factoryOnce.Do(func() {
 		globalFactory = NewBalancerFactory(scheduler, nodeManager, dist, targetMgr)
-		log.Info("Global balancer factory initialized")
+		mlog.Info(context.TODO(), "Global balancer factory initialized")
 	})
 }
 
@@ -107,7 +108,7 @@ func (f *BalancerFactory) GetBalancer() Balance {
 		return balancer
 	}
 
-	log.Info("Creating new balancer", zap.String("type", balanceKey))
+	mlog.Info(context.TODO(), "Creating new balancer", zap.String("type", balanceKey))
 
 	switch balanceKey {
 	case meta.RoundRobinBalancerName:
@@ -121,7 +122,7 @@ func (f *BalancerFactory) GetBalancer() Balance {
 	case meta.ChannelLevelScoreBalancerName:
 		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	default:
-		log.Info("Unknown balancer type, using default",
+		mlog.Info(context.TODO(), "Unknown balancer type, using default",
 			zap.String("requested", balanceKey),
 			zap.String("default", meta.ScoreBasedBalancerName))
 		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
@@ -144,7 +145,7 @@ func (f *BalancerFactory) GetStoppingBalancer() *StoppingBalancer {
 		return balancer
 	}
 
-	log.Info("Creating new stopping balancer", zap.String("policyType", policyType))
+	mlog.Info(context.TODO(), "Creating new stopping balancer", zap.String("policyType", policyType))
 
 	// Use AssignPolicyFactory to get cached policy instance
 	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(policyType)

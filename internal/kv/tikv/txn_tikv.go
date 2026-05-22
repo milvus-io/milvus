@@ -34,8 +34,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -122,7 +122,7 @@ func NewTiKV(txn *txnkv.Client, rootPath string, options ...Option) *txnTiKV {
 
 // Close closes the connection to TiKV.
 func (kv *txnTiKV) Close() {
-	log.Info("txnTiKV closed", zap.String("path", kv.rootPath))
+	mlog.Info(context.TODO(), "txnTiKV closed", zap.String("path", kv.rootPath))
 }
 
 // GetPath returns the path of the key/prefix.
@@ -135,7 +135,8 @@ func (kv *txnTiKV) GetPath(key string) string {
 func logWarnOnFailure(err *error, msg string, fields ...zap.Field) {
 	if *err != nil {
 		fields = append(fields, zap.Error(*err))
-		log.Warn(msg, fields...)
+		mlog.Warn(context.TODO(),
+			msg, fields...)
 	}
 }
 
@@ -763,7 +764,8 @@ func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, versio
 func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bool {
 	elapsed := time.Since(start)
 	if elapsed.Milliseconds() > 2000 {
-		log.Warn(message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
+		mlog.Warn(context.TODO(),
+			message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
 		return true
 	}
 	return false

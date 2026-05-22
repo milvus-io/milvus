@@ -45,7 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -91,7 +91,7 @@ func (s *ServerSuite) SetupTest() {
 
 func (s *ServerSuite) TearDownTest() {
 	if s.testServer != nil {
-		log.Info("ServerSuite tears down test", zap.String("name", s.T().Name()))
+		mlog.Info(context.TODO(), "ServerSuite tears down test", zap.String("name", s.T().Name()))
 		closeTestServer(s.T(), s.testServer)
 	}
 }
@@ -1990,7 +1990,7 @@ func TestServer_FlushAll(t *testing.T) {
 			}
 			msg.WithBroadcastID(1)
 			retry.Do(context.Background(), func() error {
-				log.Info("broadcast message", log.FieldMessage(msg))
+				mlog.Info(context.TODO(), "broadcast message", mlog.FieldMessage(msg))
 				return registry.CallMessageAckCallback(context.Background(), msg, results)
 			}, retry.AttemptAlways())
 			return &types2.BroadcastAppendResult{

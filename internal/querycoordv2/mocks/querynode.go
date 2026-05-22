@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -134,7 +134,7 @@ func (node *MockQueryNode) Start() error {
 	node.session.Init(typeutil.QueryNodeRole, node.addr, false)
 	node.session.ServerID = node.ID
 	node.session.Register()
-	log.Ctx(context.TODO()).Debug("mock QueryNode started",
+	mlog.Debug(context.TODO(), "mock QueryNode started",
 		zap.Int64("nodeID", node.ID),
 		zap.String("nodeAddr", node.addr))
 

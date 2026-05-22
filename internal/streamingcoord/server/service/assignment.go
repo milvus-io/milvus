@@ -19,8 +19,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -74,7 +74,7 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *streamingpb.UpdateReplicateConfigurationRequest) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	config := req.GetConfiguration()
 
-	log.Ctx(ctx).Info("UpdateReplicateConfiguration received",
+	mlog.Info(ctx, "UpdateReplicateConfiguration received",
 		zap.Bool("forcePromote", req.GetForcePromote()),
 		replicateutil.ConfigLogField(config),
 	)
@@ -89,7 +89,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	// so even if current cluster is not primary, we can still make a idempotent success result.
 	if _, err := s.validateReplicateConfiguration(ctx, config); err != nil {
 		if errors.Is(err, errReplicateConfigurationSame) {
-			log.Ctx(ctx).Info("configuration is same, ignored")
+			mlog.Info(ctx, "configuration is same, ignored")
 			return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 		}
 		return nil, err
@@ -113,7 +113,7 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	msg, err := s.validateReplicateConfiguration(ctx, config)
 	if err != nil {
 		if errors.Is(err, errReplicateConfigurationSame) {
-			log.Ctx(ctx).Info("configuration is same after cluster resource key is acquired, ignored")
+			mlog.Info(ctx, "configuration is same after cluster resource key is acquired, ignored")
 			return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 		}
 		return nil, err
@@ -169,7 +169,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	incomingConfig := config
 	validator := replicateutil.NewReplicateConfigValidator(incomingConfig, currentConfig, currentClusterID, cc.Channels)
 	if err := validator.Validate(); err != nil {
-		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		mlog.Warn(ctx, "UpdateReplicateConfiguration fail", zap.Error(err))
 		return nil, err
 	}
 
@@ -232,7 +232,7 @@ func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, 
 // handleForcePromote handles force promote logic for replicate configuration.
 // It promotes a secondary cluster to standalone primary immediately without waiting for CDC replication.
 func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *commonpb.ReplicateConfiguration) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
-	log.Ctx(ctx).Warn("Force promote replicate configuration requested")
+	mlog.Warn(ctx, "Force promote replicate configuration requested")
 
 	// Use WithSecondaryClusterResourceKey to:
 	// 1. Acquire exclusive cluster-level resource key
@@ -284,11 +284,11 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	// The ACK callback will handle DDL fixing and meta saving
 	_, err = broadcaster.Broadcast(ctx, msg)
 	if err != nil {
-		log.Ctx(ctx).Error("Failed to broadcast force promote AlterReplicateConfigMessage", zap.Error(err))
+		mlog.Error(ctx, "Failed to broadcast force promote AlterReplicateConfigMessage", zap.Error(err))
 		return nil, err
 	}
 
-	log.Ctx(ctx).Info("Force promote replicate configuration broadcast completed successfully")
+	mlog.Info(ctx, "Force promote replicate configuration broadcast completed successfully")
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
 
@@ -341,14 +341,14 @@ func (s *assignmentServiceImpl) buildForcePromoteConfiguration(ctx context.Conte
 
 	// Double check if configuration is same (already standalone primary)
 	if proto.Equal(forcePromoteConfig, currentConfig) {
-		log.Ctx(ctx).Info("configuration is same in force promote, ignored")
+		mlog.Info(ctx, "configuration is same in force promote, ignored")
 		return nil, nil, nil
 	}
 
 	// Validate the configuration using existing validator
 	validator := replicateutil.NewReplicateConfigValidator(forcePromoteConfig, currentConfig, currentClusterID, pchannels)
 	if err := validator.Validate(); err != nil {
-		log.Ctx(ctx).Warn("Force promote replicate configuration validation failed", zap.Error(err))
+		mlog.Warn(ctx, "Force promote replicate configuration validation failed", zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -363,7 +363,7 @@ func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context,
 	// Check ignore field first - skip all processing if true
 	// This is used for incomplete switchover messages that should be ignored after force promote
 	if header.Ignore {
-		log.Ctx(ctx).Info("AlterReplicateConfig message has ignore flag set, skipping processing",
+		mlog.Info(ctx, "AlterReplicateConfig message has ignore flag set, skipping processing",
 			zap.Bool("forcePromote", header.ForcePromote))
 		return nil
 	}
