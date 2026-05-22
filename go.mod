@@ -73,6 +73,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-beta
 	github.com/milvus-io/milvus/client/v2 v2.0.0-00010101000000-000000000000
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251201120310-af64f2acba38
 	github.com/remeh/sizedwaitgroup v1.0.0
@@ -267,7 +268,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.14-0.20260511032205-79ed5b7752a4 // indirect
+	github.com/zilliztech/woodpecker v0.1.14-0.20260519022627-fdf34b23e0d7 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
