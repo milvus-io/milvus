@@ -9,6 +9,7 @@ package canalyzer
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"unsafe"
@@ -18,7 +19,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -46,7 +47,7 @@ func UpdateParams() {
 
 	bytes, err := json.Marshal(params)
 	if err != nil {
-		log.Panic("init analyzer option failed", zap.Error(err))
+		mlog.Panic(context.TODO(), "init analyzer option failed", zap.Error(err))
 	}
 
 	paramPtr := C.CString(string(bytes))
@@ -54,7 +55,7 @@ func UpdateParams() {
 
 	status := C.set_tokenizer_option(paramPtr)
 	if err := HandleCStatus(&status, "failed to init segcore analyzer option"); err != nil {
-		log.Panic("init analyzer option failed", zap.Error(err))
+		mlog.Panic(context.TODO(), "init analyzer option failed", zap.Error(err))
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 )
 
@@ -146,7 +146,7 @@ func (c *consumer) Close() {
 	// TODO should panic?
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {
-		log.Warn("Consumer close failed", zap.String("topicName", c.topic), zap.String("groupName", c.consumerName), zap.Error(err))
+		mlog.Warn(c.ctx, "Consumer close failed", zap.String("topicName", c.topic), zap.String("groupName", c.consumerName), zap.Error(err))
 		// TODO: current rocksmq does't promise the msgmutex will be closed in some unittest,
 		// make the consuming goroutine leak.
 		// Here add a dirty way to close it.

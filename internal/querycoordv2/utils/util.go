@@ -23,11 +23,12 @@ import (
 
 	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -47,21 +48,19 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 4. All segments of the shard in target should be in the distribution
 // 5. The delegator has caught up with streaming data
 func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView, scope int32) error {
-	log := log.Ctx(context.TODO()).
-		WithRateGroup(fmt.Sprintf("util.CheckDelegatorDataReady-%d", leader.CollectionID), 1, 60).
-		With(zap.Int64("leaderID", leader.ID), zap.Int64("collectionID", leader.CollectionID))
+	log := mlog.With(zap.Int64("leaderID", leader.ID), zap.Int64("collectionID", leader.CollectionID))
 
 	// Check whether leader is online
 	info := nodeMgr.Get(leader.ID)
 	if info == nil {
 		err := merr.WrapErrNodeOffline(leader.ID)
-		log.Info("leader is not available", zap.Error(err))
+		log.Info(context.TODO(), "leader is not available", zap.Error(err))
 		return fmt.Errorf("leader not available: %w", err)
 	}
 
 	// Check if delegator is still catching up with streaming data
 	if leader.Status != nil && leader.Status.GetCatchingUpStreamingData() {
-		log.RatedInfo(10, "leader is not available due to still catching up streaming data",
+		log.RatedInfo(context.TODO(), rate.Limit(10), "leader is not available due to still catching up streaming data",
 			zap.String("channel", leader.Channel))
 		return merr.WrapErrChannelNotAvailable(leader.Channel, "still catching up streaming data")
 	}
@@ -71,7 +70,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	for segmentID := range segmentDist {
 		version, exist := leader.Segments[segmentID]
 		if !exist {
-			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
+			log.RatedInfo(context.TODO(), rate.Limit(10), "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
@@ -79,7 +78,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 		info := nodeMgr.Get(version.GetNodeID())
 		if info == nil {
 			err := merr.WrapErrNodeOffline(leader.ID)
-			log.Info("leader is not available due to QueryNode unavailable",
+			log.Info(context.TODO(), "leader is not available due to QueryNode unavailable",
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
 			return err
@@ -89,9 +88,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 }
 
 func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
-	log := log.Ctx(ctx).
-		WithRateGroup(fmt.Sprintf("util.CheckSegmentDataReady-%d", collectionID), 1, 60).
-		With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(zap.Int64("collectionID", collectionID))
 
 	// Check whether segments are fully loaded
 	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
@@ -104,14 +101,14 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 	for segmentID, segmentInfo := range segmentDist {
 		segments := distBySegmentID[segmentID]
 		if len(segments) == 0 {
-			log.RatedInfo(10, "segment is not available", zap.Int64("segmentID", segmentID))
+			log.RatedInfo(ctx, rate.Limit(10), "segment is not available", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
 		for _, segment := range segments {
 			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
 			if err != nil {
-				log.RatedWarn(10, "segment manifest path not comparable",
+				log.RatedWarn(ctx, rate.Limit(10), "segment manifest path not comparable",
 					zap.Int64("segmentID", segmentID),
 					zap.String("distManifest", segment.ManifestPath),
 					zap.String("targetManifest", segmentInfo.GetManifestPath()),
@@ -120,7 +117,7 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 			}
 			if cmp < 0 {
 				// dist manifest is older than target, segment data is not ready yet
-				log.RatedInfo(10, "segment manifest is outdated",
+				log.RatedInfo(ctx, rate.Limit(10), "segment manifest is outdated",
 					zap.Int64("segmentID", segmentID),
 					zap.String("distManifest", segment.ManifestPath),
 					zap.String("targetManifest", segmentInfo.GetManifestPath()))
@@ -130,7 +127,7 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
 			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
 			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
-				log.RatedInfo(10, "segment data version is outdated",
+				log.RatedInfo(ctx, rate.Limit(10), "segment data version is outdated",
 					zap.Int64("segmentID", segmentID),
 					zap.Int32("distDataVersion", *segment.DataVersion),
 					zap.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
@@ -145,7 +142,7 @@ func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, with
 	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
-		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
+		mlog.Warn(ctx, "failed to GetShardLeaders", zap.Error(err))
 		return err
 	}
 	// When the caller accepts unserviceable shards (e.g. proxy refreshing its
@@ -163,7 +160,8 @@ func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, with
 	if percentage < 100 {
 		err := merr.WrapErrCollectionNotFullyLoaded(collectionID)
 		msg := fmt.Sprintf("collection %v is not fully loaded", collectionID)
-		log.Ctx(ctx).Warn(msg)
+		mlog.Warn(ctx,
+			msg)
 		return err
 	}
 	return nil
@@ -195,7 +193,7 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 
 	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
-		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
+		log := mlog.With(zap.String("channel", channel.GetChannelName()))
 
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
@@ -206,8 +204,10 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 			}
 			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
 			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
-				log.WithRateGroup("util.GetShardLeaders", 1, 60).
-					Warn("leader is not available in replica", zap.String("channel", channel.GetChannelName()), zap.Int64("replicaID", replica.GetID()))
+				log.
+					Warn(ctx,
+
+						"leader is not available in replica", zap.String("channel", channel.GetChannelName()), zap.Int64("replicaID", replica.GetID()))
 				continue
 			}
 			info := nodeMgr.Get(leader.Node)
@@ -221,7 +221,8 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 		if len(ids) == 0 && !withUnserviceableShards {
 			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName())
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg, zap.Error(err))
+			log.Warn(ctx,
+				msg, zap.Error(err))
 			return nil, err
 		}
 
@@ -264,7 +265,7 @@ func GetShardLeadersWithReplicaFilter(ctx context.Context,
 	if len(channels) == 0 {
 		msg := "loaded collection do not found any channel in target, may be in recovery"
 		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
-		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
+		mlog.Warn(ctx, "failed to get channels", zap.Error(err))
 		return nil, err
 	}
 	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter)
@@ -280,7 +281,7 @@ func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta
 		// 2. Collection is not starting to release
 		// 3. The load percentage has not been updated in the last 5 minutes.
 		if err != nil && m.Exist(ctx, coll.CollectionID) && time.Since(coll.UpdatedAt) >= maxInterval {
-			log.Ctx(ctx).Warn("collection not querable",
+			mlog.Warn(ctx, "collection not querable",
 				zap.Int64("collectionID", coll.CollectionID),
 				zap.Time("lastUpdated", coll.UpdatedAt),
 				zap.Duration("maxInterval", maxInterval),
@@ -302,7 +303,7 @@ func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.
 	if len(channels) == 0 {
 		msg := "loaded collection do not found any channel in target, may be in recovery"
 		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
-		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
+		mlog.Warn(ctx, "failed to get channels", zap.Error(err))
 		return err
 	}
 
@@ -324,7 +325,7 @@ func GetChannelRWAndRONodesFor260(replica *meta.Replica, nodeManager *session.No
 	if rwQueryNodesLessThan260 := filterNodeLessThan260(replica.GetRWNodes(), nodeManager); len(rwQueryNodesLessThan260) > 0 {
 		// Add rwNodes to roNodes to balance channels from querynode to streamingnode forcely.
 		roNodes = append(roNodes, rwQueryNodesLessThan260...)
-		log.Debug("find querynode need to balance channel to streamingnode", zap.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
+		mlog.Debug(context.TODO(), "find querynode need to balance channel to streamingnode", zap.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
 	}
 	roNodes = append(roNodes, replica.GetRONodes()...)
 	return rwNodes, roNodes

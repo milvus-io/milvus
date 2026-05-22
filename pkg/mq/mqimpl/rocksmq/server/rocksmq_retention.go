@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -78,8 +78,7 @@ func (ri *retentionInfo) startRetentionInfo() {
 
 // retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
-	log := log.Ctx(context.TODO())
-	log.Debug("Rocksmq retention goroutine start!")
+	mlog.Debug(context.TODO(), "Rocksmq retention goroutine start!")
 	params := paramtable.Get()
 	// Do retention check every 10 mins
 	ticker := time.NewTicker(params.RocksmqCfg.TickerTimeInSeconds.GetAsDuration(time.Second))
@@ -91,10 +90,10 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.closeCh:
-			log.Warn("Rocksmq retention finish!")
+			mlog.Warn(context.TODO(), "Rocksmq retention finish!")
 			return nil
 		case <-compactionTicker.C:
-			log.Info("trigger rocksdb compaction, should trigger rocksdb data clean")
+			mlog.Info(context.TODO(), "trigger rocksdb compaction, should trigger rocksdb data clean")
 			go ri.db.CompactRange(gorocksdb.Range{Start: nil, Limit: nil})
 			go ri.kv.DB.CompactRange(gorocksdb.Range{Start: nil, Limit: nil})
 		case t := <-ticker.C:
@@ -105,7 +104,7 @@ func (ri *retentionInfo) retention() error {
 				if lastRetentionTs+checkTime < timeNow {
 					err := ri.expiredCleanUp(topic)
 					if err != nil {
-						log.Warn("Retention expired clean failed", zap.Error(err))
+						mlog.Warn(context.TODO(), "Retention expired clean failed", zap.Error(err))
 					}
 					ri.topicRetetionTime.Insert(topic, timeNow)
 				}
@@ -144,9 +143,9 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		return err
 	}
 	// Quick Path, No page to check
-	log := log.Ctx(context.TODO())
+
 	if totalAckedSize == 0 {
-		log.Debug("All messages are not expired, skip retention because no ack", zap.String("topic", topic),
+		mlog.Debug(context.TODO(), "All messages are not expired, skip retention because no ack", zap.String("topic", topic),
 			zap.Int64("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
@@ -200,7 +199,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		return err
 	}
 
-	log.Info("Expired check by retention time", zap.String("topic", topic),
+	mlog.Info(context.TODO(), "Expired check by retention time", zap.String("topic", topic),
 		zap.Int64("pageEndID", pageEndID), zap.Int64("deletedAckedSize", deletedAckedSize), zap.Int64("lastAck", lastAck),
 		zap.Int64("pageCleaned", pageCleaned), zap.Int64("time taken", time.Since(start).Milliseconds()))
 
@@ -235,11 +234,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	if pageEndID == 0 {
-		log.Debug("All messages are not expired, skip retention", zap.String("topic", topic), zap.Int64("time taken", time.Since(start).Milliseconds()))
+		mlog.Debug(context.TODO(), "All messages are not expired, skip retention", zap.String("topic", topic), zap.Int64("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	expireTime := time.Since(start).Milliseconds()
-	log.Debug("Expired check by message size: ", zap.String("topic", topic),
+	mlog.Debug(context.TODO(), "Expired check by message size: ", zap.String("topic", topic),
 		zap.Int64("pageEndID", pageEndID), zap.Int64("deletedAckedSize", deletedAckedSize),
 		zap.Int64("pageCleaned", pageCleaned), zap.Int64("time taken", expireTime))
 	return ri.cleanData(topic, pageEndID)
@@ -353,7 +352,7 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	if err != nil {
 		return err
 	}
-	log.Ctx(context.TODO()).Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
+	mlog.Debug(context.TODO(), "Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }
 

@@ -17,13 +17,14 @@
 package compaction
 
 import (
+	"context"
 	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -147,7 +148,7 @@ func DecideLOBStrategyFromManifest(lobFiles []packed.LobFileInfo, fieldID int64,
 		if _, seen := seenFiles[file.Path]; !seen {
 			seenFiles[file.Path] = file.TotalRows
 		} else {
-			log.Warn("LOB file referenced by multiple segments, invariant violation",
+			mlog.Warn(context.TODO(), "LOB file referenced by multiple segments, invariant violation",
 				zap.String("path", file.Path),
 				zap.Int64("fieldID", fieldID))
 		}

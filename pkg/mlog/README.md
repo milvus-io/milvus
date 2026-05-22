@@ -203,7 +203,7 @@ props := mlog.GetPropagated(ctx)
 Interceptors are defined in `interceptor.go` within the `mlog` package (not a subpackage):
 
 ```go
-import "github.com/milvus-io/milvus/pkg/v2/mlog"
+import "github.com/milvus-io/milvus/pkg/v3/mlog"
 
 // Server configuration
 server := grpc.NewServer(

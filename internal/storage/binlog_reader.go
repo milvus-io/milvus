@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -118,7 +119,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 
 		decryptor, err := hookutil.GetCipher().GetDecryptor(ezID, collectionID, []byte(edek))
 		if err != nil {
-			log.Error("failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
 		}
 
@@ -127,17 +128,17 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 			return err
 		}
 
-		log.Debug("Binlog reader starts to decypt cipher text",
+		mlog.Debug(context.TODO(), "Binlog reader starts to decypt cipher text",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),
 		)
 		decrypted, err := decryptor.Decrypt(cipherText)
 		if err != nil {
-			log.Error("failed to decrypt", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to decrypt", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
 		}
-		log.Debug("Binlog reader decrypted cipher text",
+		mlog.Debug(context.TODO(), "Binlog reader decrypted cipher text",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),

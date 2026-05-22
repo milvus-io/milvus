@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -71,23 +71,22 @@ func getMultiReadPool() *conc.Pool[any] {
 }
 
 func resizePool(pool *conc.Pool[any], newSize int, tag string) {
-	log := log.Ctx(context.Background()).
-		With(
-			zap.String("poolTag", tag),
-			zap.Int("newSize", newSize),
-		)
+	log := mlog.With(
+		zap.String("poolTag", tag),
+		zap.Int("newSize", newSize),
+	)
 
 	if newSize <= 0 {
-		log.Warn("cannot set pool size to non-positive value")
+		log.Warn(context.TODO(), "cannot set pool size to non-positive value")
 		return
 	}
 
 	err := pool.Resize(newSize)
 	if err != nil {
-		log.Warn("failed to resize pool", zap.Error(err))
+		log.Warn(context.TODO(), "failed to resize pool", zap.Error(err))
 		return
 	}
-	log.Info("pool resize successfully")
+	log.Info(context.TODO(), "pool resize successfully")
 }
 
 func ResizeBFApplyPool(evt *config.Event) {
@@ -102,7 +101,7 @@ func initBFApplyPool() {
 	bfApplyPoolInitOnce.Do(func() {
 		pt := paramtable.Get()
 		poolSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
-		log.Info("init BFApplyPool", zap.Int("poolSize", poolSize))
+		mlog.Info(context.TODO(), "init BFApplyPool", zap.Int("poolSize", poolSize))
 		pool := conc.NewPool[any](
 			poolSize,
 		)

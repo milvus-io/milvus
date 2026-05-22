@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -30,7 +30,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 	metrics := metricsutil.NewTimeTickMetrics(param.ChannelInfo.Name)
 	return &timeTickSyncOperator{
 		logger: resource.Resource().Logger().With(
-			log.FieldComponent("timetick-sync"),
+			mlog.FieldComponent("timetick-sync"),
 			zap.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
@@ -43,7 +43,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 
 // timeTickSyncOperator is a time tick sync operator.
 type timeTickSyncOperator struct {
-	logger                *log.MLogger
+	logger                *mlog.Logger
 	interceptorBuildParam *interceptors.InterceptorBuildParam // interceptor build param.
 	ackManager            *ack.AckManager                     // ack manager.
 	ackDetails            *ack.AckDetails                     // all acknowledged details, all acked messages but not sent to wal will be kept here.
@@ -78,7 +78,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	// Sync operation cannot trigger until isReady.
 	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
 	if err != nil {
-		impl.logger.Warn("unreachable: get wal failed", zap.Error(err))
+		impl.logger.Warn(ctx, "unreachable: get wal failed", zap.Error(err))
 		return
 	}
 
@@ -90,7 +90,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 		return appendResult.MessageID, nil
 	}, persisted)
 	if err != nil {
-		impl.logger.Warn("send time tick sync message failed", zap.Error(err))
+		impl.logger.Warn(ctx, "send time tick sync message failed", zap.Error(err))
 		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
 			impl.walShutdownOrFenced.Store(true)
 		}
@@ -177,7 +177,7 @@ func (impl *timeTickSyncOperator) syncAcknowledgedDetails(ctx context.Context) {
 	// Sync up and get last confirmed timestamp.
 	ackDetails, err := impl.ackManager.SyncAndGetAcknowledged(ctx)
 	if err != nil {
-		impl.logger.Warn("sync timestamp ack manager failed", zap.Error(err))
+		impl.logger.Warn(ctx, "sync timestamp ack manager failed", zap.Error(err))
 	}
 
 	// Add ack details to ackDetails.

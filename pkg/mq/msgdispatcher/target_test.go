@@ -1,6 +1,7 @@
 package msgdispatcher
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -8,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -25,7 +26,7 @@ func TestSendTimeout(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		err := target.send(&msgstream.MsgPack{})
 		if err != nil {
-			log.Error("send failed", zap.Int("idx", i), zap.Error(err))
+			mlog.Error(context.TODO(), "send failed", zap.Int("idx", i), zap.Error(err))
 			counter++
 		}
 	}

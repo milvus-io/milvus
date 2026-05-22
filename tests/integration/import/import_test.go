@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -165,7 +165,7 @@ func (s *BulkInsertSuite) run() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -323,7 +323,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 		Files:          files,
 	})
 	s.NoError(err)
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", zap.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)

@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -33,7 +33,7 @@ func NewSessionDiscoverer(etcdCli *clientv3.Client, opts ...SessionDiscovererOpt
 	if sd.versionRangeStr == "" {
 		panic("version range is required")
 	}
-	sd.SetLogger(log.With(zap.String("prefix", sd.prefix), zap.Bool("exclusive", sd.exclusive), zap.String("semver", sd.versionRangeStr)))
+	sd.SetLogger(mlog.With(zap.String("prefix", sd.prefix), zap.Bool("exclusive", sd.exclusive), zap.String("semver", sd.versionRangeStr)))
 	return sd
 }
 
@@ -42,7 +42,7 @@ type SessionDiscovererOption func(sw *sessionDiscoverer)
 
 // sessionDiscoverer is used to apply a session watch on etcd.
 type sessionDiscoverer struct {
-	log.Binder
+	mlog.Binder
 
 	etcdCli         *clientv3.Client
 	prefix          string
@@ -135,7 +135,9 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 // handleETCDEvent handles the etcd event.
 func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error {
 	if resp.Err() != nil {
-		sw.Logger().Warn("etcd watch failed with error", zap.Error(resp.Err()))
+		sw.Logger().Warn(context.TODO(),
+
+			"etcd watch failed with error", zap.Error(resp.Err()))
 		return resp.Err()
 	}
 
@@ -147,13 +149,13 @@ func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error 
 			logger = logger.With(zap.String("sessionValue", string(ev.Kv.Value)))
 			session, err := sw.parseSession(ev.Kv.Value)
 			if err != nil {
-				logger.Warn("failed to parse session", zap.Error(err))
+				logger.Warn(context.TODO(), "failed to parse session", zap.Error(err))
 				continue
 			}
-			logger.Info("new server modification")
+			logger.Info(context.TODO(), "new server modification")
 			sw.peerSessions[string(ev.Kv.Key)] = session
 		case clientv3.EventTypeDelete:
-			logger.Info("old server removed")
+			logger.Info(context.TODO(), "old server removed")
 			delete(sw.peerSessions, string(ev.Kv.Key))
 		}
 	}
@@ -180,10 +182,10 @@ func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
 		logger := sw.Logger().With(zap.String("sessionKey", string(kv.Key)), zap.String("sessionValue", string(kv.Value)))
 		session, err := sw.parseSession(kv.Value)
 		if err != nil {
-			logger.Warn("fail to parse session when initializing discoverer", zap.Error(err))
+			logger.Warn(ctx, "fail to parse session when initializing discoverer", zap.Error(err))
 			continue
 		}
-		logger.Info("new server initialization", zap.Any("session", session))
+		logger.Info(ctx, "new server initialization", zap.Any("session", session))
 		sw.peerSessions[string(kv.Key)] = session
 	}
 	sw.revision = resp.Header.Revision
@@ -207,13 +209,17 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 		session := session
 		v, err := semver.Parse(session.Version)
 		if err != nil {
-			sw.Logger().Error("failed to parse version for session", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version), zap.Error(err))
+			sw.Logger().Error(context.TODO(),
+
+				"failed to parse version for session", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version), zap.Error(err))
 			continue
 		}
 		// filter low version.
 		// !!! important, stopping nodes should not be removed here.
 		if !sw.versionRange(v) {
-			sw.Logger().Info("skip low version node", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version))
+			sw.Logger().Info(context.TODO(),
+
+				"skip low version node", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version))
 			continue
 		}
 		address := session.Address
@@ -221,7 +227,9 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 			// replace the port with the force port in session address.
 			host, _, err := net.SplitHostPort(address)
 			if err != nil {
-				sw.Logger().Error("failed to split host and port for session", zap.Int64("serverID", session.ServerID), zap.String("address", address), zap.Error(err))
+				sw.Logger().Error(context.TODO(),
+
+					"failed to split host and port for session", zap.Int64("serverID", session.ServerID), zap.String("address", address), zap.Error(err))
 				continue
 			}
 			address = net.JoinHostPort(host, strconv.Itoa(sw.forcePort))
@@ -249,7 +257,7 @@ func (s *VersionedState) Sessions() map[int64]*sessionutil.SessionRaw {
 	for _, v := range s.State.Addresses {
 		session := attributes.GetSessionFromAttributes(v.BalancerAttributes)
 		if session == nil {
-			log.Error("no session found in resolver state, skip it", zap.String("address", v.Addr))
+			mlog.Error(context.TODO(), "no session found in resolver state, skip it", zap.String("address", v.Addr))
 			continue
 		}
 		sessions[session.ServerID] = session

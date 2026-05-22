@@ -17,6 +17,7 @@
 package metacache
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
@@ -25,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -153,7 +154,7 @@ func (c *metaCacheImpl) addSegment(segment *SegmentInfo) {
 
 func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
 	if len(filters) == 0 {
-		log.Warn("remove segment without filters is not allowed", zap.Stack("callstack"))
+		mlog.Warn(context.TODO(), "remove segment without filters is not allowed", zap.Stack("callstack"))
 		return nil
 	}
 	c.mu.Lock()
@@ -302,7 +303,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			}
 			c.segmentInfos[info.GetSegmentId()] = segInfo
 			c.stateSegments[info.GetState()][info.GetSegmentId()] = segInfo
-			log.Info("metacache does not have segment, add it", zap.Int64("segmentID", info.GetSegmentId()))
+			mlog.Info(context.TODO(), "metacache does not have segment, add it", zap.Int64("segmentID", info.GetSegmentId()))
 		}
 	}
 
@@ -314,7 +315,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			continue
 		}
 		if _, ok := allSegments[segID]; !ok {
-			log.Info("remove dropped segment", zap.Int64("segmentID", segID))
+			mlog.Info(context.TODO(), "remove dropped segment", zap.Int64("segmentID", segID))
 			delete(c.segmentInfos, segID)
 			delete(c.stateSegments[info.State()], segID)
 		}

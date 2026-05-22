@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -83,20 +83,20 @@ func GroupSegmentsByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager
 
 // RecoverReplicaOfCollection recovers all replica of collection with latest resource group.
 func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID typeutil.UniqueID) {
-	logger := log.With(zap.Int64("collectionID", collectionID))
+	logger := mlog.With(zap.Int64("collectionID", collectionID))
 	rgNames := m.GetResourceGroupByCollection(ctx, collectionID)
 	if rgNames.Len() == 0 {
-		logger.Error("no resource group found for collection")
+		logger.Error(ctx, "no resource group found for collection")
 		return
 	}
 	rgs, err := m.GetResourceGroups(ctx, rgNames.Collect())
 	if err != nil {
-		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
+		logger.Error(ctx, "unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return
 	}
 
 	if err := m.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
-		logger.Warn("fail to set available nodes in replica", zap.Error(err))
+		logger.Warn(ctx, "fail to set available nodes in replica", zap.Error(err))
 	}
 }
 
@@ -147,7 +147,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		}
 
 		if num > len(nodes) {
-			log.Warn("failed to check resource group", zap.Error(err))
+			mlog.Warn(ctx, "failed to check resource group", zap.Error(err))
 			if checkNodeNum {
 				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
 				return nil, err

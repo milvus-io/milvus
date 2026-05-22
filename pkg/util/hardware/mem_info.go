@@ -18,13 +18,14 @@
 package hardware
 
 import (
+	"context"
 	"os"
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var proc *process.Process
@@ -44,7 +45,7 @@ func init() {
 func GetUsedMemoryCount() uint64 {
 	memInfo, err := proc.MemoryInfoEx()
 	if err != nil {
-		log.Warn("failed to get memory info", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to get memory info", zap.Error(err))
 		return 0
 	}
 

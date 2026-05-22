@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -52,7 +52,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 	ctx := context.Background()
 
 	expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
-	log.Info("========================delete expr==================",
+	mlog.Info(context.TODO(), "========================delete expr==================",
 		zap.String("expr", expr),
 	)
 	deleteResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
@@ -63,7 +63,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 	s.Require().True(merr.Ok(deleteResp.GetStatus()))
 	s.Require().EqualValues(len(pks), deleteResp.GetDeleteCnt())
 
-	log.Info("=========================Data flush=========================")
+	mlog.Info(context.TODO(), "=========================Data flush=========================")
 
 	flushResp, err := s.Cluster.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		CollectionNames: []string{collection},
@@ -80,9 +80,9 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	log.Info("=========================Wait for flush for 2min=========================")
+	mlog.Info(context.TODO(), "=========================Wait for flush for 2min=========================")
 	s.WaitForFlush(ctx, segmentIDs, flushTs, "", collection)
-	log.Info("=========================Data flush done=========================")
+	mlog.Info(context.TODO(), "=========================Data flush done=========================")
 }
 
 func (s *CompactionSuite) compactAndReboot(collection string) {
@@ -186,7 +186,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 	rowNum := 3000
 	pks := []int64{}
 	for i := 0; i < segmentCount; i++ {
-		log.Info("=========================Data insertion=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data insertion=========================", zap.Any("count", i))
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, s.dim)
 		hashKeys := integration.GenerateHashKeys(rowNum)
 		insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
@@ -202,7 +202,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 
 		pks = append(pks, insertResult.GetIDs().GetIntId().GetData()...)
 
-		log.Info("=========================Data flush=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data flush=========================", zap.Any("count", i))
 		flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 			CollectionNames: []string{collection},
 		})
@@ -219,9 +219,9 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		s.WaitForFlush(ctx, segmentIDs, flushTs, "", collection)
-		log.Info("=========================Data flush done=========================", zap.Any("count", i))
+		mlog.Info(context.TODO(), "=========================Data flush done=========================", zap.Any("count", i))
 	}
-	log.Info("=========================Data insertion finished=========================")
+	mlog.Info(context.TODO(), "=========================Data insertion finished=========================")
 
 	segments, err := c.ShowSegments(collection)
 	s.Require().NoError(err)

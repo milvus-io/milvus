@@ -1,11 +1,13 @@
 package pulsarlog
 
 import (
+	"context"
+
 	plog "github.com/apache/pulsar-client-go/pulsar/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var _ plog.Logger = (*logger)(nil)
@@ -14,11 +16,11 @@ var _ plog.Logger = (*logger)(nil)
 // TODO: currently, pulsar client will log a huge message when logging,
 // so we only log the first msg without format the log.
 func NewLogger() plog.Logger {
-	return &logger{log.With(zap.String("component", "pulsar"))}
+	return &logger{mlog.With(zap.String("component", "pulsar"))}
 }
 
 type logger struct {
-	inner *log.MLogger
+	inner *mlog.Logger
 }
 
 func (l *logger) SubLogger(fields plog.Fields) plog.Logger {
@@ -75,9 +77,9 @@ func (l *logger) logWithLevel(level zapcore.Level, args ...interface{}) {
 		return
 	}
 	if msg, ok := args[0].(string); ok {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(level, msg)
+		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(context.TODO(), level, msg)
 	} else {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(level, "unknown log message type")
+		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(context.TODO(), level, "unknown log message type")
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc/stats"
 )
 
@@ -41,10 +42,7 @@ type dynamicOtelGrpcStatsHandler struct {
 
 func getDynamicServerHandler() *dynamicOtelGrpcStatsHandler {
 	initServerOnce.Do(func() {
-		statsHandler := otelgrpc.NewServerHandler(
-			otelgrpc.WithInterceptorFilter(filterFunc),
-			otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
-		)
+		statsHandler := otelgrpc.NewServerHandler(getServerHandlerOpts()...)
 
 		dynamicServerHandler = &dynamicOtelGrpcStatsHandler{}
 		dynamicServerHandler.handler.Store(&statsHandler)
@@ -79,10 +77,7 @@ func GetDynamicOtelGrpcClientStatsHandler() stats.Handler {
 
 func NotifyTracerProviderUpdated() {
 	serverhandler := getDynamicServerHandler()
-	statsHandler := otelgrpc.NewServerHandler(
-		otelgrpc.WithInterceptorFilter(filterFunc),
-		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
-	)
+	statsHandler := otelgrpc.NewServerHandler(getServerHandlerOpts()...)
 
 	serverhandler.setHandler(statsHandler)
 
@@ -92,6 +87,17 @@ func NotifyTracerProviderUpdated() {
 		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
 	)
 	clientHandler.setHandler(statsHandler)
+}
+
+func getServerHandlerOpts() []otelgrpc.Option {
+	return []otelgrpc.Option{
+		otelgrpc.WithInterceptorFilter(filterFunc),
+		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
+		otelgrpc.WithPropagators(propagation.NewCompositeTextMapPropagator(
+			clientRequestIDPropagator{},
+			otel.GetTextMapPropagator(),
+		)),
+	}
 }
 
 func (h *dynamicOtelGrpcStatsHandler) getHandler() stats.Handler {

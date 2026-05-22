@@ -28,7 +28,7 @@ import (
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -112,10 +112,10 @@ func (m *FileResourceObserver) syncLoop() {
 				m.RetryNotify()
 			}
 		case <-m.closeCh:
-			log.Info("file resource observer close")
+			mlog.Info(m.ctx, "file resource observer close")
 			return
 		case <-m.ctx.Done():
-			log.Info("file resource observer context done")
+			mlog.Info(m.ctx, "file resource observer context done")
 			return
 		}
 	}
@@ -202,13 +202,13 @@ func (m *FileResourceObserver) Sync() error {
 					Version:   targetVersion,
 				})
 				if err != nil {
-					log.Warn("sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
+					mlog.Warn(m.ctx, "sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
 					syncErr = err
 					continue
 				}
 
 				if err = merr.Error(status); err != nil {
-					log.Warn("sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
+					mlog.Warn(m.ctx, "sync file resource failed", zap.Int64("nodeID", node.ID()), zap.Error(err))
 					syncErr = err
 					continue
 				}
@@ -218,7 +218,7 @@ func (m *FileResourceObserver) Sync() error {
 					NodeType: QueryNode,
 					Version:  targetVersion,
 				})
-				log.Info("finish sync file resource to query node", zap.Int64("node", node.ID()), zap.Uint64("version", targetVersion))
+				mlog.Info(m.ctx, "finish sync file resource to query node", zap.Int64("node", node.ID()), zap.Uint64("version", targetVersion))
 			}
 		}
 
@@ -235,7 +235,7 @@ func (m *FileResourceObserver) Sync() error {
 			if info, ok := m.distribution.Get(nodeID); !ok || info.Version < targetVersion {
 				c, err := m.dnManager.GetClient(nodeID)
 				if err != nil {
-					log.Warn("sync file resource failed, fetch client failed", zap.Error(err))
+					mlog.Warn(m.ctx, "sync file resource failed, fetch client failed", zap.Error(err))
 					syncErr = err
 					continue
 				}
@@ -245,12 +245,12 @@ func (m *FileResourceObserver) Sync() error {
 				})
 				if err != nil {
 					syncErr = err
-					log.Warn("sync file resource failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					mlog.Warn(m.ctx, "sync file resource failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 					continue
 				}
 
 				if err = merr.Error(status); err != nil {
-					log.Warn("sync file resource failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					mlog.Warn(m.ctx, "sync file resource failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 					syncErr = err
 					continue
 				}
@@ -260,7 +260,7 @@ func (m *FileResourceObserver) Sync() error {
 					NodeType: DataNode,
 					Version:  targetVersion,
 				})
-				log.Info("finish sync file resource to data node", zap.Int64("nodeID", nodeID), zap.Uint64("version", targetVersion))
+				mlog.Info(m.ctx, "finish sync file resource to data node", zap.Int64("nodeID", nodeID), zap.Uint64("version", targetVersion))
 			}
 		}
 

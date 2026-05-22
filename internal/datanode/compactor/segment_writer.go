@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -139,7 +139,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 
 		w.res = append(w.res, result)
 
-		log.Info("created new segment",
+		mlog.Info(w.ctx, "created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
 			zap.Int64("totalRows", rowNum),
@@ -457,7 +457,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize 
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(sch)
 	if err != nil {
-		log.Warn("failed to get pk field from schema")
+		mlog.Warn(context.TODO(), "failed to get pk field from schema")
 		return nil, err
 	}
 
@@ -499,5 +499,5 @@ func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSch
 		closers = append(closers, w.Finalize)
 	}
 	writer, err = storage.NewBinlogSerializeWriter(schema, partID, segID, fieldWriters, batchSize)
-	return
+	return writer, closers, err
 }

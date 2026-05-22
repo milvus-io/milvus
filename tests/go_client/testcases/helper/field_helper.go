@@ -1,12 +1,13 @@
 package helper
 
 import (
+	"context"
 	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -56,7 +57,7 @@ func GetFieldNameByElementType(t entity.FieldType) string {
 	case entity.FieldTypeVarChar:
 		return common.DefaultVarcharArrayField
 	default:
-		log.Warn("GetFieldNameByElementType", zap.Any("ElementType", t))
+		mlog.Warn(context.TODO(), "GetFieldNameByElementType", zap.Any("ElementType", t))
 		return common.DefaultArrayFieldName
 	}
 }
@@ -254,7 +255,7 @@ type FieldsFactory struct{}
 
 // Redesign: Create field combinations based on CollectionFieldsType and set properties based on FieldOptions
 func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, fieldOpts FieldOptions) []*entity.Field {
-	log.Info("GenFieldsForCollectionWithOptions", zap.Any("CollectionFieldsType", collectionFieldsType), zap.Any("FieldOptions", fieldOpts))
+	mlog.Info(context.TODO(), "GenFieldsForCollectionWithOptions", zap.Any("CollectionFieldsType", collectionFieldsType), zap.Any("FieldOptions", fieldOpts))
 
 	switch collectionFieldsType {
 	case Int64Vec:
@@ -623,13 +624,13 @@ func (ff FieldsFactory) applyFieldOptions(field *entity.Field, fieldOpt *GenFiel
 // For example: TWithDefaultValue(int32(2)) instead of TWithDefaultValue(2)
 // This is because Go's interface{} type inference defaults to int, not int32
 func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue interface{}) {
-	log.Info("applyDefaultValue", zap.Any("defaultValue", defaultValue), zap.String("fieldType", field.DataType.String()))
+	mlog.Info(context.TODO(), "applyDefaultValue", zap.Any("defaultValue", defaultValue), zap.String("fieldType", field.DataType.String()))
 	switch field.DataType {
 	case entity.FieldTypeBool:
 		if val, ok := defaultValue.(bool); ok {
 			field.WithDefaultValueBool(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "bool"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
@@ -647,7 +648,7 @@ func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue inte
 			val = int32(v)
 			field.WithDefaultValueInt(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "int8 or int16 or int32"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
@@ -656,7 +657,7 @@ func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue inte
 		if val, ok := defaultValue.(int64); ok {
 			field.WithDefaultValueLong(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "int64"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
@@ -665,7 +666,7 @@ func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue inte
 		if val, ok := defaultValue.(float32); ok {
 			field.WithDefaultValueFloat(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "float32"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
@@ -674,7 +675,7 @@ func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue inte
 		if val, ok := defaultValue.(float64); ok {
 			field.WithDefaultValueDouble(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "float64"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
@@ -683,13 +684,13 @@ func (ff FieldsFactory) applyDefaultValue(field *entity.Field, defaultValue inte
 		if val, ok := defaultValue.(string); ok {
 			field.WithDefaultValueString(val)
 		} else {
-			log.Fatal("applyDefaultValue failed: type assertion failed",
+			mlog.Fatal(context.TODO(), "applyDefaultValue failed: type assertion failed",
 				zap.Any("defaultValue", defaultValue),
 				zap.String("expectedType", "string"),
 				zap.String("actualType", fmt.Sprintf("%T", defaultValue)))
 		}
 	default:
-		log.Fatal("applyDefaultValue: unsupported field type for default value",
+		mlog.Fatal(context.TODO(), "applyDefaultValue: unsupported field type for default value",
 			zap.String("fieldType", field.DataType.String()),
 			zap.Any("defaultValue", defaultValue))
 	}

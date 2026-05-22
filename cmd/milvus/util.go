@@ -21,7 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -196,7 +196,7 @@ func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCo
 	if err := flags.Parse(args[3:]); err != nil {
 		os.Exit(-1)
 	}
-	return
+	return alias, enableRootCoord, enableQueryCoord, enableDataCoord, enableQueryNode, enableDataNode, enableProxy, enableStreamingNode
 }
 
 func getHelp() string {
@@ -205,7 +205,7 @@ func getHelp() string {
 
 func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []string) error {
 	if len(sessionSuffix) == 0 {
-		log.Warn("not found session info , skip to clean sessions")
+		mlog.Warn(context.TODO(), "not found session info , skip to clean sessions")
 		return nil
 	}
 
@@ -226,7 +226,7 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 	for _, key := range keys {
 		_, _ = etcdCli.Delete(ctx, key)
 	}
-	log.Ctx(ctx).Info("clean sessions from etcd", zap.Any("keys", keys))
+	mlog.Info(ctx, "clean sessions from etcd", zap.Any("keys", keys))
 	return nil
 }
 
@@ -243,7 +243,6 @@ func getSessionPaths(ctx context.Context, client *clientv3.Client, metaPath stri
 
 // filterUnmatchedKey skip active keys that don't match completed key, the latest active key may from standby server
 func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPathPrefix string, sessionSuffix []string) []string {
-	log := log.Ctx(ctx)
 	suffixSet := lo.SliceToMap(sessionSuffix, func(t string) (string, struct{}) {
 		return t, struct{}{}
 	})
@@ -254,26 +253,26 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 			res := strings.Split(suffix, "-")
 			if len(res) != 2 {
 				// skip illegal keys
-				log.Warn("skip illegal key", zap.String("suffix", suffix))
+				mlog.Warn(ctx, "skip illegal key", zap.String("suffix", suffix))
 				continue
 			}
 
 			serverType := res[0]
 			targetServerID, err := strconv.ParseInt(res[1], 10, 64)
 			if err != nil {
-				log.Warn("get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				mlog.Warn(ctx, "get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
 				continue
 			}
 
 			key := path.Join(sessionPathPrefix, serverType)
 			serverID, err := getServerID(ctx, client, key)
 			if err != nil {
-				log.Warn("get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
+				mlog.Warn(ctx, "get server id failed from key", zap.String("suffix", suffix), zap.Error(err))
 				continue
 			}
 
 			if serverID == targetServerID {
-				log.Info("add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
+				mlog.Info(ctx, "add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
 				suffixSet[serverType] = struct{}{}
 			}
 		}

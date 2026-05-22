@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -428,7 +428,7 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	resp, err = node.GetMetrics(node.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
-	log.Info("Test DataNode.GetMetrics",
+	mlog.Info(s.ctx, "Test DataNode.GetMetrics",
 		zap.String("name", resp.ComponentName),
 		zap.String("response", resp.Response))
 }

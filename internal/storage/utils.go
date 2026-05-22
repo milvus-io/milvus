@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -269,7 +269,7 @@ func GetDimFromParams(params []*commonpb.KeyValuePair) (int, error) {
 func ReadBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataType) {
 	err := binary.Read(reader, common.Endian, receiver)
 	if err != nil {
-		log.Error("binary.Read failed", zap.Any("data type", dataType), zap.Error(err))
+		mlog.Error(context.TODO(), "binary.Read failed", zap.Any("data type", dataType), zap.Error(err))
 	}
 }
 
@@ -432,7 +432,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_FloatVector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -445,7 +445,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_Float16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -458,7 +458,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_BFloat16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -472,7 +472,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 			var dim int
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -487,7 +487,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_Int8Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -630,7 +630,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_FloatVector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -653,7 +653,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_BinaryVector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -676,7 +676,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_Float16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -699,7 +699,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_BFloat16Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -747,7 +747,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_Int8Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
+				mlog.Error(context.TODO(), "failed to get dim", zap.Error(err))
 				return nil, err
 			}
 
@@ -1287,7 +1287,7 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 // MergeInsertData append the insert datas to the original buffer.
 func MergeInsertData(buffer *InsertData, datas ...*InsertData) {
 	if buffer == nil {
-		log.Warn("Attempt to merge data into a nil buffer, skip the data merge.")
+		mlog.Warn(context.TODO(), "Attempt to merge data into a nil buffer, skip the data merge.")
 		return
 	}
 
@@ -1307,19 +1307,19 @@ func MergeInsertData(buffer *InsertData, datas ...*InsertData) {
 func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData) (FieldData, error) {
 	helper, err := typeutil.CreateSchemaHelper(collSchema)
 	if err != nil {
-		log.Error("failed to create schema helper", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to create schema helper", zap.Error(err))
 		return nil, err
 	}
 
 	pf, err := helper.GetPrimaryKeyField()
 	if err != nil {
-		log.Warn("no primary field found", zap.Error(err))
+		mlog.Warn(context.TODO(), "no primary field found", zap.Error(err))
 		return nil, err
 	}
 
 	pfData, ok := data.Data[pf.FieldID]
 	if !ok {
-		log.Warn("no primary field found in insert msg", zap.Int64("fieldID", pf.FieldID))
+		mlog.Warn(context.TODO(), "no primary field found in insert msg", zap.Int64("fieldID", pf.FieldID))
 		return nil, errors.New("no primary field found in insert msg")
 	}
 
@@ -1333,7 +1333,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 		// TODO
 	}
 	if !ok {
-		log.Warn("primary field not in Int64 or VarChar format", zap.Int64("fieldID", pf.FieldID))
+		mlog.Warn(context.TODO(), "primary field not in Int64 or VarChar format", zap.Int64("fieldID", pf.FieldID))
 		return nil, errors.New("primary field not in Int64 or VarChar format")
 	}
 

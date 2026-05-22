@@ -25,7 +25,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // GetFunctionName returns the name of input
@@ -52,7 +52,7 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 
 	t := time.Now()
 	defer func() {
-		log.Ctx(context.TODO()).Debug(fname, zap.Int("total", total), zap.Any("time cost", time.Since(t)))
+		mlog.Debug(context.TODO(), fname, zap.Int("total", total), zap.Any("time cost", time.Since(t)))
 	}()
 
 	nPerBatch := (total + maxParallel - 1) / maxParallel
@@ -86,7 +86,7 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 			for idx := begin; idx < end; idx++ {
 				err = f(idx)
 				if err != nil {
-					log.Error(fname, zap.Error(err), zap.Int("idx", idx))
+					mlog.Error(context.TODO(), fname, zap.Error(err), zap.Int("idx", idx))
 					break
 				}
 			}
@@ -135,7 +135,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 	// for _, opt := range opts {
 	// 	opt(&option)
 	// }
-	log := log.Ctx(context.TODO())
+	ctx := context.TODO()
 
 	if maxParallel <= 0 {
 		maxParallel = 1
@@ -143,13 +143,13 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 
 	t := time.Now()
 	defer func() {
-		log.Debug(fname, zap.Any("time cost", time.Since(t)))
+		mlog.Debug(ctx, fname, zap.Any("time cost", time.Since(t)))
 	}()
 
 	total := len(tasks)
 	nPerBatch := (total + maxParallel - 1) / maxParallel
-	log.Debug(fname, zap.Int("total", total))
-	log.Debug(fname, zap.Int("nPerBatch", nPerBatch))
+	mlog.Debug(ctx, fname, zap.Int("total", total))
+	mlog.Debug(ctx, fname, zap.Int("nPerBatch", nPerBatch))
 
 	quit := make(chan bool)
 	errc := make(chan error)
@@ -190,7 +190,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 			for idx := begin; idx < end; idx++ {
 				err = tasks[idx]()
 				if err != nil {
-					log.Error(fname, zap.Error(err), zap.Int("idx", idx))
+					mlog.Error(ctx, fname, zap.Error(err), zap.Int("idx", idx))
 					break
 				}
 			}
@@ -214,7 +214,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 		routineNum++
 	}
 
-	log.Debug(fname, zap.Int("NumOfGoRoutines", routineNum))
+	mlog.Debug(ctx, fname, zap.Int("NumOfGoRoutines", routineNum))
 
 	if routineNum <= 0 {
 		return nil

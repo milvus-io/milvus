@@ -7,7 +7,7 @@ import (
 	woodpecker "github.com/zilliztech/woodpecker/woodpecker/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
@@ -38,12 +38,12 @@ func (s *scannerImpl) Chan() <-chan message.ImmutableMessage {
 func (s *scannerImpl) Close() error {
 	err := s.ScannerHelper.Close()
 	if err != nil {
-		log.Ctx(s.Context()).Warn("failed to close wp scanner", zap.Error(err))
+		mlog.Warn(s.Context(), "failed to close wp scanner", zap.Error(err))
 	}
 	if s.reader != nil {
 		err = s.reader.Close(context.Background())
 		if err != nil {
-			log.Ctx(s.Context()).Warn("failed to close wp reader", zap.Error(err))
+			mlog.Warn(s.Context(), "failed to close wp reader", zap.Error(err))
 		}
 	}
 	return err
@@ -63,7 +63,7 @@ func (s *scannerImpl) executeConsumer() {
 				s.Finish(errors.Wrap(err, "wp readNext Timeout"))
 				return
 			}
-			log.Ctx(s.Context()).Error("wp readNext msg exception", zap.Error(err))
+			mlog.Error(s.Context(), "wp readNext msg exception", zap.Error(err))
 			s.Finish(err)
 			return
 		}

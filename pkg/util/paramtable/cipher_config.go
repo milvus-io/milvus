@@ -1,7 +1,9 @@
 package paramtable
 
 import (
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"context"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const cipherYamlFile = "hook.yaml"
@@ -21,7 +23,7 @@ type cipherConfig struct {
 
 func (c *cipherConfig) init(base *BaseTable) {
 	c.cipherBase = base
-	log.Info("init cipher config")
+	mlog.Info(context.TODO(), "init cipher config")
 
 	c.SoPathGo = ParamItem{
 		Key:     "cipherPlugin.soPathGo",

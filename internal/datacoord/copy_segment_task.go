@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -309,34 +309,34 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 // - Reading from S3 is necessary to populate CopySegmentRequest
 // - Cached in snapshotMeta to avoid redundant reads
 func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	log.Info("processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
+	mlog.Info(context.TODO(), "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
 	req, err := AssembleCopySegmentRequest(t, job)
 	if err != nil {
-		log.Warn("failed to assemble copy segment request",
+		mlog.Warn(context.TODO(), "failed to assemble copy segment request",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId())
 	if err != nil {
-		log.Warn("failed to create copy segment task on datanode",
+		mlog.Warn(context.TODO(), "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
-	log.Info("create copy segment task on datanode done",
+	mlog.Info(context.TODO(), "create copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID))...)
 	err = t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
 		UpdateCopyTaskNodeID(nodeID),
 		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
 	if err != nil {
-		log.Warn("failed to update copy segment task state",
+		mlog.Warn(context.TODO(), "failed to update copy segment task state",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
 	// Record pending duration
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Pending).Observe(float64(pendingDuration.Milliseconds()))
-	log.Info("copy segment task start to execute",
+	mlog.Info(context.TODO(), "copy segment task start to execute",
 		WrapCopySegmentTaskLog(t, zap.Int64("scheduledNodeID", nodeID),
 			zap.Duration("taskTimeCost/pending", pendingDuration))...)
 }
@@ -352,7 +352,7 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 		UpdateCopyTaskReason(reason))
 	if updateErr != nil {
-		log.Warn("failed to update copy segment task state to failed",
+		mlog.Warn(context.TODO(), "failed to update copy segment task state to failed",
 			WrapCopySegmentTaskLog(t, zap.Error(updateErr))...)
 		return
 	}
@@ -364,11 +364,11 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason))
 		if updateErr != nil {
-			log.Warn("failed to update job state to Failed",
+			mlog.Warn(context.TODO(), "failed to update job state to Failed",
 				zap.Int64("jobID", t.GetJobId()), zap.Error(updateErr))
 		}
 	}
-	log.Warn("copy segment task failed",
+	mlog.Warn(context.TODO(), "copy segment task failed",
 		WrapCopySegmentTaskLog(t, zap.String("reason", reason))...)
 }
 
@@ -426,7 +426,7 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
-	log.Info("query copy segment task",
+	mlog.Info(context.TODO(), "query copy segment task",
 		WrapCopySegmentTaskLog(t, zap.String("respState", resp.GetState().String()),
 			zap.String("reason", resp.GetReason()))...)
 }
@@ -454,11 +454,11 @@ func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 	nodeID := t.GetNodeId()
 	err := cluster.DropCopySegment(nodeID, t.GetTaskId())
 	if err != nil {
-		log.Warn("failed to drop copy segment task on datanode",
+		mlog.Warn(context.TODO(), "failed to drop copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
-	log.Info("drop copy segment task on datanode done",
+	mlog.Info(context.TODO(), "drop copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID))...)
 }
 
@@ -524,7 +524,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
 	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
 	if err != nil {
-		log.Error("failed to read snapshot data for copy segment task",
+		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), zap.Error(err))...)
 		return nil, err
 	}
@@ -707,7 +707,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 					UpdateCopyTaskReason(err.Error()))
 				if updateErr != nil {
-					log.Warn("failed to update task state to Failed",
+					mlog.Warn(context.TODO(), "failed to update task state to Failed",
 						zap.Int64("taskID", task.GetTaskId()), zap.Error(updateErr))
 				}
 
@@ -715,11 +715,11 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 					UpdateCopyJobReason(err.Error()))
 				if updateErr != nil {
-					log.Warn("failed to update job state to Failed",
+					mlog.Warn(context.TODO(), "failed to update job state to Failed",
 						zap.Int64("jobID", task.GetJobId()), zap.Error(updateErr))
 				}
 
-				log.Warn("update copy segment binlogs failed",
+				mlog.Warn(context.TODO(), "update copy segment binlogs failed",
 					WrapCopySegmentTaskLog(task, zap.String("err", err.Error()))...)
 				return err
 			}
@@ -739,7 +739,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				return err
 			}
 
-			log.Info("update copy segment info done",
+			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", result.GetSegmentId()),
 					zap.Int64("importedRows", result.GetImportedRows()),
 					zap.Int("binlogFields", len(result.GetBinlogs())),
@@ -753,7 +753,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		// Record total latency (from task creation to completion)
 		totalDuration := task.GetTR().ElapseSpan()
 		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Done).Observe(float64(totalDuration.Milliseconds()))
-		log.Info("copy segment task completed",
+		mlog.Info(context.TODO(), "copy segment task completed",
 			WrapCopySegmentTaskLog(task,
 				zap.Duration("taskTimeCost/copying", copyingDuration),
 				zap.Duration("taskTimeCost/total", totalDuration))...)
@@ -836,7 +836,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		// This correctly handles JSON path indexes where one field has multiple indexes.
 		targetIndexID, ok := indexNameToTargetID[indexInfo.GetIndexName()]
 		if !ok {
-			log.Warn("no index definition found for index name in target collection, skip syncing",
+			mlog.Warn(ctx, "no index definition found for index name in target collection, skip syncing",
 				WrapCopySegmentTaskLog(task,
 					zap.String("indexName", indexInfo.GetIndexName()),
 					zap.Int64("fieldID", indexInfo.GetFieldId()),
@@ -866,7 +866,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 		err := meta.indexMeta.AddSegmentIndex(ctx, segIndex)
 		if err != nil {
-			log.Warn("failed to add segment index",
+			mlog.Warn(ctx, "failed to add segment index",
 				WrapCopySegmentTaskLog(task,
 					zap.Int64("segmentID", result.GetSegmentId()),
 					zap.String("indexName", indexInfo.GetIndexName()),
@@ -878,7 +878,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 				UpdateCopyTaskReason(err.Error()))
 			if updateErr != nil {
-				log.Warn("failed to update task state to Failed",
+				mlog.Warn(ctx, "failed to update task state to Failed",
 					zap.Int64("taskID", task.GetTaskId()), zap.Error(updateErr))
 			}
 
@@ -886,13 +886,13 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 				UpdateCopyJobReason(err.Error()))
 			if updateErr != nil {
-				log.Warn("failed to update job state to Failed",
+				mlog.Warn(ctx, "failed to update job state to Failed",
 					zap.Int64("jobID", task.GetJobId()), zap.Error(updateErr))
 			}
 			return err
 		}
 
-		log.Info("synced vector/scalar index",
+		mlog.Info(ctx, "synced vector/scalar index",
 			WrapCopySegmentTaskLog(task,
 				zap.Int64("segmentID", result.GetSegmentId()),
 				zap.String("indexName", indexInfo.GetIndexName()),
@@ -939,7 +939,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	err := meta.UpdateSegment(result.GetSegmentId(),
 		SetTextIndexLogs(result.GetTextIndexInfos()))
 	if err != nil {
-		log.Warn("failed to update text index",
+		mlog.Warn(ctx, "failed to update text index",
 			WrapCopySegmentTaskLog(task,
 				zap.Int64("segmentID", result.GetSegmentId()),
 				zap.Error(err))...)
@@ -949,7 +949,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 			UpdateCopyTaskReason(err.Error()))
 		if updateErr != nil {
-			log.Warn("failed to update task state to Failed",
+			mlog.Warn(ctx, "failed to update task state to Failed",
 				zap.Int64("taskID", task.GetTaskId()), zap.Error(updateErr))
 		}
 
@@ -957,13 +957,13 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {
-			log.Warn("failed to update job state to Failed",
+			mlog.Warn(ctx, "failed to update job state to Failed",
 				zap.Int64("jobID", task.GetJobId()), zap.Error(updateErr))
 		}
 		return err
 	}
 
-	log.Info("synced text indexes",
+	mlog.Info(ctx, "synced text indexes",
 		WrapCopySegmentTaskLog(task,
 			zap.Int64("segmentID", result.GetSegmentId()),
 			zap.Int("count", len(result.GetTextIndexInfos())))...)
@@ -1005,7 +1005,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	err := meta.UpdateSegment(result.GetSegmentId(),
 		SetJSONKeyIndexLogs(result.GetJsonKeyIndexInfos()))
 	if err != nil {
-		log.Warn("failed to update json key index",
+		mlog.Warn(ctx, "failed to update json key index",
 			WrapCopySegmentTaskLog(task,
 				zap.Int64("segmentID", result.GetSegmentId()),
 				zap.Error(err))...)
@@ -1015,7 +1015,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 			UpdateCopyTaskReason(err.Error()))
 		if updateErr != nil {
-			log.Warn("failed to update task state to Failed",
+			mlog.Warn(ctx, "failed to update task state to Failed",
 				zap.Int64("taskID", task.GetTaskId()), zap.Error(updateErr))
 		}
 
@@ -1023,13 +1023,13 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {
-			log.Warn("failed to update job state to Failed",
+			mlog.Warn(ctx, "failed to update job state to Failed",
 				zap.Int64("jobID", task.GetJobId()), zap.Error(updateErr))
 		}
 		return err
 	}
 
-	log.Info("synced json key indexes",
+	mlog.Info(ctx, "synced json key indexes",
 		WrapCopySegmentTaskLog(task,
 			zap.Int64("segmentID", result.GetSegmentId()),
 			zap.Int("count", len(result.GetJsonKeyIndexInfos())))...)

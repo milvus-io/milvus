@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -101,7 +101,7 @@ func (bt *batchUpdateManifestTask) PreExecute(ctx context.Context) error {
 }
 
 func (bt *batchUpdateManifestTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("proxy batch update manifest",
+	mlog.Info(ctx, "proxy batch update manifest",
 		zap.String("collectionName", bt.req.GetCollectionName()),
 		zap.Int64("collectionID", bt.collectionID),
 		zap.Int("itemCount", len(bt.req.GetItems())),

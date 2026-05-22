@@ -10,6 +10,7 @@ package segcore
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -18,7 +19,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -138,7 +139,7 @@ func (c *CCollection) Release() {
 }
 
 func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
-	log.Info("PutOrRefPluginContext",
+	mlog.Info(context.TODO(), "PutOrRefPluginContext",
 		zap.Int64("ez_id", ez.EzID),
 		zap.Int64("collection_id", ez.CollectionID))
 	ckey := C.CString(key)
@@ -156,7 +157,7 @@ func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
 }
 
 func UnRefPluginContext(ez *hookutil.EZ) error {
-	log.Info("UnRefPluginContext",
+	mlog.Info(context.TODO(), "UnRefPluginContext",
 		zap.Int64("ez_id", ez.EzID),
 		zap.Int64("collection_id", ez.CollectionID))
 	pluginContext := C.CPluginContext{

@@ -56,7 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1009,7 +1009,7 @@ func TestServer_GetMetrics(t *testing.T) {
 	resp, err = svr.GetMetrics(svr.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	log.Info("TestServer_GetMetrics",
+	mlog.Info(context.TODO(), "TestServer_GetMetrics",
 		zap.String("name", resp.ComponentName),
 		zap.String("response", resp.Response))
 }

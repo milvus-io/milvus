@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -17,7 +17,7 @@ import (
 var _ Resolver = (*resolverWithDiscoverer)(nil)
 
 // newResolverWithDiscoverer creates a new resolver with discoverer.
-func newResolverWithDiscoverer(d discoverer.Discoverer, retryInterval time.Duration, logger *log.MLogger) *resolverWithDiscoverer {
+func newResolverWithDiscoverer(d discoverer.Discoverer, retryInterval time.Duration, logger *mlog.Logger) *resolverWithDiscoverer {
 	r := &resolverWithDiscoverer{
 		taskNotifier:    syncutil.NewAsyncTaskNotifier[struct{}](),
 		registerCh:      make(chan *watchBasedGRPCResolver),
@@ -40,7 +40,7 @@ type versionStateWithError struct {
 // resolverWithDiscoverer is the resolver for bkproxy service.
 type resolverWithDiscoverer struct {
 	taskNotifier *syncutil.AsyncTaskNotifier[struct{}]
-	log.Binder
+	mlog.Binder
 
 	registerCh chan *watchBasedGRPCResolver
 
@@ -139,22 +139,30 @@ func (r *resolverWithDiscoverer) doDiscover() {
 		// Check if all grpc resolver is stopped.
 		for r := range grpcResolvers {
 			if r.State() == typeutil.LifetimeStateWorking {
-				r.Logger().Warn("resolver is stopped before grpc watcher exist, maybe bug here")
+				r.Logger().Warn(context.TODO(),
+
+					"resolver is stopped before grpc watcher exist, maybe bug here")
 				break
 			}
 		}
-		r.Logger().Info("resolver stopped")
+		r.Logger().Info(context.TODO(),
+
+			"resolver stopped")
 		r.taskNotifier.Finish(struct{}{})
 	}()
 
 	for {
 		ch := r.asyncDiscover(r.taskNotifier.Context())
-		r.Logger().Info("service discover task started, listening...")
+		r.Logger().Info(context.TODO(),
+
+			"service discover task started, listening...")
 	L:
 		for {
 			select {
 			case watcher := <-r.registerCh:
-				watcher.Logger().Info("new grpc resolver registered")
+				watcher.Logger().Info(context.TODO(),
+
+					"new grpc resolver registered")
 				// New grpc resolver registered.
 				// Trigger the latest state to the new grpc resolver.
 				grpcResolvers[watcher] = struct{}{}
@@ -163,7 +171,9 @@ func (r *resolverWithDiscoverer) doDiscover() {
 					continue
 				}
 				if err := watcher.Update(*state); err != nil {
-					r.Logger().Info("resolver is closed, ignore the new grpc resolver", zap.Error(err))
+					r.Logger().Info(context.TODO(),
+
+						"resolver is closed, ignore the new grpc resolver", zap.Error(err))
 					delete(grpcResolvers, watcher)
 				}
 			case stateWithError := <-ch:
@@ -172,7 +182,9 @@ func (r *resolverWithDiscoverer) doDiscover() {
 						// resolver stopped.
 						return
 					}
-					r.Logger().Warn("service discover break down", zap.Error(stateWithError.err), zap.Duration("retryInterval", r.retryInterval))
+					r.Logger().Warn(context.TODO(),
+
+						"service discover break down", zap.Error(stateWithError.err), zap.Duration("retryInterval", r.retryInterval))
 					time.Sleep(r.retryInterval)
 					break L
 				}
@@ -182,21 +194,29 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				latestState := r.getLatestState()
 				if latestState != nil && !state.Version.GT(latestState.Version) {
 					// Ignore the old version.
-					r.Logger().Info("service discover update, ignore old version", zap.Stringer("state", state))
+					r.Logger().Info(context.TODO(),
+
+						"service discover update, ignore old version", zap.Stringer("state", state))
 					continue
 				}
 				// Update all grpc resolver.
-				r.Logger().Info("service discover update, update resolver", zap.Stringer("state", state), zap.Int("resolver_count", len(grpcResolvers)))
+				r.Logger().Info(context.TODO(),
+
+					"service discover update, update resolver", zap.Stringer("state", state), zap.Int("resolver_count", len(grpcResolvers)))
 				for watcher := range grpcResolvers {
 					// Update operation do not block.
 					// Only return error if the resolver is closed, so just print a info log and delete the resolver.
 					if err := watcher.Update(state); err != nil {
 						// updateError is always context.Canceled.
-						r.Logger().Info("resolver is closed, unregister the resolver", zap.NamedError("updateError", err))
+						r.Logger().Info(context.TODO(),
+
+							"resolver is closed, unregister the resolver", zap.NamedError("updateError", err))
 						delete(grpcResolvers, watcher)
 					}
 				}
-				r.Logger().Info("update resolver done")
+				r.Logger().Info(context.TODO(),
+
+					"update resolver done")
 				// Update the latest state and notify all resolver watcher should be executed after the all grpc watcher updated.
 				r.latestStateCond.LockAndBroadcast()
 				r.latestState = &state

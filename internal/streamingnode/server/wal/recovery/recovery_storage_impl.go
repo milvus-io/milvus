@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -40,20 +40,24 @@ func RecoverRecoveryStorage(
 ) (RecoveryStorage, *RecoverySnapshot, error) {
 	rs := newRecoveryStorage(recoveryStreamBuilder.Channel(), cp)
 	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
-		rs.Logger().Warn("recovery storage failed", zap.Error(err))
+		rs.Logger().Warn(ctx,
+
+			"recovery storage failed", zap.Error(err))
 		return nil, nil, err
 	}
 	// recover the state from wal and start the background task to persist the state.
 	snapshot, err := rs.recoverFromStream(ctx, recoveryStreamBuilder, lastTimeTickMessage)
 	if err != nil {
-		rs.Logger().Warn("recovery storage failed", zap.Error(err))
+		rs.Logger().Warn(ctx,
+
+			"recovery storage failed", zap.Error(err))
 		return nil, nil, err
 	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
 		zap.Int64("nodeID", paramtable.GetNodeID()),
-		log.FieldComponent(componentRecoveryStorage),
+		mlog.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
@@ -81,7 +85,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 // recoveryStorageImpl is a component that manages the recovery info for the streaming service.
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type recoveryStorageImpl struct {
-	log.Binder
+	mlog.Binder
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                    *config
 	mu                     sync.Mutex
@@ -121,13 +125,19 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoin
 	defer r.mu.Unlock()
 	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
 		if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
-			r.Logger().Warn("failed to update flush checkpoint", zap.Error(err))
+			r.Logger().Warn(context.TODO(),
+
+				"failed to update flush checkpoint", zap.Error(err))
 			return
 		}
-		r.Logger().Info("update flush checkpoint", zap.String("vchannel", vchannel), zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
+		r.Logger().Info(context.TODO(),
+
+			"update flush checkpoint", zap.String("vchannel", vchannel), zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
 		return
 	}
-	r.Logger().Warn("vchannel not found", zap.String("vchannel", vchannel))
+	r.Logger().Warn(context.TODO(),
+
+		"vchannel not found", zap.String("vchannel", vchannel))
 }
 
 // GetSchema gets the schema of the collection at the given timetick.
@@ -138,7 +148,9 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
 		_, schema := vchannelInfo.GetSchema(timetick)
 		if schema == nil {
-			r.Logger().DPanic("schema not found, fallback to latest schema", zap.String("vchannel", vchannel), zap.Uint64("timetick", timetick))
+			r.Logger().DPanic(ctx,
+
+				"schema not found, fallback to latest schema", zap.String("vchannel", vchannel), zap.Uint64("timetick", timetick))
 			if _, schema = vchannelInfo.GetSchema(0); schema != nil {
 				return schema, nil
 			}
@@ -153,7 +165,9 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	if h := msg.BroadcastHeader(); h != nil {
 		if err := streaming.WAL().Broadcast().Ack(ctx, msg); err != nil {
-			r.Logger().Warn("failed to ack broadcast message", zap.Error(err))
+			r.Logger().Warn(ctx,
+
+				"failed to ack broadcast message", zap.Error(err))
 			return err
 		}
 	}
@@ -225,9 +239,11 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
-		if r.Logger().Level().Enabled(zap.DebugLevel) {
-			r.Logger().Debug("skip the message before the checkpoint",
-				log.FieldMessage(msg),
+		if r.Logger().LevelEnabled(zap.DebugLevel) {
+			r.Logger().Debug(context.TODO(),
+
+				"skip the message before the checkpoint",
+				mlog.FieldMessage(msg),
 				zap.Uint64("checkpoint", r.checkpoint.TimeTick),
 				zap.Uint64("incoming", msg.TimeTick()),
 			)
@@ -258,7 +274,9 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 		// Check ignore field - if true, skip updating ReplicateConfig and ReplicateCheckpoint
 		// This is used for incomplete switchover messages that should be ignored after force promote
 		if header.Ignore {
-			r.Logger().Info("AlterReplicateConfig message has ignore flag set, skipping checkpoint update",
+			r.Logger().Info(context.TODO(),
+
+				"AlterReplicateConfig message has ignore flag set, skipping checkpoint update",
 				zap.Bool("forcePromote", header.ForcePromote))
 		} else {
 			r.checkpoint.ReplicateConfig = header.ReplicateConfiguration
@@ -404,15 +422,19 @@ func (r *recoveryStorageImpl) handleAlterWAL(msg message.ImmutableAlterWALMessag
 	}
 
 	if len(segmentIDs) > 0 {
-		r.Logger().Info("flush all growing segments for WAL switch",
-			log.FieldMessage(msg),
+		r.Logger().Info(context.TODO(),
+
+			"flush all growing segments for WAL switch",
+			mlog.FieldMessage(msg),
 			zap.Stringer("targetWALName", header.TargetWalName),
 			zap.Int64s("segmentIDs", segmentIDs),
 			zap.Uint64s("rows", rows),
 			zap.Uint64s("binarySize", binarySize))
 	} else {
-		r.Logger().Info("no growing segments to flush for WAL switch",
-			log.FieldMessage(msg),
+		r.Logger().Info(context.TODO(),
+
+			"no growing segments to flush for WAL switch",
+			mlog.FieldMessage(msg),
 			zap.Stringer("targetWALName", header.TargetWalName))
 	}
 
@@ -446,8 +468,10 @@ func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSeg
 	// During WAL replay (e.g., Kafka offset reset), CreateSegment messages may appear
 	// for collections whose vchannels have already been cleaned up.
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-		r.Logger().Warn("skip create segment for non-active vchannel",
-			log.FieldMessage(msg),
+		r.Logger().Warn(context.TODO(),
+
+			"skip create segment for non-active vchannel",
+			mlog.FieldMessage(msg),
 			zap.String("vchannel", msg.VChannel()),
 			zap.Int64("segmentID", msg.Header().SegmentId),
 		)
@@ -455,7 +479,9 @@ func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSeg
 	}
 	segment := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
 	r.segments[segment.meta.SegmentId] = segment
-	r.Logger().Info("create segment", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(),
+
+		"create segment", mlog.FieldMessage(msg))
 }
 
 // handleFlush handles the flush message.
@@ -463,7 +489,9 @@ func (r *recoveryStorageImpl) handleFlush(msg message.ImmutableFlushMessageV2) {
 	header := msg.Header()
 	if segment, ok := r.segments[header.SegmentId]; ok {
 		segment.ObserveFlush(msg.TimeTick())
-		r.Logger().Info("flush segment", log.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
+		r.Logger().Info(context.TODO(),
+
+			"flush segment", mlog.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
 	}
 }
 
@@ -500,7 +528,9 @@ func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSe
 	if len(segmentIDs) != len(sealSegmentIDs) {
 		r.detectInconsistency(msg, "flush segments not exist", zap.Int64s("wanted", lo.Keys(sealSegmentIDs)), zap.Int64s("actually", segmentIDs))
 	}
-	r.Logger().Info("flush segments of collection by flush", log.FieldMessage(msg),
+	r.Logger().Info(context.TODO(),
+
+		"flush segments of collection by flush", mlog.FieldMessage(msg),
 		zap.Uint64s("rows", rows),
 		zap.Uint64s("binarySize", binarySize),
 		zap.Int("flushedSegmentCount", len(segmentIDs)),
@@ -513,7 +543,9 @@ func (r *recoveryStorageImpl) handleCreateCollection(msg message.ImmutableCreate
 		return
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
-	r.Logger().Info("create collection", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(),
+
+		"create collection", mlog.FieldMessage(msg))
 }
 
 // handleDropCollection handles the drop collection message.
@@ -525,7 +557,9 @@ func (r *recoveryStorageImpl) handleDropCollection(msg message.ImmutableDropColl
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		vchannelInfo.ObserveDropCollection(msg)
 	}
-	r.Logger().Info("drop collection", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(),
+
+		"drop collection", mlog.FieldMessage(msg))
 }
 
 // flushAllSegmentOfCollection flushes all segments of the collection.
@@ -539,7 +573,9 @@ func (r *recoveryStorageImpl) flushAllSegmentOfCollection(msg message.ImmutableM
 			rows = append(rows, segment.Rows())
 		}
 	}
-	r.Logger().Info("flush all segments of collection", log.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
+	r.Logger().Info(context.TODO(),
+
+		"flush all segments of collection", mlog.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
 }
 
 // handleCreatePartition handles the create partition message.
@@ -548,7 +584,9 @@ func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreateP
 		return
 	}
 	r.vchannels[msg.VChannel()].ObserveCreatePartition(msg)
-	r.Logger().Info("create partition", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(),
+
+		"create partition", mlog.FieldMessage(msg))
 }
 
 // handleDropPartition handles the drop partition message.
@@ -559,7 +597,9 @@ func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropParti
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		vchannelInfo.ObserveDropPartition(msg)
 	}
-	r.Logger().Info("drop partition", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(),
+
+		"drop partition", mlog.FieldMessage(msg))
 }
 
 // flushAllSegmentOfPartition flushes all segments of the partition.
@@ -573,7 +613,9 @@ func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMe
 			rows = append(rows, segment.Rows())
 		}
 	}
-	r.Logger().Info("flush all segments of partition", log.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
+	r.Logger().Info(context.TODO(),
+
+		"flush all segments of partition", mlog.FieldMessage(msg), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("rows", rows))
 }
 
 // handleTxn handles the txn message.
@@ -631,11 +673,13 @@ func (r *recoveryStorageImpl) handleTruncateCollection(msg message.ImmutableTrun
 // detectInconsistency detects the inconsistency in the recovery storage.
 func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, reason string, extra ...zap.Field) {
 	fields := make([]zap.Field, 0, len(extra)+2)
-	fields = append(fields, log.FieldMessage(msg), zap.String("reason", reason))
+	fields = append(fields, mlog.FieldMessage(msg), zap.String("reason", reason))
 	fields = append(fields, extra...)
 	// The log is not fatal in some cases.
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
-	r.Logger().Warn("inconsistency detected", fields...)
+	r.Logger().Warn(context.TODO(),
+
+		"inconsistency detected", fields...)
 	r.metrics.ObserveInconsitentEvent()
 }
 
@@ -646,7 +690,9 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 	defer r.mu.Unlock()
 
 	if len(r.vchannels) == 0 {
-		r.Logger().Info("get flush checkpoint fast return pChan cp, due to no vChan", zap.String("pChannel", r.channel.String()))
+		r.Logger().Info(ctx,
+
+			"get flush checkpoint fast return pChan cp, due to no vChan", zap.String("pChannel", r.channel.String()))
 		return r.checkpoint
 	}
 

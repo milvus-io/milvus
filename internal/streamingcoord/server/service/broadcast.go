@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -85,7 +85,7 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	}
 	body := importMsg.MustBody()
 
-	log.Ctx(ctx).Info("forwarding import message from old proxy to DataCoord.ImportV2",
+	mlog.Info(ctx, "forwarding import message from old proxy to DataCoord.ImportV2",
 		zap.Int64("collectionID", body.GetCollectionID()),
 		zap.String("collectionName", body.GetCollectionName()),
 		zap.Int64s("partitionIDs", body.GetPartitionIDs()),
@@ -125,7 +125,7 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 		return nil, err
 	}
 
-	log.Ctx(ctx).Info("import request forwarded to DataCoord successfully",
+	mlog.Info(ctx, "import request forwarded to DataCoord successfully",
 		zap.String("jobID", resp.GetJobID()))
 
 	// Return a response compatible with old proxy expectations

@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -124,7 +124,7 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 		}
 	}
 
-	log.Info("create numpy readers", zap.Any("readFields", readFields))
+	mlog.Info(ctx, "create numpy readers", zap.Any("readFields", readFields))
 	return readers, nil
 }
 

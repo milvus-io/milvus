@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -114,16 +114,16 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	})
 	s.NoError(err)
 	if createCollectionStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", zap.String("reason", createCollectionStatus.GetReason()))
 	}
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -153,7 +153,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	s.True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-	log.Info("Finish flush", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+	mlog.Info(context.TODO(), "Finish flush", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -165,7 +165,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	err = merr.CheckRPCCall(createIndexStatus, err)
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-	log.Info("Finish create index", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+	mlog.Info(context.TODO(), "Finish create index", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -175,7 +175,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	err = merr.CheckRPCCall(loadStatus, err)
 	s.NoError(err)
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("Finish load", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+	mlog.Info(context.TODO(), "Finish load", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	compactReq := &milvuspb.ManualCompactionRequest{
 		CollectionID:    showCollectionsResp.CollectionIds[0],
@@ -183,7 +183,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	}
 	compactResp, err := c.MilvusClient.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
-	log.Info("compact", zap.Any("compactResp", compactResp))
+	mlog.Info(context.TODO(), "compact", zap.Any("compactResp", compactResp))
 
 	compacted := func() bool {
 		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
@@ -197,7 +197,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	for !compacted() {
 		time.Sleep(3 * time.Second)
 	}
-	log.Info("compact done")
+	mlog.Info(context.TODO(), "compact done")
 
 	// delete
 	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
@@ -226,7 +226,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 		s.NotEmpty(segments)
 
 		for _, segment := range segments {
-			log.Info("ShowSegments result", zap.Int64("id", segment.ID), zap.String("state", segment.GetState().String()), zap.String("level", segment.GetLevel().String()), zap.Int64("numOfRows", segment.GetNumOfRows()))
+			mlog.Info(context.TODO(), "ShowSegments result", zap.Int64("id", segment.ID), zap.String("state", segment.GetState().String()), zap.String("level", segment.GetLevel().String()), zap.Int64("numOfRows", segment.GetNumOfRows()))
 		}
 		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
@@ -234,7 +234,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 		if len(flushed) == 1 &&
 			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
 			flushed[0].GetNumOfRows() == rowNum {
-			log.Info("l0 compaction done, wait for single compaction")
+			mlog.Info(context.TODO(), "l0 compaction done, wait for single compaction")
 		}
 		return len(flushed) == 1 &&
 			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
@@ -281,7 +281,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 
 	checkWaitGroup.Wait()
 
-	log.Info("TestL2SingleCompaction succeed")
+	mlog.Info(context.TODO(), "TestL2SingleCompaction succeed")
 }
 
 func TestL2SingleCompaction(t *testing.T) {

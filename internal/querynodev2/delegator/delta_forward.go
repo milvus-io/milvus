@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -80,7 +80,7 @@ func (sd *shardDelegator) forwardStreamingDeletion(ctx context.Context, deleteDa
 		// forward streaming deletion without bf filtering
 		sd.forwardStreamingDirect(ctx, deleteData)
 	default:
-		log.Fatal("unsupported streaming forward policy", zap.String("policy", policy))
+		mlog.Fatal(ctx, "unsupported streaming forward policy", zap.String("policy", policy))
 	}
 }
 
@@ -92,7 +92,7 @@ func (sd *shardDelegator) addL0ForGrowing(ctx context.Context, segment segments.
 		// forward streaming deletion without bf filtering
 		return sd.addL0ForGrowingLoad(ctx, segment)
 	default:
-		log.Fatal("unsupported l0 forward policy", zap.String("policy", sd.l0ForwardPolicy))
+		mlog.Fatal(ctx, "unsupported l0 forward policy", zap.String("policy", sd.l0ForwardPolicy))
 	}
 	return nil
 }
@@ -118,7 +118,7 @@ func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.S
 
 func (sd *shardDelegator) addL0ForGrowingLoad(ctx context.Context, segment segments.Segment) error {
 	deltalogs := sd.getLevel0Deltalogs(segment.Partition())
-	log.Info("forwarding L0 via loader...", zap.Int64("segmentID", segment.ID()), zap.Int("deltalogsNum", len(deltalogs)))
+	mlog.Info(ctx, "forwarding L0 via loader...", zap.Int64("segmentID", segment.ID()), zap.Int("deltalogsNum", len(deltalogs)))
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    segment.ID(),
 		CollectionID: segment.Collection(),
@@ -231,7 +231,7 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		eg.Go(func() error {
 			worker, err := sd.workerManager.GetWorker(ctx, entry.NodeID)
 			if err != nil {
-				log.Warn("failed to get worker",
+				mlog.Warn(ctx, "failed to get worker",
 					zap.Int64("nodeID", paramtable.GetNodeID()),
 					zap.Error(err),
 				)
@@ -250,7 +250,7 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		eg.Go(func() error {
 			worker, err := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
 			if err != nil {
-				log.Error("failed to get worker(local)",
+				mlog.Error(ctx, "failed to get worker(local)",
 					zap.Int64("nodeID", paramtable.GetNodeID()),
 					zap.Error(err),
 				)
@@ -271,7 +271,7 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 	sd.distribution.Unpin(version)
 	offlineSegIDs := offlineSegments.Collect()
 	if len(offlineSegIDs) > 0 {
-		log.Warn("failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
+		mlog.Warn(ctx, "failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
@@ -306,7 +306,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 				entry := entry
 				worker, err := sd.workerManager.GetWorker(ctx, entry.NodeID)
 				if err != nil {
-					log.Warn("failed to get worker",
+					mlog.Warn(ctx, "failed to get worker",
 						zap.Int64("nodeID", entry.NodeID),
 						zap.Error(err),
 					)
@@ -328,7 +328,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 			if len(growing) > 0 {
 				worker, err := sd.workerManager.GetWorker(ctx, paramtable.GetNodeID())
 				if err != nil {
-					log.Error("failed to get worker(local)",
+					mlog.Error(ctx, "failed to get worker(local)",
 						zap.Int64("nodeID", paramtable.GetNodeID()),
 						zap.Error(err),
 					)
@@ -349,7 +349,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 
 	offlineSegIDs := offlineSegments.Collect()
 	if len(offlineSegIDs) > 0 {
-		log.Warn("failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
+		mlog.Warn(ctx, "failed to apply delete, mark segment offline", zap.Int64s("offlineSegments", offlineSegIDs))
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
@@ -380,7 +380,7 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 			return entry.SegmentID
 		})
 		future := pool.Submit(func() (struct{}, error) {
-			log.Debug("delegator plan to applyDelete via worker")
+			log.Debug(ctx, "delegator plan to applyDelete via worker")
 			err := retry.Handle(ctx, func() (bool, error) {
 				if sd.Stopped() {
 					return false, merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing")
@@ -397,7 +397,7 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 					Scope:        scope,
 				})
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("try to delete data on non-exist node")
+					log.Warn(ctx, "try to delete data on non-exist node")
 					// cancel other request
 					cancel()
 					return false, err
@@ -407,10 +407,10 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 					return true, err
 				}
 				if len(resp.GetMissingIds()) > 0 {
-					log.Warn("try to delete data of released segment", zap.Int64s("ids", resp.GetMissingIds()))
+					log.Warn(ctx, "try to delete data of released segment", zap.Int64s("ids", resp.GetMissingIds()))
 				}
 				if len(resp.GetFailedIds()) > 0 {
-					log.Warn("apply delete for segment failed, marking it offline")
+					log.Warn(ctx, "apply delete for segment failed, marking it offline")
 					offlineSegments.Upsert(resp.GetFailedIds()...)
 				}
 				return false, nil

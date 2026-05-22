@@ -28,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -47,7 +47,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 
 		err = core.meta.OperatePrivilege(ctx, util.DefaultTenant, entity, operateType)
 		if err != nil && !common.IsIgnorableError(err) {
-			log.Ctx(ctx).Warn("fail to operate the privilege", zap.Any("in", entity), zap.Error(err))
+			mlog.Warn(ctx, "fail to operate the privilege", zap.Any("in", entity), zap.Error(err))
 			return err
 		}
 		return nil
@@ -65,7 +65,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 		case milvuspb.OperatePrivilegeType_Revoke:
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
-			log.Ctx(ctx).Warn("invalid operate type for the OperatePrivilege api", zap.Any("operate_type", operateType))
+			mlog.Warn(ctx, "invalid operate type for the OperatePrivilege api", zap.Any("operate_type", operateType))
 			return errors.New("invalid operate type for the OperatePrivilege api")
 		}
 		grants := []*milvuspb.GrantEntity{entity}
@@ -105,7 +105,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 				OpType: opType,
 				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
 			}); err != nil {
-				log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", entity), zap.Error(err))
+				mlog.Warn(ctx, "fail to refresh policy info cache", zap.Any("in", entity), zap.Error(err))
 				return err
 			}
 		}
@@ -120,7 +120,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 	if err := func() error {
 		groups, err := core.meta.ListPrivilegeGroups(ctx)
 		if err != nil && !common.IsIgnorableError(err) {
-			log.Ctx(ctx).Warn("fail to list privilege groups", zap.Error(err))
+			mlog.Warn(ctx, "fail to list privilege groups", zap.Error(err))
 			return err
 		}
 		currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
@@ -201,7 +201,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				OpType: opType,
 				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
 			}); err != nil {
-				log.Ctx(ctx).Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
+				mlog.Warn(ctx, "fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
 				return err
 			}
 		}
@@ -212,7 +212,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				OpType: opType,
 				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
 			}); err != nil {
-				log.Ctx(ctx).Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
+				mlog.Warn(ctx, "fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
 				return err
 			}
 		}
@@ -221,7 +221,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 		return errors.Wrap(err, "failed to refresh policy info cache")
 	}
 	if err := core.meta.OperatePrivilegeGroup(ctx, in.GroupName, in.Privileges, operateType); err != nil && !common.IsIgnorableError(err) {
-		log.Ctx(ctx).Warn("fail to operate privilege group", zap.Error(err))
+		mlog.Warn(ctx, "fail to operate privilege group", zap.Error(err))
 		return errors.Wrap(err, "failed to operate privilege group")
 	}
 	return nil

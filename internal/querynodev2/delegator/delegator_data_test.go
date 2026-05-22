@@ -51,7 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1518,7 +1518,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
-		log.Info("test", zap.Error(err))
+		mlog.Info(context.TODO(), "test", zap.Error(err))
 	})
 
 	s.Run("set avgdl failed", func() {

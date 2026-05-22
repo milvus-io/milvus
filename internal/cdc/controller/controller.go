@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -72,7 +72,7 @@ func (c *controller) recoverReplicatePChannelMeta(channels []*meta.ReplicateChan
 			// current cluster is not source cluster, skip create replicator
 			continue
 		}
-		log.Info("recover replicate pchannel meta",
+		mlog.Info(c.ctx, "recover replicate pchannel meta",
 			zap.String("key", channelMeta.Key),
 			zap.Int64("revision", channelMeta.ModRevision),
 		)
@@ -94,7 +94,7 @@ func (c *controller) watchEvents(revision int64) clientv3.WatchChan {
 		clientv3.WithPrevKV(),
 		clientv3.WithRev(revision),
 	)
-	log.Ctx(c.ctx).Info("succeed to watch replicate pchannel meta events",
+	mlog.Info(c.ctx, "succeed to watch replicate pchannel meta events",
 		zap.Int64("revision", revision), zap.String("prefix", c.prefix))
 	return eventCh
 }
@@ -106,7 +106,7 @@ func (c *controller) startWatchLoop() {
 		for {
 			m, err := meta.ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
 			if err != nil && c.ctx.Err() == nil {
-				log.Ctx(c.ctx).Warn("failed to list replicate pchannels", zap.Error(err))
+				mlog.Warn(c.ctx, "failed to list replicate pchannels", zap.Error(err))
 				continue
 			}
 			c.recoverReplicatePChannelMeta(m.Channels)
@@ -129,13 +129,13 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 				panic("etcd event channel closed")
 			}
 			if err := event.Err(); err != nil {
-				log.Warn("etcd event error", zap.Error(err))
+				mlog.Warn(c.ctx, "etcd event error", zap.Error(err))
 				return err
 			}
 			for _, e := range event.Events {
 				switch e.Type {
 				case mvccpb.PUT:
-					log.Info("handle replicate pchannel PUT event",
+					mlog.Info(c.ctx, "handle replicate pchannel PUT event",
 						zap.String("key", string(e.Kv.Key)),
 						zap.Int64("modRevision", e.Kv.ModRevision),
 					)
@@ -152,7 +152,7 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 					}
 					resource.Resource().ReplicateManagerClient().CreateReplicator(channel)
 				case mvccpb.DELETE:
-					log.Info("handle replicate pchannel DELETE event",
+					mlog.Info(c.ctx, "handle replicate pchannel DELETE event",
 						zap.String("key", string(e.Kv.Key)),
 						zap.Int64("prevModRevision", e.PrevKv.ModRevision),
 					)
@@ -166,9 +166,9 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 }
 
 func (c *controller) Stop() {
-	log.Ctx(c.ctx).Info("stop CDC controller...")
+	mlog.Info(c.ctx, "stop CDC controller...")
 	c.cancel()
 	c.wg.Wait()
 	resource.Resource().ReplicateManagerClient().Close()
-	log.Ctx(c.ctx).Info("CDC controller stopped")
+	mlog.Info(c.ctx, "CDC controller stopped")
 }

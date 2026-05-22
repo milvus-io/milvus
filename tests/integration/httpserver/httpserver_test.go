@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -121,7 +122,7 @@ func (s *HTTPServerSuite) TestInsertThrottle() {
 		}
 		wg.Wait()
 		// it's expected at least one insert request is rejected for throttle
-		log.Info("limited thread count", zap.Int32("limitedThreadCount", limitedThreadCount.Load()))
+		mlog.Info(context.TODO(), "limited thread count", zap.Int32("limitedThreadCount", limitedThreadCount.Load()))
 		s.True(limitedThreadCount.Load() > 0)
 	}
 }

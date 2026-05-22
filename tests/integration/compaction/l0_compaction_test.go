@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -75,7 +75,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
@@ -83,7 +83,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	// insert
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
@@ -178,14 +178,14 @@ func (s *CompactionSuite) TestL0Compaction() {
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
-		log.Info("ShowSegments result", zap.Any("segments", segments))
+		mlog.Info(context.TODO(), "ShowSegments result", zap.Any("segments", segments))
 		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})
 		if len(flushed) == 1 &&
 			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
 			flushed[0].GetNumOfRows() == rowNum {
-			log.Info("l0 compaction done, wait for single compaction")
+			mlog.Info(context.TODO(), "l0 compaction done, wait for single compaction")
 		}
 		return len(flushed) == 1 &&
 			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
@@ -239,7 +239,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	// err = merr.CheckRPCCall(status, err)
 	// s.NoError(err)
 
-	log.Info("Test compaction succeed")
+	mlog.Info(context.TODO(), "Test compaction succeed")
 }
 
 // TestL0CompactionDeltaLogOnV3Segment verifies that after L0 compaction,
@@ -392,7 +392,7 @@ func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 	s.Require().NotEmpty(flushed, "expected at least one flushed L1 segment")
 
 	for _, seg := range flushed {
-		log.Info("checking L1 segment after L0 compaction",
+		mlog.Info(context.TODO(), "checking L1 segment after L0 compaction",
 			zap.Int64("segmentID", seg.GetID()),
 			zap.Int64("numOfRows", seg.GetNumOfRows()),
 			zap.Int64("storageVersion", seg.GetStorageVersion()),
@@ -410,5 +410,5 @@ func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 			"Deltalogs EntriesNum should match deletion count")
 	}
 
-	log.Info("TestL0CompactionDeltaLogOnV3Segment succeed")
+	mlog.Info(context.TODO(), "TestL0CompactionDeltaLogOnV3Segment succeed")
 }

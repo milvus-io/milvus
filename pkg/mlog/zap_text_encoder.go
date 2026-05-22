@@ -31,7 +31,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package log
+package mlog
 
 import (
 	"encoding/base64"
@@ -106,6 +106,9 @@ type textEncoder struct {
 	reflectBuf *buffer.Buffer
 	reflectEnc *jsoniter.Encoder
 }
+
+// TextEncoder is the concrete text encoder implementation used by Milvus.
+type TextEncoder = textEncoder
 
 func NewTextEncoder(encoderConfig *zapcore.EncoderConfig, spaced bool, disableErrorVerbose bool) zapcore.Encoder {
 	return &textEncoder{

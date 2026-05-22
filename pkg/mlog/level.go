@@ -1,6 +1,8 @@
 package mlog
 
 import (
+	"sync/atomic"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -19,18 +21,29 @@ const (
 	FatalLevel  = zapcore.FatalLevel
 )
 
-// globalLevel allows runtime level changes
-var globalLevel = zap.NewAtomicLevelAt(InfoLevel)
+// globalLevel allows runtime level changes.
+var (
+	defaultGlobalLevel = zap.NewAtomicLevelAt(InfoLevel)
+	globalLevel        atomic.Pointer[zap.AtomicLevel]
+)
+
+func currentLevel() *zap.AtomicLevel {
+	if level := globalLevel.Load(); level != nil {
+		return level
+	}
+	globalLevel.Store(&defaultGlobalLevel)
+	return &defaultGlobalLevel
+}
 
 // SetLevel changes the log level at runtime.
 // This affects all loggers created with the default config.
 func SetLevel(level Level) {
-	globalLevel.SetLevel(level)
+	currentLevel().SetLevel(level)
 }
 
 // GetLevel returns the current log level.
 func GetLevel() Level {
-	return globalLevel.Level()
+	return currentLevel().Level()
 }
 
 // LevelEnabled reports whether a message at the given level would be logged.
@@ -40,7 +53,7 @@ func GetLevel() Level {
 //	    mlog.Debug(ctx, "details", mlog.String("dump", expensiveDump()))
 //	}
 func LevelEnabled(level Level) bool {
-	return globalLevel.Enabled(level)
+	return currentLevel().Enabled(level)
 }
 
 // GetAtomicLevel returns the AtomicLevel for integration with custom configs.
@@ -48,5 +61,5 @@ func LevelEnabled(level Level) bool {
 //
 //	cfg.Level = mlog.GetAtomicLevel()
 func GetAtomicLevel() zap.AtomicLevel {
-	return globalLevel
+	return *currentLevel()
 }

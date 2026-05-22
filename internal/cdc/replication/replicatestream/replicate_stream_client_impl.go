@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -84,7 +84,7 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 
 func (r *replicateStreamClient) startInternal() {
 	defer func() {
-		log.Info("replicate stream client closed",
+		mlog.Info(r.ctx, "replicate stream client closed",
 			zap.String("key", r.channel.Key),
 			zap.Int64("revision", r.channel.ModRevision))
 		r.metrics.OnClose()
@@ -106,9 +106,9 @@ func (r *replicateStreamClient) startInternal() {
 }
 
 func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needRestart bool) {
-	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	if r.ctx.Err() != nil {
-		logger.Info("close replicate stream client due to ctx done")
+		logger.Info(r.ctx, "close replicate stream client due to ctx done")
 		return false
 	}
 
@@ -119,12 +119,12 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 
 	client, err := r.targetClient.CreateReplicateStream(connCtx)
 	if err != nil {
-		logger.Warn("create milvus replicate stream failed, retry...", zap.Error(err))
+		logger.Warn(r.ctx, "create milvus replicate stream failed, retry...", zap.Error(err))
 		return true
 	}
 	defer client.CloseSend()
 
-	logger.Info("replicate stream client service started")
+	logger.Info(r.ctx, "replicate stream client service started")
 	r.metrics.OnConnect()
 	backoff.Reset()
 
@@ -147,19 +147,19 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 	<-recvCh // wait for send/recv loops to exit
 
 	if r.ctx.Err() != nil {
-		logger.Info("close replicate stream client due to ctx done")
+		logger.Info(r.ctx, "close replicate stream client due to ctx done")
 		return false
 	} else if errors.Is(chErr, ErrReplicationRemoved) {
-		logger.Info("close replicate stream client due to replication removed")
+		logger.Info(r.ctx, "close replicate stream client due to replication removed")
 		return false
 	} else if isStreamIdleTimeout(chErr) {
 		// Stream idle timeout is expected when no data is being replicated on the source channel.
 		// See isStreamIdleTimeout for details.
-		logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(chErr))
+		logger.Info(r.ctx, "replicate stream closed due to stream idle timeout, will reconnect", zap.Error(chErr))
 		r.metrics.OnDisconnect()
 		return true
 	} else {
-		logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
+		logger.Warn(r.ctx, "restart replicate stream client due to unexpected error", zap.Error(chErr))
 		r.metrics.OnDisconnect()
 		return true
 	}
@@ -205,12 +205,12 @@ func (r *replicateStreamClient) startRecvLoop(ctx context.Context) <-chan error 
 }
 
 func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
-	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
 		if err != nil {
-			logger.Warn("send loop closed by unexpected error", zap.Error(err))
+			logger.Warn(ctx, "send loop closed by unexpected error", zap.Error(err))
 		} else {
-			logger.Info("send loop closed")
+			logger.Info(ctx, "send loop closed")
 		}
 	}()
 	for {
@@ -259,12 +259,12 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
 	defer func() {
-		logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+		logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 		if err != nil {
-			logger.Warn("send message failed", zap.Error(err), log.FieldMessage(msg))
+			logger.Warn(r.ctx, "send message failed", zap.Error(err), mlog.FieldMessage(msg))
 		} else {
 			r.metrics.OnSent(msg)
-			logger.Debug("send message success", log.FieldMessage(msg))
+			logger.Debug(r.ctx, "send message success", mlog.FieldMessage(msg))
 		}
 	}()
 	immutableMessage := msg.IntoImmutableMessageProto()
@@ -284,16 +284,16 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
-	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
 		if err != nil && !errors.Is(err, ErrReplicationRemoved) {
 			if isStreamIdleTimeout(err) {
-				logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
+				logger.Info(ctx, "replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
 			} else {
-				logger.Warn("recv loop closed by unexpected error", zap.Error(err))
+				logger.Warn(ctx, "recv loop closed by unexpected error", zap.Error(err))
 			}
 		} else {
-			logger.Info("recv loop closed", zap.Error(err))
+			logger.Info(ctx, "recv loop closed", zap.Error(err))
 		}
 	}()
 	for {
@@ -304,9 +304,9 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 			resp, err := r.client.Recv()
 			if err != nil {
 				if isStreamIdleTimeout(err) {
-					logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
+					logger.Info(ctx, "replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
 				} else {
-					logger.Warn("replicate stream recv failed", zap.Error(err))
+					logger.Warn(ctx, "replicate stream recv failed", zap.Error(err))
 				}
 				return err
 			}
@@ -329,14 +329,14 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (replicationRemoved bool) {
-	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
-	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
+	logger := mlog.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
+	logger.Info(r.ctx, "handle AlterReplicateConfigMessage", mlog.FieldMessage(msg))
 
 	// Check ignore field - if true, skip processing
 	// This is used for incomplete switchover messages that should be ignored after force promote
 	alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
 	if alterMsg.Header().Ignore {
-		logger.Info("AlterReplicateConfig message has ignore flag set, skipping processing")
+		logger.Info(r.ctx, "AlterReplicateConfig message has ignore flag set, skipping processing")
 		return false
 	}
 
@@ -347,7 +347,7 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		etcdCli := resource.Resource().ETCD()
 		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
 		if err != nil {
-			logger.Warn("failed to remove replicate pchannel", zap.Error(err))
+			logger.Warn(r.ctx, "failed to remove replicate pchannel", zap.Error(err))
 			// When performing delete operation on etcd, the context may be canceled by the delete event
 			// in cdc controller and then return `context.Canceled` error.
 			// Since the delete event is generated after the delete operation is committed in etcd,
@@ -358,13 +358,13 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 			}
 		}
 		if ok {
-			logger.Info("handle AlterReplicateConfigMessage done, replicate pchannel removed")
+			logger.Info(r.ctx, "handle AlterReplicateConfigMessage done, replicate pchannel removed")
 		} else {
-			logger.Info("handle AlterReplicateConfigMessage done, revision not match, replicate pchannel not removed")
+			logger.Info(r.ctx, "handle AlterReplicateConfigMessage done, revision not match, replicate pchannel not removed")
 		}
 		return true
 	}
-	logger.Info("target channel found, skip handle AlterReplicateConfigMessage")
+	logger.Info(r.ctx, "target channel found, skip handle AlterReplicateConfigMessage")
 	return false
 }
 

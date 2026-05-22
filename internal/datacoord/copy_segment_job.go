@@ -17,13 +17,14 @@
 package datacoord
 
 import (
+	"context"
 	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -71,7 +72,7 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 			cleanupTime := time.Now().Add(dur)
 			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
 			job.(*copySegmentJob).CleanupTs = cleanupTs
-			log.Info("set copy segment job cleanup ts",
+			mlog.Info(context.TODO(), "set copy segment job cleanup ts",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Time("cleanupTime", cleanupTime),
 				zap.Uint64("cleanupTs", cleanupTs))

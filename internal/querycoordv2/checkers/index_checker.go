@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -88,14 +88,14 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	for _, collectionID := range collectionIDs {
 		indexInfos, err := c.broker.ListIndexes(ctx, collectionID)
 		if err != nil {
-			log.Warn("failed to list indexes", zap.Int64("collection", collectionID), zap.Error(err))
+			mlog.Warn(ctx, "failed to list indexes", zap.Int64("collection", collectionID), zap.Error(err))
 			continue
 		}
 
 		collection := c.meta.GetCollection(ctx, collectionID)
 		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		if collection == nil {
-			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
+			mlog.Warn(ctx, "collection released during check index", zap.Int64("collection", collectionID))
 			continue
 		}
 		if schema == nil && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
@@ -115,7 +115,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 }
 
 func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collection, replica *meta.Replica, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) []task.Task {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", collection.GetCollectionID()),
 	)
 	var tasks []task.Task
@@ -153,7 +153,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	for _, segmentIDs := range lo.Chunk(lo.Keys(idSegments), MaxSegmentNumPerGetIndexInfoRPC) {
 		segmentIndexInfos, err := c.broker.GetIndexInfo(ctx, collection.GetCollectionID(), segmentIDs...)
 		if err != nil {
-			log.Warn("failed to get indexInfo for segments", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+			log.Warn(ctx, "failed to get indexInfo for segments", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
 			continue
 		}
 		for segmentID, segmentIndexInfo := range segmentIndexInfos {
@@ -177,7 +177,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	for _, segmentIDs := range lo.Chunk(lo.Keys(idSegmentsStats), MaxSegmentNumPerGetIndexInfoRPC) {
 		segmentInfos, err := c.broker.GetSegmentInfo(ctx, segmentIDs...)
 		if err != nil {
-			log.Warn("failed to get SegmentInfo for segments", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+			log.Warn(ctx, "failed to get SegmentInfo for segments", zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
 			continue
 		}
 		for _, segmentInfo := range segmentInfos {
@@ -245,7 +245,7 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		action,
 	)
 	if err != nil {
-		log.Warn("create segment update task failed",
+		mlog.Warn(ctx, "create segment update task failed",
 			zap.Int64("collection", segment.GetCollectionID()),
 			zap.String("channel", segment.GetInsertChannel()),
 			zap.Int64("node", segment.Node),
@@ -264,7 +264,7 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 
 	if paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 		if schema == nil {
-			log.Warn("schema released during check index", zap.Int64("collection", segment.GetCollectionID()))
+			mlog.Warn(context.TODO(), "schema released during check index", zap.Int64("collection", segment.GetCollectionID()))
 			return result
 		}
 		loadFieldMap := make(map[int64]struct{})
@@ -300,7 +300,7 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 		action,
 	)
 	if err != nil {
-		log.Warn("create segment stats update task failed",
+		mlog.Warn(ctx, "create segment stats update task failed",
 			zap.Int64("collection", segment.GetCollectionID()),
 			zap.String("channel", segment.GetInsertChannel()),
 			zap.Int64("node", segment.Node),

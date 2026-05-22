@@ -7,12 +7,12 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestName(t *testing.T) {
-	conf := &log.Config{Level: "debug", DisableTimestamp: true}
-	logger, _, _ := log.InitTestLogger(t, conf, zap.AddCallerSkip(1), zap.Hooks(func(entry zapcore.Entry) error {
+	conf := &mlog.Config{Level: "debug", DisableTimestamp: true}
+	logger, _, _ := mlog.InitTestLogger(t, conf, zap.AddCallerSkip(1), zap.Hooks(func(entry zapcore.Entry) error {
 		assert.Equal(t, "Testing", entry.Message)
 		return nil
 	}))

@@ -45,7 +45,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -334,12 +334,12 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
 	switch deprecatedCacheWarmupPolicy {
 	case "sync":
-		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
-		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
-		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		mlog.Warn(context.TODO(), "queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		mlog.Warn(context.TODO(), "for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		mlog.Warn(context.TODO(), "otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
 	case "async":
-		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		mlog.Warn(context.TODO(), "queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {
@@ -418,7 +418,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
 
-	log.Info("tiered storage eviction cache ratio configured",
+	mlog.Info(context.TODO(), "tiered storage eviction cache ratio configured",
 		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
 		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
 	)
@@ -438,12 +438,12 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
 	switch deprecatedCacheWarmupPolicy {
 	case "sync":
-		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
-		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
-		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		mlog.Warn(context.TODO(), "queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		mlog.Warn(context.TODO(), "for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		mlog.Warn(context.TODO(), "otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
 	case "async":
-		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		mlog.Warn(context.TODO(), "queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {
@@ -544,7 +544,7 @@ func SetupCoreConfigChangelCallback() {
 				factor = 32
 			}
 			knowhereThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
-			log.Info("UpdateKnowhereThreadPoolSize", zap.Uint32("knowhereThreadPoolSize", knowhereThreadPoolSize))
+			mlog.Info(context.TODO(), "UpdateKnowhereThreadPoolSize", zap.Uint32("knowhereThreadPoolSize", knowhereThreadPoolSize))
 			C.SegcoreSetKnowhereSearchThreadPoolNum(C.uint32_t(knowhereThreadPoolSize))
 			return nil
 		})
@@ -560,7 +560,7 @@ func SetupCoreConfigChangelCallback() {
 				factor = 32
 			}
 			knowhereFetchThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
-			log.Info("UpdateKnowhereFetchThreadPoolSize", zap.Uint32("knowhereFetchThreadPoolSize", knowhereFetchThreadPoolSize))
+			mlog.Info(context.TODO(), "UpdateKnowhereFetchThreadPoolSize", zap.Uint32("knowhereFetchThreadPoolSize", knowhereFetchThreadPoolSize))
 			C.SegcoreSetKnowhereFetchThreadPoolNum(C.uint32_t(knowhereFetchThreadPoolSize))
 			return nil
 		})
@@ -767,7 +767,8 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 
 	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
-	log.Warn(logMsg)
+	mlog.Warn(context.TODO(),
+		logMsg)
 	return errors.New(finalMsg)
 }
 
@@ -796,7 +797,7 @@ func serializeHeaders(headerstr string) string {
 func InitPluginLoader() error {
 	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
-		log.Info("Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		mlog.Info(context.TODO(), "Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
 		defer C.free(unsafe.Pointer(cSoPath))
 		status := C.InitPluginLoader(cSoPath)
 		return HandleCStatus(&status, "InitPluginLoader failed")

@@ -30,7 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -109,7 +109,7 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		}
 		csm.saveCompactionTaskMemory(task)
 	}
-	log.Info("DataCoord compactionTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(csm.ctx, "DataCoord compactionTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -165,7 +165,7 @@ func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *dat
 	csm.Lock()
 	defer csm.Unlock()
 	if err := csm.catalog.SaveCompactionTask(ctx, task); err != nil {
-		log.Error("meta update: update compaction task fail", zap.Error(err))
+		mlog.Error(ctx, "meta update: update compaction task fail", zap.Error(err))
 		return err
 	}
 	csm.saveCompactionTaskMemory(task)
@@ -185,7 +185,7 @@ func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *dat
 	csm.Lock()
 	defer csm.Unlock()
 	if err := csm.catalog.DropCompactionTask(ctx, task); err != nil {
-		log.Error("meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
+		mlog.Error(ctx, "meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
 		return err
 	}
 	_, triggerIDExist := csm.compactionTasks[task.TriggerID]

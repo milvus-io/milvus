@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -36,7 +36,7 @@ func TestUpdatePartialFields(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	genPkWithSingleScalarField := func(option *hp.GenDataOption) ([]column.Column, []column.Column) {
-		log.Info("genPkWithSingleScalarField")
+		mlog.Info(context.TODO(), "genPkWithSingleScalarField")
 		columns := make([]column.Column, 0, 2)
 		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeInt64, *option))
 		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeFloat, *option))
@@ -44,7 +44,7 @@ func TestUpdatePartialFields(t *testing.T) {
 	}
 
 	genPkWithSinglVectorField := func(option *hp.GenDataOption) ([]column.Column, []column.Column) {
-		log.Info("genPkWithSinglVectorField")
+		mlog.Info(context.TODO(), "genPkWithSinglVectorField")
 		columns := make([]column.Column, 0, 2)
 		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeInt64, *option))
 		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeFloatVector, *option))

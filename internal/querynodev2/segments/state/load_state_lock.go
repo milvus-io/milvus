@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -203,7 +204,7 @@ func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then 
 
 	select {
 	case <-time.After(maxWaitTime):
-		log.Error("load state lock wait timeout", zap.Duration("maxWaitTime", maxWaitTime))
+		mlog.Error(context.TODO(), "load state lock wait timeout", zap.Duration("maxWaitTime", maxWaitTime))
 	case <-ch:
 	}
 }

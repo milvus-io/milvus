@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -53,7 +53,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	})
 
 	if len(results) == 1 {
-		log.Debug("Shortcut return ReduceSearchResults", zap.Any("result info", info))
+		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", zap.Any("result info", info))
 		return results[0], nil
 	}
 
@@ -78,17 +78,16 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 			info.SetMetricType(r.MetricType)
 		}
 	}
-	log := log.Ctx(ctx)
 
 	searchResultData, err := DecodeSearchResults(ctx, results)
 	if err != nil {
-		log.Warn("shard leader decode search results errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader decode search results errors", zap.Error(err))
 		return nil, err
 	}
-	log.Debug("shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
+	mlog.Debug(ctx, "shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
 
 	for i, sData := range searchResultData {
-		log.Debug("reduceSearchResultData",
+		mlog.Debug(ctx, "reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
@@ -99,12 +98,12 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchReduce := InitSearchReducer(info)
 	reducedResultData, err := searchReduce.ReduceSearchResultData(ctx, searchResultData, info)
 	if err != nil {
-		log.Warn("shard leader reduce errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader reduce errors", zap.Error(err))
 		return nil, err
 	}
 	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.GetNq(), info.GetTopK(), info.GetMetricType())
 	if err != nil {
-		log.Warn("shard leader encode search result errors", zap.Error(err))
+		mlog.Warn(ctx, "shard leader encode search result errors", zap.Error(err))
 		return nil, err
 	}
 
@@ -211,7 +210,7 @@ func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 			if sel == -1 {
 				// A bad case happens where knowhere returns distance == +/-maxFloat32
 				// by mistake.
-				log.Warn("a bad distance is found, something is wrong here!", zap.Float32("score", distance))
+				mlog.Warn(context.TODO(), "a bad distance is found, something is wrong here!", zap.Float32("score", distance))
 			} else if typeutil.ComparePK(
 				typeutil.GetPK(dataArray[i].GetIds(), idx),
 				typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx)) {
@@ -269,5 +268,5 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 		}
 		searchResults.SlicedBlob = slicedBlob
 	}
-	return
+	return searchResults, err
 }

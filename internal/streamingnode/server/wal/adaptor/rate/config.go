@@ -17,12 +17,13 @@
 package rate
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -53,7 +54,7 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchRecoveryConfig() ratelim
 	}
 
 	if newConfig.HWM < newConfig.LWM || newConfig.Incremental <= 0 || newConfig.NormalDelayInterval < 0 || newConfig.IncreaseInterval < 0 {
-		log.Warn("illegal recovery config, fallback to previous one",
+		mlog.Warn(context.TODO(), "illegal recovery config, fallback to previous one",
 			zap.String("sourceName", f.sourceName),
 			zap.Int64("hwm", newConfig.HWM),
 			zap.Int64("lwm", newConfig.LWM),
@@ -64,7 +65,7 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchRecoveryConfig() ratelim
 	}
 	if f.lastRecovery != newConfig {
 		f.lastRecovery = newConfig
-		log.Info("recovery config changed",
+		mlog.Info(context.TODO(), "recovery config changed",
 			zap.String("sourceName", f.sourceName),
 			zap.Int64("hwm", newConfig.HWM),
 			zap.Int64("lwm", newConfig.LWM),
@@ -100,7 +101,7 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchSlowdownConfig() ratelim
 	}
 
 	if newConfig.FirstSlowdownDelay < 0 || newConfig.HWM < newConfig.LWM || newConfig.DecreaseInterval < 0 || newConfig.DecreaseRatio <= 0 || newConfig.DecreaseRatio >= 1 || newConfig.RejectDelayInterval < 0 {
-		log.Warn("illegal slowdown config, fallback to previous one",
+		mlog.Warn(context.TODO(), "illegal slowdown config, fallback to previous one",
 			zap.String("sourceName", f.sourceName),
 			zap.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
 			zap.Int64("hwm", newConfig.HWM),
@@ -112,7 +113,7 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchSlowdownConfig() ratelim
 	}
 	if f.lastSlowdown != newConfig {
 		f.lastSlowdown = newConfig
-		log.Info("slowdown config changed",
+		mlog.Info(context.TODO(), "slowdown config changed",
 			zap.String("sourceName", f.sourceName),
 			zap.Duration("firstSlowdownDelay", newConfig.FirstSlowdownDelay),
 			zap.Int64("hwm", newConfig.HWM),

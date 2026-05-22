@@ -34,8 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -92,7 +92,7 @@ func NewLoadCollectionJob(
 
 func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
-	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
@@ -111,7 +111,7 @@ func (job *LoadCollectionJob) Execute() error {
 			return err
 		}
 		replicas = localReplicas
-		log.Info("using local cluster-level replica config for replicated load",
+		log.Info(context.TODO(), "using local cluster-level replica config for replicated load",
 			zap.Int("localReplicaCount", len(localReplicas)))
 	}
 
@@ -188,13 +188,14 @@ func (job *LoadCollectionJob) Execute() error {
 
 	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
-		log.Warn(msg, zap.Error(err))
+		log.Warn(context.TODO(),
+			msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
 
-	log.Info("put collection and partitions done",
+	log.Info(context.TODO(), "put collection and partitions done",
 		zap.Int64("collectionID", req.GetCollectionId()),
 		zap.Int64s("partitions", req.GetPartitionIds()),
 		zap.Int64s("toReleasePartitions", toReleasePartitions),
@@ -211,16 +212,16 @@ func (job *LoadCollectionJob) Execute() error {
 	// 7. wait for partition released if any partition is released
 	if len(toReleasePartitions) > 0 {
 		if err = WaitCurrentTargetUpdated(ctx, job.targetObserver, req.GetCollectionId()); err != nil {
-			log.Warn("failed to wait current target updated", zap.Error(err))
+			log.Warn(context.TODO(), "failed to wait current target updated", zap.Error(err))
 			// return nil to avoid infinite retry on DDL callback
 			return nil
 		}
 		if err = WaitCollectionReleased(ctx, job.dist, job.checkerController, req.GetCollectionId(), toReleasePartitions...); err != nil {
-			log.Warn("failed to wait partition released", zap.Error(err))
+			log.Warn(context.TODO(), "failed to wait partition released", zap.Error(err))
 			// return nil to avoid infinite retry on DDL callback
 			return nil
 		}
-		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
+		log.Info(context.TODO(), "wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
 }

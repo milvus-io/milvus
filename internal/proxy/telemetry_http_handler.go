@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,7 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -65,7 +66,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 		encoded := strings.TrimPrefix(authHeader, "Basic ")
 		decoded, err := crypto.Base64Decode(encoded)
 		if err != nil {
-			log.Warn("TelemetryAuthMiddleware: failed to decode credentials", zap.Error(err))
+			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: failed to decode credentials", zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid credentials encoding",
 			})
@@ -86,7 +87,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Validate credentials using Milvus auth system
 		if !passwordVerify(c.Request.Context(), username, password, privilege.GetPrivilegeCache()) {
-			log.Warn("TelemetryAuthMiddleware: authentication failed", zap.String("username", username))
+			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: authentication failed", zap.String("username", username))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid username or password",
 			})
@@ -130,7 +131,7 @@ func getTelemetryClients(node *Proxy) gin.HandlerFunc {
 		// Call RootCoord via RPC
 		resp, err := node.GetClientTelemetry(ctx, req)
 		if err != nil {
-			log.Ctx(ctx).Warn("getTelemetryClients: failed to get client telemetry",
+			mlog.Warn(ctx, "getTelemetryClients: failed to get client telemetry",
 				zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": err.Error(),
@@ -180,7 +181,7 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 
 		resp, err := node.GetClientTelemetry(ctx, req)
 		if err != nil {
-			log.Ctx(ctx).Warn("getTelemetryClientMetrics: failed to get client metrics",
+			mlog.Warn(ctx, "getTelemetryClientMetrics: failed to get client metrics",
 				zap.Error(err),
 				zap.String("client_id", clientID))
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -242,7 +243,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 		}
 
 		if err := json.Unmarshal(body, &cmdReq); err != nil {
-			log.Ctx(ctx).Warn("postTelemetryCommand: failed to parse request",
+			mlog.Warn(ctx, "postTelemetryCommand: failed to parse request",
 				zap.Error(err))
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "invalid request body",
@@ -285,7 +286,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 
 		resp, err := node.PushClientCommand(ctx, pushReq)
 		if err != nil {
-			log.Ctx(ctx).Warn("postTelemetryCommand: failed to push command",
+			mlog.Warn(ctx, "postTelemetryCommand: failed to push command",
 				zap.Error(err),
 				zap.String("command_type", cmdReq.CommandType))
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -295,7 +296,7 @@ func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 		}
 
 		if !merr.Ok(resp.Status) {
-			log.Ctx(ctx).Warn("postTelemetryCommand: rpc returned error",
+			mlog.Warn(ctx, "postTelemetryCommand: rpc returned error",
 				zap.String("reason", resp.Status.Reason))
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": resp.Status.Reason,
@@ -337,7 +338,7 @@ func deleteTelemetryCommand(node *Proxy) gin.HandlerFunc {
 
 		resp, err := node.DeleteClientCommand(ctx, delReq)
 		if err != nil {
-			log.Ctx(ctx).Warn("deleteTelemetryCommand: failed to delete command",
+			mlog.Warn(ctx, "deleteTelemetryCommand: failed to delete command",
 				zap.Error(err),
 				zap.String("command_id", commandID))
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -420,7 +421,7 @@ func getTelemetryClientHistory(node *Proxy) gin.HandlerFunc {
 
 		resp, err := node.PushClientCommand(ctx, pushReq)
 		if err != nil {
-			log.Ctx(ctx).Warn("getTelemetryClientHistory: failed to push command",
+			mlog.Warn(ctx, "getTelemetryClientHistory: failed to push command",
 				zap.Error(err),
 				zap.String("client_id", clientID))
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -478,7 +479,7 @@ func getTelemetryClientConfig(node *Proxy) gin.HandlerFunc {
 
 		resp, err := node.PushClientCommand(ctx, pushReq)
 		if err != nil {
-			log.Ctx(ctx).Warn("getTelemetryClientConfig: failed to push command",
+			mlog.Warn(ctx, "getTelemetryClientConfig: failed to push command",
 				zap.Error(err),
 				zap.String("client_id", clientID))
 			c.JSON(http.StatusInternalServerError, gin.H{

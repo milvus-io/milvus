@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -69,14 +69,14 @@ func (o *LeaderCacheObserver) schedule(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("stop leader cache observer due to context done")
+			mlog.Info(ctx, "stop leader cache observer due to context done")
 			return
 		case <-o.closeCh:
-			log.Info("stop leader cache observer")
+			mlog.Info(ctx, "stop leader cache observer")
 			return
 
 		case event := <-o.eventCh:
-			log.Info("receive event, trigger leader cache update", zap.Int64("event", event))
+			mlog.Info(ctx, "receive event, trigger leader cache update", zap.Int64("event", event))
 			ret := make([]int64, 0)
 			ret = append(ret, event)
 
@@ -101,7 +101,7 @@ func (o *LeaderCacheObserver) HandleEvent(ctx context.Context, collectionIDs ...
 		CollectionIDs: collectionIDs,
 	})
 	if err != nil {
-		log.Warn("failed to invalidate proxy's shard leader cache", zap.Error(err))
+		mlog.Warn(ctx, "failed to invalidate proxy's shard leader cache", zap.Error(err))
 		return
 	}
 }

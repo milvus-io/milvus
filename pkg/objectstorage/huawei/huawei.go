@@ -17,6 +17,7 @@
 package huawei
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -35,7 +36,7 @@ import (
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -107,7 +108,7 @@ func (p *HuaweiCredentialProvider) initClients() error {
 	basicChain := provider.BasicCredentialProviderChain()
 	basicCred, err := basicChain.GetCredentials()
 	if err != nil {
-		log.Warn("HuaweiCloud credential provider: failed to get basic credentials", zap.Error(err))
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to get basic credentials", zap.Error(err))
 		return errors.Wrap(err, "failed to get basic credentials")
 	}
 	p.basicCred = basicCred
@@ -121,7 +122,7 @@ func (p *HuaweiCredentialProvider) initClients() error {
 	if err != nil {
 		endpoint := fmt.Sprintf("https://iam.%s.myhuaweicloud.com", regionName)
 		regionObj = region.NewRegion(regionName, endpoint)
-		log.Warn("HuaweiCloud credential provider: region not in SDK, using constructed endpoint",
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: region not in SDK, using constructed endpoint",
 			zap.String("region", regionName), zap.String("endpoint", endpoint))
 	}
 	p.regionObj = regionObj
@@ -132,12 +133,12 @@ func (p *HuaweiCredentialProvider) initClients() error {
 		WithHttpConfig(config.DefaultHttpConfig().WithTimeout(30 * time.Second)).
 		SafeBuild()
 	if err != nil {
-		log.Warn("HuaweiCloud credential provider: failed to build IAM client", zap.Error(err))
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to build IAM client", zap.Error(err))
 		return errors.Wrap(err, "failed to build IAM client")
 	}
 	p.iamClient = iam.NewIamClient(hcClient)
 	p.inited = true
-	log.Info("HuaweiCloud credential provider: IAM client initialized successfully",
+	mlog.Info(context.TODO(), "HuaweiCloud credential provider: IAM client initialized successfully",
 		zap.String("region", regionName))
 	return nil
 }
@@ -181,11 +182,11 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	// Throttle retries after STS failures to avoid hammering the service.
 	if p.isInCooldown() {
 		if p.hasValidCachedCredentials() {
-			log.Warn("HuaweiCloud credential provider: in cooldown after failure, returning cached credentials",
+			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: in cooldown after failure, returning cached credentials",
 				zap.Time("cached_expiration", p.expiration))
 			return p.credentials, nil
 		}
-		log.Warn("HuaweiCloud credential provider: in cooldown after failure, no valid cached credentials available")
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: in cooldown after failure, no valid cached credentials available")
 		return minioCred.Value{}, errors.New("STS refresh in cooldown, no valid cached credentials available")
 	}
 
@@ -209,14 +210,14 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		p.lastReloadFailed = true
 		p.lastFailedReloadTime = time.Now()
 		if p.hasValidCachedCredentials() {
-			log.Warn("HuaweiCloud credential provider: STS refresh failed, falling back to cached credentials",
+			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS refresh failed, falling back to cached credentials",
 				zap.Time("cached_expiration", p.expiration),
 				zap.Int64("sts_success", p.stsSuccessCount.Load()),
 				zap.Int64("sts_failure", p.stsFailureCount.Load()),
 				zap.Error(err))
 			return p.credentials, nil
 		}
-		log.Warn("HuaweiCloud credential provider: failed to create temporary access key",
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to create temporary access key",
 			zap.Int64("sts_success", p.stsSuccessCount.Load()),
 			zap.Int64("sts_failure", p.stsFailureCount.Load()),
 			zap.Error(err))
@@ -229,13 +230,13 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		p.lastReloadFailed = true
 		p.lastFailedReloadTime = time.Now()
 		if p.hasValidCachedCredentials() {
-			log.Warn("HuaweiCloud credential provider: STS returned incomplete credentials, falling back to cached credentials",
+			mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS returned incomplete credentials, falling back to cached credentials",
 				zap.Time("cached_expiration", p.expiration),
 				zap.Int64("sts_success", p.stsSuccessCount.Load()),
 				zap.Int64("sts_failure", p.stsFailureCount.Load()))
 			return p.credentials, nil
 		}
-		log.Warn("HuaweiCloud credential provider: STS returned nil or incomplete credentials",
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: STS returned nil or incomplete credentials",
 			zap.Int64("sts_success", p.stsSuccessCount.Load()),
 			zap.Int64("sts_failure", p.stsFailureCount.Load()))
 		return minioCred.Value{}, errors.New("incomplete credential returned from Huawei Cloud (missing ak/sk/token)")
@@ -244,7 +245,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	expiration, err := time.Parse(time.RFC3339, response.Credential.ExpiresAt)
 	if err != nil {
 		p.stsFailureCount.Add(1)
-		log.Warn("HuaweiCloud credential provider: failed to parse expiration time",
+		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to parse expiration time",
 			zap.String("expires_at", response.Credential.ExpiresAt),
 			zap.Int64("sts_success", p.stsSuccessCount.Load()),
 			zap.Int64("sts_failure", p.stsFailureCount.Load()),
@@ -274,7 +275,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	if len(akPrefix) > 4 {
 		akPrefix = akPrefix[:4] + "***"
 	}
-	log.Info("HuaweiCloud credential provider: credentials retrieved successfully",
+	mlog.Info(context.TODO(), "HuaweiCloud credential provider: credentials retrieved successfully",
 		zap.String("ak_prefix", akPrefix), zap.Time("expiration", expiration),
 		zap.Int64("sts_success", p.stsSuccessCount.Load()),
 		zap.Int64("sts_failure", p.stsFailureCount.Load()))

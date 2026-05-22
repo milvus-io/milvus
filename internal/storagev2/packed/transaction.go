@@ -23,13 +23,14 @@ package packed
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"unsafe"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -94,7 +95,7 @@ func addDeltaLogsToManifest(
 		return "", fmt.Errorf("failed to parse manifest path: %w", err)
 	}
 
-	log.Debug("AddDeltaLogsToManifest",
+	mlog.Debug(context.TODO(), "AddDeltaLogsToManifest",
 		zap.String("basePath", basePath),
 		zap.Int64("version", version),
 		zap.Int("numDeltaLogs", len(deltaLogs)))
@@ -127,7 +128,7 @@ func addDeltaLogsToManifest(
 			return "", fmt.Errorf("failed to add delta log %s: %w", deltaLog.Path, err)
 		}
 
-		log.Debug("Added delta log to transaction",
+		mlog.Debug(context.TODO(), "Added delta log to transaction",
 			zap.String("path", deltaLog.Path),
 			zap.Int64("numEntries", deltaLog.NumEntries))
 	}
@@ -140,7 +141,7 @@ func addDeltaLogsToManifest(
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	log.Debug("Delta logs committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Delta logs committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
 
 	return newManifestPath, nil
 }
@@ -194,7 +195,7 @@ func GetDeltaLogPathsFromManifest(
 		paths = append(paths, C.GoString(cPath))
 	}
 
-	log.Debug("GetDeltaLogPathsFromManifest",
+	mlog.Debug(context.TODO(), "GetDeltaLogPathsFromManifest",
 		zap.String("manifestPath", manifestPath),
 		zap.Int("numDeltaLogs", numDeltaLogs),
 		zap.Strings("paths", paths))
@@ -224,7 +225,7 @@ func AddStatsToManifest(
 		return "", fmt.Errorf("failed to parse manifest path: %w", err)
 	}
 
-	log.Debug("AddStatsToManifest",
+	mlog.Debug(context.TODO(), "AddStatsToManifest",
 		zap.String("basePath", basePath),
 		zap.Int64("version", version),
 		zap.Int("numStats", len(stats)))
@@ -250,7 +251,7 @@ func AddStatsToManifest(
 		if err := UpdateTransactionStat(transactionHandle, stat.Key, stat.Files, stat.Metadata); err != nil {
 			return "", fmt.Errorf("failed to update stat %s: %w", stat.Key, err)
 		}
-		log.Debug("Added stat to transaction",
+		mlog.Debug(context.TODO(), "Added stat to transaction",
 			zap.String("key", stat.Key),
 			zap.Strings("files", stat.Files))
 	}
@@ -262,7 +263,7 @@ func AddStatsToManifest(
 	}
 
 	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	log.Debug("Stats committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Stats committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
 
 	return newManifestPath, nil
 }

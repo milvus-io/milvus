@@ -46,7 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -695,7 +695,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		chunkSize := uint64(64)                     // 64B
 		rw, err := newCompositeBinlogRecordWriter(0, 0, 0, schema,
 			func(b []*Blob) error {
-				log.Debug("write blobs", zap.Int("files", len(b)))
+				mlog.Debug(context.TODO(), "write blobs", zap.Int("files", len(b)))
 				return nil
 			},
 			alloc, chunkSize, "root", 10000)
@@ -1241,7 +1241,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 	sort.Slice(values, func(i, j int) bool {
 		return values[i].PK.LT(values[j].PK)
 	})
-	log.Info("prepare data done", zap.Int("len", len(values)), zap.Duration("dur", time.Since(start)))
+	mlog.Info(context.TODO(), "prepare data done", zap.Int("len", len(values)), zap.Duration("dur", time.Since(start)))
 
 	b.ResetTimer()
 

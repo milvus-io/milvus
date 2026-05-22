@@ -1,13 +1,14 @@
 package stats
 
 import (
+	"context"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -30,7 +31,7 @@ func newSealWorker(statsManager *StatsManager) *sealWorker {
 
 // sealWorker is the background task that handles the seal signal from stats manager or timer.
 type sealWorker struct {
-	log.Binder
+	mlog.Binder
 	statsManager            *StatsManager // reference to the stats manager.
 	sealNotifier            chan sealSegmentIDWithPolicy
 	growingBytesNotifier    *syncutil.CooldownNotifier[uint64]
@@ -97,7 +98,9 @@ func (m *sealWorker) loop() {
 func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 	sealSegmentIDs := m.statsManager.selectSegmentsWithTimePolicy()
 	if len(sealSegmentIDs) != 0 {
-		m.Logger().Info("notify to seal segments with time policy", zap.Int("segmentNum", len(sealSegmentIDs)))
+		m.Logger().Info(context.TODO(),
+
+			"notify to seal segments with time policy", zap.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -108,7 +111,9 @@ func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 func (m *sealWorker) notifyToSealSegmentWithBlockingL0Policy() {
 	sealSegmentIDs := m.statsManager.selectSegmentsWithBlockingL0Policy()
 	if len(sealSegmentIDs) != 0 {
-		m.Logger().Info("notify to seal segments with blocking l0 policy", zap.Int("segmentNum", len(sealSegmentIDs)))
+		m.Logger().Info(context.TODO(),
+
+			"notify to seal segments with blocking l0 policy", zap.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -119,7 +124,9 @@ func (m *sealWorker) notifyToSealSegmentWithBlockingL0Policy() {
 func (m *sealWorker) notifyToSealSegmentUntilLessThanLWM(sealPolicy policy.SealPolicy) {
 	segmentIDs := m.statsManager.selectSegmentsUntilLessThanLWM()
 	if len(segmentIDs) != 0 {
-		m.Logger().Info("notify to seal segments until less than LWM", zap.Int("segmentNum", len(segmentIDs)), zap.String("policy", string(sealPolicy.Policy)))
+		m.Logger().Info(context.TODO(),
+
+			"notify to seal segments until less than LWM", zap.Int("segmentNum", len(segmentIDs)), zap.String("policy", string(sealPolicy.Policy)))
 		for _, segmentID := range segmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}

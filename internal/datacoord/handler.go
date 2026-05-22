@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -84,7 +85,7 @@ func newServerHandler(s *Server) *ServerHandler {
 // level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
-	log.Info("GetDataVChanPositions",
+	mlog.Info(context.TODO(), "GetDataVChanPositions",
 		zap.Int64("collectionID", channel.GetCollectionID()),
 		zap.String("channel", channel.GetName()),
 		zap.Int("numOfSegments", len(segments)),
@@ -375,7 +376,7 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 		return true
 	})
 
-	log.Ctx(ctx).Info("GetCurrentSegmentsView",
+	mlog.Info(ctx, "GetCurrentSegmentsView",
 		zap.Int64("collectionID", channel.GetCollectionID()),
 		zap.String("channel", channel.GetName()),
 		zap.Int("numOfSegments", len(segments)),
@@ -430,7 +431,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 		}
 	}
 	if minPos != nil {
-		log.Info("getEarliestSegmentDMLPos done",
+		mlog.Info(context.TODO(), "getEarliestSegmentDMLPos done",
 			zap.Int64("segmentID", minPosSegID),
 			zap.Uint64("posTs", minPosTs),
 			zap.Time("posTime", tsoutil.PhysicalTime(minPosTs)))
@@ -440,7 +441,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 
 // getCollectionStartPos returns collection start position.
 func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosition {
-	log := log.With(zap.String("channel", channel.GetName()))
+	log := mlog.With(zap.String("channel", channel.GetName()))
 	if channel.GetStartPosition() != nil {
 		return channel.GetStartPosition()
 	}
@@ -453,7 +454,7 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 		// because when using the collection start position, we don't perform any sync operation of data,
 		// so we can just use 0 here without introducing any repeated data to avoid filtering some DML whose timetick is less than collectionInfo.CreatedAt.
 		// And after enabling new DDL framework, the collection start position will have its own timestamp, so we can use it directly.
-		log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
+		log.Info(context.TODO(), "NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
 			zap.Uint64("posTs", startPosition.GetTimestamp()),
 			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
 		)
@@ -468,7 +469,7 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 //  3. Collection start position;
 //     And would return if any position is valid.
 func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
-	log := log.With(zap.String("channel", channel.GetName()))
+	log := mlog.With(zap.String("channel", channel.GetName()))
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
 	if seekPosition != nil {
@@ -477,7 +478,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 
 	seekPosition = h.getEarliestSegmentDMLPos(channel.GetName(), partitionIDs...)
 	if seekPosition != nil {
-		log.Info("channel seek position set from earliest segment dml position",
+		log.Info(context.TODO(), "channel seek position set from earliest segment dml position",
 			zap.Uint64("posTs", seekPosition.Timestamp),
 			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
@@ -485,13 +486,13 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 
 	seekPosition = h.getCollectionStartPos(channel)
 	if seekPosition != nil {
-		log.Info("channel seek position set from collection start position",
+		log.Info(context.TODO(), "channel seek position set from collection start position",
 			zap.Uint64("posTs", seekPosition.Timestamp),
 			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
-	log.Warn("get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
+	log.Warn(context.TODO(), "get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
 	return nil
 }
 
@@ -548,13 +549,13 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 	if err := retry.Do(ctx2, func() error {
 		has, err := h.s.broker.HasCollection(ctx2, collectionID)
 		if err != nil {
-			log.RatedInfo(60, "datacoord ServerHandler HasCollection retry failed", zap.Error(err))
+			mlog.RatedInfo(ctx, rate.Limit(60), "datacoord ServerHandler HasCollection retry failed", zap.Error(err))
 			return err
 		}
 		hasCollection = has
 		return nil
 	}, retry.Attempts(5)); err != nil {
-		log.Ctx(ctx2).Error("datacoord ServerHandler HasCollection finally failed",
+		mlog.Error(ctx2, "datacoord ServerHandler HasCollection finally failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		// A workaround for https://github.com/milvus-io/milvus/issues/26863. The collection may be considered as not
@@ -575,12 +576,12 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	if err := retry.Do(ctx2, func() error {
 		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
 		if err != nil {
-			log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
+			mlog.Warn(ctx, "failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
 		}
 		return nil
 	}, retry.Attempts(5)); err != nil {
-		log.Ctx(ctx2).Warn("datacoord ServerHandler GetCollection finally failed",
+		mlog.Warn(ctx2, "datacoord ServerHandler GetCollection finally failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return nil, err
@@ -600,10 +601,10 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
 	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
 	if err != nil {
-		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
+		mlog.Warn(context.TODO(), "DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
-	log.Info("DropChannel succeeded", zap.String("channel", channel))
+	mlog.Info(context.TODO(), "DropChannel succeeded", zap.String("channel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
 
 	// clean collection info cache when meet drop collection info
@@ -736,7 +737,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}))
 
 	if len(segments) == 0 {
-		log.Info("no segments found for collection when generating snapshot",
+		mlog.Info(ctx, "no segments found for collection when generating snapshot",
 			zap.Int64("collectionID", collectionID),
 			zap.Uint64("snapshotTs", snapshotTs))
 	}
@@ -747,7 +748,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	err = binlog.DecompressMultiBinLogs(segmentInfos)
 	if err != nil {
-		log.Error("decompress segment binlogs failed when generating snapshot",
+		mlog.Error(ctx, "decompress segment binlogs failed when generating snapshot",
 			zap.Int64("collectionID", collectionID),
 			zap.Uint64("snapshotTs", snapshotTs),
 			zap.Error(err))
@@ -758,7 +759,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	lo.ForEach(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) {
 		deltalogs, err := h.GetDeltaLogFromCompactTo(ctx, segInfo.GetID())
 		if err != nil {
-			log.Error("get delta logs from compactTo failed when generating snapshot",
+			mlog.Error(ctx, "get delta logs from compactTo failed when generating snapshot",
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("snapshotTs", snapshotTs),
 				zap.Int64("segmentID", segInfo.GetID()),
@@ -872,7 +873,7 @@ func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID 
 		children, ok := h.s.meta.GetCompactionTo(id)
 		// double-check the segment, maybe the segment is being dropped concurrently.
 		if !ok {
-			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+			mlog.Warn(ctx, "failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
 			err := merr.WrapErrSegmentNotFound(id)
 			return nil, err
 		}
@@ -881,7 +882,7 @@ func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID 
 			clonedChild := child.Clone()
 			// child segment should decompress binlog path
 			if err := binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs()); err != nil {
-				log.Warn("failed to decompress delta binlog", zap.Int64("segmentID", clonedChild.GetID()), zap.Error(err))
+				mlog.Warn(ctx, "failed to decompress delta binlog", zap.Int64("segmentID", clonedChild.GetID()), zap.Error(err))
 				return nil, err
 			}
 			allDeltaLogs = append(allDeltaLogs, clonedChild.GetDeltalogs()...)

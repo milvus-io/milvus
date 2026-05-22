@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -138,7 +138,7 @@ func (t *L0ImportTask) Clone() Task {
 
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
-	log.Info("start to import l0", WrapLogFields(t,
+	mlog.Info(t.ctx, "start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("files", t.req.GetFiles()),
@@ -155,7 +155,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 				if len(t.req.GetFiles()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.req.GetFiles()[0].String())
 				}
-				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.Any("file", t.req.GetFiles()), zap.String("err", reason))...)
+				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, zap.Any("file", t.req.GetFiles()), zap.String("err", reason))...)
 				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
@@ -163,26 +163,26 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		var pkField *schemapb.FieldSchema
 		pkField, err = typeutil.GetPrimaryFieldSchema(t.GetSchema())
 		if err != nil {
-			return
+			return err
 		}
 
 		// Parse ts parameters from options
 		tsStart, tsEnd, err := importutilv2.ParseTimeRange(t.req.GetOptions())
 		if err != nil {
-			return
+			return err
 		}
 
 		var reader binlog.L0Reader
 		reader, err = binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
-			return
+			return err
 		}
 		start := time.Now()
 		err = t.importL0(reader)
 		if err != nil {
-			return
+			return err
 		}
-		log.Info("l0 import done", WrapLogFields(t,
+		mlog.Info(t.ctx, "l0 import done", WrapLogFields(t,
 			zap.Strings("l0 prefix", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
@@ -232,13 +232,13 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 			return err
 		}
 		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		log.Info("sync l0 data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
+		mlog.Info(t.ctx, "sync l0 data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
 func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Ctx(context.TODO()).Info("start to sync l0 delete data", WrapLogFields(t)...)
+	mlog.Info(t.ctx, "start to sync l0 delete data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, data := range delData {
@@ -259,7 +259,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 		if err != nil {
-			log.Ctx(context.TODO()).Error("failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
+			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
 			return nil, nil, err
 		}
 		futures = append(futures, future)

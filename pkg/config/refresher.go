@@ -22,8 +22,9 @@ import (
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type refresher struct {
@@ -65,17 +66,17 @@ func (r *refresher) refreshPeriodically(name string) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(r.refreshInterval)
 	defer ticker.Stop()
-	log := log.Ctx(context.TODO())
-	log.Debug("start refreshing configurations", zap.String("source", name))
+	ctx := context.TODO()
+	mlog.Debug(ctx, "start refreshing configurations", zap.String("source", name))
 	for {
 		select {
 		case <-ticker.C:
 			err := r.fetchFunc()
 			if err != nil {
-				log.WithRateGroup("refresher", 1, 60).RatedWarn(60, "can not pull configs", zap.Error(err))
+				mlog.RatedWarn(ctx, rate.Limit(60), "can not pull configs", zap.Error(err))
 			}
 		case <-r.intervalDone:
-			log.Info("stop refreshing configurations", zap.String("source", name))
+			mlog.Info(ctx, "stop refreshing configurations", zap.String("source", name))
 			return
 		}
 	}

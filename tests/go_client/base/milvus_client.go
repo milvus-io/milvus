@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -20,14 +21,14 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 	// Limit debug logging for these methods
 	ratedLogMethods := typeutil.NewSet("GetFlushState", "GetLoadingProgress", "DescribeIndex")
 
-	logWithRateLimit := func(methodShortName string, logFunc func(msg string, fields ...zap.Field),
-		logRateFunc func(cost float64, msg string, fields ...zap.Field) bool,
+	logWithRateLimit := func(ctx context.Context, methodShortName string, logFunc func(context.Context, string, ...zap.Field),
+		logRateFunc func(context.Context, rate.Limit, string, ...zap.Field),
 		msg string, fields ...zap.Field,
 	) {
 		if ratedLogMethods.Contain(methodShortName) {
-			logRateFunc(10, msg, fields...)
+			logRateFunc(ctx, rate.Limit(10), msg, fields...)
 		} else {
-			logFunc(msg, fields...)
+			logFunc(ctx, msg, fields...)
 		}
 	}
 
@@ -40,7 +41,7 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		marshalWithFallback := func(v interface{}, fallbackMsg string) string {
 			dataJSON, err := json.Marshal(v)
 			if err != nil {
-				log.Error("Failed to marshal", zap.Error(err))
+				mlog.Error(ctx, "Failed to marshal", zap.Error(err))
 				return fallbackMsg
 			}
 			dataStr := string(dataJSON)
@@ -51,7 +52,7 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		}
 
 		reqStr := marshalWithFallback(req, "could not marshal request")
-		logWithRateLimit(_methodShortName, log.Info, log.RatedInfo, "Request", zap.String("method", _methodShortName), zap.String("reqs", reqStr))
+		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Request", zap.String("method", _methodShortName), zap.String("reqs", reqStr))
 
 		// Invoke the actual method
 		start := time.Now()
@@ -60,8 +61,8 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 
 		// Marshal response
 		respStr := marshalWithFallback(reply, "could not marshal response")
-		logWithRateLimit(_methodShortName, log.Info, log.RatedInfo, "Response", zap.String("method", _methodShortName), zap.String("resp", respStr))
-		logWithRateLimit(_methodShortName, log.Debug, log.RatedDebug, "Cost", zap.String("method", _methodShortName), zap.Duration("cost", cost))
+		logWithRateLimit(ctx, _methodShortName, mlog.Info, mlog.RatedInfo, "Response", zap.String("method", _methodShortName), zap.String("resp", respStr))
+		logWithRateLimit(ctx, _methodShortName, mlog.Debug, mlog.RatedDebug, "Cost", zap.String("method", _methodShortName), zap.Duration("cost", cost))
 
 		return errResp
 	}

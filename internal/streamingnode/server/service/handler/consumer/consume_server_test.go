@@ -18,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -119,7 +119,7 @@ func TestConsumeServerRecvArm(t *testing.T) {
 		consumeServer: &consumeGrpcServerHelper{
 			StreamingNodeHandlerService_ConsumeServer: grpcConsumerServer,
 		},
-		logger:  log.With(),
+		logger:  mlog.With(),
 		closeCh: make(chan struct{}),
 		metrics: newConsumerMetrics("test"),
 	}
@@ -164,7 +164,7 @@ func TestConsumerServeSendArm(t *testing.T) {
 		consumeServer: &consumeGrpcServerHelper{
 			StreamingNodeHandlerService_ConsumeServer: grpcConsumerServer,
 		},
-		logger:  log.With(),
+		logger:  mlog.With(),
 		scanner: scanner,
 		closeCh: make(chan struct{}),
 		metrics: newConsumerMetrics("test"),

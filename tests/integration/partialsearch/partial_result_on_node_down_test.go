@@ -13,7 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -70,7 +70,7 @@ func (s *PartialSearchTestSuit) initCollection(collectionName string, replica in
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.True(merr.Ok(loadStatus))
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("initCollection Done")
+	mlog.Info(context.TODO(), "initCollection Done")
 }
 
 func (s *PartialSearchTestSuit) executeQuery(collection string) (int, error) {
@@ -84,7 +84,7 @@ func (s *PartialSearchTestSuit) executeQuery(collection string) (int, error) {
 	})
 
 	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
-		log.Info("query failed", zap.Error(err))
+		mlog.Info(context.TODO(), "query failed", zap.Error(err))
 		return 0, err
 	}
 
@@ -125,15 +125,15 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnSingleReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 				} else if numEntities < totalEntities {
-					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+					mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 				}
@@ -190,21 +190,21 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 				} else if failCounter.Load() > 0 {
 					if numEntities < totalEntities {
-						log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+						mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 						partialResultCounter.Inc()
 						partialResultRecoverTs.Store(time.Now().UnixNano())
 						s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 					} else {
-						log.Info("query return full result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+						mlog.Info(context.TODO(), "query return full result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 						fullResultRecoverTs.Store(time.Now().UnixNano())
 					}
 				}
@@ -227,7 +227,7 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 	time.Sleep(20 * time.Second)
 	s.True(failCounter.Load() >= 0)
 	s.True(partialResultCounter.Load() >= 0)
-	log.Info("partialResultRecoverTs", zap.Int64("partialResultRecoverTs", partialResultRecoverTs.Load()), zap.Int64("fullResultRecoverTs", fullResultRecoverTs.Load()))
+	mlog.Info(context.TODO(), "partialResultRecoverTs", zap.Int64("partialResultRecoverTs", partialResultRecoverTs.Load()), zap.Int64("fullResultRecoverTs", fullResultRecoverTs.Load()))
 	s.True(partialResultRecoverTs.Load() < fullResultRecoverTs.Load())
 	close(stopSearchCh)
 	wg.Wait()
@@ -266,15 +266,15 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnMultiReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 				} else if numEntities < totalEntities {
-					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+					mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 				}
@@ -330,16 +330,16 @@ func (s *PartialSearchTestSuit) TestEachReplicaHasNodeDownOnMultiReplica() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 					continue
 				} else if numEntities < totalEntities {
-					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+					mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 				}
@@ -408,15 +408,15 @@ func (s *PartialSearchTestSuit) TestPartialResultRequiredDataRatioTooHigh() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 				} else if numEntities < totalEntities {
-					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+					mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 				}
@@ -530,15 +530,15 @@ func (s *PartialSearchTestSuit) TestSkipWaitTSafe() {
 		for {
 			select {
 			case <-stopSearchCh:
-				log.Info("stop search")
+				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
 				numEntities, err := s.executeQuery(name)
 				if err != nil {
-					log.Info("query failed", zap.Error(err))
+					mlog.Info(context.TODO(), "query failed", zap.Error(err))
 					failCounter.Inc()
 				} else if numEntities < totalEntities {
-					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
+					mlog.Info(context.TODO(), "query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
 				}

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -63,7 +63,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			actions...,
 		)
 		if err != nil {
-			log.Warn("create segment task from plan failed",
+			mlog.Warn(ctx, "create segment task from plan failed",
 				zap.Int64("collection", p.Segment.GetCollectionID()),
 				zap.Int64("segmentID", p.Segment.GetID()),
 				zap.Int64("replica", p.Replica.GetID()),
@@ -75,7 +75,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			continue
 		}
 
-		log.Info("create segment task",
+		mlog.Info(ctx, "create segment task",
 			zap.Int64("collection", p.Segment.GetCollectionID()),
 			zap.Int64("segmentID", p.Segment.GetID()),
 			zap.Int64("replica", p.Replica.GetID()),
@@ -113,7 +113,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 		}
 		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
 		if err != nil {
-			log.Warn("create channel task failed",
+			mlog.Warn(ctx, "create channel task failed",
 				zap.Int64("collection", p.Channel.GetCollectionID()),
 				zap.Int64("replica", p.Replica.GetID()),
 				zap.String("channel", p.Channel.GetChannelName()),
@@ -124,7 +124,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			continue
 		}
 
-		log.Info("create channel task",
+		mlog.Info(ctx, "create channel task",
 			zap.Int64("collection", p.Channel.GetCollectionID()),
 			zap.Int64("replica", p.Replica.GetID()),
 			zap.String("channel", p.Channel.GetChannelName()),
@@ -148,7 +148,8 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []as
 		balanceInfo += channelPlan.String()
 	}
 	balanceInfo += "}"
-	log.Info(balanceInfo)
+	mlog.Info(context.TODO(),
+		balanceInfo)
 }
 
 // PrintCurrentReplicaDist logs the current distribution of segments and channels across nodes
@@ -216,7 +217,8 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	}
 	distInfo += "]"
 
-	log.Info(distInfo)
+	mlog.Info(context.TODO(),
+		distInfo)
 }
 
 // sortIfChannelAtWALLocated sorts channels based on WAL location when streaming service is enabled.

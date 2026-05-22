@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -19,9 +20,9 @@ import (
 
 // teardownTest
 func teardownTest(t *testing.T) func(t *testing.T) {
-	log.Info("setup test func")
+	mlog.Info(context.TODO(), "setup test func")
 	return func(t *testing.T) {
-		log.Info("teardown func drop all non-default db")
+		mlog.Info(context.TODO(), "teardown func drop all non-default db")
 		// drop all db
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -240,7 +241,7 @@ func TestClientWithDb(t *testing.T) {
 	_, defCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDefault, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	defCollections, _ := mcDefault.ListCollections(ctx, listCollOpt)
 	require.Contains(t, defCollections, defCol1.CollectionName)
-	log.Debug("default db collections:", zap.Any("default collections", defCollections))
+	mlog.Debug(context.TODO(), "default db collections:", zap.Any("default collections", defCollections))
 
 	// create a db and create collection in db
 	dbName := common.GenRandomString("db", 5)
@@ -256,7 +257,7 @@ func TestClientWithDb(t *testing.T) {
 	_, dbCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDb, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
 	dbCollections, _ := mcDb.ListCollections(ctx, listCollOpt)
-	log.Debug("db collections:", zap.Any("db collections", dbCollections))
+	mlog.Debug(context.TODO(), "db collections:", zap.Any("db collections", dbCollections))
 	require.Containsf(t, dbCollections, dbCol1.CollectionName, fmt.Sprintf("The collection %s not in: %v", dbCol1.CollectionName, dbCollections))
 
 	// using default db and collection not in

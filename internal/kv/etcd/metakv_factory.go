@@ -17,13 +17,14 @@
 package etcdkv
 
 import (
+	"context"
 	"time"
 
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -31,7 +32,7 @@ import (
 // NewWatchKVFactory returns an object that implements the kv.WatchKV interface using etcd.
 // The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
 func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.WatchKV, error) {
-	log.Info("start etcd with rootPath",
+	mlog.Info(context.TODO(), "start etcd with rootPath",
 		zap.String("rootpath", rootPath),
 		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd.GetAsBool()))
 	if etcdCfg.UseEmbedEtcd.GetAsBool() {

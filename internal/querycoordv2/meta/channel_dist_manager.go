@@ -17,15 +17,17 @@
 package meta
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -351,21 +353,21 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 			}
 		}
 	}
-	if log.Level().Enabled(zap.DebugLevel) {
-		logger := log.With(
+	if mlog.LevelEnabled(zap.DebugLevel) {
+		logger := mlog.With(
 			zap.String("Scope", "ChannelDistManager"),
 			zap.String("channelName", channelName),
 			zap.Int64("replicaID", replica.GetID()),
-		).WithRateGroup("ChannelDistManager", 1.0, 60.0)
+		)
 		if candidates != nil {
-			logger.RatedDebug(1.0, "final",
+			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "final",
 				zap.String("candidates", candidates.GetChannelName()),
 				zap.Int64("candidates version", candidates.Version),
 				zap.Int64("candidates node", candidates.Node),
 				zap.String("reason", setReason),
 			)
 		} else {
-			logger.RatedDebug(1.0, "no candidates found")
+			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "no candidates found")
 		}
 	}
 	return candidates

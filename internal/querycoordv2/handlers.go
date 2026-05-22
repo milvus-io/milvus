@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -77,7 +77,7 @@ func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64)
 			// sdk insert three segments:A, B, D, then A + B----compact--> C
 			// In this scenario, we promise that clients see either 2 segments(C,D) or 3 segments(A, B, D)
 			// rather than 4 segments(A, B, C, D), in which query nodes are loading C but have completed loading process
-			log.Info("filtered segment being in the intermediate status",
+			mlog.Info(ctx, "filtered segment being in the intermediate status",
 				zap.Int64("segmentID", segment.GetID()))
 			continue
 		}
@@ -104,7 +104,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	sync bool,
 	copyMode bool,
 ) error {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
+	log := mlog.With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
 	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes, true)
@@ -114,7 +114,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
-		log.Info("manually balance segment...",
+		log.Info(ctx, "manually balance segment...",
 			zap.Int64("replica", plan.Replica.GetID()),
 			zap.String("channel", plan.Segment.InsertChannel),
 			zap.Int64("from", plan.From),
@@ -139,7 +139,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions...,
 		)
 		if err != nil {
-			log.Warn("create segment task for balance failed",
+			log.Warn(ctx, "create segment task for balance failed",
 				zap.Int64("replica", plan.Replica.GetID()),
 				zap.String("channel", plan.Segment.InsertChannel),
 				zap.Int64("from", plan.From),
@@ -155,7 +155,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 		err = s.taskScheduler.Add(t)
 		if err != nil {
 			t.Cancel(err)
-			log.Info("skip balance segment task", zap.Int64("segmentID", plan.Segment.GetID()), zap.Error(err))
+			log.Info(ctx, "skip balance segment task", zap.Int64("segmentID", plan.Segment.GetID()), zap.Error(err))
 			continue
 		}
 		tasks = append(tasks, t)
@@ -165,7 +165,8 @@ func (s *Server) balanceSegments(ctx context.Context,
 		err := task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
-			log.Warn(msg, zap.Error(err))
+			log.Warn(ctx,
+				msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 	}
@@ -185,7 +186,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 	sync bool,
 	copyMode bool,
 ) error {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(zap.Int64("collectionID", collectionID))
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
@@ -197,7 +198,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
-		log.Info("manually balance channel...",
+		log.Info(ctx, "manually balance channel...",
 			zap.Int64("replica", plan.Replica.GetID()),
 			zap.String("channel", plan.Channel.GetChannelName()),
 			zap.Int64("from", plan.From),
@@ -220,7 +221,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 			actions...,
 		)
 		if err != nil {
-			log.Warn("create channel task for balance failed",
+			log.Warn(ctx, "create channel task for balance failed",
 				zap.Int64("replica", plan.Replica.GetID()),
 				zap.String("channel", plan.Channel.GetChannelName()),
 				zap.Int64("from", plan.From),
@@ -235,7 +236,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		err = s.taskScheduler.Add(t)
 		if err != nil {
 			t.Cancel(err)
-			log.Info("skip balance channel task", zap.String("channel", plan.Channel.GetChannelName()), zap.Error(err))
+			log.Info(ctx, "skip balance channel task", zap.String("channel", plan.Channel.GetChannelName()), zap.Error(err))
 			continue
 		}
 		tasks = append(tasks, t)
@@ -245,7 +246,8 @@ func (s *Server) balanceChannels(ctx context.Context,
 		err := task.Wait(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
-			log.Warn(msg, zap.Error(err))
+			log.Warn(ctx,
+				msg, zap.Error(err))
 			return errors.Wrap(err, msg)
 		}
 	}
@@ -263,7 +265,7 @@ func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsR
 		errorGroup.Go(func() error {
 			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to get metric from QueryNode", zap.Int64("nodeID", node.ID()))
+				mlog.Warn(ctx, "failed to get metric from QueryNode", zap.Int64("nodeID", node.ID()))
 				return err
 			}
 
@@ -274,7 +276,7 @@ func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsR
 			infos := make([]T, 0)
 			err = json.Unmarshal([]byte(resp.Response), &infos)
 			if err != nil {
-				log.Warn("invalid metrics of query node was found", zap.Error(err))
+				mlog.Warn(ctx, "invalid metrics of query node was found", zap.Error(err))
 				return err
 			}
 
@@ -317,7 +319,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		filteredSegments := s.dist.SegmentDistManager.GetSegmentDist(collectionID)
 		bs, err := json.Marshal(filteredSegments)
 		if err != nil {
-			log.Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			mlog.Warn(ctx, "marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
 			return "", nil
 		}
 		return string(bs), nil
@@ -346,12 +348,12 @@ func (s *Server) getQueryCoordTopology(
 ) metricsinfo.QueryCoordTopology {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", zap.Error(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", zap.Error(err))
 	}
 
 	clusterTopology := metricsinfo.QueryClusterTopology{
@@ -395,7 +397,7 @@ func (s *Server) getQueryCoordTopology(
 func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, nodeMetrics []*metricResp) {
 	for _, metric := range nodeMetrics {
 		if metric.err != nil {
-			log.Warn("invalid metrics of query node was found",
+			mlog.Warn(context.TODO(), "invalid metrics of query node was found",
 				zap.Error(metric.err))
 			topo.ConnectedNodes = append(topo.ConnectedNodes, metricsinfo.QueryNodeInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -410,7 +412,7 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 		}
 
 		if metric.resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("invalid metrics of query node was found",
+			mlog.Warn(context.TODO(), "invalid metrics of query node was found",
 				zap.Any("error_code", metric.resp.GetStatus().GetErrorCode()),
 				zap.Any("error_reason", metric.resp.GetStatus().GetReason()))
 			topo.ConnectedNodes = append(topo.ConnectedNodes, metricsinfo.QueryNodeInfos{
@@ -427,7 +429,7 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 		infos := metricsinfo.QueryNodeInfos{}
 		err := metricsinfo.UnmarshalComponentInfos(metric.resp.Response, &infos)
 		if err != nil {
-			log.Warn("invalid metrics of query node was found",
+			mlog.Warn(context.TODO(), "invalid metrics of query node was found",
 				zap.Error(err))
 			topo.ConnectedNodes = append(topo.ConnectedNodes, metricsinfo.QueryNodeInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -465,7 +467,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
 			if err != nil {
-				log.Warn("failed to get metric from QueryNode",
+				mlog.Warn(ctx, "failed to get metric from QueryNode",
 					zap.Int64("nodeID", node.ID()))
 				return
 			}
@@ -494,7 +496,7 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 
 	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
-		log.Warn("failed to get channels, collection may be not loaded or in recovering", zap.Int64("collectionID", replica.GetCollectionID()))
+		mlog.Warn(ctx, "failed to get channels, collection may be not loaded or in recovering", zap.Int64("collectionID", replica.GetCollectionID()))
 		return info
 	}
 	shardReplicas := make([]*milvuspb.ShardReplica, 0, len(channels))
@@ -511,7 +513,7 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 			leaderInfo = s.nodeMgr.Get(leader.Node)
 		}
 		if leaderInfo == nil {
-			log.Warn("failed to get shard leader for shard",
+			mlog.Warn(ctx, "failed to get shard leader for shard",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replica", replica.GetID()),
 				zap.String("shard", channel.GetChannelName()))

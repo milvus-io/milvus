@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,7 +45,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		}
 		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, request)
 		if err != nil {
-			log.Warn("failed to get request info", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get request info", zap.Error(err))
 			return handler(ctx, req)
 		}
 		if rt == internalpb.RateType_DMLBulkLoad {
@@ -64,7 +64,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			if rsp != nil {
 				return rsp, nil
 			}
-			log.Warn("failed to get failed response, please check it!", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to get failed response, please check it!", zap.Error(err))
 			return nil, err
 		}
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()

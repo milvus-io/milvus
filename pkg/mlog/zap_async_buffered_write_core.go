@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package log
+package mlog
 
 import (
 	"fmt"
@@ -69,6 +69,9 @@ type asyncTextIOCore struct {
 	maxBytesPerLog      int
 }
 
+// AsyncTextIOCore is the async text IO core implementation used by Milvus.
+type AsyncTextIOCore = asyncTextIOCore
+
 // entryItem is the item to write to the underlying buffered write syncer.
 type entryItem struct {
 	buf   *buffer.Buffer
@@ -96,6 +99,7 @@ func (s *asyncTextIOCore) With(fields []zapcore.Field) zapcore.Core {
 		bws:                 s.bws,
 		pending:             s.pending,
 		writeDroppedTimeout: s.writeDroppedTimeout,
+		nonDroppableLevel:   s.nonDroppableLevel,
 		stopTimeout:         s.stopTimeout,
 		maxBytesPerLog:      s.maxBytesPerLog,
 	}

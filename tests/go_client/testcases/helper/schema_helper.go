@@ -1,8 +1,10 @@
 package helper
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -51,7 +53,7 @@ func (opt *GenSchemaOption) TWithFunction(function *entity.Function) *GenSchemaO
 
 func GenSchema(option *GenSchemaOption) *entity.Schema {
 	if len(option.Fields) == 0 {
-		log.Fatal("Require at least a primary field and a vector field")
+		mlog.Fatal(context.TODO(), "Require at least a primary field and a vector field")
 	}
 	if option.CollectionName == "" {
 		option.CollectionName = common.GenRandomString("pre", 6)

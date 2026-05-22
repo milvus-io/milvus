@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -17,7 +17,7 @@ import (
 )
 
 // newBroadcasterScheduler creates a new broadcaster scheduler.
-func newBroadcasterScheduler(pendings []*pendingBroadcastTask, logger *log.MLogger) *broadcasterScheduler {
+func newBroadcasterScheduler(pendings []*pendingBroadcastTask, logger *mlog.Logger) *broadcasterScheduler {
 	b := &broadcasterScheduler{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		pendings:               pendings,
@@ -33,7 +33,7 @@ func newBroadcasterScheduler(pendings []*pendingBroadcastTask, logger *log.MLogg
 
 // broadcasterScheduler is the implementation of Broadcaster
 type broadcasterScheduler struct {
-	log.Binder
+	mlog.Binder
 
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	pendings               []*pendingBroadcastTask
@@ -75,11 +75,15 @@ func (b *broadcasterScheduler) execute() {
 	if workers < 1 {
 		workers = 1
 	}
-	b.Logger().Info("broadcaster start to execute", zap.Int("workerNum", workers))
+	b.Logger().Info(context.TODO(),
+
+		"broadcaster start to execute", zap.Int("workerNum", workers))
 
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
-		b.Logger().Info("broadcaster execute exit")
+		b.Logger().Info(context.TODO(),
+
+			"broadcaster execute exit")
 	}()
 
 	// Start n workers to handle the broadcast task.
@@ -111,7 +115,9 @@ func (b *broadcasterScheduler) dispatch() {
 		if b.backoffs.Len() > 0 {
 			var nextInterval time.Duration
 			nextBackOff, nextInterval = b.backoffs.Peek().NextTimer()
-			b.Logger().Info("backoff task", zap.Duration("nextInterval", nextInterval))
+			b.Logger().Info(context.TODO(),
+
+				"backoff task", zap.Duration("nextInterval", nextInterval))
 		}
 
 		select {
@@ -142,7 +148,7 @@ func (b *broadcasterScheduler) dispatch() {
 func (b *broadcasterScheduler) worker(no int) {
 	logger := b.Logger().With(zap.Int("workerNo", no))
 	defer func() {
-		logger.Info("broadcaster worker exit")
+		logger.Info(context.TODO(), "broadcaster worker exit")
 	}()
 
 	for {

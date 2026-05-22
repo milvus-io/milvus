@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -334,7 +334,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	log.Info("test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", zap.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
@@ -425,7 +425,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		s.NotNil(segment.GetDeltalogs())
 	}
 
-	log.Info("test segment results", zap.Any("result", segments))
+	mlog.Info(context.TODO(), "test segment results", zap.Any("result", segments))
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
@@ -528,7 +528,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 		s.ElementsMatch(expectedPKs, allPKs, "segment %d should have expected PKs", segmentID)
 		s.ElementsMatch(expectedTSs, allTSs, "segment %d should have expected timestamps", segmentID)
 
-		log.Info("verified deltalog content",
+		mlog.Info(context.TODO(), "verified deltalog content",
 			zap.Int64("segmentID", segmentID),
 			zap.Int64s("pks", allPKs),
 			zap.Uint64s("tss", allTSs))

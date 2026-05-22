@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"context"
 	"math"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -54,7 +55,7 @@ func (s *LevelZeroSegmentsViewSuite) SetupTest() {
 	}
 
 	s.True(label.Equal(targetView.GetGroupLabel()))
-	log.Info("LevelZeroSegmentsView", zap.String("view", targetView.String()))
+	mlog.Info(context.TODO(), "LevelZeroSegmentsView", zap.String("view", targetView.String()))
 
 	s.v = targetView
 }
@@ -125,7 +126,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 					view.DeltaRowCount = 1
 				}
 			}
-			log.Info("LevelZeroSegmentsView", zap.String("view", s.v.String()))
+			mlog.Info(context.TODO(), "LevelZeroSegmentsView", zap.String("view", s.v.String()))
 
 			gotView, reason := s.v.Trigger()
 			if len(test.expectedSegs) == 0 {
@@ -139,7 +140,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 					return v.ID
 				})
 				s.ElementsMatch(gotSegIDs, test.expectedSegs)
-				log.Info("output view", zap.String("view", levelZeroView.String()), zap.String("trigger reason", reason))
+				mlog.Info(context.TODO(), "output view", zap.String("view", levelZeroView.String()), zap.String("trigger reason", reason))
 			}
 		})
 	}
@@ -184,7 +185,7 @@ func (s *LevelZeroSegmentsViewSuite) TestMinCountSizeTrigger() {
 				s.NotEmpty(reason)
 			}
 
-			log.Info("test minCountSizeTrigger", zap.Any("trigger reason", reason))
+			mlog.Info(context.TODO(), "test minCountSizeTrigger", zap.Any("trigger reason", reason))
 		})
 	}
 }
@@ -223,7 +224,7 @@ func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
 			s.ElementsMatch(lo.Map(picked, func(view *SegmentView, _ int) int64 {
 				return view.ID
 			}), test.expectedIDs)
-			log.Info("test forceTrigger", zap.Any("trigger reason", reason))
+			mlog.Info(context.TODO(), "test forceTrigger", zap.Any("trigger reason", reason))
 		})
 	}
 
@@ -243,7 +244,7 @@ func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
 		s.ElementsMatch(lo.Map(picked, func(view *SegmentView, _ int) int64 {
 			return view.ID
 		}), []int64{100})
-		log.Info("test forceTrigger", zap.Any("trigger reason", reason))
+		mlog.Info(context.TODO(), "test forceTrigger", zap.Any("trigger reason", reason))
 	})
 }
 

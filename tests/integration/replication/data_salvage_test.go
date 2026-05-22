@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -83,7 +83,7 @@ func (s *DataSalvageSuite) TestGetReplicateInfoOnPrimaryCluster() {
 
 	// On a primary cluster, checkpoint should exist but salvage checkpoint should be nil
 	// (no force promote has occurred)
-	log.Info("GetReplicateInfo response",
+	mlog.Info(context.TODO(), "GetReplicateInfo response",
 		zap.Any("checkpoint", resp.GetCheckpoint()),
 		zap.Any("salvageCheckpoint", resp.GetSalvageCheckpoint()))
 
@@ -143,7 +143,7 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 	vchannel := descResp.GetVirtualChannelNames()[0]
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 
-	log.Info("Testing DumpMessages",
+	mlog.Info(context.TODO(), "Testing DumpMessages",
 		zap.String("pchannel", pchannel),
 		zap.String("vchannel", vchannel))
 
@@ -197,15 +197,15 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 				break
 			}
 			if err != nil {
-				log.Warn("error receiving message", zap.Error(err))
+				mlog.Warn(context.TODO(), "error receiving message", zap.Error(err))
 				break
 			}
 			// Check if response contains a message (not a status)
 			if msg := resp.GetMessage(); msg != nil {
 				messages = append(messages, resp)
-				log.Info("received message", zap.String("messageId", msg.GetId().GetId()))
+				mlog.Info(context.TODO(), "received message", zap.String("messageId", msg.GetId().GetId()))
 			} else if status := resp.GetStatus(); status != nil {
-				log.Warn("received status response", zap.Any("status", status))
+				mlog.Warn(context.TODO(), "received status response", zap.Any("status", status))
 				break
 			}
 		}
@@ -214,7 +214,7 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 
 	<-readCtx.Done()
 
-	log.Info("DumpMessages test completed", zap.Int("messageCount", len(messages)))
+	mlog.Info(context.TODO(), "DumpMessages test completed", zap.Int("messageCount", len(messages)))
 
 	// We should have received at least some messages
 	// Note: The exact count depends on timing and what messages are in the WAL

@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -19,7 +19,7 @@ import (
 // newPartitionSegmentManager creates a new partition segment assign manager.
 func newPartitionSegmentManager(
 	ctx context.Context,
-	logger *log.MLogger,
+	logger *mlog.Logger,
 	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
 	vchannel string,
@@ -54,7 +54,7 @@ func newPartitionSegmentManager(
 
 // partitionManager is a assign manager of determined partition on determined vchannel.
 type partitionManager struct {
-	log.Binder
+	mlog.Binder
 
 	ctx                  context.Context
 	txnManager           TxnManager // the txn manager is used to manage the transaction of the segment.

@@ -24,8 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -60,19 +60,18 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			return err
 		}
 
-		log := log.Ctx(ctx)
-		if log.Core().Enabled(zap.DebugLevel) && req.GetReq().GetIsCount() {
+		if mlog.LevelEnabled(mlog.DebugLevel) && req.GetReq().GetIsCount() {
 			allRetrieveCount := result.AllRetrieveCount
 			countRet := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 			if allRetrieveCount != countRet {
-				log.Debug("count segment done with delete",
+				mlog.Debug(ctx, "count segment done with delete",
 					zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
 					zap.String("channel", s.LoadInfo().GetInsertChannel()),
 					zap.Int64("segmentID", s.ID()),
 					zap.Int64("allRetrieveCount", allRetrieveCount),
 					zap.Int64("countRet", countRet))
 			} else {
-				log.Debug("count segment done",
+				mlog.Debug(ctx, "count segment done",
 					zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
 					zap.String("channel", s.LoadInfo().GetInsertChannel()),
 					zap.Int64("segmentID", s.ID()),
@@ -178,8 +177,8 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
-	log := log.Ctx(ctx)
-	log.Debug("retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+
+	mlog.Debug(ctx, "retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
@@ -205,7 +204,7 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
-	log.Ctx(ctx).Debug("retrieve stream on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+	mlog.Debug(ctx, "retrieve stream on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed

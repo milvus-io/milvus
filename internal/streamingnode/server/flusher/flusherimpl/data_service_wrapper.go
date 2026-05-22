@@ -52,7 +52,7 @@ func (ds *dataSyncServiceWrapper) HandleMessage(ctx context.Context, msg message
 
 		// filter out the message less than vchannel level checkpoint.
 		if nextTsMsg.EndTs < ds.channelCheckpointTimeTick {
-			ds.handler.Logger.Debug("skip the message less than vchannel checkpoint",
+			ds.handler.Logger.Debug(ctx, "skip the message less than vchannel checkpoint",
 				zap.Uint64("timestamp", nextTsMsg.EndTs),
 				zap.Uint64("checkpoint", ds.channelCheckpointTimeTick),
 			)

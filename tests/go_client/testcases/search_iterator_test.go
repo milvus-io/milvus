@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"testing"
@@ -12,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -43,7 +44,7 @@ func TestSearchIteratorDefault(t *testing.T) {
 			if err == io.EOF {
 				break
 			} else {
-				log.Error("SearchIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 				break
 			}
 		}
@@ -129,7 +130,7 @@ func TestSearchIteratorBatchSize(t *testing.T) {
 				if err == io.EOF {
 					break
 				}
-				log.Error("SearchIterator next gets error", zap.Error(err))
+				mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 				break
 			}
 			actualLimit = actualLimit + rs.ResultCount
@@ -315,7 +316,7 @@ func TestSearchIteratorTemplateKey(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			log.Error("SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -377,7 +378,7 @@ func TestSearchIteratorIgnoreGrowing(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			log.Error("SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -438,7 +439,7 @@ func TestSearchIteratorNull(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			log.Error("SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount
@@ -506,7 +507,7 @@ func TestSearchIteratorDefaultValue(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			log.Error("SearchIterator next gets error", zap.Error(err))
+			mlog.Error(context.TODO(), "SearchIterator next gets error", zap.Error(err))
 			break
 		}
 		actualLimit = actualLimit + rs.ResultCount

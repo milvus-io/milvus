@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -16,11 +17,8 @@ var (
 )
 
 func init() {
-	// Default logger: production config writing to stderr
-	cfg := zap.NewProductionConfig()
-	cfg.Level = globalLevel
-	logger, _ := cfg.Build(zap.AddCallerSkip(1))
-	globalLogger.Store(logger)
+	logger, props := newStdLogger()
+	ReplaceGlobals(logger, props)
 }
 
 // initGlobalLogger replaces the global logger with the provided one.
@@ -35,6 +33,25 @@ func getLogger() *zap.Logger {
 	return globalLogger.Load()
 }
 
+func appendTraceFields(ctx context.Context, fields []Field) []Field {
+	spanCtx := trace.SpanContextFromContext(ctx)
+	hasTraceID := spanCtx.HasTraceID()
+	hasSpanID := spanCtx.HasSpanID()
+	if !hasTraceID && !hasSpanID {
+		return fields
+	}
+
+	allFields := make([]Field, 0, len(fields)+2)
+	allFields = append(allFields, fields...)
+	if hasTraceID {
+		allFields = append(allFields, FieldTraceID(spanCtx.TraceID().String()))
+	}
+	if hasSpanID {
+		allFields = append(allFields, FieldSpanID(spanCtx.SpanID().String()))
+	}
+	return allFields
+}
+
 // prepareLog resolves the logger and fields from context for package-level functions.
 // It returns before the actual log call, so it does not appear in the call stack
 // when zap captures the caller.
@@ -47,7 +64,7 @@ func prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 
 	lc := getLogContext(ctx)
 	if lc.logger != nil {
-		return lc.logger, fields
+		return lc.logger, appendTraceFields(ctx, fields)
 	}
 
 	logger := getLogger()
@@ -56,12 +73,12 @@ func prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 		fields = append(ctxFields, fields...)
 	}
 
-	return logger, fields
+	return logger, appendTraceFields(ctx, fields)
 }
 
 // Log logs a message at the specified level.
 func Log(ctx context.Context, level Level, msg string, fields ...Field) {
-	if !globalLevel.Enabled(level) {
+	if !currentLevel().Enabled(level) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -70,7 +87,7 @@ func Log(ctx context.Context, level Level, msg string, fields ...Field) {
 
 // Debug logs a message at debug level.
 func Debug(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(DebugLevel) {
+	if !currentLevel().Enabled(DebugLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -79,7 +96,7 @@ func Debug(ctx context.Context, msg string, fields ...Field) {
 
 // Info logs a message at info level.
 func Info(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(InfoLevel) {
+	if !currentLevel().Enabled(InfoLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -88,7 +105,7 @@ func Info(ctx context.Context, msg string, fields ...Field) {
 
 // Warn logs a message at warn level.
 func Warn(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(WarnLevel) {
+	if !currentLevel().Enabled(WarnLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -97,7 +114,7 @@ func Warn(ctx context.Context, msg string, fields ...Field) {
 
 // Error logs a message at error level.
 func Error(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(ErrorLevel) {
+	if !currentLevel().Enabled(ErrorLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -107,7 +124,7 @@ func Error(ctx context.Context, msg string, fields ...Field) {
 // DPanic logs a message at dpanic level.
 // In development mode, the logger then panics. (See DPanicLevel for details.)
 func DPanic(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(DPanicLevel) {
+	if !currentLevel().Enabled(DPanicLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -116,7 +133,7 @@ func DPanic(ctx context.Context, msg string, fields ...Field) {
 
 // Panic logs a message at panic level, then panics.
 func Panic(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(PanicLevel) {
+	if !currentLevel().Enabled(PanicLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -125,7 +142,7 @@ func Panic(ctx context.Context, msg string, fields ...Field) {
 
 // Fatal logs a message at fatal level, then calls os.Exit(1).
 func Fatal(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(FatalLevel) {
+	if !currentLevel().Enabled(FatalLevel) {
 		return
 	}
 	logger, fields := prepareLog(ctx, fields)
@@ -138,6 +155,14 @@ func Fatal(ctx context.Context, msg string, fields ...Field) {
 type Logger struct {
 	logger *zap.Logger // pre-encoded with component fields
 	fields []Field     // copy of component fields for passing to other loggers
+}
+
+// NewLogger wraps a zap logger as a mlog Logger.
+func NewLogger(logger *zap.Logger) *Logger {
+	if logger == nil {
+		logger = getLogger()
+	}
+	return &Logger{logger: logger}
 }
 
 // With creates a new Logger with the given fields (immediately encoded).
@@ -200,6 +225,18 @@ func (l *Logger) WithLazy(fields ...Field) *Logger {
 	}
 }
 
+// WithOptions creates a new Logger with zap options applied.
+func (l *Logger) WithOptions(opts ...zap.Option) *Logger {
+	if len(opts) == 0 {
+		return l
+	}
+	fields := append([]Field(nil), l.fields...)
+	return &Logger{
+		logger: l.logger.WithOptions(opts...),
+		fields: fields,
+	}
+}
+
 // Level returns the current global log level.
 func (l *Logger) Level() Level {
 	return GetLevel()
@@ -212,7 +249,7 @@ func (l *Logger) Level() Level {
 //	    l.Debug(ctx, "details", mlog.String("dump", expensiveDump()))
 //	}
 func (l *Logger) LevelEnabled(level Level) bool {
-	return globalLevel.Enabled(level)
+	return currentLevel().Enabled(level)
 }
 
 // prepareLog resolves the logger and fields for Logger methods.
@@ -237,14 +274,14 @@ func (l *Logger) prepareLog(ctx context.Context, fields []Field) (*zap.Logger, [
 		// ctx has more fields, use ctx logger, pass component fields + extra fields
 		switch {
 		case len(l.fields) == 0:
-			return lc.logger, fields
+			return lc.logger, appendTraceFields(ctx, fields)
 		case len(fields) == 0:
-			return lc.logger, l.fields
+			return lc.logger, appendTraceFields(ctx, l.fields)
 		default:
 			allFields := make([]Field, len(l.fields)+len(fields))
 			copy(allFields, l.fields)
 			copy(allFields[len(l.fields):], fields)
-			return lc.logger, allFields
+			return lc.logger, appendTraceFields(ctx, allFields)
 		}
 	}
 
@@ -252,20 +289,20 @@ func (l *Logger) prepareLog(ctx context.Context, fields []Field) (*zap.Logger, [
 	ctxFields := lc.getFields()
 	switch {
 	case len(ctxFields) == 0:
-		return l.logger, fields
+		return l.logger, appendTraceFields(ctx, fields)
 	case len(fields) == 0:
-		return l.logger, ctxFields
+		return l.logger, appendTraceFields(ctx, ctxFields)
 	default:
 		allFields := make([]Field, len(ctxFields)+len(fields))
 		copy(allFields, ctxFields)
 		copy(allFields[len(ctxFields):], fields)
-		return l.logger, allFields
+		return l.logger, appendTraceFields(ctx, allFields)
 	}
 }
 
 // Log logs a message at the specified level.
 func (l *Logger) Log(ctx context.Context, level Level, msg string, fields ...Field) {
-	if !globalLevel.Enabled(level) {
+	if !currentLevel().Enabled(level) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -274,7 +311,7 @@ func (l *Logger) Log(ctx context.Context, level Level, msg string, fields ...Fie
 
 // Debug logs a message at debug level.
 func (l *Logger) Debug(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(DebugLevel) {
+	if !currentLevel().Enabled(DebugLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -283,7 +320,7 @@ func (l *Logger) Debug(ctx context.Context, msg string, fields ...Field) {
 
 // Info logs a message at info level.
 func (l *Logger) Info(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(InfoLevel) {
+	if !currentLevel().Enabled(InfoLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -292,7 +329,7 @@ func (l *Logger) Info(ctx context.Context, msg string, fields ...Field) {
 
 // Warn logs a message at warn level.
 func (l *Logger) Warn(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(WarnLevel) {
+	if !currentLevel().Enabled(WarnLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -301,7 +338,7 @@ func (l *Logger) Warn(ctx context.Context, msg string, fields ...Field) {
 
 // Error logs a message at error level.
 func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(ErrorLevel) {
+	if !currentLevel().Enabled(ErrorLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -311,7 +348,7 @@ func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
 // DPanic logs a message at dpanic level.
 // In development mode, the logger then panics. (See DPanicLevel for details.)
 func (l *Logger) DPanic(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(DPanicLevel) {
+	if !currentLevel().Enabled(DPanicLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -320,7 +357,7 @@ func (l *Logger) DPanic(ctx context.Context, msg string, fields ...Field) {
 
 // Panic logs a message at panic level, then panics.
 func (l *Logger) Panic(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(PanicLevel) {
+	if !currentLevel().Enabled(PanicLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)
@@ -329,7 +366,7 @@ func (l *Logger) Panic(ctx context.Context, msg string, fields ...Field) {
 
 // Fatal logs a message at fatal level, then calls os.Exit(1).
 func (l *Logger) Fatal(ctx context.Context, msg string, fields ...Field) {
-	if !globalLevel.Enabled(FatalLevel) {
+	if !currentLevel().Enabled(FatalLevel) {
 		return
 	}
 	logger, fields := l.prepareLog(ctx, fields)

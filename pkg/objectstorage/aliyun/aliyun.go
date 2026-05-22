@@ -1,12 +1,14 @@
 package aliyun
 
 import (
+	"context"
+
 	"github.com/aliyun/credentials-go/credentials" // >= v1.2.6
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -93,7 +95,7 @@ func (c *CredentialProvider) Retrieve() (minioCred.Value, error) {
 func (c CredentialProvider) IsExpired() bool {
 	ak, err := c.aliyunCreds.GetAccessKeyId()
 	if err != nil {
-		log.Warn("failed to get access key id from aliyun credential, assume it's expired")
+		mlog.Warn(context.TODO(), "failed to get access key id from aliyun credential, assume it's expired")
 		return true
 	}
 	return *ak != c.akCache

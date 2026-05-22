@@ -1,6 +1,6 @@
 # mlog — AI Agent Logging Guide
 
-- ALWAYS USE `github.com/milvus-io/milvus/pkg/v2/mlog` PACKAGE TO LOG.
+- ALWAYS USE `github.com/milvus-io/milvus/pkg/v3/mlog` PACKAGE TO LOG.
 - NEVER USE `zap` OR `log` PACKAGE DIRECTLY.
 
 ## Rules

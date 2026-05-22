@@ -18,19 +18,19 @@ package balance
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sort"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -66,7 +66,7 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 // In exclusive mode, it balances segments and channels per channel among the channel's assigned nodes.
 // If exclusive mode cannot be achieved, it delegates to ScoreBasedBalancer.
 func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
-	log := log.With(
+	log := mlog.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
 		zap.String("replica group", replica.GetResourceGroup()),
@@ -75,10 +75,10 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
-			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
-				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+			log.
+				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
 		} else {
-			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+			log.Info(ctx, "balance plan generated", zap.Stringers("report details", br.records))
 		}
 	}()
 
@@ -204,12 +204,10 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-
-	log.Ctx(ctx).WithRateGroup(fmt.Sprintf("genSegmentPlan-%d-%d", replica.GetCollectionID(), replica.GetID()), 1, 60).
-		RatedInfo(30, "node segment workload status",
-			zap.Int64("collectionID", replica.GetCollectionID()),
-			zap.Int64("replicaID", replica.GetID()),
-			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+	mlog.RatedInfo(ctx, rate.Limit(30), "node segment workload status",
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	segmentDist := make(map[int64][]*meta.Segment)
 	// list all segment which could be balanced, and calculate node's score

@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -134,7 +134,7 @@ func (it *indexBuildTask) GetState() indexpb.JobState {
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.queueDur = 0
 	it.tr.RecordSpan()
-	log.Ctx(ctx).Info("IndexBuilderTask Enqueue", zap.Int64("buildID", it.req.GetBuildID()),
+	mlog.Info(ctx, "IndexBuilderTask Enqueue", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("segmentID", it.req.GetSegmentID()))
 	return nil
 }
@@ -150,7 +150,7 @@ func (it *indexBuildTask) IsVectorIndex() bool {
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.queueDur = it.tr.RecordSpan()
-	log.Ctx(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
+	mlog.Info(ctx, "Begin to prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("Collection", it.req.GetCollectionID()), zap.Int64("SegmentID", it.req.GetSegmentID()))
 
 	typeParams := make(map[string]string)
@@ -199,7 +199,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 			var err error
 			it.req.Dim, err = strconv.ParseInt(dimStr, 10, 64)
 			if err != nil {
-				log.Ctx(ctx).Error("parse dimension failed", zap.Error(err))
+				mlog.Error(ctx, "parse dimension failed", zap.Error(err))
 				// ignore error
 			}
 		}
@@ -208,7 +208,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	if it.req.GetCollectionID() == 0 || it.req.GetField().GetDataType() == schemapb.DataType_None || it.req.GetField().GetFieldID() == 0 {
 		err := it.parseFieldMetaFromBinlog(ctx)
 		if err != nil {
-			log.Ctx(ctx).Warn("parse field meta from binlog failed", zap.Error(err))
+			mlog.Warn(ctx, "parse field meta from binlog failed", zap.Error(err))
 			return err
 		}
 	}
@@ -216,7 +216,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
-	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
+	mlog.Info(ctx, "Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
 		zap.Int64("taskVersion", it.req.GetIndexVersion()),
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
@@ -226,7 +226,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) Execute(ctx context.Context) error {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", it.req.GetClusterID()),
 		zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collection", it.req.GetCollectionID()),
@@ -251,7 +251,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
-			log.Warn("failed to fill disk index params", zap.Error(err))
+			log.Warn(ctx, "failed to fill disk index params", zap.Error(err))
 			return err
 		}
 	}
@@ -328,7 +328,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.ExternalSource = it.req.GetExternalSource()
 		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
-	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
+	log.Info(ctx, "create index", zap.Any("buildIndexParams", buildIndexParams))
 
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {
@@ -339,32 +339,32 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
-			log.Warn("failed to clean cached data on disk after build index failed")
+			log.Warn(ctx, "failed to clean cached data on disk after build index failed")
 		}
-		log.Warn("failed to build index", zap.Error(err))
+		log.Warn(ctx, "failed to build index", zap.Error(err))
 		return err
 	}
 
 	buildIndexLatency := it.tr.RecordSpan()
 	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 
-	log.Info("Successfully build index")
+	log.Info(ctx, "Successfully build index")
 	return nil
 }
 
 func (it *indexBuildTask) PostExecute(ctx context.Context) error {
-	log := log.Ctx(ctx).With(zap.String("clusterID", it.req.GetClusterID()), zap.Int64("buildID", it.req.GetBuildID()),
+	log := mlog.With(zap.String("clusterID", it.req.GetClusterID()), zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collection", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
-			log.Warn("indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+			log.Warn(ctx, "indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
 	indexStats, err := it.index.UpLoad()
 	if err != nil {
-		log.Warn("failed to upload index", zap.Error(err))
+		log.Warn(ctx, "failed to upload index", zap.Error(err))
 		gcIndex()
 		return err
 	}
@@ -397,7 +397,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
-	log.Info("Successfully save index files",
+	log.Info(ctx, "Successfully save index files",
 		zap.Uint64("serializedSize", serializedSize),
 		zap.Int64("memSize", indexStats.MemSize),
 		zap.Strings("indexFiles", saveFileKeys))

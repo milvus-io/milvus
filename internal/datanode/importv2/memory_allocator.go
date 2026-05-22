@@ -17,11 +17,12 @@
 package importv2
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -58,7 +59,7 @@ type memoryAllocator struct {
 
 // NewMemoryAllocator creates a new MemoryAllocator instance
 func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
-	log.Info("new import memory allocator", zap.Int64("systemTotalMemory", systemTotalMemory))
+	mlog.Info(context.TODO(), "new import memory allocator", zap.Int64("systemTotalMemory", systemTotalMemory))
 	ma := &memoryAllocator{
 		systemTotalMemory: systemTotalMemory,
 		usedMemory:        0,
@@ -77,7 +78,7 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 
 	// Wait until enough memory is available
 	for ma.usedMemory+size > memoryLimit {
-		log.Warn("task waiting for memory allocation...",
+		mlog.Warn(context.TODO(), "task waiting for memory allocation...",
 			zap.Int64("taskID", taskID),
 			zap.Int64("requestedSize", size),
 			zap.Int64("usedMemory", ma.usedMemory),
@@ -88,7 +89,7 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 
 	// Allocate memory
 	ma.usedMemory += size
-	log.Info("memory allocated successfully",
+	mlog.Info(context.TODO(), "memory allocated successfully",
 		zap.Int64("taskID", taskID),
 		zap.Int64("allocatedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory),
@@ -103,12 +104,12 @@ func (ma *memoryAllocator) Release(taskID int64, size int64) {
 	ma.usedMemory -= size
 	if ma.usedMemory < 0 {
 		ma.usedMemory = 0 // Prevent negative memory usage
-		log.Warn("memory release resulted in negative usage, reset to 0",
+		mlog.Warn(context.TODO(), "memory release resulted in negative usage, reset to 0",
 			zap.Int64("taskID", taskID),
 			zap.Int64("releaseSize", size))
 	}
 
-	log.Info("memory released successfully",
+	mlog.Info(context.TODO(), "memory released successfully",
 		zap.Int64("taskID", taskID),
 		zap.Int64("releasedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory))

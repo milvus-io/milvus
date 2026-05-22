@@ -172,7 +172,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	err = wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
 	if err != nil {
-		log.Error("failed to buffer data", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to buffer data", zap.Error(err))
 		panic(err)
 	}
 
@@ -181,7 +181,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		func(id int64, _ int) (*commonpb.SegmentStats, bool) {
 			segInfo, ok := wNode.metacache.GetSegmentByID(id)
 			if !ok {
-				log.Warn("segment not found for stats", zap.Int64("segment", id))
+				mlog.Warn(context.TODO(), "segment not found for stats", zap.Int64("segment", id))
 				return nil, false
 			}
 			return &commonpb.SegmentStats{

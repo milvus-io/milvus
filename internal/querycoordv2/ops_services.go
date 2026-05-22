@@ -39,10 +39,9 @@ import (
 )
 
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("list checkers request received")
+	mlog.Info(ctx, "list checkers request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn("failed to list checkers", zap.Error(err))
+		mlog.Warn(ctx, "failed to list checkers", zap.Error(err))
 		return &querypb.ListCheckersResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -76,28 +75,26 @@ func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequ
 }
 
 func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("activate checker request received")
+	mlog.Info(ctx, "activate checker request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn("failed to activate checker", zap.Error(err))
+		mlog.Warn(ctx, "failed to activate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn("failed to activate checker", zap.Error(err))
+		mlog.Warn(ctx, "failed to activate checker", zap.Error(err))
 		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
 	}
 	return merr.Success(), nil
 }
 
 func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateCheckerRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("deactivate checker request received")
+	mlog.Info(ctx, "deactivate checker request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn("failed to deactivate checker", zap.Error(err))
+		mlog.Warn(ctx, "failed to deactivate checker", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn("failed to deactivate checker", zap.Error(err))
+		mlog.Warn(ctx, "failed to deactivate checker", zap.Error(err))
 		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
 	}
 	return merr.Success(), nil
@@ -105,12 +102,12 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 
 // ListQueryNode return all available node list, for each node, return it's (nodeID, ip_address)
 func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("ListQueryNode request received")
+	mlog.Info(ctx, "ListQueryNode request received")
 
 	errMsg := "failed to list querynode state"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return &querypb.ListQueryNodeResponse{
 			Status: merr.Status(errors.Wrap(err, errMsg)),
 		}, nil
@@ -152,12 +149,13 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 
 // GetQueryNodeDistribution return query node's data distribution, for given nodeID, return it's (channel_name_list, sealed_segment_list)
 func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("nodeID", req.GetNodeID()))
-	log.Info("GetQueryNodeDistribution request received")
+	log := mlog.With(zap.Int64("nodeID", req.GetNodeID()))
+	log.Info(ctx, "GetQueryNodeDistribution request received")
 
 	errMsg := "failed to get query node distribution"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		log.Warn(ctx,
+			errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
 			Status: merr.Status(errors.Wrap(err, errMsg)),
 		}, nil
@@ -165,7 +163,8 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 
 	if s.nodeMgr.Get(req.GetNodeID()) == nil {
 		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
-		log.Warn(errMsg, zap.Error(err))
+		log.Warn(ctx,
+			errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -181,45 +180,46 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 }
 
 func (s *Server) SuspendChannelBalance(ctx context.Context) error {
-	log := log.Ctx(ctx)
-	log.Info("SuspendChannelBalance request received")
+	mlog.Info(ctx, "SuspendChannelBalance request received")
 
 	errMsg := "failed to suspend channel balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return err
 	}
 	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "false"); err != nil {
-		log.Warn(err.Error(), zap.Error(err))
+		mlog.Warn(ctx,
+			err.Error(), zap.Error(err))
 		return err
 	}
-	log.Info("SuspendChannelBalance request finished successfully")
+	mlog.Info(ctx, "SuspendChannelBalance request finished successfully")
 	return nil
 }
 
 func (s *Server) ResumeChannelBalance(ctx context.Context) error {
-	log := log.Ctx(ctx)
-	log.Info("ResumeChannelBalance request received")
+	mlog.Info(ctx, "ResumeChannelBalance request received")
 
 	errMsg := "failed to resume channel balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return err
 	}
 
 	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "true"); err != nil {
-		log.Warn(err.Error(), zap.Error(err))
+		mlog.Warn(ctx,
+			err.Error(), zap.Error(err))
 		return err
 	}
-	log.Info("ResumeChannelBalance request finished successfully")
+	mlog.Info(ctx, "ResumeChannelBalance request finished successfully")
 
 	return nil
 }
 
 // SuspendBalance background balance for all query node, include stopping balance and auto balance
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("SuspendBalance request received")
+	mlog.Info(ctx, "SuspendBalance request received")
 
 	errMsg := "failed to suspend balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -228,7 +228,8 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 
 	err := s.checkerController.Deactivate(utils.BalanceChecker)
 	if err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -237,9 +238,7 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 
 // ResumeBalance background balance for all query node, include stopping balance and auto balance
 func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("ResumeBalance request received")
+	mlog.Info(ctx, "ResumeBalance request received")
 
 	errMsg := "failed to resume balance for all querynode"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -248,7 +247,8 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 
 	err := s.checkerController.Activate(utils.BalanceChecker)
 	if err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -257,12 +257,12 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 
 // CheckBalanceStatus checks whether balance is active or suspended
 func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("CheckBalanceStatus request received")
+	mlog.Info(ctx, "CheckBalanceStatus request received")
 
 	errMsg := "failed to check balance status"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return &querypb.CheckBalanceStatusResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -270,7 +270,8 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 
 	isActive, err := s.checkerController.IsActive(utils.BalanceChecker)
 	if err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return &querypb.CheckBalanceStatusResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -283,16 +284,15 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 }
 
 func (s *Server) CheckChannelBalanceActive(ctx context.Context) (bool, error) {
-	log := log.Ctx(ctx)
-	log.Info("ResumeChannelBalance request received")
+	mlog.Info(ctx, "ResumeChannelBalance request received")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn("failed to resume channel balance", zap.Error(err))
+		mlog.Warn(ctx, "failed to resume channel balance", zap.Error(err))
 		return false, err
 	}
 	active := paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool()
 
-	log.Info("ResumeChannelBalance request finished successfully", zap.Bool("active", active))
+	mlog.Info(ctx, "ResumeChannelBalance request finished successfully", zap.Bool("active", active))
 
 	return active, nil
 }
@@ -300,19 +300,19 @@ func (s *Server) CheckChannelBalanceActive(ctx context.Context) (bool, error) {
 // IsNodeSuspended checks if a specific node is suspended based on the provided request.
 // It returns true if the node is suspended, false otherwise.
 func (s *Server) IsNodeSuspended(ctx context.Context, nodeID int64) (bool, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("IsNodeSuspended request received", zap.Int64("nodeID", nodeID))
+	mlog.Info(ctx, "IsNodeSuspended request received", zap.Int64("nodeID", nodeID))
 
 	errMsg := "failed to call IsNodeSuspended for query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return false, err
 	}
 
 	if s.nodeMgr.Get(nodeID) == nil {
 		err := merr.WrapErrNodeNotFound(nodeID, errMsg)
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return false, err
 	}
 	isSuspended := s.meta.IsNodeSuspended(nodeID)
@@ -321,19 +321,19 @@ func (s *Server) IsNodeSuspended(ctx context.Context, nodeID int64) (bool, error
 
 // suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("SuspendNode request received", zap.Int64("nodeID", req.GetNodeID()))
+	mlog.Info(ctx, "SuspendNode request received", zap.Int64("nodeID", req.GetNodeID()))
 
 	errMsg := "failed to suspend query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	if s.nodeMgr.Get(req.GetNodeID()) == nil {
 		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -343,19 +343,20 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 
 // resume node from resource operation, for given node, resume load_segment/sub_channel operations
 func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("ResumeNode request received", zap.Int64("nodeID", req.GetNodeID()))
+	mlog.Info(ctx, "ResumeNode request received", zap.Int64("nodeID", req.GetNodeID()))
 
 	errMsg := "failed to resume query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, errMsg)), nil
 	}
 
 	info := s.nodeMgr.Get(req.GetNodeID())
 	if info == nil {
 		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -373,16 +374,15 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 // if no segment_id specified, default to transfer all segment on the source node.
 // if no target_nodeId specified, default to move segment to all other nodes
 func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegmentRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("TransferSegment request received",
+	mlog.Info(ctx, "TransferSegment request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
 		zap.Int64("segment", req.GetSegmentID()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
-		log.Warn(msg, zap.Error(err))
+		mlog.Warn(ctx,
+			msg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -432,7 +432,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 
 			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 			if !existInTarget {
-				log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", req.GetSegmentID()))
+				mlog.Info(ctx, "segment doesn't exist in current target, skip it", zap.Int64("segmentID", req.GetSegmentID()))
 			} else {
 				toBalance.Insert(segment)
 			}
@@ -441,7 +441,8 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		err := s.balanceSegments(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
 		if err != nil {
 			msg := "failed to balance segments"
-			log.Warn(msg, zap.Error(err))
+			mlog.Warn(ctx,
+				msg, zap.Error(err))
 			return merr.Status(errors.Wrap(err, msg)), nil
 		}
 	}
@@ -452,16 +453,15 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 // if no channel_name specified, default to transfer all channel on the source node.
 // if no target_nodeId specified, default to move channel to all other nodes
 func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("TransferChannel request received",
+	mlog.Info(ctx, "TransferChannel request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()),
 		zap.String("channel", req.GetChannelName()))
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
-		log.Warn(msg, zap.Error(err))
+		mlog.Warn(ctx,
+			msg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
@@ -506,7 +506,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			}
 			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
 			if !existInTarget {
-				log.Info("channel doesn't exist in current target, skip it", zap.String("channelName", channel.GetChannelName()))
+				mlog.Info(ctx, "channel doesn't exist in current target, skip it", zap.String("channelName", channel.GetChannelName()))
 			} else {
 				toBalance.Insert(channel)
 			}
@@ -515,7 +515,8 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		err := s.balanceChannels(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
 		if err != nil {
 			msg := "failed to balance channels"
-			log.Warn(msg, zap.Error(err))
+			mlog.Warn(ctx,
+				msg, zap.Error(err))
 			return merr.Status(errors.Wrap(err, msg)), nil
 		}
 	}
@@ -600,29 +601,30 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 }
 
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-
-	log.Info("CheckQueryNodeDistribution request received",
+	mlog.Info(ctx, "CheckQueryNodeDistribution request received",
 		zap.Int64("source", req.GetSourceNodeID()),
 		zap.Int64("dest", req.GetTargetNodeID()))
 
 	errMsg := "failed to check query node distribution"
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	sourceNode := s.nodeMgr.Get(req.GetSourceNodeID())
 	if sourceNode == nil {
 		err := merr.WrapErrNodeNotFound(req.GetSourceNodeID(), "source node not found")
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	targetNode := s.nodeMgr.Get(req.GetTargetNodeID())
 	if targetNode == nil {
 		err := merr.WrapErrNodeNotFound(req.GetTargetNodeID(), "target node not found")
-		log.Warn(errMsg, zap.Error(err))
+		mlog.Warn(ctx,
+			errMsg, zap.Error(err))
 		return merr.Status(err), nil
 	}
 

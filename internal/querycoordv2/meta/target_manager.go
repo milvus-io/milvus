@@ -28,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -101,11 +101,11 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
-	log := log.With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(zap.Int64("collectionID", collectionID))
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
-		log.Info("next target does not exist, skip it")
+		log.Info(ctx, "next target does not exist, skip it")
 		return false
 	}
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
@@ -125,7 +125,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		}
 		partStatsVersionInfo += "],"
 	}
-	log.Debug("finish to update current target for collection",
+	log.Debug(ctx, "finish to update current target for collection",
 		zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
 		zap.Int64("version", newTarget.GetTargetVersion()),
@@ -138,7 +138,6 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
-	log := log.Ctx(ctx)
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -150,7 +149,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return false, nil
 	}, retry.Attempts(10))
 	if err != nil {
-		log.Warn("failed to get next targets for collection", zap.Int64("collectionID", collectionID), zap.Error(err))
+		mlog.Warn(ctx, "failed to get next targets for collection", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return err
 	}
 
@@ -158,7 +157,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	// build a next target that could dispatch WatchDmChannels with it.
 	for _, channelInfo := range vChannelInfos {
 		if funcutil.IsDroppedChannelCheckpoint(channelInfo.GetSeekPosition()) {
-			log.Warn("refuse to build next target: channel checkpoint is a dropped sentinel; sticky until collection meta is fully dropped",
+			mlog.Warn(ctx, "refuse to build next target: channel checkpoint is a dropped sentinel; sticky until collection meta is fully dropped",
 				zap.Int64("collectionID", collectionID),
 				zap.String("channel", channelInfo.GetChannelName()),
 				zap.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
@@ -188,7 +187,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	}
 
 	if len(segments) == 0 && len(dmChannels) == 0 {
-		log.Debug("skip empty next targets for collection", zap.Int64("collectionID", collectionID), zap.Int64s("PartitionIDs", partitionIDs))
+		mlog.Debug(ctx, "skip empty next targets for collection", zap.Int64("collectionID", collectionID), zap.Int64s("PartitionIDs", partitionIDs))
 		return nil
 	}
 
@@ -196,7 +195,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
-	log.Debug("finish to update next targets for collection",
+	mlog.Debug(ctx, "finish to update next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
 
@@ -225,7 +224,7 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 
 // RemoveCollection removes all channels and segments in the given collection
 func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int64) {
-	log.Info("remove collection from targets",
+	mlog.Info(ctx, "remove collection from targets",
 		zap.Int64("collectionID", collectionID))
 
 	current := mgr.current.getCollectionTarget(collectionID)
@@ -250,10 +249,10 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 // NOTE: this doesn't remove any channel even the given one is the only partition
 // Deprecated: use RemovePartitionFromNextTarget instead @weiliu1031
 func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int64, partitionIDs ...int64) {
-	log := log.With(zap.Int64("collectionID", collectionID),
+	log := mlog.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
 
-	log.Info("remove partition from targets")
+	log.Info(ctx, "remove partition from targets")
 
 	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 
@@ -262,11 +261,11 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 		newTarget := mgr.removePartitionFromCollectionTarget(oldCurrentTarget, partitionSet)
 		if newTarget != nil {
 			mgr.current.updateCollectionTarget(collectionID, newTarget)
-			log.Info("finish to remove partition from current target for collection",
+			log.Info(ctx, "finish to remove partition from current target for collection",
 				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
-			log.Info("all partitions have been released, release the collection next target now")
+			log.Info(ctx, "all partitions have been released, release the collection next target now")
 			mgr.current.removeCollectionTarget(collectionID)
 		}
 	}
@@ -276,11 +275,11 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 		newTarget := mgr.removePartitionFromCollectionTarget(oleNextTarget, partitionSet)
 		if newTarget != nil {
 			mgr.next.updateCollectionTarget(collectionID, newTarget)
-			log.Info("finish to remove partition from next target for collection",
+			log.Info(ctx, "finish to remove partition from next target for collection",
 				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
-			log.Info("all partitions have been released, release the collection current target now")
+			log.Info(ctx, "all partitions have been released, release the collection current target now")
 			mgr.next.removeCollectionTarget(collectionID)
 		}
 	}
@@ -290,22 +289,22 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 // NOTE: don't edit current target directly, it will be updated by target observer, which push the new next target as current target
 // need the full progress to update next target to current target, so the query view on delegator could be updated when current target is updated
 func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, collectionID int64, partitionIDs ...int64) {
-	log := log.With(zap.Int64("collectionID", collectionID),
+	log := mlog.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
 
 	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 
-	log.Info("remove partition from next target")
+	log.Info(ctx, "remove partition from next target")
 	oleNextTarget := mgr.next.getCollectionTarget(collectionID)
 	if oleNextTarget != nil {
 		newTarget := mgr.removePartitionFromCollectionTarget(oleNextTarget, partitionSet)
 		if newTarget != nil {
 			mgr.next.updateCollectionTarget(collectionID, newTarget)
-			log.Info("finish to remove partition from next target for collection",
+			log.Info(ctx, "finish to remove partition from next target for collection",
 				zap.Int64s("segments", newTarget.GetAllSegmentIDs()),
 				zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 		} else {
-			log.Info("all partitions have been released, release the collection current target now")
+			log.Info(ctx, "all partitions have been released, release the collection current target now")
 			mgr.current.removeCollectionTarget(collectionID)
 			mgr.next.removeCollectionTarget(collectionID)
 		}
@@ -552,9 +551,9 @@ func (mgr *TargetManager) SaveCurrentTarget(ctx context.Context, catalog metasto
 				if err := catalog.SaveCollectionTargets(ctx, lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) *querypb.CollectionTarget {
 					return p.B
 				})...); err != nil {
-					log.Warn("failed to save current target for collection", zap.Int64s("collectionIDs", ids), zap.Error(err))
+					mlog.Warn(ctx, "failed to save current target for collection", zap.Int64s("collectionIDs", ids), zap.Error(err))
 				} else {
-					log.Info("succeed to save current target for collection", zap.Int64s("collectionIDs", ids))
+					mlog.Info(ctx, "succeed to save current target for collection", zap.Int64s("collectionIDs", ids))
 				}
 				return nil, nil
 			})
@@ -578,14 +577,14 @@ func (mgr *TargetManager) SaveCurrentTarget(ctx context.Context, catalog metasto
 func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error {
 	targets, err := catalog.GetCollectionTargets(ctx)
 	if err != nil {
-		log.Warn("failed to recover collection target from etcd", zap.Error(err))
+		mlog.Warn(ctx, "failed to recover collection target from etcd", zap.Error(err))
 		return err
 	}
 
 	for _, t := range targets {
 		newTarget := FromPbCollectionTarget(t)
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
-		log.Info("recover current target for collection",
+		mlog.Info(ctx, "recover current target for collection",
 			zap.Int64("collectionID", t.GetCollectionID()),
 			zap.Strings("channels", newTarget.GetAllDmChannelNames()),
 			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
@@ -597,7 +596,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 	// Uses RemoveWithPrefix which is a single etcd call.
 	if len(targets) > 0 {
 		if err := catalog.RemoveCollectionTargets(ctx); err != nil {
-			log.Warn("failed to remove collection targets from etcd", zap.Error(err))
+			mlog.Warn(ctx, "failed to remove collection targets from etcd", zap.Error(err))
 		}
 	}
 
@@ -627,7 +626,7 @@ func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope, 
 
 	v, err := json.Marshal(ret.toQueryCoordCollectionTargets(collectionID))
 	if err != nil {
-		log.Warn("failed to marshal target", zap.Error(err))
+		mlog.Warn(ctx, "failed to marshal target", zap.Error(err))
 		return ""
 	}
 	return string(v)

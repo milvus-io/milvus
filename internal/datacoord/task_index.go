@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -148,12 +148,12 @@ func (it *indexBuildTask) dropAndResetTaskOnWorker(cluster session.Cluster, reas
 
 func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	ctx := context.TODO()
-	log := log.Ctx(ctx).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID))
+	log := mlog.With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID))
 
 	// Check if task exists in meta
 	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
 	if !exist || segIndex == nil {
-		log.Info("index task has not exist in meta table, removing task")
+		log.Info(context.TODO(), "index task has not exist in meta table, removing task")
 		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
 		return
 	}
@@ -161,7 +161,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Check segment health and index existence
 	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
 	if !isSegmentHealthy(segment) || !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
-		log.Info("task is no need to build index, removing it")
+		log.Info(context.TODO(), "task is no need to build index, removing it")
 		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
 		return
 	}
@@ -181,7 +181,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 	}
 	if isNoTrainIndex(indexType) || effectiveRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
-		log.Info("segment does not need index really, marking as finished", zap.Int64("numRows", segIndex.NumRows), zap.Int64("effectiveRows", effectiveRows))
+		log.Info(context.TODO(), "segment does not need index really, marking as finished", zap.Int64("numRows", segIndex.NumRows), zap.Int64("effectiveRows", effectiveRows))
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
@@ -192,13 +192,13 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Create job request
 	req, err := it.prepareJobRequest(ctx, segment, segIndex, indexParams, indexType)
 	if err != nil {
-		log.Warn("failed to prepare job request", zap.Error(err))
+		log.Warn(context.TODO(), "failed to prepare job request", zap.Error(err))
 		return
 	}
 
 	// Update task version
 	if err := it.UpdateTaskVersion(nodeID); err != nil {
-		log.Warn("failed to update task version", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update task version", zap.Error(err))
 		return
 	}
 
@@ -210,24 +210,24 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
-		log.Warn("failed to send job to worker", zap.Error(err))
+		log.Warn(context.TODO(), "failed to send job to worker", zap.Error(err))
 		return
 	}
 
 	// Update state to in progress
 	if err = it.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
-		log.Warn("failed to update task state", zap.Error(err))
+		log.Warn(context.TODO(), "failed to update task state", zap.Error(err))
 		return
 	}
 
-	log.Info("index task assigned successfully")
+	log.Info(context.TODO(), "index task assigned successfully")
 }
 
 // Helper method to prepare job request
 func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo, segIndex *model.SegmentIndex,
 	indexParams []*commonpb.KeyValuePair, indexType string,
 ) (*workerpb.CreateJobRequest, error) {
-	log := log.Ctx(ctx).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", segment.GetID()))
+	log := mlog.With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", segment.GetID()))
 
 	typeParams := it.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 	fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
@@ -282,7 +282,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 	if typeutil.IsFixDimVectorType(dataType) {
 		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
-			log.Warn("failed to get dim from field type params",
+			log.Warn(ctx, "failed to get dim from field type params",
 				zap.String("field type", field.GetDataType().String()), zap.Error(err))
 		} else {
 			dim = dimVal
@@ -365,7 +365,7 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 
 			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
 			if isoErr != nil {
-				log.Ctx(ctx).Warn("failed to parse partition key isolation", zap.Error(isoErr))
+				mlog.Warn(ctx, "failed to parse partition key isolation", zap.Error(isoErr))
 			}
 			if iso {
 				partitionKeyIsolation = true
@@ -377,12 +377,12 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 }
 
 func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
-	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
+	log := mlog.With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
 
 	// Check if task exists in meta
 	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
 	if !exist || segIndex == nil {
-		log.Info("index task has not exist in meta table, removing task")
+		log.Info(context.TODO(), "index task has not exist in meta table, removing task")
 		if it.tryDropTaskOnWorker(cluster) != nil {
 			return
 		}
@@ -395,7 +395,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskIDs:   []UniqueID{it.BuildID},
 	})
 	if err != nil {
-		log.Warn("query index task result from worker failed", zap.Error(err))
+		log.Warn(context.TODO(), "query index task result from worker failed", zap.Error(err))
 		it.dropAndResetTaskOnWorker(cluster, err.Error())
 		return
 	}
@@ -405,12 +405,12 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if info.GetBuildID() == it.BuildID {
 			switch info.GetState() {
 			case commonpb.IndexState_Finished, commonpb.IndexState_Failed:
-				log.Info("query task index info successfully",
+				log.Info(context.TODO(), "query task index info successfully",
 					zap.Int64("taskID", it.BuildID), zap.String("result state", info.GetState().String()),
 					zap.String("failReason", info.GetFailReason()))
 				it.setJobInfo(info)
 			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
-				log.Info("query task index info successfully",
+				log.Info(context.TODO(), "query task index info successfully",
 					zap.Int64("taskID", it.BuildID), zap.String("result state", info.GetState().String()),
 					zap.String("failReason", info.GetFailReason()))
 				it.dropAndResetTaskOnWorker(cluster, info.GetFailReason())
@@ -424,14 +424,14 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
-	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
+	log := mlog.With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
 
 	if err := cluster.DropIndex(it.NodeID, it.BuildID); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		log.Warn("notify worker drop the index task failed", zap.Error(err))
+		log.Warn(context.TODO(), "notify worker drop the index task failed", zap.Error(err))
 		return err
 	}
 
-	log.Info("index task dropped successfully")
+	log.Info(context.TODO(), "index task dropped successfully")
 	return nil
 }
 

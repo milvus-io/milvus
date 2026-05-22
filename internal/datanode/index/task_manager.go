@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -125,7 +125,7 @@ func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.Uni
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.indexTasks[key]; ok {
-		log.Ctx(m.ctx).Debug("store task state", zap.String("clusterID", ClusterID), zap.Int64("buildID", buildID),
+		mlog.Debug(m.ctx, "store task state", zap.String("clusterID", ClusterID), zap.Int64("buildID", buildID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
@@ -173,7 +173,7 @@ func (m *TaskManager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*I
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.indexTasks, key)
-			log.Ctx(ctx).Info("delete task infos",
+			mlog.Info(ctx, "delete task infos",
 				zap.String("cluster_id", key.ClusterID), zap.Int64("build_id", key.TaskID))
 		}
 	}
@@ -228,7 +228,7 @@ func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Un
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.analyzeTasks[key]; ok {
-		log.Info("store analyze task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
+		mlog.Info(m.ctx, "store analyze task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
@@ -273,7 +273,7 @@ func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.analyzeTasks, key)
-			log.Ctx(ctx).Info("delete analyze task infos",
+			mlog.Info(ctx, "delete analyze task infos",
 				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
 		}
 	}
@@ -328,15 +328,15 @@ func (m *TaskManager) WaitTaskFinish() {
 				return
 			}
 		case <-timeoutCtx.Done():
-			log.Warn("timeout, the index node has some progress task")
+			mlog.Warn(m.ctx, "timeout, the index node has some progress task")
 			for _, info := range m.indexTasks {
 				if info.State == commonpb.IndexState_InProgress {
-					log.Warn("progress task", zap.Any("info", info))
+					mlog.Warn(m.ctx, "progress task", zap.Any("info", info))
 				}
 			}
 			for _, info := range m.analyzeTasks {
 				if info.State == indexpb.JobState_JobStateInProgress {
-					log.Warn("progress task", zap.Any("info", info))
+					mlog.Warn(m.ctx, "progress task", zap.Any("info", info))
 				}
 			}
 			return
@@ -477,7 +477,7 @@ func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.Uniq
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.statsTasks[key]; ok {
-		log.Info("store stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
+		mlog.Info(m.ctx, "store stats task state", zap.String("clusterID", clusterID), zap.Int64("TaskID", taskID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
@@ -579,7 +579,7 @@ func (m *TaskManager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*S
 		if ok {
 			deleted = append(deleted, info)
 			delete(m.statsTasks, key)
-			log.Ctx(ctx).Info("delete stats task infos",
+			mlog.Info(ctx, "delete stats task infos",
 				zap.String("clusterID", key.ClusterID), zap.Int64("TaskID", key.TaskID))
 		}
 	}

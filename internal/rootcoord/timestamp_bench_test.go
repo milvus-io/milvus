@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -54,7 +54,7 @@ func cleanTestEtcdEnv(cli *clientv3.Client, rootPath string) {
 	if _, err := cli.Delete(ctx, rootPath, clientv3.WithPrefix()); err != nil {
 		panic(err)
 	}
-	log.Debug("remove root path on etcd", zap.String("rootPath", rootPath))
+	mlog.Debug(context.TODO(), "remove root path on etcd", zap.String("rootPath", rootPath))
 }
 
 func newBenchTSOAllocator(etcdCli *clientv3.Client, rootPath, subPath, key string) *tso.GlobalTSOAllocator {
@@ -70,7 +70,7 @@ func Benchmark_RootCoord_AllocTimestamp(b *testing.B) {
 	rootPath := funcutil.GenRandomStr()
 	subPath := funcutil.GenRandomStr()
 	key := funcutil.GenRandomStr()
-	log.Info("benchmark for allocating ts", zap.String("rootPath", rootPath), zap.String("subPath", subPath), zap.String("key", key))
+	mlog.Info(context.TODO(), "benchmark for allocating ts", zap.String("rootPath", rootPath), zap.String("subPath", subPath), zap.String("key", key))
 
 	ctx := context.Background()
 	cli := getTestEtcdCli()

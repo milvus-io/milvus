@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
@@ -48,7 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -84,7 +85,7 @@ const (
 	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 )
 
-var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
+var logger = mlog.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
@@ -1531,7 +1532,7 @@ func getMaxMvccTsFromChannels(channelsTs map[string]uint64, beginTs typeutil.Tim
 	}
 
 	if maxTs == 0 {
-		log.Warn("no channel ts found, use beginTs instead")
+		mlog.Warn(context.TODO(), "no channel ts found, use beginTs instead")
 		return beginTs
 	}
 
@@ -1677,7 +1678,7 @@ func VerifyAPIKey(rawToken string) (string, error) {
 	hoo := hookutil.GetHook()
 	user, err := hoo.VerifyAPIKey(rawToken)
 	if err != nil {
-		log.Warn("fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to verify apikey", zap.String("api_key", rawToken), zap.Error(err))
 		return "", merr.WrapErrParameterInvalidMsg("invalid apikey: [%s]", rawToken)
 	}
 	return user, nil
@@ -1689,7 +1690,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
+		mlog.Error(ctx, "found no credential", zap.String("username", username), zap.Error(err))
 		return false
 	}
 
@@ -1701,13 +1702,13 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 
 	// miss cache, verify against encrypted password from etcd
 	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		log.Ctx(ctx).Error("Verify password failed", zap.Error(err))
+		mlog.Error(ctx, "Verify password failed", zap.Error(err))
 		return false
 	}
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	mlog.Debug(ctx, "get credential miss cache, update cache with", zap.Any("credential", credInfo))
 	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
@@ -1928,7 +1929,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 						return nil
 					})
 					if err != nil {
-						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
+						mlog.Info(context.TODO(), "parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
 						return nil, nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
 					resultFieldNameMap[common.MetaFieldName] = true
@@ -2032,7 +2033,6 @@ func isPartitionLoaded(ctx context.Context, mc types.MixCoordClient, collID int6
 }
 
 func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
-	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
 
@@ -2051,7 +2051,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 
 	for _, fieldSchema := range allFields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
-			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
+			mlog.Warn(context.TODO(), "not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
 
@@ -2074,7 +2074,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 			}
 
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+				mlog.Warn(context.TODO(), "no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 			}
 			// when use default_value or has set Nullable
@@ -2089,7 +2089,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	}
 
 	if primaryKeyNum > 1 {
-		log.Warn("more than 1 primary keys not supported",
+		mlog.Warn(context.TODO(), "more than 1 primary keys not supported",
 			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
@@ -2097,7 +2097,7 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
 	if expectedNum != actualNum {
-		log.Warn("the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
+		mlog.Warn(context.TODO(), "the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
 		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
 	}
 
@@ -2439,7 +2439,6 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 }
 
 func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
-	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
@@ -2452,7 +2451,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error("get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
+		mlog.Error(context.TODO(), "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2468,7 +2467,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Info("get primary field data failed", zap.Error(err))
+			mlog.Info(context.TODO(), "get primary field data failed", zap.Error(err))
 			return nil, err
 		}
 	} else {
@@ -2479,7 +2478,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 		if err != nil {
-			log.Info("generate primary field data failed when autoID == true", zap.Error(err))
+			mlog.Info(context.TODO(), "generate primary field data failed when autoID == true", zap.Error(err))
 			return nil, err
 		}
 		// if autoID == true, set the primary field data
@@ -2490,7 +2489,7 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn("parse primary field data to IDs failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -2499,8 +2498,6 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 
 // check whether insertMsg has all fields in schema
 func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
-	log := log.With(zap.String("collection", schema.GetName()))
-
 	// find bm25 generated fields
 	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(schema)...)
 	dataNameMap := make(map[string]*schemapb.FieldData)
@@ -2525,7 +2522,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 				continue
 			}
 
-			log.Info("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+			mlog.Info(context.TODO(), "no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
@@ -2567,7 +2564,7 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 		for row, data := range strData.GetData() {
 			ok := utf8.ValidString(data)
 			if !ok {
-				log.Warn("string field data not utf-8 format", zap.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
+				mlog.Warn(context.TODO(), "string field data not utf-8 format", zap.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
 				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
 			}
 		}
@@ -2576,7 +2573,6 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 }
 
 func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
-	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
 	if insertMsg.NRows() <= 0 {
@@ -2589,7 +2585,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error("get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
+		mlog.Error(context.TODO(), "get primary field schema failed", zap.Any("schema", schema), zap.Error(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2609,7 +2605,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 				// automatic generate pk as new pk wehen autoID == true
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
-					log.Info("generate new primary field data failed when upsert", zap.Error(err))
+					mlog.Info(context.TODO(), "generate new primary field data failed when upsert", zap.Error(err))
 					return nil, nil, err
 				}
 				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
@@ -2626,7 +2622,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn("parse primary field data to IDs failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", zap.Error(err))
 		return nil, nil, err
 	}
 	if !primaryFieldSchema.GetAutoID() {
@@ -2634,7 +2630,7 @@ func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *sche
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
-		log.Warn("parse primary field data to IDs failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse primary field data to IDs failed", zap.Error(err))
 		return nil, nil, err
 	}
 	return newIDs, ids, nil
@@ -2668,19 +2664,19 @@ func getCollectionProgress(
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to show collections",
+		mlog.Warn(ctx, "fail to show collections",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err),
 		)
-		return
+		return loadProgress, refreshProgress, err
 	}
 
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to show collections",
+		mlog.Warn(ctx, "fail to show collections",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
-		return
+		return loadProgress, refreshProgress, err
 	}
 
 	loadProgress = resp.GetInMemoryPercentages()[0]
@@ -2688,7 +2684,7 @@ func getCollectionProgress(
 		refreshProgress = resp.GetRefreshProgress()[0]
 	}
 
-	return
+	return loadProgress, refreshProgress, err
 }
 
 func getPartitionProgress(
@@ -2706,7 +2702,7 @@ func getPartitionProgress(
 		var partitionID int64
 		partitionID, err = globalMetaCache.GetPartitionID(ctx, dbName, collectionName, partitionName)
 		if err != nil {
-			return
+			return loadProgress, refreshProgress, err
 		}
 		IDs2Names[partitionID] = partitionName
 		partitionIDs = append(partitionIDs, partitionID)
@@ -2722,21 +2718,21 @@ func getPartitionProgress(
 		PartitionIDs: partitionIDs,
 	})
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to show partitions", zap.Int64("collection_id", collectionID),
+		mlog.Warn(ctx, "fail to show partitions", zap.Int64("collection_id", collectionID),
 			zap.String("collection_name", collectionName),
 			zap.Strings("partition_names", partitionNames),
 			zap.Error(err))
-		return
+		return loadProgress, refreshProgress, err
 	}
 
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
 		err = merr.Error(resp.GetStatus())
-		log.Ctx(ctx).Warn("fail to show partitions",
+		mlog.Warn(ctx, "fail to show partitions",
 			zap.String("collectionName", collectionName),
 			zap.Strings("partitionNames", partitionNames),
 			zap.Error(err))
-		return
+		return loadProgress, refreshProgress, err
 	}
 
 	for _, p := range resp.InMemoryPercentages {
@@ -2748,7 +2744,7 @@ func getPartitionProgress(
 		refreshProgress = resp.GetRefreshProgress()[0]
 	}
 
-	return
+	return loadProgress, refreshProgress, err
 }
 
 func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (bool, error) {
@@ -2841,13 +2837,15 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 	return hashedPartitionNames, err
 }
 
-func ErrWithLog(logger *log.MLogger, msg string, err error) error {
+func ErrWithLog(logger *mlog.Logger, msg string, err error) error {
 	wrapErr := errors.Wrap(err, msg)
 	if logger != nil {
-		logger.Warn(msg, zap.Error(err))
+		logger.Warn(context.TODO(),
+			msg, zap.Error(err))
 		return wrapErr
 	}
-	log.Warn(msg, zap.Error(err))
+	mlog.Warn(context.TODO(),
+		msg, zap.Error(err))
 	return wrapErr
 }
 
@@ -2860,7 +2858,7 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					log.Info("insert invalid dynamic data, milvus only support json map",
+					mlog.Info(context.TODO(), "insert invalid dynamic data, milvus only support json map",
 						zap.ByteString("data", rowData),
 						zap.Error(err),
 					)
@@ -2872,7 +2870,7 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 				if !skipStaticFieldNameCheck {
 					for _, f := range schema.GetFields() {
 						if _, ok := jsonData[f.GetName()]; ok {
-							log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
+							mlog.Info(context.TODO(), "dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
 							return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
 						}
 					}
@@ -3054,7 +3052,7 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	if value, ok := status.ExtraInfo["scanned_remote_bytes"]; ok {
 		scannedRemoteBytes, err = strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			log.Warn("scanned_remote_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			mlog.Warn(context.TODO(), "scanned_remote_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
 			return 0, 0, 0, false
 		}
 	} else {
@@ -3063,7 +3061,7 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	if value, ok := status.ExtraInfo["scanned_total_bytes"]; ok {
 		scannedTotalBytes, err = strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			log.Warn("scanned_total_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
+			mlog.Warn(context.TODO(), "scanned_total_bytes is not a valid int64", zap.String("value", value), zap.Error(err))
 			return 0, 0, 0, false
 		}
 	} else {
@@ -3072,7 +3070,7 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	if value, ok := status.ExtraInfo["cache_hit_ratio"]; ok {
 		cacheHitRatio, err = strconv.ParseFloat(value, 64)
 		if err != nil {
-			log.Warn("cache_hit_ratio is not a valid float64", zap.String("value", value), zap.Error(err))
+			mlog.Warn(context.TODO(), "cache_hit_ratio is not a valid float64", zap.String("value", value), zap.Error(err))
 			return 0, 0, 0, false
 		}
 	} else {
@@ -3160,10 +3158,10 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
 	case *milvuspb.CreateDatabaseRequest:
-		log.Info("rate limiter CreateDatabaseRequest")
+		mlog.Info(ctx, "rate limiter CreateDatabaseRequest")
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	case *milvuspb.DropDatabaseRequest:
-		log.Info("rate limiter DropDatabaseRequest")
+		mlog.Info(ctx, "rate limiter DropDatabaseRequest")
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	case *milvuspb.AlterDatabaseRequest:
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
@@ -3171,7 +3169,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, errors.New("null request")
 		}
-		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
+		mlog.RatedWarn(ctx, rate.Limit(60), "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }
@@ -3247,7 +3245,7 @@ func GetMinHashFunctionOutputFields(collSchema *schemapb.CollectionSchema) []str
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	ttl, err := common.GetCollectionTTL(pairs)
 	if err != nil {
-		log.Error("failed to get collection ttl, use default ttl", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to get collection ttl, use default ttl", zap.Error(err))
 	}
 	if ttl < 0 {
 		return 0
@@ -3308,7 +3306,7 @@ func reconstructStructFieldData(
 		for _, field := range fields {
 			originalName, err := extractOriginalFieldName(field.FieldName)
 			if err != nil {
-				log.Error("failed to extract original field name from struct field",
+				mlog.Error(context.TODO(), "failed to extract original field name from struct field",
 					zap.String("fieldName", field.FieldName),
 					zap.Error(err))
 			} else {
@@ -3365,7 +3363,7 @@ func getColTimezone(colInfo *collectionInfo) string {
 func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) error {
 	location, err := time.LoadLocation(colTimezone)
 	if err != nil {
-		log.Error("invalid timezone", zap.String("timezone", colTimezone), zap.Error(err))
+		mlog.Error(context.TODO(), "invalid timezone", zap.String("timezone", colTimezone), zap.Error(err))
 		return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", colTimezone)
 	}
 
@@ -3379,7 +3377,7 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) er
 		// Guard against nil scalars or missing timestamp data
 		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
 			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
-				log.Warn("field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
+				mlog.Warn(context.TODO(), "field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
 				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
 			}
 			// Handle the case of an empty field (e.g., all nulls), skip if no data to process.
@@ -3443,7 +3441,7 @@ func extractFields(t time.Time, fieldList []string) ([]int64, error) {
 func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fieldList []string) error {
 	targetLocation, err := time.LoadLocation(timezone)
 	if err != nil {
-		log.Error("invalid timezone", zap.String("timezone", timezone), zap.Error(err))
+		mlog.Error(context.TODO(), "invalid timezone", zap.String("timezone", timezone), zap.Error(err))
 		return merr.WrapErrParameterInvalidMsg("got invalid timezone: %s", timezone)
 	}
 
@@ -3455,7 +3453,7 @@ func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fi
 		scalarField := fieldData.GetScalars()
 		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
 			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
-				log.Warn("field data is not Timestamptz data, but found LongData instead", zap.String("fieldName", fieldData.GetFieldName()))
+				mlog.Warn(context.TODO(), "field data is not Timestamptz data, but found LongData instead", zap.String("fieldName", fieldData.GetFieldName()))
 				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
 			}
 			continue
@@ -3503,7 +3501,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	// Since PartialUpdate is supported, the field_data here may not be complete
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
 	if err != nil {
-		log.Ctx(ctx).Warn("Check upsert field error,", zap.String("collectionName", schema.Name), zap.Error(err))
+		mlog.Warn(ctx, "Check upsert field error,", zap.String("collectionName", schema.Name), zap.Error(err))
 		return err
 	}
 

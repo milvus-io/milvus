@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -79,7 +79,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
-		log.Ctx(ctx).Warn("import job creation failed because of collection not found, skip it",
+		mlog.Warn(ctx, "import job creation failed because of collection not found, skip it",
 			zap.Strings("vchannels", vchannels),
 			zap.String("job_id", importResp.GetJobID()), zap.Error(err))
 		return nil
@@ -221,15 +221,15 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
-	log.Ctx(ctx).Info("CommitImport broadcast ack received", zap.Int64("jobID", jobID))
+	mlog.Info(ctx, "CommitImport broadcast ack received", zap.Int64("jobID", jobID))
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		log.Ctx(ctx).Warn("CommitImport: job not found, skipping", zap.Int64("jobID", jobID))
+		mlog.Warn(ctx, "CommitImport: job not found, skipping", zap.Int64("jobID", jobID))
 		return nil
 	}
 	if job.GetState() != internalpb.ImportJobState_Uncommitted {
-		log.Ctx(ctx).Info("CommitImport: job not in Uncommitted state, no-op",
+		mlog.Info(ctx, "CommitImport: job not in Uncommitted state, no-op",
 			zap.Int64("jobID", jobID), zap.String("state", job.GetState().String()))
 		return nil
 	}
@@ -241,7 +241,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	}
 
 	uncommittedDuration := job.GetTR().RecordSpan()
-	log.Ctx(ctx).Info("import job uncommitted stage done",
+	mlog.Info(ctx, "import job uncommitted stage done",
 		zap.Int64("jobID", jobID),
 		zap.Duration("jobTimeCost/uncommitted", uncommittedDuration))
 	return nil
@@ -255,18 +255,18 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result message.BroadcastResultRollbackImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
-	log.Ctx(ctx).Info("RollbackImport broadcast ack received", zap.Int64("jobID", jobID))
+	mlog.Info(ctx, "RollbackImport broadcast ack received", zap.Int64("jobID", jobID))
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		log.Ctx(ctx).Warn("RollbackImport: job not found, skipping", zap.Int64("jobID", jobID))
+		mlog.Warn(ctx, "RollbackImport: job not found, skipping", zap.Int64("jobID", jobID))
 		return nil
 	}
 	state := job.GetState()
 	if state == internalpb.ImportJobState_Committing ||
 		state == internalpb.ImportJobState_Completed ||
 		state == internalpb.ImportJobState_Failed {
-		log.Ctx(ctx).Info("RollbackImport: job already in terminal/committed state, no-op",
+		mlog.Info(ctx, "RollbackImport: job already in terminal/committed state, no-op",
 			zap.Int64("jobID", jobID), zap.String("state", state.String()))
 		return nil
 	}

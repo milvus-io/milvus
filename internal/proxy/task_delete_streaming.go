@@ -9,7 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -43,7 +43,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	if hookutil.IsClusterEncryptionEnabled() {
 		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 		if err != nil {
-			log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
+			mlog.Warn(ctx, "get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
 			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 
@@ -69,8 +69,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			msgs = append(msgs, msg)
 		}
 	}
-
-	log.Ctx(ctx).Debug("send delete request to virtual channels",
+	mlog.Debug(ctx, "send delete request to virtual channels",
 		zap.String("collectionName", dt.req.GetCollectionName()),
 		zap.Int64("collectionID", dt.collectionID),
 		zap.Strings("virtual_channels", dt.vChannels),
@@ -79,7 +78,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if err := resp.UnwrapFirstError(); err != nil {
-		log.Ctx(ctx).Warn("append messages to wal failed", zap.Error(err))
+		mlog.Warn(ctx, "append messages to wal failed", zap.Error(err))
 		return err
 	}
 	dt.sessionTS = resp.MaxTimeTick()

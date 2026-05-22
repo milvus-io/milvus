@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var errTypeNotFound = errors.New("checker type not found")
@@ -142,7 +142,7 @@ func (controller *CheckerController) startChecker(ctx context.Context, checker u
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Checker stopped",
+			mlog.Info(ctx, "Checker stopped",
 				zap.String("type", checker.String()))
 			return
 

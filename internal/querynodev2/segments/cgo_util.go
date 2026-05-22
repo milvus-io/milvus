@@ -32,7 +32,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -45,10 +45,10 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 	errorMsg := C.GoString(status.error_msg)
 	defer C.free(unsafe.Pointer(status.error_msg))
 
-	log := log.Ctx(ctx).With(fields...).
+	log := mlog.With(fields...).
 		WithOptions(zap.AddCallerSkip(1)) // Add caller stack to show HandleCStatus caller
 
 	err := merr.SegcoreError(int32(errorCode), errorMsg)
-	log.Warn("CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
+	log.Warn(ctx, "CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
 	return err
 }

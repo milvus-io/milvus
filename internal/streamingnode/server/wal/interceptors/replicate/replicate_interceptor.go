@@ -8,7 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -31,7 +31,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 		// Check ignore field - if true, skip all processing and just append the message
 		// This is used for incomplete switchover messages that should be ignored after force promote
 		if header.Ignore {
-			log.Ctx(ctx).Info("AlterReplicateConfig message has ignore flag set, skipping replicate mode switch and txn rollback")
+			mlog.Info(ctx, "AlterReplicateConfig message has ignore flag set, skipping replicate mode switch and txn rollback")
 			return appendOp(ctx, msg)
 		}
 
@@ -51,7 +51,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 		// This ensures atomicity: transactions are only rolled back after the config change is persisted in WAL
 		if header.ForcePromote && impl.txnManager != nil {
 			impl.txnManager.RollbackAllInFlightTransactions()
-			log.Ctx(ctx).Info("Force promote replicate config and roll back all in-flight transactions successfully")
+			mlog.Info(ctx, "Force promote replicate config and roll back all in-flight transactions successfully")
 		}
 
 		return msgID, nil

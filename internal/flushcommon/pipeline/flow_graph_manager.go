@@ -23,8 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -80,12 +80,12 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 }
 
 func (fm *fgManagerImpl) ClearFlowgraphs() {
-	log.Info("start drop all flowgraph resources in DataNode")
+	mlog.Info(fm.ctx, "start drop all flowgraph resources in DataNode")
 	fm.flowgraphs.Range(func(key string, value *DataSyncService) bool {
 		value.GracefullyClose()
 		fm.flowgraphs.GetAndRemove(key)
 
-		log.Info("successfully dropped flowgraph", zap.String("vChannelName", key))
+		mlog.Info(fm.ctx, "successfully dropped flowgraph", zap.String("vChannelName", key))
 		return true
 	})
 }
@@ -139,7 +139,7 @@ func (fm *fgManagerImpl) GetChannelsJSON(collectionID int64) string {
 
 	ret, err := json.Marshal(channels)
 	if err != nil {
-		log.Warn("failed to marshal channels", zap.Error(err))
+		mlog.Warn(fm.ctx, "failed to marshal channels", zap.Error(err))
 		return ""
 	}
 	return string(ret)
@@ -173,7 +173,7 @@ func (fm *fgManagerImpl) GetSegmentsJSON(collectionID int64) string {
 
 	ret, err := json.Marshal(segments)
 	if err != nil {
-		log.Warn("failed to marshal segments", zap.Error(err))
+		mlog.Warn(fm.ctx, "failed to marshal segments", zap.Error(err))
 		return ""
 	}
 	return string(ret)

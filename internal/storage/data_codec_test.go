@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -29,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1255,8 +1256,8 @@ func TestInsertCodec(t *testing.T) {
 		},
 		resultData.Data[JSONField].(*JSONFieldData).Data)
 
-	log.Debug("Data", zap.Any("Data", resultData.Data))
-	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
+	mlog.Debug(context.TODO(), "Data", zap.Any("Data", resultData.Data))
+	mlog.Debug(context.TODO(), "Infos", zap.Any("Infos", resultData.Infos))
 
 	blobs := []*Blob{}
 	_, _, _, err = insertCodec.Deserialize(blobs)

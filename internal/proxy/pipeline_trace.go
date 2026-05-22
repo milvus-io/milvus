@@ -25,7 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -161,7 +161,7 @@ func (t *PipelineTrace) LogIfEnabled(ctx context.Context, pipelineName string) {
 	if t == nil {
 		return
 	}
-	log.Ctx(ctx).Debug("PipelineTrace", zap.String("pipeline", pipelineName), zap.String("trace", t.String()))
+	mlog.Debug(ctx, "PipelineTrace", zap.String("pipeline", pipelineName), zap.String("trace", t.String()))
 }
 
 // String formats all entries as a single log line.

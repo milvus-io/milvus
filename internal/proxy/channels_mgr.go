@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -66,7 +66,7 @@ func removeDuplicate(ss []string) []string {
 
 func newChannels(vchans []vChan, pchans []pChan) (channelInfos, error) {
 	if len(vchans) != len(pchans) {
-		log.Error("physical channels mismatch virtual channels", zap.Int("len(VirtualChannelNames)", len(vchans)), zap.Int("len(PhysicalChannelNames)", len(pchans)))
+		mlog.Error(context.TODO(), "physical channels mismatch virtual channels", zap.Int("len(VirtualChannelNames)", len(vchans)), zap.Int("len(PhysicalChannelNames)", len(pchans)))
 		return channelInfos{}, fmt.Errorf("physical channels mismatch virtual channels, len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v", len(vchans), len(pchans))
 	}
 	/*
@@ -92,12 +92,12 @@ func getDmlChannelsFunc(ctx context.Context, mixc types.MixCoordClient) getChann
 
 		resp, err := mixc.DescribeCollection(ctx, req)
 		if err != nil {
-			log.Error("failed to describe collection", zap.Error(err), zap.Int64("collection", collectionID))
+			mlog.Error(ctx, "failed to describe collection", zap.Error(err), zap.Int64("collection", collectionID))
 			return channelInfos{}, err
 		}
 
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Error("failed to describe collection",
+			mlog.Error(ctx, "failed to describe collection",
 				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
 				zap.String("reason", resp.GetStatus().GetReason()))
 			return channelInfos{}, merr.Error(resp.GetStatus())
@@ -186,7 +186,7 @@ func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) {
 		decPChanMetrics(info.channelInfos.pchans)
 		delete(mgr.infos, collectionID)
 	}
-	log.Info("dml stream removed", zap.Int64("collection_id", collectionID))
+	mlog.Info(context.TODO(), "dml stream removed", zap.Int64("collection_id", collectionID))
 }
 
 func newSingleTypeChannelsMgr(

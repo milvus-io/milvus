@@ -26,12 +26,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -41,19 +42,19 @@ import (
 
 // CreateJob is CreateIndex
 func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()),
 		zap.Int64("indexBuildID", req.GetBuildID()),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("index node not ready",
+		log.Warn(ctx, "index node not ready",
 			zap.Error(err),
 		)
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-	log.Info("DataNode building index ...",
+	log.Info(ctx, "DataNode building index ...",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
@@ -83,13 +84,13 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		State:  commonpb.IndexState_InProgress,
 	}); oldInfo != nil {
 		err := merr.WrapErrIndexDuplicate(req.GetIndexName(), "building index task existed")
-		log.Warn("duplicated index build task", zap.Error(err))
+		log.Warn(ctx, "duplicated index build task", zap.Error(err))
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+		log.Error(ctx, "create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
 			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			zap.Error(err),
 		)
@@ -104,24 +105,24 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
-		log.Warn("DataNode failed to schedule",
+		log.Warn(ctx, "DataNode failed to schedule",
 			zap.Error(err))
 		ret = merr.Status(err)
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel).Inc()
-	log.Info("DataNode successfully scheduled",
+	log.Info(ctx, "DataNode successfully scheduled",
 		zap.String("indexName", req.GetIndexName()))
 	return ret, nil
 }
 
 func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()),
-	).WithRateGroup("in.queryJobs", 1, 60)
+	)
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
-		log.Warn("index node not ready", zap.Error(err))
+		log.Warn(ctx, "index node not ready", zap.Error(err))
 		return &workerpb.QueryJobsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -153,7 +154,7 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 			ret.IndexInfos[i].FailReason = info.FailReason
 			ret.IndexInfos[i].CurrentIndexVersion = info.CurrentIndexVersion
 			ret.IndexInfos[i].CurrentScalarIndexVersion = info.CurrentScalarIndexVersion
-			log.RatedDebug(5, "querying index build task",
+			log.RatedDebug(ctx, rate.Limit(5), "querying index build task",
 				zap.Int64("indexBuildID", buildID),
 				zap.String("state", info.State.String()),
 				zap.String("reason", info.FailReason),
@@ -164,12 +165,12 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 }
 
 func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("drop index build jobs",
+	mlog.Info(ctx, "drop index build jobs",
 		zap.String("clusterID", req.ClusterID),
 		zap.Int64s("indexBuildIDs", req.GetTaskIDs()),
 	)
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
-		log.Ctx(ctx).Warn("index node not ready", zap.Error(err), zap.String("clusterID", req.ClusterID))
+		mlog.Warn(ctx, "index node not ready", zap.Error(err), zap.String("clusterID", req.ClusterID))
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
@@ -183,7 +184,7 @@ func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsReques
 			info.Cancel()
 		}
 	}
-	log.Ctx(ctx).Info("drop index build jobs success", zap.String("clusterID", req.GetClusterID()),
+	mlog.Info(ctx, "drop index build jobs success", zap.String("clusterID", req.GetClusterID()),
 		zap.Int64s("indexBuildIDs", req.GetTaskIDs()))
 	return merr.Success(), nil
 }
@@ -191,7 +192,7 @@ func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsReques
 // GetJobStats should be GetSlots
 func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStatsRequest) (*workerpb.GetJobStatsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
-		log.Ctx(ctx).Warn("index node not ready", zap.Error(err))
+		mlog.Warn(ctx, "index node not ready", zap.Error(err))
 		return &workerpb.GetJobStatsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -210,7 +211,7 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		availableSlots = 0
 	}
 
-	log.Ctx(ctx).Info("query slots done",
+	mlog.Info(ctx, "query slots done",
 		zap.Int64("totalSlots", totalSlots),
 		zap.Int64("availableSlots", availableSlots),
 		zap.Int64("indexStatsUsed", indexStatsUsed),
@@ -227,20 +228,20 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 
 // Deprecated: use CreateTask instead, keep for compatibility
 func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Request) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()), zap.Int64("TaskID", req.GetTaskID()),
 		zap.String("jobType", req.GetJobType().String()),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("index node not ready",
+		log.Warn(ctx, "index node not ready",
 			zap.Error(err),
 		)
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
 
-	log.Info("DataNode receive CreateJob request...")
+	log.Info(ctx, "DataNode receive CreateJob request...")
 
 	switch req.GetJobType() {
 	case indexpb.JobType_JobTypeIndexJob:
@@ -253,13 +254,13 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 		statsRequest := req.GetStatsRequest()
 		return node.createStatsTask(ctx, statsRequest)
 	default:
-		log.Warn("DataNode receive unknown type job")
+		log.Warn(ctx, "DataNode receive unknown type job")
 		return merr.Status(fmt.Errorf("DataNode receive unknown type job with TaskID: %d", req.GetTaskID())), nil
 	}
 }
 
 func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode building index ...",
+	mlog.Info(ctx, "DataNode building index ...",
 		zap.String("clusterID", req.GetClusterID()),
 		zap.Int64("taskID", req.GetBuildID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -282,7 +283,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		zap.Int64("lackBinlogRows", req.GetLackBinlogRows()),
 	)
 	if req.GetTaskSlot() <= 0 {
-		log.Ctx(ctx).Warn("receive index task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
+		mlog.Warn(ctx, "receive index task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
@@ -293,13 +294,13 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))
-		log.Warn("duplicated index build task", zap.Error(err))
+		mlog.Warn(ctx, "duplicated index build task", zap.Error(err))
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+		mlog.Error(ctx, "create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
 			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			zap.Error(err),
 		)
@@ -316,20 +317,20 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
-		log.Warn("DataNode failed to schedule",
+		mlog.Warn(ctx, "DataNode failed to schedule",
 			zap.Error(err))
 		ret = merr.Status(err)
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel).Inc()
-	log.Info("DataNode index job enqueued successfully",
+	mlog.Info(ctx, "DataNode index job enqueued successfully",
 		zap.String("indexName", req.GetIndexName()))
 	return ret, nil
 }
 
 func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.AnalyzeRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("receive analyze job",
+	mlog.Info(ctx, "receive analyze job",
 		zap.String("clusterID", req.GetClusterID()),
 		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -345,7 +346,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	)
 
 	if req.GetTaskSlot() <= 0 {
-		log.Ctx(ctx).Warn("receive analyze task with invalid slot, set to 65535", zap.Int64("taskSlot", req.GetTaskSlot()))
+		mlog.Warn(ctx, "receive analyze task with invalid slot, set to 65535", zap.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 65535
 	}
 
@@ -356,22 +357,22 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeAnalyzeJob.String(),
 			fmt.Sprintf("analyze task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
-		log.Warn("duplicated analyze task", zap.Error(err))
+		mlog.Warn(ctx, "duplicated analyze task", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
-		log.Warn("DataNode failed to schedule", zap.Error(err))
+		mlog.Warn(ctx, "DataNode failed to schedule", zap.Error(err))
 		ret = merr.Status(err)
 		return ret, nil
 	}
-	log.Info("DataNode analyze job enqueued successfully")
+	mlog.Info(ctx, "DataNode analyze job enqueued successfully")
 	return ret, nil
 }
 
 func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateStatsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("receive stats job",
+	mlog.Info(ctx, "receive stats job",
 		zap.String("clusterID", req.GetClusterID()),
 		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -386,7 +387,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	)
 
 	if req.GetTaskSlot() <= 0 {
-		log.Ctx(ctx).Warn("receive stats task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
+		mlog.Warn(ctx, "receive stats task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
 
@@ -397,12 +398,12 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(),
 			fmt.Sprintf("stats task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
-		log.Warn("duplicated stats task", zap.Error(err))
+		mlog.Warn(ctx, "duplicated stats task", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+		mlog.Error(ctx, "create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
 			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			zap.Error(err),
 		)
@@ -413,22 +414,22 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
-		log.Warn("DataNode failed to schedule", zap.Error(err))
+		mlog.Warn(ctx, "DataNode failed to schedule", zap.Error(err))
 		ret = merr.Status(err)
 		return ret, nil
 	}
-	log.Info("DataNode stats job enqueued successfully")
+	mlog.Info(ctx, "DataNode stats job enqueued successfully")
 	return ret, nil
 }
 
 // Deprecated: use QueryTask instead, keep for compatibility
 func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Request) (*workerpb.QueryJobsV2Response, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
-	).WithRateGroup("QueryResult", 1, 60)
+	)
 
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
-		log.Warn("DataNode not ready", zap.Error(err))
+		log.Warn(ctx, "DataNode not ready", zap.Error(err))
 		return &workerpb.QueryJobsV2Response{
 			Status: merr.Status(err),
 		}, nil
@@ -452,7 +453,7 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 			TaskIDs:   req.GetTaskIDs(),
 		})
 	default:
-		log.Warn("DataNode receive querying unknown type jobs")
+		log.Warn(ctx, "DataNode receive querying unknown type jobs")
 		return &workerpb.QueryJobsV2Response{
 			Status: merr.Status(errors.New("DataNode receive querying unknown type jobs")),
 		}, nil
@@ -460,9 +461,9 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 }
 
 func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
-	).WithRateGroup("QueryResult", 1, 60)
+	)
 
 	infos := make(map[typeutil.UniqueID]*index.IndexTaskInfo)
 	node.taskManager.ForeachIndexTaskInfo(func(ClusterID string, buildID typeutil.UniqueID, info *index.IndexTaskInfo) {
@@ -476,7 +477,7 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 			results = append(results, info.ToIndexTaskInfo(buildID))
 		}
 	}
-	log.Debug("query index jobs result success", zap.Any("results", results))
+	log.Debug(ctx, "query index jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
 			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
@@ -494,9 +495,9 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 }
 
 func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
-	).WithRateGroup("QueryResult", 1, 60)
+	)
 
 	results := make([]*workerpb.StatsResult, 0, len(req.GetTaskIDs()))
 	for _, taskID := range req.GetTaskIDs() {
@@ -505,7 +506,7 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 			results = append(results, info.ToStatsResult(taskID))
 		}
 	}
-	log.Debug("query stats job result success", zap.Any("results", results))
+	log.Debug(ctx, "query stats job result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
 			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
@@ -523,9 +524,9 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 }
 
 func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
-	).WithRateGroup("QueryResult", 1, 60)
+	)
 
 	results := make([]*workerpb.AnalyzeResult, 0, len(req.GetTaskIDs()))
 	for _, taskID := range req.GetTaskIDs() {
@@ -539,7 +540,7 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 			})
 		}
 	}
-	log.Debug("query analyze jobs result success", zap.Any("results", results))
+	log.Debug(ctx, "query analyze jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
 			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
@@ -558,18 +559,18 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 
 // Deprecated: use DropTask instead, keep for compatibility
 func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Request) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.String("clusterID", req.GetClusterID()),
+	log := mlog.With(zap.String("clusterID", req.GetClusterID()),
 		zap.Int64s("taskIDs", req.GetTaskIDs()),
 		zap.String("jobType", req.GetJobType().String()),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
-		log.Warn("DataNode not ready", zap.Error(err))
+		log.Warn(ctx, "DataNode not ready", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
 
-	log.Info("DataNode receive DropJobs request")
+	log.Info(ctx, "DataNode receive DropJobs request")
 
 	switch req.GetJobType() {
 	case indexpb.JobType_JobTypeIndexJob:
@@ -583,7 +584,7 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 				info.Cancel()
 			}
 		}
-		log.Info("drop index build jobs success")
+		log.Info(ctx, "drop index build jobs success")
 		return merr.Success(), nil
 	case indexpb.JobType_JobTypeAnalyzeJob:
 		keys := make([]index.Key, 0, len(req.GetTaskIDs()))
@@ -596,7 +597,7 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 				info.Cancel()
 			}
 		}
-		log.Info("drop analyze jobs success")
+		log.Info(ctx, "drop analyze jobs success")
 		return merr.Success(), nil
 	case indexpb.JobType_JobTypeStatsJob:
 		keys := make([]index.Key, 0, len(req.GetTaskIDs()))
@@ -609,10 +610,10 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 				info.Cancel()
 			}
 		}
-		log.Info("drop stats jobs success")
+		log.Info(ctx, "drop stats jobs success")
 		return merr.Success(), nil
 	default:
-		log.Warn("DataNode receive dropping unknown type jobs")
+		log.Warn(ctx, "DataNode receive dropping unknown type jobs")
 		return merr.Status(errors.New("DataNode receive dropping unknown type jobs")), nil
 	}
 }

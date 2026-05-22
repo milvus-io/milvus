@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"context"
 	"math"
 
 	"github.com/cockroachdb/errors"
@@ -9,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -81,7 +82,7 @@ type InsertBuffer struct {
 func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	estSize, err := typeutil.EstimateSizePerRecord(sch)
 	if err != nil {
-		log.Warn("failed to estimate size per record", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to estimate size per record", zap.Error(err))
 		return nil, err
 	}
 

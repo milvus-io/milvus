@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/generic"
@@ -247,7 +247,7 @@ func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceRese
 	// wrapper close may block waiting pending request finish
 	go func(w *clientConnWrapper[T], addr string) {
 		w.Close()
-		log.Info("previous client closed", zap.String("role", c.role), zap.String("addr", c.addr.Load()))
+		mlog.Info(context.TODO(), "previous client closed", zap.String("role", c.role), zap.String("addr", c.addr.Load()))
 	}(c.grpcClient, c.addr.Load())
 	c.addr.Store("")
 	c.grpcClient = nil
@@ -257,7 +257,7 @@ func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceRese
 func (c *ClientBase[T]) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to get client address", zap.Error(err))
+		mlog.Warn(ctx, "failed to get client address", zap.Error(err))
 		return err
 	}
 
@@ -269,7 +269,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		compress = Zstd
 	}
 	if c.encryption {
-		log.Ctx(ctx).Debug("Running in internalTLS mode with encryption enabled")
+		mlog.Debug(ctx, "Running in internalTLS mode with encryption enabled")
 		conn, err = grpc.DialContext(
 			dialContext,
 			addr,
@@ -372,9 +372,9 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 		return nil
 	}
 
-	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
+	log := mlog.With(zap.String("clientRole", c.GetRole()))
 	if time.Since(c.lastSessionCheck.Load()) < c.minSessionCheckInterval {
-		log.Debug("skip session check, verify too frequent")
+		log.Debug(ctx, "skip session check, verify too frequent")
 		return nil
 	}
 	c.lastSessionCheck.Store(time.Now())
@@ -382,12 +382,12 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 		sessions, _, getSessionErr := c.sess.GetSessions(ctx, c.GetRole())
 		if getSessionErr != nil {
 			// Only log but not handle this error as it is an auxiliary logic
-			log.Warn("fail to get session", zap.Error(getSessionErr))
+			log.Warn(ctx, "fail to get session", zap.Error(getSessionErr))
 			return getSessionErr
 		}
 		if coordSess, exist := sessions[c.GetRole()]; exist {
 			if c.GetNodeID() != coordSess.ServerID {
-				log.Warn("server id mismatch, may connected to a old server, start to reset connection",
+				log.Warn(ctx, "server id mismatch, may connected to a old server, start to reset connection",
 					zap.Int64("client_node", c.GetNodeID()),
 					zap.Int64("current_node", coordSess.ServerID))
 				return merr.WrapErrNodeNotMatch(c.GetNodeID(), coordSess.ServerID)
@@ -409,15 +409,15 @@ func (c *ClientBase[T]) needResetCancel() (needReset bool) {
 }
 
 func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry, needReset, forceReset bool, retErr error) {
-	log := log.Ctx(ctx).With(zap.String("clientRole", c.GetRole()))
+	log := mlog.With(zap.String("clientRole", c.GetRole()))
 	// Unknown err
 	if !funcutil.IsGrpcErr(err) {
-		log.Warn("fail to grpc call because of unknown error", zap.Error(err))
+		log.Warn(ctx, "fail to grpc call because of unknown error", zap.Error(err))
 		return false, false, false, err
 	}
 
 	// grpc err
-	log.Warn("call received grpc error", zap.Error(err))
+	log.Warn(ctx, "call received grpc error", zap.Error(err))
 	switch {
 	case IsConnectionClosingErr(err):
 		// Connection is being torn down, retry is pointless.
@@ -457,7 +457,7 @@ func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 	if c.isNode {
 		err := c.verifySession(ctx)
 		if err != nil {
-			log.Warn("failed to verify node session", zap.Error(err))
+			mlog.Warn(ctx, "failed to verify node session", zap.Error(err))
 		}
 		return !errors.Is(err, merr.ErrNodeNotFound)
 	}
@@ -465,7 +465,7 @@ func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 }
 
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
-	log := log.Ctx(ctx).With(zap.String("client_role", c.GetRole()))
+	log := mlog.With(zap.String("client_role", c.GetRole()))
 	var (
 		ret       any
 		clientErr error
@@ -474,14 +474,14 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 
 	wrapper, clientErr = c.GetGrpcClient(ctx)
 	if clientErr != nil {
-		log.Warn("fail to get grpc client", zap.Error(clientErr))
+		log.Warn(ctx, "fail to get grpc client", zap.Error(clientErr))
 	}
 
 	resetClientFunc := func(forceReset bool) {
 		c.resetConnection(wrapper, forceReset)
 		wrapper, clientErr = c.GetGrpcClient(ctx)
 		if clientErr != nil {
-			log.Warn("fail to get grpc client in the retry state", zap.Error(clientErr))
+			log.Warn(ctx, "fail to get grpc client in the retry state", zap.Error(clientErr))
 		}
 	}
 
@@ -495,7 +495,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			}
 
 			err := errors.Wrap(clientErr, "empty grpc client")
-			log.Warn("grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
+			log.Warn(ctx, "grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
 			resetClientFunc(false)
 			return true, err
 		}
@@ -509,13 +509,13 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			var needRetry, needReset, forceReset bool
 			needRetry, needReset, forceReset, err = c.checkGrpcErr(ctx, err)
 			if needReset {
-				log.Warn("start to reset connection because of specific reasons", zap.Error(err))
+				log.Warn(ctx, "start to reset connection because of specific reasons", zap.Error(err))
 				resetClientFunc(forceReset)
 			} else {
 				// err occurs but no need to reset connection, try to verify session
 				err := c.verifySession(ctx)
 				if err != nil {
-					log.Warn("failed to verify session, reset connection", zap.Error(err))
+					log.Warn(ctx, "failed to verify session, reset connection", zap.Error(err))
 					resetClientFunc(forceReset)
 				}
 			}
@@ -535,12 +535,12 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			status = merr.Status(nil)
 		default:
 			// it will directly return the result
-			log.Warn("unknown return type", zap.Any("return", ret))
+			log.Warn(ctx, "unknown return type", zap.Any("return", ret))
 			return false, nil
 		}
 
 		if status == nil {
-			log.Warn("status is nil, please fix it", zap.Stack("stack"))
+			log.Warn(ctx, "status is nil, please fix it", zap.Stack("stack"))
 			return false, nil
 		}
 
@@ -577,7 +577,7 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 	ret, err := c.call(ctx, caller)
 	if err != nil {
 		traceErr := errors.Wrapf(err, "stack trace: %s", tracer.StackTrace())
-		log.Ctx(ctx).Warn("ClientBase Call grpc call get error",
+		mlog.Warn(ctx, "ClientBase Call grpc call get error",
 			zap.String("role", c.GetRole()),
 			zap.String("address", c.GetAddr()),
 			zap.Error(traceErr),

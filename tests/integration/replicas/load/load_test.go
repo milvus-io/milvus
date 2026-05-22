@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -234,7 +234,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp2.Status))
-		log.Info("get replicas", zap.Any("replicas", resp2.GetReplicas()))
+		mlog.Info(context.TODO(), "get replicas", zap.Any("replicas", resp2.GetReplicas()))
 		return len(resp2.GetReplicas()) == 2
 	}, 30*time.Second, time.Second)
 
@@ -645,7 +645,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		s.Equal(5, len(resp3.GetReplicas()))
 		for _, replica := range resp3.GetReplicas() {
 			if len(replica.GetNodeIds()) != 2 { // one sn and one qn at least
-				log.Info("get replica info", zap.Any("replica", replica))
+				mlog.Info(context.TODO(), "get replica info", zap.Any("replica", replica))
 				return false
 			}
 		}
@@ -719,7 +719,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 			segmentNum += len(resp.Segments)
 			channelNum += len(resp.Channels)
 		}
-		log.Info("get data distribution", zap.Int("segmentNum", segmentNum), zap.Int("channelNum", channelNum))
+		mlog.Info(context.TODO(), "get data distribution", zap.Int("segmentNum", segmentNum), zap.Int("channelNum", channelNum))
 		return segmentNum == 5 && channelNum == 5
 	}, 30*time.Second, 1*time.Second)
 

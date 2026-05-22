@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -66,12 +66,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("cdc init done")
+	mlog.Info(s.ctx, "cdc init done")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("cdc start done")
+	mlog.Info(s.ctx, "cdc start done")
 	return nil
 }
 
@@ -84,10 +84,10 @@ func (s *Server) Stop() (err error) {
 // stop stops the server.
 func (s *Server) stop() {
 	s.componentState.OnStopping()
-	log := log.Ctx(s.ctx)
+
 	defer s.cancel()
 
-	log.Info("stopping cdc...")
+	mlog.Info(s.ctx, "stopping cdc...")
 
 	// Stop CDC service.
 	s.cdcServer.Stop()
@@ -95,7 +95,7 @@ func (s *Server) stop() {
 	// Don't close s.etcdCli here because it's a shared instance from kvfactory.
 	// The kvfactory.CloseEtcdClient() will be called in roles.go to close it properly.
 
-	log.Info("cdc stop done")
+	mlog.Info(s.ctx, "cdc stop done")
 }
 
 // Health check the health status of cdc.
@@ -105,13 +105,12 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 }
 
 func (s *Server) init() (err error) {
-	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
-			log.Error("cdc init failed", zap.Error(err))
+			mlog.Error(s.ctx, "cdc init failed", zap.Error(err))
 			return
 		}
-		log.Info("init cdc server finished")
+		mlog.Info(s.ctx, "init cdc server finished")
 	}()
 
 	// Create etcd client.
@@ -127,13 +126,12 @@ func (s *Server) init() (err error) {
 }
 
 func (s *Server) start() (err error) {
-	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
-			log.Error("CDC start failed", zap.Error(err))
+			mlog.Error(s.ctx, "CDC start failed", zap.Error(err))
 			return
 		}
-		log.Info("start CDC server finished")
+		mlog.Info(s.ctx, "start CDC server finished")
 	}()
 
 	s.cdcServer.Start()

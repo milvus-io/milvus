@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -150,6 +151,69 @@ func TestLogIncludesContextFields(t *testing.T) {
 	assert.Equal(t, "abc123", entry["request_id"])
 }
 
+func TestLogAppendsCurrentTraceContext(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	initForTest(logger)
+	defer resetLogger()
+
+	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	spanID, _ := trace.SpanIDFromHex("0102030405060708")
+	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID,
+		SpanID:  spanID,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), spanCtx)
+
+	Info(ctx, "test")
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", entry[keyTraceID])
+	assert.Equal(t, "0102030405060708", entry[keySpanID])
+}
+
+func TestLogUsesCurrentTraceContextWithCachedLogger(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	initForTest(logger)
+	defer resetLogger()
+
+	ctx := WithFields(context.Background(), String("request_id", "abc123"))
+
+	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	firstSpanID, _ := trace.SpanIDFromHex("0102030405060708")
+	secondSpanID, _ := trace.SpanIDFromHex("1112131415161718")
+
+	firstCtx := trace.ContextWithSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID,
+		SpanID:  firstSpanID,
+	}))
+	Info(firstCtx, "first")
+
+	secondCtx := trace.ContextWithSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID,
+		SpanID:  secondSpanID,
+	}))
+	Info(secondCtx, "second")
+
+	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	require.Len(t, lines, 2)
+
+	var firstEntry map[string]interface{}
+	err := json.Unmarshal(lines[0], &firstEntry)
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", firstEntry["request_id"])
+	assert.Equal(t, "0102030405060708", firstEntry[keySpanID])
+
+	var secondEntry map[string]interface{}
+	err = json.Unmarshal(lines[1], &secondEntry)
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", secondEntry["request_id"])
+	assert.Equal(t, "1112131415161718", secondEntry[keySpanID])
+}
+
 func TestLogCombinesContextAndCallSiteFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
@@ -232,7 +296,7 @@ func TestLogFunction(t *testing.T) {
 // resetLogger restores the default logger after test
 func resetLogger() {
 	cfg := zap.NewProductionConfig()
-	cfg.Level = globalLevel
+	cfg.Level = GetAtomicLevel()
 	logger, _ := cfg.Build(zap.AddCallerSkip(1))
 	globalLogger.Store(logger)
 }

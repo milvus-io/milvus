@@ -17,6 +17,7 @@
 package delegator
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
@@ -26,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -221,7 +222,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	}
 
 	if !isServiceable {
-		log.Warn("channel distribution is not serviceable",
+		mlog.Warn(context.TODO(), "channel distribution is not serviceable",
 			zap.String("channel", d.channelName),
 			zap.Float64("requiredLoadRatio", requiredLoadRatio),
 			zap.Float64("currentLoadRatio", d.queryView.GetLoadedRatio()),
@@ -269,7 +270,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 		})
 	}
 
-	return
+	return sealed, growing, sealedRowCount, version, err
 }
 
 func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
@@ -283,7 +284,7 @@ func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []Snapshot
 	}
 	sealed, growing = d.filterSegments(sealed, growing, filterOnline)
 	version = current.version
-	return
+	return sealed, growing, version
 }
 
 func (d *distribution) filterSegments(sealed []SnapshotItem, growing []SegmentEntry, filter func(SegmentEntry, int) bool) ([]SnapshotItem, []SegmentEntry) {
@@ -308,10 +309,10 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
 		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
-		return
+		return sealed, growing
 	}
 
-	return
+	return sealed, growing
 }
 
 // IsReadableSealedSegment reuses PeekSegments(readable=true) semantics for Reopen activation.
@@ -374,7 +375,7 @@ func (d *distribution) updateServiceable(triggerAction string) {
 
 	serviceable := loadedRatio >= 1.0
 	if serviceable != d.queryView.Serviceable() {
-		log.Info("channel distribution serviceable changed",
+		mlog.Info(context.TODO(), "channel distribution serviceable changed",
 			zap.String("channel", d.channelName),
 			zap.Bool("serviceable", serviceable),
 			zap.Float64("loadedRatio", loadedRatio),
@@ -406,7 +407,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
-			log.Warn("Invalid segment distribution changed, skip it",
+			mlog.Warn(context.TODO(), "Invalid segment distribution changed, skip it",
 				zap.Int64("segmentID", entry.SegmentID),
 				zap.Int64("oldVersion", oldEntry.Version),
 				zap.Int64("oldNode", oldEntry.NodeID),
@@ -474,7 +475,7 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 	d.mut.Unlock()
 
 	if updated {
-		log.Info("mark sealed segment offline from distribution",
+		mlog.Info(context.TODO(), "mark sealed segment offline from distribution",
 			zap.String("channelName", d.channelName),
 			zap.Int64s("segmentIDs", segmentIDs))
 		d.notifySnapshotUpdate()
@@ -507,7 +508,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		// sealed segment already exists or dropped, make growing segment redundant
 		if sealedSet.Contain(s.SegmentID) || droppedSet.Contain(s.SegmentID) {
 			s.TargetVersion = redundantTargetVersion
-			log.Info("set growing segment redundant, wait for release",
+			mlog.Info(context.TODO(), "set growing segment redundant, wait for release",
 				zap.Int64("segmentID", s.SegmentID),
 				zap.Int64("targetVersion", s.TargetVersion),
 			)
@@ -519,7 +520,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	d.queryView.growingSegments.Range(func(s UniqueID) bool {
 		entry, ok := d.growingSegments[s]
 		if !ok {
-			log.Warn("readable growing segment lost, consume from dml seems too slow",
+			mlog.Warn(context.TODO(), "readable growing segment lost, consume from dml seems too slow",
 				zap.Int64("segmentID", s))
 			return true
 		}
@@ -546,7 +547,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	}
 	d.updateServiceable("SyncTargetVersion")
 
-	log.Info("Update channel query view",
+	mlog.Info(context.TODO(), "Update channel query view",
 		zap.String("channel", d.channelName),
 		zap.Int64s("partitions", partitions),
 		zap.Int64("oldVersion", oldValue),
@@ -605,7 +606,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	}
 	d.mut.Unlock()
 
-	log.Info("remove segments from distribution",
+	mlog.Info(context.TODO(), "remove segments from distribution",
 		zap.String("channelName", d.channelName),
 		zap.Int64s("growing", lo.Map(growingSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
 		zap.Int64s("sealed", lo.Map(sealedSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),

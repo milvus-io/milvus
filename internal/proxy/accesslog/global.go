@@ -17,6 +17,7 @@
 package accesslog
 
 import (
+	"context"
 	"io"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	configEvent "github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -127,7 +128,7 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 	}
 	_, err := l.writer.Write([]byte(formatter.Format(info)))
 	if err != nil {
-		log.Warn("write access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "write access log failed", zap.Error(err))
 		return false
 	}
 	return true
@@ -146,11 +147,11 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 
 		err := logger.Init(params)
 		if err != nil {
-			log.Warn("Init access logger failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Init access logger failed", zap.Error(err))
 		}
 		_globalL = logger
 		info.ClusterPrefix.Store(params.CommonCfg.ClusterPrefix.GetValue())
-		log.Info("Init access logger success")
+		mlog.Info(context.TODO(), "Init access logger success")
 	})
 }
 

@@ -17,12 +17,13 @@
 package metacache
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type SegmentBM25Stats struct {
@@ -52,7 +53,7 @@ func (s *SegmentBM25Stats) Serialize() (map[int64][]byte, map[int64]int64, error
 	for fieldID, stats := range s.stats {
 		bytes, err := stats.Serialize()
 		if err != nil {
-			log.Warn("serialize history bm25 stats failed", zap.Int64("fieldID", fieldID))
+			mlog.Warn(context.TODO(), "serialize history bm25 stats failed", zap.Int64("fieldID", fieldID))
 			return nil, nil, err
 		}
 		result[fieldID] = bytes

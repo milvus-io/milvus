@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -538,7 +538,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 		manifestPaths = append(manifestPaths, manifestPath)
 	}
 
-	log.Info("Successfully wrote segment manifest files",
+	mlog.Info(ctx, "Successfully wrote segment manifest files",
 		zap.Int("numSegments", len(snapshot.Segments)),
 		zap.String("manifestDir", manifestDir))
 
@@ -560,7 +560,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 		return "", fmt.Errorf("failed to write metadata file: %w", err)
 	}
 
-	log.Info("Successfully wrote metadata file",
+	mlog.Info(ctx, "Successfully wrote metadata file",
 		zap.String("metadataPath", metadataPath))
 
 	return metadataPath, nil
@@ -680,7 +680,7 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 		if err := w.chunkManager.MultiRemove(ctx, manifestList); err != nil {
 			return fmt.Errorf("failed to remove manifest files: %w", err)
 		}
-		log.Info("Successfully removed manifest files",
+		mlog.Info(ctx, "Successfully removed manifest files",
 			zap.Int("count", len(manifestList)),
 			zap.Int64("snapshotID", snapshotID))
 	}
@@ -689,10 +689,10 @@ func (w *SnapshotWriter) Drop(ctx context.Context, metadataFilePath string) erro
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
 		return fmt.Errorf("failed to remove metadata file: %w", err)
 	}
-	log.Info("Successfully removed metadata file",
+	mlog.Info(ctx, "Successfully removed metadata file",
 		zap.String("metadataFilePath", metadataFilePath))
 
-	log.Info("Successfully dropped snapshot",
+	mlog.Info(ctx, "Successfully dropped snapshot",
 		zap.Int64("snapshotID", snapshotID))
 	return nil
 }
@@ -999,7 +999,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 		metadata, err := r.readMetadataFile(ctx, file)
 		if err != nil {
 			// Log warning but continue - don't fail entire list for one bad file
-			log.Warn("Failed to parse metadata file, skipping",
+			mlog.Warn(ctx, "Failed to parse metadata file, skipping",
 				zap.String("file", file),
 				zap.Error(err))
 			continue

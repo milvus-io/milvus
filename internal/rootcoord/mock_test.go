@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -770,9 +770,9 @@ func cleanTestEnv() {
 		return
 	}
 	if err := os.RemoveAll(path); err != nil { //nolint:gosec // path is from test environment variable
-		log.Warn("failed to clean test directories", zap.Error(err), zap.String("path", path))
+		mlog.Warn(context.TODO(), "failed to clean test directories", zap.Error(err), zap.String("path", path))
 	}
-	log.Debug("clean test environment", zap.String("path", path))
+	mlog.Debug(context.TODO(), "clean test environment", zap.String("path", path))
 }
 
 func withTtSynchronizer(ticker *timetickSync) Opt {
@@ -1064,12 +1064,12 @@ func newChanTimeTickSync(packChan chan *msgstream.ConsumeMsgPack) *timetickSync 
 	f.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
 		stream := msgstream.NewWastedMockMsgStream()
 		stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
-			log.Info("mock Broadcast")
+			mlog.Info(context.TODO(), "mock Broadcast")
 			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return nil
 		}
 		stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-			log.Info("mock BroadcastMark")
+			mlog.Info(context.TODO(), "mock BroadcastMark")
 			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return map[string][]msgstream.MessageID{}, nil
 		}

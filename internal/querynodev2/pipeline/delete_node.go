@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -54,7 +54,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	deleteData.Timestamps = append(deleteData.Timestamps, msg.Timestamps...)
 	deleteData.RowCount += int64(len(pks))
 
-	log.Info("pipeline fetch delete msg",
+	mlog.Info(context.TODO(), "pipeline fetch delete msg",
 		zap.Int64("collectionID", dNode.collectionID),
 		zap.Int64("partitionID", msg.PartitionID),
 		zap.Int("deleteRowNum", len(pks)),

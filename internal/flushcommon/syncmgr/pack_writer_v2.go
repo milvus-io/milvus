@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -80,25 +80,25 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	err error,
 ) {
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
-		log.Error("failed to write insert data", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to write insert data", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		log.Error("failed to process stats blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process stats blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
-		log.Error("failed to process delta blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process delta blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		log.Error("failed to process bm25 stats blob", zap.Error(err))
-		return
+		mlog.Error(ctx, "failed to process bm25 stats blob", zap.Error(err))
+		return inserts, deltas, stats, bm25Stats, manifest, size, err
 	}
 
 	size = bw.sizeWritten
 
-	return
+	return inserts, deltas, stats, bm25Stats, manifest, size, err
 }
 
 // getRootPath returns the rootPath current task shall use.
@@ -176,7 +176,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		var err error
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
 		if err != nil {
-			log.Warn("failed to write inserts into storage",
+			mlog.Warn(ctx, "failed to write inserts into storage",
 				zap.Int64("collectionID", pack.collectionID),
 				zap.Int64("segmentID", pack.segmentID),
 				zap.Error(err))
@@ -204,7 +204,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	doWrite := func(w storage.RecordWriter) error {
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
-				log.Error("failed to close writer after write failed", zap.Error(closeErr))
+				mlog.Error(context.TODO(), "failed to close writer after write failed", zap.Error(closeErr))
 			}
 			return err
 		}

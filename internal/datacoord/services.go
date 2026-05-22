@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -42,8 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -76,10 +77,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("dbID", req.GetDbID()),
 		zap.Int64("collectionID", req.GetCollectionID()))
-	log.Info("receive flush request")
+	log.Info(ctx, "receive flush request")
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
 
@@ -92,7 +93,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
-		log.Warn("unable to alloc timestamp", zap.Error(err))
+		log.Warn(ctx, "unable to alloc timestamp", zap.Error(err))
 		return nil, err
 	}
 	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), ts, req.GetSegmentIDs())
@@ -118,7 +119,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn("fail to get collection", zap.Error(err))
+		mlog.Warn(ctx, "fail to get collection", zap.Error(err))
 		return nil, err
 	}
 	if coll == nil {
@@ -156,7 +157,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		}
 	}
 
-	log.Info("flush response with segments",
+	mlog.Info(ctx, "flush response with segments",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
@@ -177,7 +178,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 }
 
 func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
-	log.Ctx(ctx).Info("receive FlushAll request")
+	mlog.Info(ctx, "receive FlushAll request")
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.FlushAllResponse{
@@ -202,7 +203,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		MustBuildBroadcast()
 	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
-		log.Ctx(ctx).Warn("broadcast FlushAllMessage fail", zap.Error(err))
+		mlog.Warn(ctx, "broadcast FlushAllMessage fail", zap.Error(err))
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -219,7 +220,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", log.FieldMessages(msgs))
+	mlog.Info(ctx, "FlushAll successfully", mlog.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
 		FlushAllMsgs: flushAllMsgs,
@@ -233,7 +234,6 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 
 // AssignSegmentID applies for segment ids and make allocation for records.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AssignSegmentIDResponse{
 			Status: merr.Status(err),
@@ -243,7 +243,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 
 	for _, r := range req.SegmentIDRequests {
-		log.Info("handle assign segment request",
+		mlog.Info(ctx, "handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
@@ -254,14 +254,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		// Note: this request wouldn't be received if collection didn't exist.
 		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
 		if err != nil {
-			log.Warn("cannot get collection schema", zap.Error(err))
+			mlog.Warn(ctx, "cannot get collection schema", zap.Error(err))
 		}
 
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
 		if err != nil {
-			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
+			mlog.Warn(ctx, "failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			assigns = append(assigns, &datapb.SegmentIDAssignment{
 				ChannelName:  r.ChannelName,
 				CollectionID: r.CollectionID,
@@ -271,7 +271,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			continue
 		}
 
-		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
+		mlog.Info(ctx, "success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
 
 		for _, allocation := range segmentAllocations {
 			result := &datapb.SegmentIDAssignment{
@@ -399,10 +399,10 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 // GetCollectionStatistics returns statistics for collection
 // for now only row count is returned
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-	log.Info("received request to get collection statistics")
+	log.Info(ctx, "received request to get collection statistics")
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetCollectionStatisticsResponse{
 			Status: merr.Status(err),
@@ -454,7 +454,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 					consistentCount++
 				}
 			}
-			log.Info("calculated schema version consistency",
+			log.Info(ctx, "calculated schema version consistency",
 				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
 				zap.Int("totalSegments", len(segments)),
 				zap.Int("consistentSegments", consistentCount))
@@ -474,7 +474,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		}
 	}
 
-	log.Info("success to get collection statistics", zap.Any("response", resp))
+	log.Info(ctx, "success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }
 
@@ -482,7 +482,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 // if partID is empty, return statistics for all partitions of the collection
 // for now only row count is returned
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
@@ -503,7 +503,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		nums += num
 	}
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
-	log.Info("success to get partition statistics", zap.Any("response", resp))
+	log.Info(ctx, "success to get partition statistics", zap.Any("response", resp))
 	return resp, nil
 }
 
@@ -518,7 +518,6 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegme
 // GetSegmentInfo returns segment info requested, status, row count, etc included
 // Called by: QueryCoord, DataNode, IndexCoord, Proxy.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentInfoResponse{
 		Status: merr.Success(),
 	}
@@ -536,7 +535,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			info = s.meta.GetSegment(ctx, id)
 			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
 			if info == nil {
-				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+				mlog.Warn(ctx, "failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
 				err := merr.WrapErrSegmentNotFound(id)
 				resp.Status = merr.Status(err)
 				return resp, nil
@@ -586,7 +585,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		channelName = req.GetChannel()
 	)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("nodeID", nodeID),
 		zap.String("channel", channelName),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -595,7 +594,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Bool("withFullBinlogs", req.GetWithFullBinlogs()),
 	)
 
-	log.Info("receive SaveBinlogPaths request",
+	log.Info(ctx, "receive SaveBinlogPaths request",
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
@@ -612,7 +611,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
 		if err != nil || targetID != nodeID {
 			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-			log.Warn("failed to get latest wal allocated", zap.Int64("nodeID", nodeID), zap.Int64("channel nodeID", targetID), zap.Error(err))
+			log.Warn(ctx, "failed to get latest wal allocated", zap.Int64("nodeID", nodeID), zap.Int64("channel nodeID", targetID), zap.Error(err))
 			return merr.Status(err), nil
 		}
 	}
@@ -620,7 +619,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// try to parse path and fill logid
 	err := binlog.CompressSaveBinlogPaths(req)
 	if err != nil {
-		log.Warn("fail to CompressSaveBinlogPaths", zap.String("channel", channelName), zap.Error(err))
+		log.Warn(ctx, "fail to CompressSaveBinlogPaths", zap.String("channel", channelName), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -633,18 +632,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// validate level one segment
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			log.Warn("failed to get segment", zap.Error(err))
+			log.Warn(ctx, "failed to get segment", zap.Error(err))
 			return merr.Status(err), nil
 		}
 
 		if segment.State == commonpb.SegmentState_Dropped {
-			log.Info("save to dropped segment, ignore this request")
+			log.Info(ctx, "save to dropped segment, ignore this request")
 			return merr.Success(), nil
 		}
 
 		if !isSegmentHealthy(segment) {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
+			log.Warn(ctx, "failed to get segment, the segment not healthy", zap.Error(err))
 			return merr.Status(err), nil
 		}
 		if err := s.validateTextSegmentStorage(req); err != nil {
@@ -694,14 +693,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
-			log.Error("save binlog and checkpoints failed", zap.Error(err))
+			log.Error(ctx, "save binlog and checkpoints failed", zap.Error(err))
 			return merr.Status(err), nil
 		}
-		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
+		log.Info(ctx, "save binlog and checkpoints failed with ignorable error", zap.Error(err))
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
-	log.Info("SaveBinlogPaths sync segment with meta",
+	log.Info(ctx, "SaveBinlogPaths sync segment with meta",
 		zap.Any("checkpoints", req.GetCheckPoints()),
 		zap.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
 		zap.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
@@ -712,7 +711,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// Validate manifest segment after update
 	if segment := s.meta.GetSegment(ctx, req.GetSegmentID()); segment != nil {
 		if msg := ValidateManifestSegment(segment); msg != "" {
-			log.Warn("manifest segment validation warning", zap.String("detail", msg))
+			log.Warn(ctx, "manifest segment validation warning", zap.String("detail", msg))
 		}
 	}
 
@@ -736,7 +735,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				WithPartitionID(req.GetPartitionID()).
 				WithChannel(req.GetChannel()))
 		if err != nil {
-			log.Warn("failed to trigger single compaction")
+			log.Warn(ctx, "failed to trigger single compaction")
 		}
 	}
 
@@ -767,7 +766,6 @@ func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest) 
 // DropVirtualChannel notifies vchannel dropped
 // And contains the remaining data log & checkpoint to update
 func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
-	log := log.Ctx(ctx)
 	resp := &datapb.DropVirtualChannelResponse{
 		Status: merr.Success(),
 	}
@@ -778,7 +776,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 
 	channel := req.GetChannelName()
-	log.Info("receive DropVirtualChannel request",
+	mlog.Info(ctx, "receive DropVirtualChannel request",
 		zap.String("channelName", channel))
 
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
@@ -800,7 +798,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 	err := s.meta.UpdateDropChannelSegmentInfo(ctx, channel, segments)
 	if err != nil {
-		log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
+		mlog.Error(ctx, "Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -815,7 +813,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 // SetSegmentState reset the state of the given segment.
 func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
-	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.SetSegmentStateResponse{
 			Status: merr.Status(err),
@@ -823,7 +820,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 	}
 	err := s.meta.SetState(ctx, req.GetSegmentId(), req.GetNewState())
 	if err != nil {
-		log.Error("failed to updated segment state in dataCoord meta",
+		mlog.Error(ctx, "failed to updated segment state in dataCoord meta",
 			zap.Int64("segmentID", req.SegmentId),
 			zap.String("newState", req.GetNewState().String()))
 		return &datapb.SetSegmentStateResponse{
@@ -846,13 +843,13 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 // UpdateStateCode update state code
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.stateCode.Store(code)
-	log.Ctx(s.ctx).Info("update datacoord state", zap.String("state", code.String()))
+	mlog.Info(s.ctx, "update datacoord state", zap.String("state", code.String()))
 }
 
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
-	log.Ctx(ctx).Debug("DataCoord current state", zap.String("StateCode", code.String()))
+	mlog.Debug(ctx, "DataCoord current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID() // or Params.NodeID
@@ -872,7 +869,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 // GetRecoveryInfo get recovery info for segment.
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	log := log.Ctx(ctx)
+	log := mlog.With()
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
 	log = log.With(
@@ -890,7 +887,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 
 	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
 	if err != nil {
-		log.Error("get collection info from rootcoord failed",
+		log.Error(ctx, "get collection info from rootcoord failed",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -901,7 +898,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	for _, c := range channels {
 		channelInfo := s.handler.GetQueryVChanPositions(&channelMeta{Name: c, CollectionID: collectionID}, partitionID)
 		channelInfos = append(channelInfos, channelInfo)
-		log.Info("datacoord append channelInfo in GetRecoveryInfo",
+		log.Info(ctx, "datacoord append channelInfo in GetRecoveryInfo",
 			zap.String("channel", channelInfo.GetChannelName()),
 			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
 			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
@@ -922,7 +919,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		segment := s.meta.GetSegment(ctx, id)
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(id)
-			log.Warn("failed to get segment", zap.Int64("segmentID", id))
+			log.Warn(ctx, "failed to get segment", zap.Int64("segmentID", id))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -968,7 +965,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}
 
 		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
-			log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
+			log.Warn(ctx, "segment row number meta inconsistent with bin log row count and will be corrected",
 				zap.Int64("segmentID", segment.GetID()),
 				zap.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
 				zap.Int64("segment bin log row count (correct)", newCount))
@@ -1020,7 +1017,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // GetRecoveryInfoV2 get recovery info for segment
 // Called by: QueryCoord.
 func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryInfoRequestV2) (*datapb.GetRecoveryInfoResponseV2, error) {
-	log := log.Ctx(ctx)
+	log := mlog.With()
 	collectionID := req.GetCollectionID()
 	partitionIDs := req.GetPartitionIDs()
 	log = log.With(
@@ -1046,7 +1043,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	for _, ch := range channels {
 		channelInfo := s.handler.GetQueryVChanPositions(ch, partitionIDs...)
 		channelInfos = append(channelInfos, channelInfo)
-		log.Info("datacoord append channelInfo in GetRecoveryInfo",
+		log.Info(ctx, "datacoord append channelInfo in GetRecoveryInfo",
 			zap.String("channel", channelInfo.GetChannelName()),
 			zap.Any("seekPos", channelInfo.GetSeekPosition()),
 			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
@@ -1065,7 +1062,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		segment := s.meta.GetSegment(ctx, id)
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(id)
-			log.Warn("failed to get segment", zap.Int64("segmentID", id))
+			log.Warn(ctx, "failed to get segment", zap.Int64("segmentID", id))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -1084,7 +1081,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
 		if rowCount != segment.NumOfRows && rowCount > 0 {
-			log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
+			log.Warn(ctx, "segment row number meta inconsistent with bin log row count and will be corrected",
 				zap.Int64("segmentID", segment.GetID()),
 				zap.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
 				zap.Int64("segment bin log row count (correct)", rowCount))
@@ -1114,10 +1111,10 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 // GetChannelRecoveryInfo get recovery channel info.
 // Called by: StreamingNode.
 func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("vchannel", req.GetVchannel()),
 	)
-	log.Info("get channel recovery info request received")
+	log.Info(ctx, "get channel recovery info request received")
 	resp := &datapb.GetChannelRecoveryInfoResponse{
 		Status: merr.Success(),
 	}
@@ -1132,7 +1129,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		CollectionID: collectionID,
 	}, allPartitionID)
 	if channelInfo.SeekPosition == nil {
-		log.Warn("channel recovery start position is not found, may collection is on creating")
+		log.Warn(ctx, "channel recovery start position is not found, may collection is on creating")
 		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
 		return resp, nil
 	}
@@ -1148,7 +1145,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		}
 	}
 
-	log.Info("datacoord get channel recovery info",
+	log.Info(ctx, "datacoord get channel recovery info",
 		zap.String("channel", channelInfo.GetChannelName()),
 		zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
 		zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
@@ -1167,13 +1164,12 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 // GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-	log := log.Ctx(ctx)
 	resp := &datapb.GetFlushedSegmentsResponse{
 		Status: merr.Success(),
 	}
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
-	log.Info("received get flushed segments request",
+	mlog.Info(ctx, "received get flushed segments request",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 	)
@@ -1211,14 +1207,13 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // GetSegmentsByStates returns all segment matches provided criterion and States
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
-	log := log.Ctx(ctx)
 	resp := &datapb.GetSegmentsByStatesResponse{
 		Status: merr.Success(),
 	}
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
 	states := req.GetStates()
-	log.Info("received get segments by states request",
+	mlog.Info(ctx, "received get segments by states request",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Any("states", states))
@@ -1287,10 +1282,10 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		msg := "failed to get metrics"
-		log.Warn(msg, zap.Error(err))
+		mlog.Warn(ctx,
+			msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
 			Status: merr.Status(errors.Wrap(err, msg)),
 		}, nil
@@ -1314,10 +1309,10 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-	log.Info("received manual compaction", zap.Any("request", req))
+	log.Info(ctx, "received manual compaction", zap.Any("request", req))
 
 	resp := &milvuspb.ManualCompactionResponse{
 		Status: merr.Success(),
@@ -1348,7 +1343,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		)
 	}
 	if err != nil {
-		log.Error("failed to trigger manual compaction", zap.Error(err))
+		log.Error(ctx, "failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -1362,17 +1357,17 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
+	log.Info(ctx, "success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
 		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("targetSize", req.GetTargetSize()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("compactionID", req.GetCompactionID()),
 	)
-	log.Info("received get compaction state request")
+	log.Info(ctx, "received get compaction state request")
 	resp := &milvuspb.GetCompactionStateResponse{
 		Status: merr.Success(),
 	}
@@ -1395,7 +1390,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	resp.CompletedPlanNo = int64(info.completedCnt)
 	resp.TimeoutPlanNo = int64(info.timeoutCnt)
 	resp.FailedPlanNo = int64(info.failedCnt)
-	log.Info("success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
+	log.Info(ctx, "success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
 		zap.Int("completed", info.completedCnt), zap.Int("failed", info.failedCnt), zap.Int("timeout", info.timeoutCnt))
 
 	return resp, nil
@@ -1403,10 +1398,10 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 
 // GetCompactionStateWithPlans returns the compaction state of given plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("compactionID", req.GetCompactionID()),
 	)
-	log.Info("received the request to get compaction state with plans")
+	log.Info(ctx, "received the request to get compaction state with plans")
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetCompactionPlansResponse{
@@ -1429,7 +1424,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	})
 
 	planIDs := lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(planID int64, _ *milvuspb.CompactionMergeInfo) int64 { return planID })
-	log.Info("success to get state with plans", zap.Any("state", info.state), zap.Any("merge infos", resp.MergeInfos),
+	log.Info(ctx, "success to get state with plans", zap.Any("state", info.state), zap.Any("merge infos", resp.MergeInfos),
 		zap.Int64s("plans", planIDs))
 	return resp, nil
 }
@@ -1437,12 +1432,12 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 // WatchChannels notifies DataCoord to watch vchannels of a collection.
 // Deprecated: Redundant design by now, remove it in future.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Strings("channels", req.GetChannelNames()),
 		zap.Any("dbProperties", req.GetDbProperties()),
 	)
-	log.Info("receive watch channels request")
+	log.Info(ctx, "receive watch channels request")
 	resp := &datapb.WatchChannelsResponse{
 		Status: merr.Success(),
 	}
@@ -1456,7 +1451,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		// TODO: redundant channel mark by now, remove it in future.
 		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
-			log.Error("failed to mark channel added", zap.Error(err))
+			log.Error(ctx, "failed to mark channel added", zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -1466,10 +1461,10 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		if startPos != nil {
 			startPos.Timestamp = req.GetCreateTimestamp()
 			if err := s.meta.UpdateChannelCheckpoint(ctx, channelName, startPos); err != nil {
-				log.Warn("failed to init channel checkpoint, meta update error", zap.String("channel", channelName), zap.Error(err))
+				log.Warn(ctx, "failed to init channel checkpoint, meta update error", zap.String("channel", channelName), zap.Error(err))
 			}
 		} else {
-			log.Info("skip to init channel checkpoint for nil startPosition", zap.String("channel", channelName))
+			log.Info(ctx, "skip to init channel checkpoint for nil startPosition", zap.String("channel", channelName))
 		}
 	}
 	return resp, nil
@@ -1477,10 +1472,10 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collection", req.GetCollectionID()),
+	log := mlog.With(zap.Int64("collection", req.GetCollectionID()),
 		zap.Uint64("flushTs", req.GetFlushTs()),
-		zap.Time("flushTs in time", tsoutil.PhysicalTime(req.GetFlushTs()))).
-		WithRateGroup("dc.GetFlushState", 1, 60)
+		zap.Time("flushTs in time", tsoutil.PhysicalTime(req.GetFlushTs())))
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushStateResponse{
 			Status: merr.Status(err),
@@ -1502,7 +1497,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 			unflushed = append(unflushed, sid)
 		}
 		if len(unflushed) != 0 {
-			log.RatedInfo(10, "DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("unflushed", unflushed), zap.Int("len", len(unflushed)))
+			log.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("unflushed", unflushed), zap.Int("len", len(unflushed)))
 			resp.Flushed = false
 
 			return resp, nil
@@ -1518,7 +1513,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 
-		log.Info("GetFlushState all flushed without checking flush ts")
+		log.Info(ctx, "GetFlushState all flushed without checking flush ts")
 		return resp, nil
 	}
 
@@ -1539,7 +1534,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	resp.Flushed = true
-	log.Info("GetFlushState all flushed")
+	log.Info(ctx, "GetFlushState all flushed")
 
 	return resp, nil
 }
@@ -1569,7 +1564,6 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
-	log := log.Ctx(ctx).WithRateGroup("dc.GetFlushAllState", 1, 60)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushAllStateResponse{
 			Status: merr.Status(err),
@@ -1586,7 +1580,7 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
-		log.Warn("failed to ListDatabases", zap.Error(err))
+		mlog.Warn(ctx, "failed to ListDatabases", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -1597,7 +1591,7 @@ OUTER:
 	for _, dbName := range targetDbs {
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
 		if err != nil {
-			log.Warn("failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
+			mlog.Warn(ctx, "failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -1605,13 +1599,13 @@ OUTER:
 		for _, collectionID := range showColRsp.GetCollectionIds() {
 			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
-				log.Warn("failed to DescribeCollectionInternal", zap.Int64("collectionID", collectionID), zap.Error(err))
+				mlog.Warn(ctx, "failed to DescribeCollectionInternal", zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
 				if len(req.GetFlushAllTss()) > 0 {
-					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(log, channel, req.GetFlushAllTss())
+					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(ctx, channel, req.GetFlushAllTss())
 					if err != nil {
 						resp.Status = merr.Status(err)
 						return resp, nil
@@ -1622,7 +1616,7 @@ OUTER:
 					}
 				} else if req.GetFlushAllTs() != 0 {
 					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
-					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
+					if !s.verifyFlushAllStateByLegacyFlushAllTs(ctx, channel, req.GetFlushAllTs()) {
 						allFlushed = false
 						break OUTER
 					}
@@ -1635,23 +1629,23 @@ OUTER:
 	}
 
 	if allFlushed {
-		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()), zap.Uint64("FlushAllTs", req.GetFlushAllTs()))
+		mlog.Info(ctx, "GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()), zap.Uint64("FlushAllTs", req.GetFlushAllTs()))
 	}
 
 	resp.Flushed = allFlushed
 	return resp, nil
 }
 
-func (s *Server) verifyFlushAllStateByChannelFlushAllTs(logger *log.MLogger, channel string, flushAllTss map[string]uint64) (bool, error) {
+func (s *Server) verifyFlushAllStateByChannelFlushAllTs(ctx context.Context, channel string, flushAllTss map[string]uint64) (bool, error) {
 	channelCP := s.meta.GetChannelCheckpoint(channel)
 	pchannel := funcutil.ToPhysicalChannel(channel)
 	flushAllTs, ok := flushAllTss[pchannel]
 	if !ok || flushAllTs == 0 {
-		logger.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
+		mlog.Warn(ctx, "FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
 		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
 	}
 	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		logger.RatedInfo(10, "channel unflushed",
+		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
 			zap.String("vchannel", channel),
 			zap.Uint64("flushAllTs", flushAllTs),
 			zap.Uint64("channelCP", channelCP.GetTimestamp()),
@@ -1661,10 +1655,10 @@ func (s *Server) verifyFlushAllStateByChannelFlushAllTs(logger *log.MLogger, cha
 	return true, nil
 }
 
-func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(logger *log.MLogger, channel string, flushAllTs uint64) bool {
+func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(ctx context.Context, channel string, flushAllTs uint64) bool {
 	channelCP := s.meta.GetChannelCheckpoint(channel)
 	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		logger.RatedInfo(10, "channel unflushed",
+		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
 			zap.String("vchannel", channel),
 			zap.Uint64("flushAllTs", flushAllTs),
 			zap.Uint64("channelCP", channelCP.GetTimestamp()),
@@ -1685,7 +1679,6 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 
 // UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
 func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -1697,11 +1690,11 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
 		if err != nil || targetID != nodeID {
 			err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
-			log.Warn("failed to get latest wal allocated", zap.Error(err))
+			mlog.Warn(ctx, "failed to get latest wal allocated", zap.Error(err))
 			return merr.Status(err), nil
 		}
 		if err := s.meta.UpdateChannelCheckpoint(ctx, req.GetVChannel(), req.GetPosition()); err != nil {
-			log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
+			mlog.Warn(ctx, "failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
 			return merr.Status(err), nil
 		}
 		return merr.Success(), nil
@@ -1712,7 +1705,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
 		if err != nil || targetID != nodeID {
 			err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
-			log.Warn("failed to get latest wal allocated", zap.Error(err))
+			mlog.Warn(ctx, "failed to get latest wal allocated", zap.Error(err))
 			return false
 		}
 		return true
@@ -1720,7 +1713,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 	err := s.meta.UpdateChannelCheckpoints(ctx, checkpoints)
 	if err != nil {
-		log.Warn("failed to update channel checkpoint", zap.Error(err))
+		mlog.Warn(ctx, "failed to update channel checkpoint", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -1743,12 +1736,12 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
 // Deprecated, do not use it
 func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
+	mlog.Info(ctx, "marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	var err error
 	for _, segID := range req.GetSegmentIds() {
 		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
-			log.Ctx(ctx).Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
+			mlog.Error(ctx, "failed to set segment state as dropped", zap.Int64("segmentID", segID))
 			break
 		}
 	}
@@ -1902,11 +1895,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
+	log := mlog.With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
 
-	log.Info("receive import request from proxy, will broadcast",
+	log.Info(ctx, "receive import request from proxy, will broadcast",
 		zap.Int("fileNum", len(in.GetFiles())),
 		zap.Any("files", in.GetFiles()),
 		zap.Any("options", in.GetOptions()))
@@ -1949,13 +1942,13 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		in.GetChannelNames(),
 	)
 	if err != nil {
-		log.Warn("failed to broadcast import message", zap.Error(err))
+		log.Warn(ctx, "failed to broadcast import message", zap.Error(err))
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to broadcast import: %v", err)))
 		return resp, nil
 	}
 
 	resp.JobID = fmt.Sprint(jobID)
-	log.Info("import request broadcasted successfully", zap.String("jobID", resp.JobID))
+	log.Info(ctx, "import request broadcasted successfully", zap.String("jobID", resp.JobID))
 	return resp, nil
 }
 
@@ -1972,11 +1965,11 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		Status: merr.Success(),
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
+	log := mlog.With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
 
-	log.Info("creating import job from ack callback",
+	log.Info(ctx, "creating import job from ack callback",
 		zap.Int("fileNum", len(in.GetFiles())),
 		zap.Any("files", in.GetFiles()),
 		zap.Any("options", in.GetOptions()))
@@ -2053,7 +2046,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	}
 
 	resp.JobID = fmt.Sprint(job.GetJobID())
-	log.Info("add import job done",
+	log.Info(ctx, "add import job done",
 		zap.Int64("jobID", job.GetJobID()),
 		zap.Int("fileNum", len(files)),
 		zap.Any("files", files),
@@ -2063,7 +2056,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.Ctx(ctx).With(zap.String("jobID", in.GetJobID()))
+	log := mlog.With(zap.String("jobID", in.GetJobID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),
@@ -2094,7 +2087,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows
 	resp.TaskProgresses = GetTaskProgresses(ctx, jobID, s.importMeta, s.meta)
-	log.Info("GetImportProgress done", zap.String("jobState", job.GetState().String()), zap.Any("resp", resp))
+	log.Info(ctx, "GetImportProgress done", zap.String("jobState", job.GetState().String()), zap.Any("resp", resp))
 	return resp, nil
 }
 
@@ -2136,7 +2129,7 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("receive NotifyDropPartition request",
+	mlog.Info(ctx, "receive NotifyDropPartition request",
 		zap.String("channelname", channel),
 		zap.Any("partitionID", partitionIDs))
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
@@ -2150,20 +2143,20 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		return err
 	}
 
-	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
+	mlog.Info(ctx, "receive DropSegmentsByTime request",
 		zap.Int64("collectionID", collectionID))
 
 	for channelName, flushTs := range flushTsList {
 		// wait until the checkpoint reaches or exceeds the flush timestamp
 		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
 		if err != nil {
-			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
+			mlog.Warn(ctx, "WatchChannelCheckpoint failed", zap.Error(err))
 			return err
 		}
 		// drop segments that were updated before the flush timestamp
 		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
 		if err != nil {
-			log.Warn("TruncateChannelByTime failed", zap.Error(err))
+			mlog.Warn(ctx, "TruncateChannelByTime failed", zap.Error(err))
 			return err
 		}
 	}
@@ -2172,12 +2165,12 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 }
 
 func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
+	log.Info(ctx, "receive CreateSnapshot request", zap.String("name", req.GetName()),
 		zap.String("description", req.GetDescription()),
 		zap.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
 
@@ -2198,10 +2191,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// other error (etcd timeout, decode failure, ctx cancel) — those must surface
 	// rather than be silently swallowed by falling through to the broadcast path.
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
-		log.Warn("CreateSnapshot failed: snapshot name already exists in collection")
+		log.Warn(ctx, "CreateSnapshot failed: snapshot name already exists in collection")
 		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
 	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
-		log.Warn("CreateSnapshot: failed to check snapshot existence", zap.Error(err))
+		log.Warn(ctx, "CreateSnapshot: failed to check snapshot existence", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -2212,11 +2205,11 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// falls back to rootcoord with bounded retries.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("CreateSnapshot failed to resolve collection", zap.Error(err))
+		log.Warn(ctx, "CreateSnapshot failed to resolve collection", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if coll == nil {
-		log.Warn("CreateSnapshot: collection not found")
+		log.Warn(ctx, "CreateSnapshot: collection not found")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
 	dbName := coll.DatabaseName
@@ -2227,7 +2220,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
 	)
 	if err != nil {
-		log.Warn("CreateSnapshot failed to start broadcast", zap.Error(err))
+		log.Warn(ctx, "CreateSnapshot failed to start broadcast", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
@@ -2239,11 +2232,11 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// can no longer generate a valid snapshot.
 	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("CreateSnapshot: failed to re-check collection existence after lock", zap.Error(err))
+		log.Warn(ctx, "CreateSnapshot: failed to re-check collection existence after lock", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if !hasCollection {
-		log.Warn("CreateSnapshot: collection not found after lock")
+		log.Warn(ctx, "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
 
@@ -2251,10 +2244,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// Same error-handling discipline as the pre-lock check above: only treat
 	// ErrSnapshotNotFound as "good to proceed"; surface every other error.
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
-		log.Warn("CreateSnapshot failed: snapshot name already exists in collection")
+		log.Warn(ctx, "CreateSnapshot failed: snapshot name already exists in collection")
 		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
 	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
-		log.Warn("CreateSnapshot: failed to re-check snapshot existence after lock", zap.Error(err))
+		log.Warn(ctx, "CreateSnapshot: failed to re-check snapshot existence after lock", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -2271,25 +2264,25 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
-		log.Error("CreateSnapshot broadcast failed", zap.Error(err))
+		log.Error(ctx, "CreateSnapshot broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("CreateSnapshot completed successfully")
+	log.Info(ctx, "CreateSnapshot completed successfully")
 	return merr.Success(), nil
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	log.Info("receive BatchUpdateManifest request", zap.Int("itemCount", len(req.GetItems())))
+	log.Info(ctx, "receive BatchUpdateManifest request", zap.Int("itemCount", len(req.GetItems())))
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("BatchUpdateManifest failed to describe collection", zap.Error(err))
+		log.Warn(ctx, "BatchUpdateManifest failed to describe collection", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	dbName := coll.GetDbName()
@@ -2299,7 +2292,7 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
 	)
 	if err != nil {
-		log.Warn("BatchUpdateManifest failed to start broadcast", zap.Error(err))
+		log.Warn(ctx, "BatchUpdateManifest failed to start broadcast", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
@@ -2322,30 +2315,30 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
-		log.Error("BatchUpdateManifest broadcast failed", zap.Error(err))
+		log.Error(ctx, "BatchUpdateManifest broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("BatchUpdateManifest completed successfully")
+	log.Info(ctx, "BatchUpdateManifest completed successfully")
 	return merr.Success(), nil
 }
 
 func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshot", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.String("snapshot", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	log.Info("receive DropSnapshot request")
+	log.Info(ctx, "receive DropSnapshot request")
 
 	// Check if snapshot exists - if not, return success (idempotent).
 	// Only treat ErrSnapshotNotFound as idempotent success; other errors (etcd timeout,
 	// decode failure, ctx cancel) must surface so they can be retried or reported.
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err != nil {
 		if errors.Is(err, merr.ErrSnapshotNotFound) {
-			log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
+			log.Info(ctx, "DropSnapshot: snapshot not found, returning success (idempotent)")
 			return merr.Success(), nil
 		}
-		log.Warn("DropSnapshot: failed to check snapshot existence", zap.Error(err))
+		log.Warn(ctx, "DropSnapshot: failed to check snapshot existence", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -2359,11 +2352,11 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// falls back to rootcoord with bounded retries.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("DropSnapshot failed to resolve collection", zap.Error(err))
+		log.Warn(ctx, "DropSnapshot failed to resolve collection", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if coll == nil {
-		log.Warn("DropSnapshot: collection not found")
+		log.Warn(ctx, "DropSnapshot: collection not found")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
 	dbName := coll.DatabaseName
@@ -2378,7 +2371,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
 	)
 	if err != nil {
-		log.Error("DropSnapshot failed to start broadcast", zap.Error(err))
+		log.Error(ctx, "DropSnapshot failed to start broadcast", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
@@ -2386,10 +2379,10 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// Double-check after acquiring lock - another goroutine may have dropped it.
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err != nil {
 		if errors.Is(err, merr.ErrSnapshotNotFound) {
-			log.Info("DropSnapshot: snapshot not found after lock, returning success (idempotent)")
+			log.Info(ctx, "DropSnapshot: snapshot not found after lock, returning success (idempotent)")
 			return merr.Success(), nil
 		}
-		log.Warn("DropSnapshot: failed to re-check snapshot existence after lock", zap.Error(err))
+		log.Warn(ctx, "DropSnapshot: failed to re-check snapshot existence after lock", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -2408,11 +2401,11 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// synchronous, non-retrying error and the broadcast is never initiated.
 	pinned, err := s.snapshotManager.HasActivePins(ctx, req.GetCollectionId(), req.GetName())
 	if err != nil {
-		log.Warn("DropSnapshot: failed to check active pins", zap.Error(err))
+		log.Warn(ctx, "DropSnapshot: failed to check active pins", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if pinned {
-		log.Warn("DropSnapshot rejected: snapshot has active pins")
+		log.Warn(ctx, "DropSnapshot rejected: snapshot has active pins")
 		return merr.Status(merr.WrapErrSnapshotPinned(req.GetName(), "active pins exist, unpin before dropping")), nil
 	}
 
@@ -2426,27 +2419,27 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
-		log.Error("DropSnapshot broadcast failed", zap.Error(err))
+		log.Error(ctx, "DropSnapshot broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("DropSnapshot completed successfully")
+	log.Info(ctx, "DropSnapshot completed successfully")
 	return merr.Success(), nil
 }
 
 func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.String("snapshotName", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive DescribeSnapshot request")
+	log.Info(ctx, "receive DescribeSnapshot request")
 
 	// Delegate to SnapshotManager
 	snapshotData, err := s.snapshotManager.DescribeSnapshot(ctx, req.GetCollectionId(), req.GetName())
 	if err != nil {
-		log.Error("failed to describe snapshot", zap.Error(err))
+		log.Error(ctx, "failed to describe snapshot", zap.Error(err))
 		return &datapb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2466,7 +2459,7 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 // RestoreSnapshot restores snapshot data to a new collection.
 // This method validates parameters and delegates to snapshotManager for the actual restore.
 func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("snapshot", req.GetName()),
 		zap.Int64("sourceCollectionID", req.GetSourceCollectionId()),
 		zap.String("targetDbName", req.GetTargetDbName()),
@@ -2477,19 +2470,19 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive RestoreSnapshot request")
+	log.Info(ctx, "receive RestoreSnapshot request")
 
 	// Validate parameters
 	if req.GetName() == "" {
 		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
-		log.Warn("invalid request", zap.Error(err))
+		log.Warn(ctx, "invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	if req.GetTargetCollectionName() == "" {
 		err := merr.WrapErrParameterInvalidMsg("target collection name is required")
-		log.Warn("invalid request", zap.Error(err))
+		log.Warn(ctx, "invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2508,13 +2501,13 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		s.validateRestoreSnapshotResources,
 	)
 	if err != nil {
-		log.Error("restore snapshot failed", zap.Error(err))
+		log.Error(ctx, "restore snapshot failed", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("restore snapshot completed", zap.Int64("jobID", jobID))
+	log.Info(ctx, "restore snapshot completed", zap.Int64("jobID", jobID))
 	return &datapb.RestoreSnapshotResponse{
 		Status: merr.Success(),
 		JobId:  jobID,
@@ -2523,27 +2516,27 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 
 // rollbackRestoreSnapshot drops the newly created collection when restore fails.
 func (s *Server) rollbackRestoreSnapshot(ctx context.Context, dbName, collectionName string) error {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("dbName", dbName),
 		zap.String("collectionName", collectionName),
 	)
-	log.Info("rolling back restore snapshot, dropping collection")
+	log.Info(ctx, "rolling back restore snapshot, dropping collection")
 
 	if err := s.broker.DropCollection(ctx, dbName, collectionName); err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Debug("collection not found, skipping rollback")
+			log.Debug(ctx, "collection not found, skipping rollback")
 			return nil
 		}
-		log.Error("failed to drop collection during rollback", zap.Error(err))
+		log.Error(ctx, "failed to drop collection during rollback", zap.Error(err))
 		return err
 	}
 
-	log.Info("rollback completed, collection dropped")
+	log.Info(ctx, "rollback completed, collection dropped")
 	return nil
 }
 
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	log := mlog.With(zap.Int64("jobID", req.GetJobId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetRestoreSnapshotStateResponse{
 			Status: merr.Status(err),
@@ -2553,13 +2546,13 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 	// Delegate to SnapshotManager
 	restoreInfo, err := s.snapshotManager.GetRestoreState(ctx, req.GetJobId())
 	if err != nil {
-		log.Warn("failed to get restore state", zap.Error(err))
+		log.Warn(ctx, "failed to get restore state", zap.Error(err))
 		return &datapb.GetRestoreSnapshotStateResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("get restore state completed",
+	log.Info(ctx, "get restore state completed",
 		zap.String("state", restoreInfo.GetState().String()),
 		zap.Int32("progress", restoreInfo.GetProgress()))
 
@@ -2579,13 +2572,13 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	// Delegate to SnapshotManager
 	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId(), req.GetDbId())
 	if err != nil {
-		log.Ctx(ctx).Error("failed to list restore jobs", zap.Error(err))
+		mlog.Error(ctx, "failed to list restore jobs", zap.Error(err))
 		return &datapb.ListRestoreSnapshotJobsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Ctx(ctx).Info("list restore jobs completed",
+	mlog.Info(ctx, "list restore jobs completed",
 		zap.Int("totalJobs", len(restoreInfos)),
 		zap.Int64("filterCollectionId", req.GetCollectionId()))
 
@@ -2596,18 +2589,18 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 }
 
 func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	log := mlog.With(zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ListSnapshotsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive ListSnapshots request")
+	log.Info(ctx, "receive ListSnapshots request")
 
 	// Delegate to SnapshotManager
 	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetDbId())
 	if err != nil {
-		log.Error("failed to list snapshots", zap.Error(err))
+		log.Error(ctx, "failed to list snapshots", zap.Error(err))
 		return &datapb.ListSnapshotsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2620,7 +2613,7 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 }
 
 func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("snapshotName", req.GetName()),
 		zap.Int64("collectionID", req.GetCollectionId()))
 
@@ -2629,7 +2622,7 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive PinSnapshotData request")
+	log.Info(ctx, "receive PinSnapshotData request")
 
 	// Resolve collection identity for the resource key lock. We need the
 	// collection to exist before we can acquire the locks that serialize Pin
@@ -2641,13 +2634,13 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 	// falls back to rootcoord with bounded retries.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("PinSnapshotData failed to resolve collection", zap.Error(err))
+		log.Warn(ctx, "PinSnapshotData failed to resolve collection", zap.Error(err))
 		return &datapb.PinSnapshotDataResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	if coll == nil {
-		log.Warn("PinSnapshotData: collection not found")
+		log.Warn(ctx, "PinSnapshotData: collection not found")
 		return &datapb.PinSnapshotDataResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())),
 		}, nil
@@ -2674,7 +2667,7 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 		message.NewSharedSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
 	)
 	if err != nil {
-		log.Warn("PinSnapshotData failed to acquire resource key lock", zap.Error(err))
+		log.Warn(ctx, "PinSnapshotData failed to acquire resource key lock", zap.Error(err))
 		return &datapb.PinSnapshotDataResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2683,13 +2676,13 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 
 	pinID, err := s.snapshotManager.PinSnapshotData(ctx, req.GetCollectionId(), req.GetName(), req.GetTtlSeconds())
 	if err != nil {
-		log.Error("failed to pin snapshot data", zap.Error(err))
+		log.Error(ctx, "failed to pin snapshot data", zap.Error(err))
 		return &datapb.PinSnapshotDataResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("PinSnapshotData completed successfully", zap.Int64("pinID", pinID))
+	log.Info(ctx, "PinSnapshotData completed successfully", zap.Int64("pinID", pinID))
 	return &datapb.PinSnapshotDataResponse{
 		Status: merr.Success(),
 		PinId:  pinID,
@@ -2697,27 +2690,27 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 }
 
 func (s *Server) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("pinID", req.GetPinId()))
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	log.Info("receive UnpinSnapshotData request")
+	log.Info(ctx, "receive UnpinSnapshotData request")
 
 	if err := s.snapshotManager.UnpinSnapshotData(ctx, req.GetPinId()); err != nil {
-		log.Error("failed to unpin snapshot data", zap.Error(err))
+		log.Error(ctx, "failed to unpin snapshot data", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("UnpinSnapshotData completed successfully")
+	log.Info(ctx, "UnpinSnapshotData completed successfully")
 	return merr.Success(), nil
 }
 
 // RefreshExternalCollection manually triggers a refresh job for an external collection
 // This uses WAL Broadcast mechanism for idempotency and distributed consistency.
 func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionId()),
 		zap.String("collectionName", req.GetCollectionName()))
 
@@ -2727,10 +2720,10 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}, nil
 	}
 
-	log.Info("receive RefreshExternalCollection request")
+	log.Info(ctx, "receive RefreshExternalCollection request")
 
 	if s.externalCollectionRefreshManager == nil {
-		log.Warn("external collection refresh manager not initialized")
+		log.Warn(ctx, "external collection refresh manager not initialized")
 		return &datapb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
 		}, nil
@@ -2739,7 +2732,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
 	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("failed to start broadcaster", zap.Error(err))
+		log.Warn(ctx, "failed to start broadcaster", zap.Error(err))
 		return &datapb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -2755,7 +2748,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	// ack-side AddJob falls back to the existing ack-side rejection, i.e.
 	// today's behavior — never worse.
 	if active := s.externalCollectionRefreshManager.GetActiveJobByCollectionID(req.GetCollectionId()); active != nil {
-		log.Info("refresh job already in progress, rejecting at RPC edge",
+		log.Info(ctx, "refresh job already in progress, rejecting at RPC edge",
 			zap.Int64("existingJobID", active.GetJobId()),
 			zap.String("existingState", active.GetState().String()))
 		return &datapb.RefreshExternalCollectionResponse{
@@ -2770,12 +2763,12 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
 	allocatedJobID, err := s.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn("failed to allocate job ID", zap.Error(err))
+		log.Warn(ctx, "failed to allocate job ID", zap.Error(err))
 		return &datapb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
+	log.Info(ctx, "pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
 
 	// Build and broadcast the message
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
@@ -2791,13 +2784,13 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		MustBuildBroadcast()
 
 	if _, err := b.Broadcast(ctx, msg); err != nil {
-		log.Warn("failed to broadcast refresh message", zap.Error(err))
+		log.Warn(ctx, "failed to broadcast refresh message", zap.Error(err))
 		return &datapb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("refresh external collection job submitted via WAL broadcast", zap.Int64("jobID", allocatedJobID))
+	log.Info(ctx, "refresh external collection job submitted via WAL broadcast", zap.Int64("jobID", allocatedJobID))
 
 	return &datapb.RefreshExternalCollectionResponse{
 		Status: merr.Success(),
@@ -2807,7 +2800,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 
 // GetRefreshExternalCollectionProgress returns the progress of a refresh job
 func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	log := mlog.With(zap.Int64("jobID", req.GetJobId()))
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.GetRefreshExternalCollectionProgressResponse{
@@ -2815,10 +2808,10 @@ func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *
 		}, nil
 	}
 
-	log.Info("receive GetRefreshExternalCollectionProgress request")
+	log.Info(ctx, "receive GetRefreshExternalCollectionProgress request")
 
 	if s.externalCollectionRefreshManager == nil {
-		log.Warn("external collection refresh manager not initialized")
+		log.Warn(ctx, "external collection refresh manager not initialized")
 		return &datapb.GetRefreshExternalCollectionProgressResponse{
 			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
 		}, nil
@@ -2826,13 +2819,13 @@ func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *
 
 	jobInfo, err := s.externalCollectionRefreshManager.GetJobProgress(ctx, req.GetJobId())
 	if err != nil {
-		log.Warn("failed to get job progress", zap.Error(err))
+		log.Warn(ctx, "failed to get job progress", zap.Error(err))
 		return &datapb.GetRefreshExternalCollectionProgressResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("get refresh external collection progress completed",
+	log.Info(ctx, "get refresh external collection progress completed",
 		zap.String("state", jobInfo.GetState().String()),
 		zap.Int64("progress", jobInfo.GetProgress()))
 
@@ -2845,7 +2838,7 @@ func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *
 // ListRefreshExternalCollectionJobs lists refresh jobs for a collection.
 // A zero collectionID lists jobs for all external collections.
 func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("collectionID", req.GetCollectionId()))
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -2854,10 +2847,10 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 		}, nil
 	}
 
-	log.Info("receive ListRefreshExternalCollectionJobs request")
+	log.Info(ctx, "receive ListRefreshExternalCollectionJobs request")
 
 	if s.externalCollectionRefreshManager == nil {
-		log.Warn("external collection refresh manager not initialized")
+		log.Warn(ctx, "external collection refresh manager not initialized")
 		return &datapb.ListRefreshExternalCollectionJobsResponse{
 			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
 		}, nil
@@ -2865,13 +2858,13 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 
 	jobs, err := s.externalCollectionRefreshManager.ListJobs(ctx, req.GetCollectionId())
 	if err != nil {
-		log.Warn("failed to list jobs", zap.Error(err))
+		log.Warn(ctx, "failed to list jobs", zap.Error(err))
 		return &datapb.ListRefreshExternalCollectionJobsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("list refresh external collection jobs completed", zap.Int("jobCount", len(jobs)))
+	log.Info(ctx, "list refresh external collection jobs completed", zap.Int("jobCount", len(jobs)))
 
 	return &datapb.ListRefreshExternalCollectionJobsResponse{
 		Status: merr.Success(),
@@ -2980,7 +2973,7 @@ func (s *Server) validateAndExecuteImportAction(
 // It transitions the job from Uncommitted → Committing by broadcasting a CommitImport WAL message.
 // The call is idempotent: if the job is already Committing or Completed it returns success.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	log := mlog.With(zap.Int64("jobID", req.GetJobId()))
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
 		func(job ImportJob) *commonpb.Status {
 			switch job.GetState() {
@@ -2994,7 +2987,7 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 			}
 		},
 		func(ctx context.Context, job ImportJob) error {
-			log.Info("committing import job via WAL broadcast")
+			log.Info(ctx, "committing import job via WAL broadcast")
 			return s.broadcastCommitImportMessage(ctx, job)
 		},
 	)
@@ -3004,7 +2997,7 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 // It broadcasts a RollbackImport WAL message to cancel the job.
 // Returns an error if the job is already committed or committing.
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	log := mlog.With(zap.Int64("jobID", req.GetJobId()))
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
 		func(job ImportJob) *commonpb.Status {
 			state := job.GetState()
@@ -3017,7 +3010,7 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 			return nil // proceed
 		},
 		func(ctx context.Context, job ImportJob) error {
-			log.Info("aborting import job via WAL broadcast")
+			log.Info(ctx, "aborting import job via WAL broadcast")
 			return s.broadcastRollbackImportMessage(ctx, job)
 		},
 	)

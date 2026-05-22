@@ -54,8 +54,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -101,7 +101,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
-	log.Ctx(ctx).Debug("Proxy current state", zap.String("StateCode", code.String()))
+	mlog.Debug(ctx, "Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -133,7 +133,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
 	defer sp.End()
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collectionName", request.CollectionName),
@@ -142,7 +142,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		zap.String("partitionName", request.GetPartitionName()),
 	)
 
-	log.Info("received request to invalidate collection meta cache")
+	log.Info(ctx, "received request to invalidate collection meta cache")
 
 	dbName := request.DbName
 	collectionName := request.CollectionName
@@ -170,7 +170,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					globalMetaCache.RemoveAlias(ctx, request.GetDbName(), collectionName)
 				}
 			}
-			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
+			log.Info(ctx, "complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
@@ -179,14 +179,14 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
-			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+			log.Info(ctx, "complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
 			if request.GetPartitionName() == "" {
-				log.Warn("invalidate collection meta cache failed. partitionName is empty")
+				log.Warn(ctx, "invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
 			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
-			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+			log.Info(ctx, "complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
 			fallthrough
@@ -202,9 +202,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
 			}
-			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+			log.Info(ctx, "complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		default:
-			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
+			log.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 				for _, name := range aliasName {
@@ -233,7 +233,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
-	log.Info("complete to invalidate collection meta cache")
+	log.Info(ctx, "complete to invalidate collection meta cache")
 
 	return merr.Success(), nil
 }
@@ -247,15 +247,15 @@ func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *prox
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateShardLeaderCache")
 	defer sp.End()
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("received request to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+	log.Info(ctx, "received request to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	node.shardMgr.InvalidateShardLeaderCache(request.GetCollectionIDs())
 
-	log.Info("complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+	log.Info(ctx, "complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	return merr.Success(), nil
 }
@@ -306,26 +306,26 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		mixCoord:              node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcEnqueued(method))
+	log.Info(ctx, rpcEnqueued(method))
 	if err := cct.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcDone(method))
+	log.Info(ctx, rpcDone(method))
 
 	metrics.ProxyReqLatency.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -353,24 +353,24 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		mixCoord:            node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcEnqueued(method))
+	log.Info(ctx, rpcEnqueued(method))
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcDone(method))
+	log.Info(ctx, rpcDone(method))
 	DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 
 	metrics.ProxyReqLatency.WithLabelValues(
@@ -400,26 +400,26 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		mixCoord:             node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Info(rpcEnqueued(method))
+	log.Info(ctx, rpcEnqueued(method))
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Info(rpcDone(method), zap.Int("num of db", len(dct.result.DbNames)))
+	log.Info(ctx, rpcDone(method), zap.Int("num of db", len(dct.result.DbNames)))
 
 	metrics.ProxyReqLatency.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -446,27 +446,26 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		mixCoord:             node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := act.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", act.BeginTs()),
 			zap.Uint64("EndTs", act.EndTs()))
@@ -474,7 +473,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		return merr.Status(err), nil
 	}
 
-	log.Info(rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
@@ -501,26 +500,26 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 		mixCoord:                node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Debug(rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := act.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", act.BeginTs()),
 			zap.Uint64("EndTs", act.EndTs()))
@@ -529,7 +528,7 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 		return resp, nil
 	}
 
-	log.Debug(rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
@@ -559,7 +558,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	// avoid data race
 	lenOfSchema := len(request.Schema)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -568,26 +567,23 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.String("consistency_level", request.ConsistencyLevel.String()),
 	)
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", cct.BeginTs()),
 		zap.Uint64("EndTs", cct.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp),
 	)
 
 	if err := cct.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", cct.BeginTs()),
 			zap.Uint64("EndTs", cct.EndTs()))
@@ -595,8 +591,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", cct.BeginTs()),
 		zap.Uint64("EndTs", cct.EndTs()),
 	)
@@ -628,29 +623,28 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		chMgr:                 node.chMgr,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 	)
 
-	log.Info("DropCollection received")
+	log.Info(ctx, "DropCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("DropCollection failed to enqueue",
+		log.Warn(ctx, "DropCollection failed to enqueue",
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		"DropCollection enqueued",
+	log.Debug(ctx, "DropCollection enqueued",
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
 	)
 
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("DropCollection failed to WaitToFinish",
+		log.Warn(ctx, "DropCollection failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTs", dct.BeginTs()),
 			zap.Uint64("EndTs", dct.EndTs()))
@@ -658,8 +652,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		"DropCollection done",
+	log.Info(ctx, "DropCollection done",
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
 	)
@@ -694,16 +687,16 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 		chMgr:                     node.chMgr,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 	)
 
-	log.Info("TruncateCollection received")
+	log.Info(ctx, "TruncateCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("TruncateCollection failed to enqueue",
+		log.Warn(ctx, "TruncateCollection failed to enqueue",
 			zap.Error(err))
 
 		return &milvuspb.TruncateCollectionResponse{
@@ -711,14 +704,13 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 		}, nil
 	}
 
-	log.Debug(
-		"TruncateCollection enqueued",
+	log.Debug(ctx, "TruncateCollection enqueued",
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
 	)
 
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("TruncateCollection failed to WaitToFinish",
+		log.Warn(ctx, "TruncateCollection failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTs", dct.BeginTs()),
 			zap.Uint64("EndTs", dct.EndTs()))
@@ -728,8 +720,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 		}, nil
 	}
 
-	log.Info(
-		"TruncateCollection done",
+	log.Info(ctx, "TruncateCollection done",
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
 	)
@@ -758,13 +749,13 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	method := "HasCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 	)
 
-	log.Debug("HasCollection received")
+	log.Debug(ctx, "HasCollection received")
 
 	hct := &hasCollectionTask{
 		ctx:                  ctx,
@@ -774,7 +765,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	}
 
 	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
-		log.Warn("HasCollection failed to enqueue",
+		log.Warn(ctx, "HasCollection failed to enqueue",
 			zap.Error(err))
 
 		return &milvuspb.BoolResponse{
@@ -782,14 +773,13 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug(
-		"HasCollection enqueued",
+	log.Debug(ctx, "HasCollection enqueued",
 		zap.Uint64("BeginTS", hct.BeginTs()),
 		zap.Uint64("EndTS", hct.EndTs()),
 	)
 
 	if err := hct.WaitToFinish(); err != nil {
-		log.Warn("HasCollection failed to WaitToFinish",
+		log.Warn(ctx, "HasCollection failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", hct.BeginTs()),
 			zap.Uint64("EndTS", hct.EndTs()))
@@ -799,8 +789,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug(
-		"HasCollection done",
+	log.Debug(ctx, "HasCollection done",
 		zap.Uint64("BeginTS", hct.BeginTs()),
 		zap.Uint64("EndTS", hct.EndTs()),
 	)
@@ -831,38 +820,36 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		mixCoord:              node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Bool("refreshMode", request.Refresh),
 	)
 
-	log.Info("LoadCollection received")
+	log.Info(ctx, "LoadCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
-		log.Warn("LoadCollection failed to enqueue",
+		log.Warn(ctx, "LoadCollection failed to enqueue",
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		"LoadCollection enqueued",
+	log.Debug(ctx, "LoadCollection enqueued",
 		zap.Uint64("BeginTS", lct.BeginTs()),
 		zap.Uint64("EndTS", lct.EndTs()),
 	)
 
 	if err := lct.WaitToFinish(); err != nil {
-		log.Warn("LoadCollection failed to WaitToFinish",
+		log.Warn(ctx, "LoadCollection failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", lct.BeginTs()),
 			zap.Uint64("EndTS", lct.EndTs()))
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		"LoadCollection done",
+	log.Debug(ctx, "LoadCollection done",
 		zap.Uint64("BeginTS", lct.BeginTs()),
 		zap.Uint64("EndTS", lct.EndTs()),
 	)
@@ -892,29 +879,26 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		mixCoord:                 node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", rct.BeginTs()),
 		zap.Uint64("EndTS", rct.EndTs()))
 
 	if err := rct.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", rct.BeginTs()),
 			zap.Uint64("EndTS", rct.EndTs()))
@@ -922,8 +906,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", rct.BeginTs()),
 		zap.Uint64("EndTS", rct.EndTs()))
 
@@ -1012,29 +995,26 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	method := "AddCollectionField"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1042,8 +1022,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1081,29 +1060,26 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 	method := "AddCollectionStructField"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1111,8 +1087,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1154,30 +1129,27 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	method := "AlterCollectionSchema"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 		return &milvuspb.AlterCollectionSchemaResponse{
 			AlterStatus: merr.Status(err),
 		}, nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1185,8 +1157,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 			AlterStatus: merr.Status(err),
 		}, nil
 	}
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1217,18 +1188,16 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		lb:        node.lbPolicy,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(
-		rpcReceived(method),
+	log.Debug(ctx, rpcReceived(method),
 		zap.Strings("partitions", request.PartitionNames))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.Strings("partitions", request.PartitionNames))
 
@@ -1237,15 +1206,13 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()),
 		zap.Strings("partitions", request.PartitionNames))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", g.BeginTs()),
 			zap.Uint64("EndTS", g.EndTs()),
@@ -1256,8 +1223,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()))
 
@@ -1284,16 +1250,15 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		mixCoord:                       node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.GetCollectionStatisticsResponse{
@@ -1301,14 +1266,12 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", g.BeginTs()),
 			zap.Uint64("EndTS", g.EndTs()))
@@ -1318,8 +1281,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()))
 
@@ -1346,18 +1308,18 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		mixCoord:               node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("DbName", request.DbName),
 		zap.Uint64("TimeStamp", request.TimeStamp),
 		zap.String("ShowType", request.Type.String()))
 
-	log.Debug("ShowCollections received",
+	log.Debug(ctx, "ShowCollections received",
 		zap.Any("CollectionNames", request.CollectionNames))
 
 	err := node.sched.ddQueue.Enqueue(sct)
 	if err != nil {
-		log.Warn("ShowCollections failed to enqueue",
+		log.Warn(ctx, "ShowCollections failed to enqueue",
 			zap.Error(err),
 			zap.Any("CollectionNames", request.CollectionNames))
 
@@ -1366,12 +1328,12 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections enqueued",
+	log.Debug(ctx, "ShowCollections enqueued",
 		zap.Any("CollectionNames", request.CollectionNames))
 
 	err = sct.WaitToFinish()
 	if err != nil {
-		log.Warn("ShowCollections failed to WaitToFinish",
+		log.Warn(ctx, "ShowCollections failed to WaitToFinish",
 			zap.Error(err),
 			zap.Any("CollectionNames", request.CollectionNames))
 
@@ -1380,7 +1342,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections Done",
+	log.Debug(ctx, "ShowCollections Done",
 		zap.Int("len(CollectionNames)", len(request.CollectionNames)),
 		zap.Int("num_collections", len(sct.result.CollectionNames)))
 
@@ -1406,32 +1368,28 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		mixCoord:               node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("props", request.Properties))
 
-	log.Info(
-		rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := act.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", act.BeginTs()),
 			zap.Uint64("EndTs", act.EndTs()))
@@ -1439,8 +1397,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
@@ -1463,29 +1420,26 @@ func (node *Proxy) AddCollectionFunction(ctx context.Context, request *milvuspb.
 		AddCollectionFunctionRequest: request,
 		mixCoord:                     node.mixCoord,
 	}
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1493,8 +1447,7 @@ func (node *Proxy) AddCollectionFunction(ctx context.Context, request *milvuspb.
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1517,30 +1470,27 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 		AlterCollectionFunctionRequest: request,
 		mixCoord:                       node.mixCoord,
 	}
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("collection", request.FunctionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1548,8 +1498,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1572,29 +1521,26 @@ func (node *Proxy) DropCollectionFunction(ctx context.Context, request *milvuspb
 		DropCollectionFunctionRequest: request,
 		mixCoord:                      node.mixCoord,
 	}
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -1602,8 +1548,7 @@ func (node *Proxy) DropCollectionFunction(ctx context.Context, request *milvuspb
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -1633,32 +1578,29 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		mixCoord:                    node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("fieldName", request.FieldName),
 		zap.Any("props", request.Properties))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := act.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", act.BeginTs()),
 			zap.Uint64("EndTs", act.EndTs()))
@@ -1666,8 +1608,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
@@ -1699,30 +1640,27 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		result:                 nil,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
 		zap.Uint64("EndTS", cpt.EndTs()))
 
 	if err := cpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", cpt.BeginTs()),
 			zap.Uint64("EndTS", cpt.EndTs()))
@@ -1730,8 +1668,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
 		zap.Uint64("EndTS", cpt.EndTs()))
 
@@ -1763,30 +1700,27 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		result:               nil,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
 		zap.Uint64("EndTS", dpt.EndTs()))
 
 	if err := dpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", dpt.BeginTs()),
 			zap.Uint64("EndTS", dpt.EndTs()))
@@ -1794,8 +1728,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
 		zap.Uint64("EndTS", dpt.EndTs()))
 
@@ -1824,17 +1757,16 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		result:              nil,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(hpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.BoolResponse{
@@ -1843,14 +1775,12 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", hpt.BeginTs()),
 		zap.Uint64("EndTS", hpt.EndTs()))
 
 	if err := hpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", hpt.BeginTs()),
 			zap.Uint64("EndTS", hpt.EndTs()))
@@ -1861,8 +1791,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", hpt.BeginTs()),
 		zap.Uint64("EndTS", hpt.EndTs()))
 
@@ -1887,31 +1816,28 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		mixCoord:              node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames),
 		zap.Bool("refreshMode", request.Refresh))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(lpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", lpt.BeginTs()),
 		zap.Uint64("EndTS", lpt.EndTs()))
 
 	if err := lpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", lpt.BeginTs()),
 			zap.Uint64("EndTS", lpt.EndTs()))
@@ -1919,8 +1845,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", lpt.BeginTs()),
 		zap.Uint64("EndTS", lpt.EndTs()))
 
@@ -1947,30 +1872,27 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	method := "ReleasePartitions"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(rpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", rpt.BeginTs()),
 		zap.Uint64("EndTS", rpt.EndTs()))
 
 	if err := rpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", rpt.BeginTs()),
 			zap.Uint64("EndTS", rpt.EndTs()))
@@ -1978,8 +1900,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", rpt.BeginTs()),
 		zap.Uint64("EndTS", rpt.EndTs()))
 
@@ -2007,17 +1928,16 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		mixCoord:                      node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.GetPartitionStatisticsResponse{
@@ -2025,14 +1945,12 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", g.BeginTs()),
 			zap.Uint64("EndTS", g.EndTs()))
@@ -2042,8 +1960,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()))
 
@@ -2073,15 +1990,13 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	method := "ShowPartitions"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+	log := mlog.With(zap.String("role", typeutil.ProxyRole))
 
-	log.Debug(
-		rpcReceived(method),
+	log.Debug(ctx, rpcReceived(method),
 		zap.Any("request", request))
 
 	if err := node.sched.ddQueue.Enqueue(spt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.Any("request", request))
 
@@ -2090,8 +2005,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTS", spt.BeginTs()),
 		zap.Uint64("EndTS", spt.EndTs()),
 		zap.String("db", spt.DbName),
@@ -2099,8 +2013,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		zap.Any("partitions", spt.PartitionNames))
 
 	if err := spt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTS", spt.BeginTs()),
 			zap.Uint64("EndTS", spt.EndTs()),
@@ -2113,8 +2026,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTS", spt.BeginTs()),
 		zap.Uint64("EndTS", spt.EndTs()),
 		zap.String("db", spt.DbName),
@@ -2133,14 +2045,12 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	tr := timerecord.NewTimeRecorder(method)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadingProgress")
 	defer sp.End()
-	log := log.Ctx(ctx)
 
-	log.Debug(
-		rpcReceived(method),
+	mlog.Debug(ctx, rpcReceived(method),
 		zap.Any("request", request))
 
 	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
-		log.Warn("fail to get loading progress",
+		mlog.Warn(ctx, "fail to get loading progress",
 			zap.String("collectionName", request.CollectionName),
 			zap.Strings("partitionName", request.PartitionNames),
 			zap.Error(err))
@@ -2188,8 +2098,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		}
 	}
 
-	log.Debug(
-		rpcDone(method),
+	mlog.Debug(ctx, rpcDone(method),
 		zap.Any("request", request),
 		zap.Int64("loadProgress", loadProgress),
 		zap.Int64("refreshProgress", refreshProgress))
@@ -2209,14 +2118,12 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	tr := timerecord.NewTimeRecorder(method)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadState")
 	defer sp.End()
-	log := log.Ctx(ctx)
 
-	log.Debug(
-		rpcReceived(method),
+	mlog.Debug(ctx, rpcReceived(method),
 		zap.Any("request", request))
 
 	getErrResponse := func(err error) *milvuspb.GetLoadStateResponse {
-		log.Warn("fail to get load state",
+		mlog.Warn(ctx, "fail to get load state",
 			zap.String("collection_name", request.CollectionName),
 			zap.Strings("partition_name", request.PartitionNames),
 			zap.Error(err))
@@ -2233,8 +2140,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		Status: merr.Success(),
 	}
 	defer func() {
-		log.Debug(
-			rpcDone(method),
+		mlog.Debug(ctx, rpcDone(method),
 			zap.Any("request", request),
 			zap.Any("response", resp),
 			zap.Error(err),
@@ -2244,7 +2150,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
-		log.Warn("failed to get collection id",
+		mlog.Warn(ctx, "failed to get collection id",
 			zap.String("dbName", request.GetDbName()),
 			zap.String("collectionName", request.CollectionName),
 			zap.Error(err))
@@ -2316,31 +2222,28 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	method := "CreateIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.Any("extra_params", request.ExtraParams))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cit); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", cit.BeginTs()),
 		zap.Uint64("EndTs", cit.EndTs()))
 
 	if err := cit.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", cit.BeginTs()),
 			zap.Uint64("EndTs", cit.EndTs()))
@@ -2348,8 +2251,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", cit.BeginTs()),
 		zap.Uint64("EndTs", cit.EndTs()))
 
@@ -2375,31 +2277,28 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 	method := "AlterIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("indexName", request.GetIndexName()),
 		zap.Any("extraParams", request.ExtraParams))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", task.BeginTs()),
 			zap.Uint64("EndTs", task.EndTs()))
@@ -2407,8 +2306,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", task.BeginTs()),
 		zap.Uint64("EndTs", task.EndTs()))
 
@@ -2438,18 +2336,17 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	// avoid data race
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.DescribeIndexResponse{
@@ -2457,14 +2354,12 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
 	if err := dit.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", dit.BeginTs()),
 			zap.Uint64("EndTs", dit.EndTs()))
@@ -2474,8 +2369,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
@@ -2505,17 +2399,16 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 	// avoid data race
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("index name", request.IndexName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.GetIndexStatisticsResponse{
@@ -2523,20 +2416,18 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
 	if err := dit.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", dit.BeginTs()), zap.Uint64("EndTs", dit.EndTs()))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", dit.BeginTs()), zap.Uint64("EndTs", dit.EndTs()))
 		return &milvuspb.GetIndexStatisticsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
@@ -2564,31 +2455,28 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	method := "DropIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
 	if err := dit.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", dit.BeginTs()),
 			zap.Uint64("EndTs", dit.EndTs()))
@@ -2596,8 +2484,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dit.BeginTs()),
 		zap.Uint64("EndTs", dit.EndTs()))
 
@@ -2628,18 +2515,17 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	method := "GetIndexBuildProgress"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(gibpt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.GetIndexBuildProgressResponse{
@@ -2647,14 +2533,12 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", gibpt.BeginTs()),
 		zap.Uint64("EndTs", gibpt.EndTs()))
 
 	if err := gibpt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", gibpt.BeginTs()),
 			zap.Uint64("EndTs", gibpt.EndTs()))
@@ -2664,8 +2548,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", gibpt.BeginTs()),
 		zap.Uint64("EndTs", gibpt.EndTs()))
 
@@ -2695,18 +2578,17 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	method := "GetIndexState"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dipt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.GetIndexStateResponse{
@@ -2714,14 +2596,12 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dipt.BeginTs()),
 		zap.Uint64("EndTs", dipt.EndTs()))
 
 	if err := dipt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", dipt.BeginTs()),
 			zap.Uint64("EndTs", dipt.EndTs()))
@@ -2731,8 +2611,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dipt.BeginTs()),
 		zap.Uint64("EndTs", dipt.EndTs()))
 
@@ -2758,7 +2637,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}, nil
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2814,17 +2693,17 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 	}
 
-	log.Debug("Enqueue insert request in Proxy")
+	log.Debug(ctx, "Enqueue insert request in Proxy")
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
-		log.Warn("Failed to enqueue insert task: " + err.Error())
+		log.Warn(ctx, "Failed to enqueue insert task: "+err.Error())
 		return constructFailedResponse(merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)), nil
 	}
 
-	log.Debug("Detail of insert request in Proxy")
+	log.Debug(ctx, "Detail of insert request in Proxy")
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Warn("Failed to execute insert task in task scheduler: " + err.Error())
+		log.Warn(ctx, "Failed to execute insert task in task scheduler: "+err.Error())
 		return constructFailedResponse(err), nil
 	}
 
@@ -2839,7 +2718,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 
 		setErrorIndex()
-		log.Warn("fail to insert data", zap.Uint32s("err_index", it.result.ErrIndex))
+		log.Warn(ctx, "fail to insert data", zap.Uint32s("err_index", it.result.ErrIndex))
 	}
 
 	// InsertCnt always equals to the number of entities in the request
@@ -2881,15 +2760,15 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete")
 	defer sp.End()
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.String("expr", request.Expr),
 	)
-	log.Debug("Start processing delete request in Proxy")
-	defer log.Debug("Finish processing delete request in Proxy")
+	log.Debug(ctx, "Start processing delete request in Proxy")
+	defer log.Debug(ctx, "Finish processing delete request in Proxy")
 	method := "Delete"
 
 	metrics.GetStats(ctx).
@@ -2928,19 +2807,19 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		limiter:         limiter,
 	}
 
-	log.Debug("init delete runner in Proxy")
+	log.Debug(ctx, "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
-		log.Error("Failed to enqueue delete task: " + err.Error())
+		log.Error(ctx, "Failed to enqueue delete task: "+err.Error())
 
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug("Run delete in Proxy")
+	log.Debug(ctx, "Run delete in Proxy")
 
 	if err := dr.Run(ctx); err != nil {
-		log.Error("Failed to run delete task: " + err.Error())
+		log.Error(ctx, "Failed to run delete task: "+err.Error())
 
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
@@ -2992,7 +2871,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.GetDbName()),
 		zap.String("collection", request.GetCollectionName()),
@@ -3000,7 +2879,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		zap.Uint32("NumRows", request.GetNumRows()),
 		zap.Bool("partialUpdate", request.GetPartialUpdate()),
 	)
-	log.Debug("Start processing upsert request in Proxy")
+	log.Debug(ctx, "Start processing upsert request in Proxy")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.MutationResult{
@@ -3049,24 +2928,24 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		node:            node,
 	}
 
-	log.Debug("Enqueue upsert request in Proxy",
+	log.Debug(ctx, "Enqueue upsert request in Proxy",
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)))
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
-		log.Info("Failed to enqueue upsert task",
+		log.Info(ctx, "Failed to enqueue upsert task",
 			zap.Error(err))
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug("Detail of upsert request in Proxy",
+	log.Debug(ctx, "Detail of upsert request in Proxy",
 		zap.Uint64("BeginTS", it.BeginTs()),
 		zap.Uint64("EndTS", it.EndTs()))
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Warn("Failed to execute insert task in task scheduler",
+		log.Warn(ctx, "Failed to execute insert task in task scheduler",
 			zap.Error(err))
 		// Not every error case changes the status internally
 		// change status there to handle it
@@ -3136,7 +3015,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Debug("Finish processing upsert request in Proxy")
+	log.Debug(ctx, "Finish processing upsert request in Proxy")
 	return it.result, nil
 }
 
@@ -3290,7 +3169,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
+	log := mlog.With( // TODO: it might cause some cpu consumption
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -3314,7 +3193,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			spanPerNq = span / time.Duration(qt.GetNq())
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
+			log.Info(ctx, rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("nq", qt.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
@@ -3331,11 +3210,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 	}()
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 		)
 
@@ -3345,14 +3223,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
 	if err := qt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Int64("nq", qt.GetNq()),
 			zap.Error(err),
 		)
@@ -3372,7 +3248,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	).Observe(float64(span.Milliseconds()))
 
 	tr.CtxRecord(ctx, "wait search result")
-	log.Debug(rpcDone(method))
+	log.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -3530,7 +3406,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -3556,7 +3432,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			spanPerNq = span / time.Duration(totalNq)
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
+			log.Info(ctx, rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("totalNq", totalNq), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
@@ -3573,11 +3449,10 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 	}()
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 		)
 
@@ -3587,14 +3462,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	}
 	tr.CtxRecord(ctx, "hybrid search request enqueue")
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
 	if err := qt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 		)
 
@@ -3613,7 +3486,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	).Observe(float64(span.Milliseconds()))
 
 	tr.CtxRecord(ctx, "wait hybrid search result")
-	log.Debug(rpcDone(method))
+	log.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -3952,29 +3825,26 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	method := "Flush"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.Any("collections", request.CollectionNames))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	if err := ft.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", ft.BeginTs()),
 			zap.Uint64("EndTs", ft.EndTs()))
@@ -3983,8 +3853,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
@@ -4007,7 +3876,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}, segcore.StorageCost{}, nil
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -4017,8 +3886,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		zap.String("queryLabel", queryLabel),
 	)
 
-	log.Debug(
-		rpcReceived(method),
+	log.Debug(ctx, rpcReceived(method),
 		zap.String("expr", request.Expr),
 		zap.Strings("OutputFields", request.OutputFields),
 		zap.Uint64("travel_timestamp", request.TravelTimestamp),
@@ -4033,8 +3901,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}
 		span := tr.ElapseSpan()
 		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(
-				rpcSlow(method),
+			log.Info(ctx, rpcSlow(method),
 				zap.String("expr", request.Expr),
 				zap.Strings("OutputFields", request.OutputFields),
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
@@ -4058,8 +3925,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 	}()
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 		)
 
@@ -4069,11 +3935,10 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 	}
 	tr.CtxRecord(ctx, "query request enqueue")
 
-	log.Debug(rpcEnqueued(method))
+	log.Debug(ctx, rpcEnqueued(method))
 
 	if err := qt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err))
 
 		return &milvuspb.QueryResults{
@@ -4174,8 +4039,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	if err != nil || !merr.Ok(res.Status) {
 		return res, err
 	}
-
-	log.Ctx(ctx).Debug(rpcDone(method))
+	mlog.Debug(ctx, rpcDone(method))
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
@@ -4191,9 +4055,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
-	if log.Ctx(ctx).Core().Enabled(zap.DebugLevel) && matchCountRule(request.OutputFields) {
+	if mlog.LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)
-		log.Ctx(ctx).Debug("Count result", zap.String("result", string(r)))
+		mlog.Debug(ctx, "Count result", zap.String("result", string(r)))
 	}
 	return res, nil
 }
@@ -4217,30 +4081,27 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	method := "CreateAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cat); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", cat.BeginTs()),
 		zap.Uint64("EndTs", cat.EndTs()))
 
 	if err := cat.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", cat.BeginTs()),
 			zap.Uint64("EndTs", cat.EndTs()))
@@ -4248,8 +4109,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", cat.BeginTs()),
 		zap.Uint64("EndTs", cat.EndTs()))
 
@@ -4279,16 +4139,15 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 	method := "DescribeAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.DescribeAliasResponse{
@@ -4296,20 +4155,18 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dat.BeginTs()),
 		zap.Uint64("EndTs", dat.EndTs()))
 
 	if err := dat.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Uint64("BeginTs", dat.BeginTs()), zap.Uint64("EndTs", dat.EndTs()), zap.Error(err))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Uint64("BeginTs", dat.BeginTs()), zap.Uint64("EndTs", dat.EndTs()), zap.Error(err))
 		return &milvuspb.DescribeAliasResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dat.BeginTs()),
 		zap.Uint64("EndTs", dat.EndTs()))
 
@@ -4339,15 +4196,14 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 	method := "ListAliases"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(lat); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return &milvuspb.ListAliasesResponse{
@@ -4355,20 +4211,18 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 		}, nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", lat.BeginTs()),
 		zap.Uint64("EndTs", lat.EndTs()))
 
 	if err := lat.WaitToFinish(); err != nil {
-		log.Warn(rpcFailedToWaitToFinish(method), zap.Uint64("BeginTs", lat.BeginTs()), zap.Uint64("EndTs", lat.EndTs()), zap.Error(err))
+		log.Warn(ctx, rpcFailedToWaitToFinish(method), zap.Uint64("BeginTs", lat.BeginTs()), zap.Uint64("EndTs", lat.EndTs()), zap.Error(err))
 		return &milvuspb.ListAliasesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", lat.BeginTs()),
 		zap.Uint64("EndTs", lat.EndTs()))
 
@@ -4395,29 +4249,26 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	method := "DropAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", dat.BeginTs()),
 		zap.Uint64("EndTs", dat.EndTs()))
 
 	if err := dat.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", dat.BeginTs()),
 			zap.Uint64("EndTs", dat.EndTs()))
@@ -4425,8 +4276,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", dat.BeginTs()),
 		zap.Uint64("EndTs", dat.EndTs()))
 
@@ -4453,30 +4303,27 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	method := "AlterAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(aat); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Debug(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", aat.BeginTs()),
 		zap.Uint64("EndTs", aat.EndTs()))
 
 	if err := aat.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", aat.BeginTs()),
 			zap.Uint64("EndTs", aat.EndTs()))
@@ -4484,8 +4331,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcDone(method),
+	log.Info(ctx, rpcDone(method),
 		zap.Uint64("BeginTs", aat.BeginTs()),
 		zap.Uint64("EndTs", aat.EndTs()))
 
@@ -4523,28 +4369,27 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 	method := "FlushAll"
 	tr := timerecord.NewTimeRecorder(method)
 
-	logger := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+	logger := mlog.With(zap.String("role", typeutil.ProxyRole))
 
-	logger.Debug(rpcReceived(method))
+	logger.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
-		logger.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		logger.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	logger.Debug(rpcEnqueued(method))
+	logger.Debug(ctx, rpcEnqueued(method))
 
 	if err := ft.WaitToFinish(); err != nil {
-		logger.Warn(
-			rpcFailedToWaitToFinish(method),
+		logger.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err))
 
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	logger.Debug(rpcDone(method), log.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
+	logger.Debug(ctx, rpcDone(method), mlog.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil
@@ -4562,9 +4407,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetPersistentSegmentInfo")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", req.DbName),
 		zap.Any("collection", req.CollectionName))
@@ -4606,7 +4449,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
 	})
 	if err != nil {
-		log.Warn("GetPersistentSegmentInfo fail",
+		mlog.Warn(ctx, "GetPersistentSegmentInfo fail",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4616,7 +4459,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Debug("GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		zap.Int("len(infos)", len(infoResp.Infos)),
 		zap.Any("status", infoResp.Status))
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
@@ -4641,8 +4484,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetSegmentsInfo")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-	log.Debug("GetSegmentsInfo",
+	mlog.Debug(ctx, "GetSegmentsInfo",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", req.DbName),
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -4659,7 +4501,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 	tr := timerecord.NewTimeRecorder(method)
 	defer func() {
 		if resp.GetStatus().GetCode() != 0 {
-			log.Warn("GetSegmentsInfo failed", zap.String("err", resp.GetStatus().GetReason()))
+			mlog.Warn(ctx, "GetSegmentsInfo failed", zap.String("err", resp.GetStatus().GetReason()))
 		}
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
@@ -4669,7 +4511,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 		IncludeUnHealthy: true,
 	})
 	if err != nil {
-		log.Warn("GetSegmentInfo fail",
+		mlog.Warn(ctx, "GetSegmentInfo fail",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4679,7 +4521,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Debug("GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		zap.Int("len(infos)", len(infoResp.Infos)),
 		zap.Any("status", infoResp.Status))
 	getLogIDs := func(binlogs []*datapb.FieldBinlog) []*internalpb.FieldBinlog {
@@ -4722,9 +4564,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuerySegmentInfo")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", req.DbName),
 		zap.Any("collection", req.CollectionName))
@@ -4756,12 +4596,12 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		err = merr.Error(infoResp.GetStatus())
 	}
 	if err != nil {
-		log.Error("Failed to get segment info from QueryCoord",
+		mlog.Error(ctx, "Failed to get segment info from QueryCoord",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Debug("GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		zap.Any("infos", infoResp.Infos),
 		zap.Any("status", infoResp.Status))
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
@@ -4799,10 +4639,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Dummy")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
 	if err != nil {
-		log.Warn("Failed to parse dummy request type",
+		mlog.Warn(ctx, "Failed to parse dummy request type",
 			zap.Error(err))
 		return failedResponse, nil
 	}
@@ -4810,7 +4648,7 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	if drt.RequestType == "query" {
 		drr, err := parseDummyQueryRequest(req.RequestType)
 		if err != nil {
-			log.Warn("Failed to parse dummy query request",
+			mlog.Warn(ctx, "Failed to parse dummy query request",
 				zap.Error(err))
 			return failedResponse, nil
 		}
@@ -4824,7 +4662,7 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 
 		_, err = node.Query(ctx, request)
 		if err != nil {
-			log.Warn("Failed to execute dummy query",
+			mlog.Warn(ctx, "Failed to execute dummy query",
 				zap.Error(err))
 			return failedResponse, err
 		}
@@ -4834,7 +4672,7 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 		}, nil
 	}
 
-	log.Debug("cannot find specify dummy request type")
+	mlog.Debug(ctx, "cannot find specify dummy request type")
 	return failedResponse, nil
 }
 
@@ -4845,11 +4683,11 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RegisterLink")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("state", code.String()))
 
-	log.Debug("RegisterLink")
+	log.Debug(ctx, "RegisterLink")
 
 	if err := merr.CheckHealthy(code); err != nil {
 		return &milvuspb.RegisterLinkResponse{
@@ -4868,14 +4706,12 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetMetrics")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.RatedDebug(60, "Proxy.GetMetrics",
+	mlog.RatedDebug(ctx, rate.Limit(60), "Proxy.GetMetrics",
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("Proxy.GetMetrics failed",
+		mlog.Warn(ctx, "Proxy.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -4888,7 +4724,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	ret := gjson.Parse(req.GetRequest())
 	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
-		log.Warn("Proxy.GetMetrics failed to parse metric type",
+		mlog.Warn(ctx, "Proxy.GetMetrics failed to parse metric type",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -4908,7 +4744,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			metrics, err = getSystemInfoMetrics(ctx, req, node)
 		}
 
-		log.RatedDebug(60, "Proxy.GetMetrics",
+		mlog.RatedDebug(ctx, rate.Limit(60), "Proxy.GetMetrics",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metricType", metricType),
@@ -4920,7 +4756,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		return metrics, nil
 	}
 
-	log.RatedWarn(60, "Proxy.GetMetrics failed, request metric type is not implemented yet",
+	mlog.RatedWarn(ctx, rate.Limit(60), "Proxy.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
@@ -4936,12 +4772,12 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetProxyMetrics")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("Proxy.GetProxyMetrics failed",
+		log.Warn(ctx, "Proxy.GetProxyMetrics failed",
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -4952,7 +4788,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	ret := gjson.Parse(req.GetRequest())
 	metricType, err := metricsinfo.ParseMetricRequestType(ret)
 	if err != nil {
-		log.Warn("Proxy.GetProxyMetrics failed to parse metric type",
+		log.Warn(ctx, "Proxy.GetProxyMetrics failed to parse metric type",
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -4968,7 +4804,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	if metricType == metricsinfo.SystemInfoMetrics {
 		proxyMetrics, err := getProxyMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("Proxy.GetProxyMetrics failed to getProxyMetrics",
+			log.Warn(ctx, "Proxy.GetProxyMetrics failed to getProxyMetrics",
 				zap.Error(err))
 
 			return &milvuspb.GetMetricsResponse{
@@ -4982,7 +4818,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		return proxyMetrics, nil
 	}
 
-	log.Warn("Proxy.GetProxyMetrics failed, request metric type is not implemented yet",
+	log.Warn(ctx, "Proxy.GetProxyMetrics failed, request metric type is not implemented yet",
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
@@ -4995,9 +4831,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadBalance")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("Proxy.LoadBalance",
+	mlog.Debug(ctx, "Proxy.LoadBalance",
 		zap.Int64("proxy_id", paramtable.GetNodeID()),
 		zap.Any("req", req))
 
@@ -5009,7 +4843,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
-		log.Warn("failed to get collection id",
+		mlog.Warn(ctx, "failed to get collection id",
 			zap.String("collectionName", req.GetCollectionName()),
 			zap.Error(err))
 		status = merr.Status(err)
@@ -5027,19 +4861,19 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		CollectionID:     collectionID,
 	})
 	if err != nil {
-		log.Warn("Failed to LoadBalance from Query Coordinator",
+		mlog.Warn(ctx, "Failed to LoadBalance from Query Coordinator",
 			zap.Any("req", req),
 			zap.Error(err))
 		status = merr.Status(err)
 		return status, nil
 	}
 	if infoResp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn("Failed to LoadBalance from Query Coordinator",
+		mlog.Warn(ctx, "Failed to LoadBalance from Query Coordinator",
 			zap.String("errMsg", infoResp.Reason))
 		status = infoResp
 		return status, nil
 	}
-	log.Debug("LoadBalance Done",
+	mlog.Debug(ctx, "LoadBalance Done",
 		zap.Any("req", req),
 		zap.Any("status", infoResp))
 	return status, nil
@@ -5050,9 +4884,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicas")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("received get replicas request",
+	mlog.Debug(ctx, "received get replicas request",
 		zap.Int64("collection", req.GetCollectionID()),
 		zap.Bool("with shard nodes", req.GetWithShardNodes()))
 	resp := &milvuspb.GetReplicasResponse{}
@@ -5077,12 +4909,12 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	r, err := node.mixCoord.GetReplicas(ctx, req)
 	if err != nil {
-		log.Warn("Failed to get replicas from Query Coordinator",
+		mlog.Warn(ctx, "Failed to get replicas from Query Coordinator",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	log.Debug("received get replicas response", zap.String("resp", r.String()))
+	mlog.Debug(ctx, "received get replicas response", zap.String("resp", r.String()))
 	return r, nil
 }
 
@@ -5091,10 +4923,10 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetCompactionState")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("compactionID", req.GetCompactionID()))
 
-	log.Debug("received GetCompactionState request")
+	log.Debug(ctx, "received GetCompactionState request")
 	resp := &milvuspb.GetCompactionStateResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -5102,7 +4934,7 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	}
 
 	resp, err := node.mixCoord.GetCompactionState(ctx, req)
-	log.Debug("received GetCompactionState response",
+	log.Debug(ctx, "received GetCompactionState response",
 		zap.Any("resp", resp),
 		zap.Error(err))
 	return resp, err
@@ -5113,11 +4945,11 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ManualCompaction")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", req.GetCollectionID()))
 
-	log.Info("received ManualCompaction request")
+	log.Info(ctx, "received ManualCompaction request")
 	resp := &milvuspb.ManualCompactionResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -5157,7 +4989,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 
 	var err error
 	resp, err = node.mixCoord.ManualCompaction(ctx, req)
-	log.Info("received ManualCompaction response",
+	log.Info(ctx, "received ManualCompaction response",
 		zap.Any("resp", resp),
 		zap.Error(err))
 	return resp, err
@@ -5168,10 +5000,10 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetCompactionStateWithPlans")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Int64("compactionID", req.GetCompactionID()))
 
-	log.Debug("received GetCompactionStateWithPlans request")
+	log.Debug(ctx, "received GetCompactionStateWithPlans request")
 	resp := &milvuspb.GetCompactionPlansResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
@@ -5179,7 +5011,7 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	}
 
 	resp, err := node.mixCoord.GetCompactionStateWithPlans(ctx, req)
-	log.Debug("received GetCompactionStateWithPlans response",
+	log.Debug(ctx, "received GetCompactionStateWithPlans response",
 		zap.Any("resp", resp),
 		zap.Error(err))
 	return resp, err
@@ -5190,15 +5022,13 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushState")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("received get flush state request",
+	mlog.Debug(ctx, "received get flush state request",
 		zap.Any("request", req))
 	var err error
 	failResp := &milvuspb.GetFlushStateResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		failResp.Status = merr.Status(err)
-		log.Warn("unable to get flush state because of closed server")
+		mlog.Warn(ctx, "unable to get flush state because of closed server")
 		return failResp, nil
 	}
 
@@ -5222,12 +5052,12 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 
 	resp, err := node.mixCoord.GetFlushState(ctx, stateReq)
 	if err != nil {
-		log.Warn("failed to get flush state response",
+		mlog.Warn(ctx, "failed to get flush state response",
 			zap.Error(err))
 		failResp.Status = merr.Status(err)
 		return failResp, nil
 	}
-	log.Debug("received get flush state response",
+	mlog.Debug(ctx, "received get flush state response",
 		zap.Any("response", resp))
 	return resp, err
 }
@@ -5236,27 +5066,27 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.Any("FlushAllTss", req.GetFlushAllTss()),
 		zap.Uint64("FlushAllTs", req.GetFlushAllTs()), // for compatibility
 	)
-	log.Debug("receive GetFlushAllState request")
+	log.Debug(ctx, "receive GetFlushAllState request")
 
 	var err error
 	resp := &milvuspb.GetFlushAllStateResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
-		log.Warn("GetFlushAllState failed, closed server")
+		log.Warn(ctx, "GetFlushAllState failed, closed server")
 		return resp, nil
 	}
 
 	resp, err = node.mixCoord.GetFlushAllState(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
-		log.Warn("GetFlushAllState failed", zap.Error(err))
+		log.Warn(ctx, "GetFlushAllState failed", zap.Error(err))
 		return resp, nil
 	}
-	log.Debug("GetFlushAllState done", zap.Bool("flushed", resp.GetFlushed()))
+	log.Debug(ctx, "GetFlushAllState done", zap.Bool("flushed", resp.GetFlushed()))
 	return resp, err
 }
 
@@ -5418,11 +5248,11 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCredentialCache")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
-	log.Debug("received request to invalidate credential cache")
+	log.Debug(ctx, "received request to invalidate credential cache")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5432,7 +5262,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
-	log.Debug("complete to invalidate credential cache")
+	log.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
 }
@@ -5442,11 +5272,11 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredentialCache")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
-	log.Debug("received request to update credential cache")
+	log.Debug(ctx, "received request to update credential cache")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5459,7 +5289,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if priCache != nil {
 		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	log.Debug("complete to update credential cache")
+	log.Debug(ctx, "complete to update credential cache")
 
 	return merr.Success(), nil
 }
@@ -5468,10 +5298,10 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateCredential")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("username", req.Username))
 
-	log.Info("CreateCredential",
+	log.Info(ctx, "CreateCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5483,19 +5313,19 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	}
 	rawPassword, err := crypto.Base64Decode(req.Password)
 	if err != nil {
-		log.Error("decode password fail",
+		log.Error(ctx, "decode password fail",
 			zap.Error(err))
 		err = errors.Wrap(err, "decode password fail")
 		return merr.Status(err), nil
 	}
 	if err = ValidatePassword(rawPassword); err != nil {
-		log.Error("illegal password",
+		log.Error(ctx, "illegal password",
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
 	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
 	if err != nil {
-		log.Error("encrypt password fail",
+		log.Error(ctx, "encrypt password fail",
 			zap.Error(err))
 		err = errors.Wrap(err, "encrypt password failed")
 		return merr.Status(err), nil
@@ -5512,7 +5342,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	}
 	result, err := node.mixCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("create credential fail",
+		log.Error(ctx, "create credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -5523,31 +5353,31 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredential")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("username", req.Username))
 
-	log.Info("UpdateCredential",
+	log.Info(ctx, "UpdateCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
 	if err != nil {
-		log.Error("decode old password fail",
+		log.Error(ctx, "decode old password fail",
 			zap.Error(err))
 		err = errors.Wrap(err, "decode old password failed")
 		return merr.Status(err), nil
 	}
 	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
 	if err != nil {
-		log.Error("decode password fail",
+		log.Error(ctx, "decode password fail",
 			zap.Error(err))
 		err = errors.Wrap(err, "decode password failed")
 		return merr.Status(err), nil
 	}
 	// valid new password
 	if err = ValidatePassword(rawNewPassword); err != nil {
-		log.Error("illegal password",
+		log.Error(ctx, "illegal password",
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -5568,7 +5398,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	// update meta data
 	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
 	if err != nil {
-		log.Error("encrypt password fail",
+		log.Error(ctx, "encrypt password fail",
 			zap.Error(err))
 		err = errors.Wrap(err, "encrypt password failed")
 		return merr.Status(err), nil
@@ -5584,7 +5414,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	}
 	result, err := node.mixCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("update credential fail",
+		log.Error(ctx, "update credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -5595,10 +5425,10 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DeleteCredential")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("username", req.Username))
 
-	log.Info("DeleteCredential",
+	log.Info(ctx, "DeleteCredential",
 		zap.String("role", typeutil.ProxyRole))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5614,7 +5444,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	req.Base.MsgType = commonpb.MsgType_DeleteCredential
 	result, err := node.mixCoord.DeleteCredential(ctx, req)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("delete credential fail",
+		log.Error(ctx, "delete credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -5625,10 +5455,10 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListCredUsers")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("ListCredUsers")
+	log.Debug(ctx, "ListCredUsers")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListCredUsersResponse{Status: merr.Status(err)}, nil
 	}
@@ -5657,9 +5487,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateRole")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("CreateRole", zap.Stringer("req", req))
+	mlog.Info(ctx, "CreateRole", zap.Stringer("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5678,7 +5506,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 
 	result, err := node.mixCoord.CreateRole(ctx, req)
 	if err != nil {
-		log.Warn("fail to create role", zap.Error(err))
+		mlog.Warn(ctx, "fail to create role", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -5688,9 +5516,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropRole")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("DropRole",
+	mlog.Info(ctx, "DropRole",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5708,7 +5534,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	}
 	result, err := node.mixCoord.DropRole(ctx, req)
 	if err != nil {
-		log.Warn("fail to drop role",
+		mlog.Warn(ctx, "fail to drop role",
 			zap.String("role_name", req.RoleName),
 			zap.Error(err))
 		return merr.Status(err), nil
@@ -5720,9 +5546,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperateUserRole")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("OperateUserRole", zap.Any("req", req))
+	mlog.Info(ctx, "OperateUserRole", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5739,7 +5563,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 
 	result, err := node.mixCoord.OperateUserRole(ctx, req)
 	if err != nil {
-		log.Warn("fail to operate user role", zap.Error(err))
+		mlog.Warn(ctx, "fail to operate user role", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -5749,9 +5573,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectRole")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("SelectRole", zap.Any("req", req))
+	mlog.Debug(ctx, "SelectRole", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SelectRoleResponse{Status: merr.Status(err)}, nil
 	}
@@ -5770,7 +5592,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 
 	result, err := node.mixCoord.SelectRole(ctx, req)
 	if err != nil {
-		log.Warn("fail to select role", zap.Error(err))
+		mlog.Warn(ctx, "fail to select role", zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -5782,16 +5604,14 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectUser")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("SelectUser", zap.Any("req", req))
+	mlog.Debug(ctx, "SelectUser", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SelectUserResponse{Status: merr.Status(err)}, nil
 	}
 
 	if req.User != nil {
 		if err := ValidateUsername(req.User.Name); err != nil {
-			log.Warn("invalid username", zap.Error(err))
+			mlog.Warn(ctx, "invalid username", zap.Error(err))
 			return &milvuspb.SelectUserResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -5804,7 +5624,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 	result, err := node.mixCoord.SelectUser(ctx, req)
 	if err != nil {
-		log.Warn("fail to select user", zap.Error(err))
+		mlog.Warn(ctx, "fail to select user", zap.Error(err))
 		return &milvuspb.SelectUserResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -5872,9 +5692,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilegeV2")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("OperatePrivilegeV2",
+	mlog.Info(ctx, "OperatePrivilegeV2",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5897,7 +5715,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 		req.CollectionName != util.AnyWord && req.CollectionName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
 		if resolveErr != nil {
-			log.Warn("failed to resolve collection alias for privilege operation",
+			mlog.Warn(ctx, "failed to resolve collection alias for privilege operation",
 				zap.String("collectionName", req.CollectionName), zap.String("dbName", req.DbName), zap.Error(resolveErr))
 			return merr.Status(resolveErr), nil
 		}
@@ -5918,7 +5736,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	request.Base = req.Base
 	result, err := node.mixCoord.OperatePrivilege(ctx, request)
 	if err != nil {
-		log.Warn("fail to operate privilege", zap.Error(err))
+		mlog.Warn(ctx, "fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Grantor.Privilege.Name)]
@@ -5928,11 +5746,11 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
 			result, err = node.mixCoord.OperatePrivilege(ctx, relatedReq)
 			if err != nil {
-				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
+				mlog.Warn(ctx, "fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
 				return merr.Status(err), nil
 			}
 			if !merr.Ok(result) {
-				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
+				mlog.Warn(ctx, "fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
 				return result, nil
 			}
 		}
@@ -5944,9 +5762,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilege")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("OperatePrivilege",
+	mlog.Info(ctx, "OperatePrivilege",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -5960,7 +5776,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	req.Base.MsgType = commonpb.MsgType_OperatePrivilege
 	curUser, err := GetCurUserFromContext(ctx)
 	if err != nil {
-		log.Warn("fail to get current user", zap.Error(err))
+		mlog.Warn(ctx, "fail to get current user", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
@@ -5971,7 +5787,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
-			log.Warn("failed to resolve collection alias for privilege operation",
+			mlog.Warn(ctx, "failed to resolve collection alias for privilege operation",
 				zap.String("objectName", req.Entity.ObjectName), zap.String("dbName", req.Entity.DbName), zap.Error(resolveErr))
 			return merr.Status(resolveErr), nil
 		}
@@ -5980,7 +5796,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 
 	result, err := node.mixCoord.OperatePrivilege(ctx, req)
 	if err != nil {
-		log.Warn("fail to operate privilege", zap.Error(err))
+		mlog.Warn(ctx, "fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Entity.Grantor.Privilege.Name)]
@@ -5990,11 +5806,11 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
 			result, err = node.mixCoord.OperatePrivilege(ctx, relatedReq)
 			if err != nil {
-				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
+				mlog.Warn(ctx, "fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
 				return merr.Status(err), nil
 			}
 			if !merr.Ok(result) {
-				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
+				mlog.Warn(ctx, "fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Any("result", result))
 				return result, nil
 			}
 		}
@@ -6032,9 +5848,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectGrant")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("SelectGrant",
+	mlog.Debug(ctx, "SelectGrant",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SelectGrantResponse{Status: merr.Status(err)}, nil
@@ -6056,7 +5870,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
-			log.Warn("failed to resolve collection alias for select grant",
+			mlog.Warn(ctx, "failed to resolve collection alias for select grant",
 				zap.String("objectName", req.Entity.ObjectName), zap.String("dbName", req.Entity.DbName), zap.Error(resolveErr))
 			return &milvuspb.SelectGrantResponse{
 				Status: merr.Status(resolveErr),
@@ -6067,7 +5881,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 
 	result, err := node.mixCoord.SelectGrant(ctx, req)
 	if err != nil {
-		log.Warn("fail to select grant", zap.Error(err))
+		mlog.Warn(ctx, "fail to select grant", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -6079,16 +5893,14 @@ func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaR
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-BackupRBAC")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("BackupRBAC", zap.Any("req", req))
+	mlog.Debug(ctx, "BackupRBAC", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.BackupRBACMetaResponse{Status: merr.Status(err)}, nil
 	}
 
 	result, err := node.mixCoord.BackupRBAC(ctx, req)
 	if err != nil {
-		log.Warn("fail to backup rbac", zap.Error(err))
+		mlog.Warn(ctx, "fail to backup rbac", zap.Error(err))
 		return &milvuspb.BackupRBACMetaResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -6100,9 +5912,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("RestoreRBAC", zap.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -6112,7 +5922,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 
 	result, err := node.mixCoord.RestoreRBAC(ctx, req)
 	if err != nil {
-		log.Warn("fail to restore rbac", zap.Error(err))
+		mlog.Warn(ctx, "fail to restore rbac", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -6122,9 +5932,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Debug("RefreshPrivilegeInfoCache",
+	mlog.Debug(ctx, "RefreshPrivilegeInfoCache",
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -6137,12 +5945,12 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 			OpKey:  req.OpKey,
 		})
 		if err != nil {
-			log.Warn("fail to refresh policy info",
+			mlog.Warn(ctx, "fail to refresh policy info",
 				zap.Error(err))
 			return merr.Status(err), nil
 		}
 	}
-	log.Debug("RefreshPrivilegeInfoCache success")
+	mlog.Debug(ctx, "RefreshPrivilegeInfoCache success")
 
 	return merr.Success(), nil
 }
@@ -6185,17 +5993,17 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
 		defer sp.End()
 
-		log := log.Ctx(ctx).With(zap.String("role", role))
+		log := mlog.With(zap.String("role", role))
 
 		if err != nil {
-			log.Warn("check health fail",
+			log.Warn(ctx, "check health fail",
 				zap.Error(err))
 			errReasons = append(errReasons, fmt.Sprintf("check health fail for %s", role))
 			return err
 		}
 
 		if !resp.IsHealthy {
-			log.Warn("check health fail")
+			log.Warn(ctx, "check health fail")
 			errReasons = append(errReasons, resp.Reasons...)
 		}
 		return nil
@@ -6225,12 +6033,12 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RenameCollection")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("oldName", req.GetOldName()),
 		zap.String("newName", req.GetNewName()))
 
-	log.Info("received rename collection request")
+	log.Info(ctx, "received rename collection request")
 	var err error
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -6238,7 +6046,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	}
 
 	if err := validateCollectionName(req.GetNewName()); err != nil {
-		log.Warn("validate new collection name fail", zap.Error(err))
+		log.Warn(ctx, "validate new collection name fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -6248,7 +6056,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	)
 	resp, err := node.mixCoord.RenameCollection(ctx, req)
 	if err != nil {
-		log.Warn("failed to rename collection", zap.Error(err))
+		log.Warn(ctx, "failed to rename collection", zap.Error(err))
 		return merr.Status(err), err
 	}
 	return resp, nil
@@ -6261,7 +6069,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 
 	method := "CreateResourceGroup"
 	if err := ValidateResourceGroupName(request.GetResourceGroup()); err != nil {
-		log.Warn("CreateResourceGroup failed",
+		mlog.Warn(ctx, "CreateResourceGroup failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
@@ -6277,31 +6085,31 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		mixCoord:                   node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("CreateResourceGroup received")
+	log.Info(ctx, "CreateResourceGroup received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("CreateResourceGroup failed to enqueue",
+		log.Warn(ctx, "CreateResourceGroup failed to enqueue",
 			zap.Error(err))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Debug("CreateResourceGroup enqueued",
+	log.Debug(ctx, "CreateResourceGroup enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("CreateResourceGroup failed to WaitToFinish",
+		log.Warn(ctx, "CreateResourceGroup failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Info("CreateResourceGroup done",
+	log.Info(ctx, "CreateResourceGroup done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6317,7 +6125,7 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 	method := "UpdateResourceGroups"
 	for name := range request.GetResourceGroups() {
 		if err := ValidateResourceGroupName(name); err != nil {
-			log.Warn("UpdateResourceGroups failed",
+			mlog.Warn(ctx, "UpdateResourceGroups failed",
 				zap.Error(err),
 			)
 			return getErrResponse(err, method, "", ""), nil
@@ -6334,31 +6142,31 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 		mixCoord:                    node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("UpdateResourceGroups received")
+	log.Info(ctx, "UpdateResourceGroups received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("UpdateResourceGroups failed to enqueue",
+		log.Warn(ctx, "UpdateResourceGroups failed to enqueue",
 			zap.Error(err))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Debug("UpdateResourceGroups enqueued",
+	log.Debug(ctx, "UpdateResourceGroups enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("UpdateResourceGroups failed to WaitToFinish",
+		log.Warn(ctx, "UpdateResourceGroups failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Info("UpdateResourceGroups done",
+	log.Info(ctx, "UpdateResourceGroups done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6386,32 +6194,32 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		mixCoord:                 node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("DropResourceGroup received")
+	log.Info(ctx, "DropResourceGroup received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("DropResourceGroup failed to enqueue",
+		log.Warn(ctx, "DropResourceGroup failed to enqueue",
 			zap.Error(err))
 
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Debug("DropResourceGroup enqueued",
+	log.Debug(ctx, "DropResourceGroup enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("DropResourceGroup failed to WaitToFinish",
+		log.Warn(ctx, "DropResourceGroup failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Info("DropResourceGroup done",
+	log.Info(ctx, "DropResourceGroup done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6426,14 +6234,14 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 
 	method := "TransferNode"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Ctx(ctx).Warn("TransferNode failed",
+		mlog.Warn(ctx, "TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Ctx(ctx).Warn("TransferNode failed",
+		mlog.Warn(ctx, "TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
@@ -6449,32 +6257,32 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		mixCoord:            node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("TransferNode received")
+	log.Info(ctx, "TransferNode received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("TransferNode failed to enqueue",
+		log.Warn(ctx, "TransferNode failed to enqueue",
 			zap.Error(err))
 
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Debug("TransferNode enqueued",
+	log.Debug(ctx, "TransferNode enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("TransferNode failed to WaitToFinish",
+		log.Warn(ctx, "TransferNode failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return getErrResponse(err, method, "", ""), nil
 	}
 
-	log.Info("TransferNode done",
+	log.Info(ctx, "TransferNode done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6489,14 +6297,14 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 
 	method := "TransferReplica"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Ctx(ctx).Warn("TransferReplica failed",
+		mlog.Warn(ctx, "TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Ctx(ctx).Warn("TransferReplica failed",
+		mlog.Warn(ctx, "TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
@@ -6512,32 +6320,32 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		mixCoord:               node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Info("TransferReplica received")
+	log.Info(ctx, "TransferReplica received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("TransferReplica failed to enqueue",
+		log.Warn(ctx, "TransferReplica failed to enqueue",
 			zap.Error(err))
 
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
-	log.Debug("TransferReplica enqueued",
+	log.Debug(ctx, "TransferReplica enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("TransferReplica failed to WaitToFinish",
+		log.Warn(ctx, "TransferReplica failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
-	log.Info("TransferReplica done",
+	log.Info(ctx, "TransferReplica done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6563,14 +6371,14 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		mixCoord:                  node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("ListResourceGroups received")
+	log.Debug(ctx, "ListResourceGroups received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("ListResourceGroups failed to enqueue",
+		log.Warn(ctx, "ListResourceGroups failed to enqueue",
 			zap.Error(err))
 
 		return &milvuspb.ListResourceGroupsResponse{
@@ -6578,12 +6386,12 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		}, nil
 	}
 
-	log.Debug("ListResourceGroups enqueued",
+	log.Debug(ctx, "ListResourceGroups enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("ListResourceGroups failed to WaitToFinish",
+		log.Warn(ctx, "ListResourceGroups failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
@@ -6592,7 +6400,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		}, nil
 	}
 
-	log.Debug("ListResourceGroups done",
+	log.Debug(ctx, "ListResourceGroups done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6624,32 +6432,32 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		mixCoord:                     node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
-	log.Debug("DescribeResourceGroup received")
+	log.Debug(ctx, "DescribeResourceGroup received")
 
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
-		log.Warn("DescribeResourceGroup failed to enqueue",
+		log.Warn(ctx, "DescribeResourceGroup failed to enqueue",
 			zap.Error(err))
 
 		return GetErrResponse(err), nil
 	}
 
-	log.Debug("DescribeResourceGroup enqueued",
+	log.Debug(ctx, "DescribeResourceGroup enqueued",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("DescribeResourceGroup failed to WaitToFinish",
+		log.Warn(ctx, "DescribeResourceGroup failed to WaitToFinish",
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
 		return GetErrResponse(err), nil
 	}
 
-	log.Debug("DescribeResourceGroup done",
+	log.Debug(ctx, "DescribeResourceGroup done",
 		zap.Uint64("BeginTS", t.BeginTs()),
 		zap.Uint64("EndTS", t.EndTs()))
 
@@ -6676,9 +6484,9 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	db := GetCurDBNameFromContextOrDefault(ctx)
 	logsToBePrinted := append(connection.ZapClientInfo(request.GetClientInfo()), zap.String("db", db))
-	log := log.Ctx(ctx).With(logsToBePrinted...)
+	log := mlog.With(logsToBePrinted...)
 
-	log.Info("connect received")
+	log.Info(ctx, "connect received")
 
 	resp, err := node.mixCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -6690,14 +6498,14 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 	}
 
 	if err != nil {
-		log.Info("connect failed, failed to list databases", zap.Error(err))
+		log.Info(ctx, "connect failed, failed to list databases", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
 	if !funcutil.SliceContain(resp.GetDbNames(), db) {
-		log.Info("connect failed, target database not exist")
+		log.Info(ctx, "connect failed, target database not exist")
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(merr.WrapErrDatabaseNotFound(db)),
 		}, nil
@@ -6705,7 +6513,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
-		log.Info("connect failed, failed to allocate timestamp", zap.Error(err))
+		log.Info(ctx, "connect failed, failed to allocate timestamp", zap.Error(err))
 		return &milvuspb.ConnectResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -6752,19 +6560,19 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 		return &milvuspb.AllocTimestampResponse{Status: merr.Status(err)}, nil
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 	)
-	log.Info("AllocTimestamp request receive")
+	log.Info(ctx, "AllocTimestamp request receive")
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
-		log.Info("AllocTimestamp failed", zap.Error(err))
+		log.Info(ctx, "AllocTimestamp failed", zap.Error(err))
 		return &milvuspb.AllocTimestampResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("AllocTimestamp request success", zap.Uint64("timestamp", ts))
+	log.Info(ctx, "AllocTimestamp request success", zap.Uint64("timestamp", ts))
 
 	return &milvuspb.AllocTimestampResponse{
 		Status:    merr.Success(),
@@ -6789,7 +6597,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
@@ -6803,7 +6611,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 
 	method := "ImportV2"
 	tr := timerecord.NewTimeRecorder(method)
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 	nodeID := paramtable.GetStringNodeID()
 
 	it := &importTask{
@@ -6816,21 +6624,18 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		log.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", it.BeginTs()),
 		zap.Uint64("EndTs", it.EndTs()))
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", it.BeginTs()),
 			zap.Uint64("EndTs", it.EndTs()))
@@ -6848,17 +6653,17 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 			Status: merr.Status(err),
 		}, nil
 	}
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("jobID", req.GetJobID()),
 	)
 	method := "GetImportProgress"
 	tr := timerecord.NewTimeRecorder(method)
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	nodeID := paramtable.GetStringNodeID()
 	resp, err := node.mixCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
-		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
+		log.Warn(ctx, "get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, err
@@ -6874,13 +6679,13 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		Status: merr.Success(),
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("dbName", req.GetDbName()),
 		zap.String("collectionName", req.GetCollectionName()),
 	)
 	method := "ListImports"
 	tr := timerecord.NewTimeRecorder(method)
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 
 	nodeID := paramtable.GetStringNodeID()
 
@@ -6899,7 +6704,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		CollectionID: collectionID,
 	})
 	if resp.GetStatus().GetCode() != 0 || err != nil {
-		log.Warn("list imports", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
+		log.Warn(ctx, "list imports", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil
@@ -6986,14 +6791,12 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreatePrivilegeGroup")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("CreatePrivilegeGroup", zap.Any("req", req))
+	mlog.Info(ctx, "CreatePrivilegeGroup", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
-		log.Warn("CreatePrivilegeGroup failed",
+		mlog.Warn(ctx, "CreatePrivilegeGroup failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, "CreatePrivilegeGroup", "", ""), nil
@@ -7005,7 +6808,7 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 
 	result, err := node.mixCoord.CreatePrivilegeGroup(ctx, req)
 	if err != nil {
-		log.Warn("fail to create privilege group", zap.Error(err))
+		mlog.Warn(ctx, "fail to create privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -7015,14 +6818,12 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropPrivilegeGroup")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("DropPrivilegeGroup", zap.Any("req", req))
+	mlog.Info(ctx, "DropPrivilegeGroup", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
-		log.Warn("DropPrivilegeGroup failed",
+		mlog.Warn(ctx, "DropPrivilegeGroup failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, "DropPrivilegeGroup", "", ""), nil
@@ -7034,7 +6835,7 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 
 	result, err := node.mixCoord.DropPrivilegeGroup(ctx, req)
 	if err != nil {
-		log.Warn("fail to drop privilege group", zap.Error(err))
+		mlog.Warn(ctx, "fail to drop privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -7044,10 +6845,10 @@ func (node *Proxy) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPr
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListPrivilegeGroups")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("ListPrivilegeGroups")
+	log.Debug(ctx, "ListPrivilegeGroups")
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListPrivilegeGroupsResponse{Status: merr.Status(err)}, nil
 	}
@@ -7073,14 +6874,12 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilegeGroup")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
-	log.Info("OperatePrivilegeGroup", zap.Any("req", req))
+	mlog.Info(ctx, "OperatePrivilegeGroup", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := ValidatePrivilegeGroupName(req.GroupName); err != nil {
-		log.Warn("OperatePrivilegeGroup failed",
+		mlog.Warn(ctx, "OperatePrivilegeGroup failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, "OperatePrivilegeGroup", "", ""), nil
@@ -7097,7 +6896,7 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 
 	result, err := node.mixCoord.OperatePrivilegeGroup(ctx, req)
 	if err != nil {
-		log.Warn("fail to operate privilege group", zap.Error(err))
+		mlog.Warn(ctx, "fail to operate privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -7148,8 +6947,7 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	}
 
 	if err := node.sched.dqQueue.Enqueue(task); err != nil {
-		log.Warn(
-			rpcFailedToEnqueue(method),
+		mlog.Warn(ctx, rpcFailedToEnqueue(method),
 			zap.Error(err),
 		)
 
@@ -7159,8 +6957,7 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	}
 
 	if err := task.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 		)
 
@@ -7175,19 +6972,17 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuotaMetrics")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &internalpb.GetQuotaMetricsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("receive GetQuotaMetrics request")
+	mlog.Info(ctx, "receive GetQuotaMetrics request")
 
 	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
 	if err != nil {
-		log.Warn("GetQuotaMetrics fail",
+		mlog.Warn(ctx, "GetQuotaMetrics fail",
 			zap.Error(err))
 		metricsResp.Status = merr.Status(err)
 		return metricsResp, nil
@@ -7198,7 +6993,7 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 		return metricsResp, nil
 	}
 
-	log.Info("GetQuotaMetrics success", zap.String("metrics", metricsResp.GetMetricsInfo()))
+	mlog.Info(ctx, "GetQuotaMetrics success", zap.String("metrics", metricsResp.GetMetricsInfo()))
 
 	return metricsResp, nil
 }
@@ -7208,7 +7003,7 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddFileResource")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("name", req.GetName()),
 		zap.String("path", req.GetPath()))
@@ -7217,19 +7012,19 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 		return merr.Status(err), nil
 	}
 
-	log.Info("receive AddFileResource request")
+	log.Info(ctx, "receive AddFileResource request")
 
 	status, err := node.mixCoord.AddFileResource(ctx, req)
 	if err != nil {
-		log.Warn("AddFileResource fail", zap.Error(err))
+		log.Warn(ctx, "AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if err = merr.Error(status); err != nil {
-		log.Warn("AddFileResource fail", zap.Error(err))
+		log.Warn(ctx, "AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("AddFileResource success")
+	log.Info(ctx, "AddFileResource success")
 	return status, nil
 }
 
@@ -7238,7 +7033,7 @@ func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveF
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RemoveFileResource")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("name", req.GetName()))
 
@@ -7246,19 +7041,19 @@ func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveF
 		return merr.Status(err), nil
 	}
 
-	log.Info("receive RemoveFileResource request")
+	log.Info(ctx, "receive RemoveFileResource request")
 
 	status, err := node.mixCoord.RemoveFileResource(ctx, req)
 	if err != nil {
-		log.Warn("RemoveFileResource fail", zap.Error(err))
+		log.Warn(ctx, "RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	if err = merr.Error(status); err != nil {
-		log.Warn("RemoveFileResource fail", zap.Error(err))
+		log.Warn(ctx, "RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info("RemoveFileResource success")
+	log.Info(ctx, "RemoveFileResource success")
 	return status, nil
 }
 
@@ -7267,7 +7062,7 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListFileResources")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+	log := mlog.With(zap.String("role", typeutil.ProxyRole))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListFileResourcesResponse{
@@ -7275,23 +7070,23 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 		}, nil
 	}
 
-	log.Info("receive ListFileResources request")
+	log.Info(ctx, "receive ListFileResources request")
 
 	resp, err := node.mixCoord.ListFileResources(ctx, req)
 	if err != nil {
-		log.Warn("ListFileResources fail", zap.Error(err))
+		log.Warn(ctx, "ListFileResources fail", zap.Error(err))
 		return &milvuspb.ListFileResourcesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 	if err = merr.Error(resp.GetStatus()); err != nil {
-		log.Warn("ListFileResources fail", zap.Error(err))
+		log.Warn(ctx, "ListFileResources fail", zap.Error(err))
 		return &milvuspb.ListFileResourcesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
+	log.Info(ctx, "ListFileResources success", zap.Int("count", len(resp.GetResources())))
 	return resp, nil
 }
 
@@ -7303,17 +7098,17 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		replicateutil.ConfigLogField(req.GetReplicateConfiguration()),
 		zap.Bool("forcePromote", req.GetForcePromote()),
 	)
-	log.Info("UpdateReplicateConfiguration received")
+	log.Info(ctx, "UpdateReplicateConfiguration received")
 	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, req)
 	if err != nil {
-		log.Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		log.Warn(ctx, "UpdateReplicateConfiguration fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	log.Info("UpdateReplicateConfiguration success")
+	log.Info(ctx, "UpdateReplicateConfiguration success")
 	return merr.Status(nil), nil
 }
 
@@ -7322,8 +7117,7 @@ func (node *Proxy) GetReplicateConfiguration(ctx context.Context, req *milvuspb.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateConfiguration")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
-	log.Info("GetReplicateConfiguration request received")
+	mlog.Info(ctx, "GetReplicateConfiguration request received")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetReplicateConfigurationResponse{
@@ -7333,13 +7127,13 @@ func (node *Proxy) GetReplicateConfiguration(ctx context.Context, req *milvuspb.
 
 	config, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
 	if err != nil {
-		log.Warn("GetReplicateConfiguration failed", zap.Error(err))
+		mlog.Warn(ctx, "GetReplicateConfiguration failed", zap.Error(err))
 		return &milvuspb.GetReplicateConfigurationResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("GetReplicateConfiguration succeeded")
+	mlog.Info(ctx, "GetReplicateConfiguration succeeded")
 	return &milvuspb.GetReplicateConfigurationResponse{
 		Status:        merr.Success(),
 		Configuration: config,
@@ -7356,16 +7150,16 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	logger := log.Ctx(ctx).With(
+	logger := mlog.With(
 		zap.String("sourceClusterID", req.GetSourceClusterId()),
 		zap.String("pchannel", req.GetTargetPchannel()),
 	)
-	logger.Info("GetReplicateInfo received")
+	logger.Info(ctx, "GetReplicateInfo received")
 	defer func() {
 		if err != nil {
-			logger.Warn("GetReplicateInfo fail", zap.Error(err))
+			logger.Warn(ctx, "GetReplicateInfo fail", zap.Error(err))
 		} else {
-			logger.Info("GetReplicateInfo success", zap.Any("checkpoint", resp.GetCheckpoint()))
+			logger.Info(ctx, "GetReplicateInfo success", zap.Any("checkpoint", resp.GetCheckpoint()))
 		}
 	}()
 
@@ -7421,13 +7215,12 @@ func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateRep
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return err
 	}
-
-	log.Ctx(ctx).Info("replicate stream created")
+	mlog.Info(ctx, "replicate stream created")
 	defer func() {
 		if err != nil {
-			log.Ctx(ctx).Warn("replicate stream closed with error", zap.Error(err))
+			mlog.Warn(ctx, "replicate stream closed with error", zap.Error(err))
 		} else {
-			log.Ctx(ctx).Info("replicate stream closed")
+			mlog.Info(ctx, "replicate stream closed")
 		}
 	}()
 
@@ -7462,12 +7255,12 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return err
 	}
 
-	logger := log.Ctx(ctx).With(
+	logger := mlog.With(
 		zap.String("pchannel", req.GetPchannel()),
 		zap.Uint64("startTimetick", req.GetStartTimetick()),
 		zap.Uint64("endTimetick", req.GetEndTimetick()),
 	)
-	logger.Info("DumpMessages received")
+	logger.Info(ctx, "DumpMessages received")
 
 	// Validate request
 	if req.GetPchannel() == "" {
@@ -7503,20 +7296,20 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("DumpMessages context canceled", zap.Int("messageCount", msgCount))
+			logger.Info(ctx, "DumpMessages context canceled", zap.Int("messageCount", msgCount))
 			return ctx.Err()
 		case <-scanner.Done():
 			// Scanner closed
 			if err := scanner.Error(); err != nil {
-				logger.Warn("DumpMessages scanner error", zap.Error(err), zap.Int("messageCount", msgCount))
+				logger.Warn(ctx, "DumpMessages scanner error", zap.Error(err), zap.Int("messageCount", msgCount))
 				return err
 			}
-			logger.Info("DumpMessages completed", zap.Int("messageCount", msgCount))
+			logger.Info(ctx, "DumpMessages completed", zap.Int("messageCount", msgCount))
 			return nil
 		case msg, ok := <-msgCh:
 			if !ok {
 				// Channel closed
-				logger.Info("DumpMessages channel closed", zap.Int("messageCount", msgCount))
+				logger.Info(ctx, "DumpMessages channel closed", zap.Int("messageCount", msgCount))
 				return nil
 			}
 
@@ -7529,7 +7322,7 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 
 			// Check end timetick condition
 			if endTimetick > 0 && msgTimetick > endTimetick {
-				logger.Info("DumpMessages reached end timetick", zap.Int("messageCount", msgCount))
+				logger.Info(ctx, "DumpMessages reached end timetick", zap.Int("messageCount", msgCount))
 				return nil
 			}
 
@@ -7544,7 +7337,7 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 					Message: msg.IntoImmutableMessageProto(),
 				},
 			}); err != nil {
-				logger.Warn("DumpMessages send failed", zap.Error(err))
+				logger.Warn(ctx, "DumpMessages send failed", zap.Error(err))
 				return err
 			}
 			msgCount++
@@ -7565,9 +7358,9 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 	method := "ComputePhraseMatchSlop"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+	log := mlog.With(zap.String("role", typeutil.ProxyRole))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	resp, err := node.mixCoord.ComputePhraseMatchSlop(ctx, &querypb.ComputePhraseMatchSlopRequest{
 		AnalyzerParams: req.GetAnalyzerParams(),
@@ -7580,7 +7373,7 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 		}, nil
 	}
 
-	log.Debug(rpcDone(method))
+	log.Debug(ctx, rpcDone(method))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
@@ -7645,7 +7438,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 		return merr.Status(err), nil
 	}
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int("itemCount", len(req.GetItems())),
@@ -7653,7 +7446,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 
 	method := "BatchUpdateManifest"
 	tr := timerecord.NewTimeRecorder(method)
-	log.Info(rpcReceived(method))
+	log.Info(ctx, rpcReceived(method))
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 
 	bt := &batchUpdateManifestTask{
@@ -7664,18 +7457,16 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	}
 
 	if err := node.sched.ddQueue.Enqueue(bt); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		log.Warn(ctx, rpcFailedToEnqueue(method), zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	log.Info(
-		rpcEnqueued(method),
+	log.Info(ctx, rpcEnqueued(method),
 		zap.Uint64("BeginTs", bt.BeginTs()),
 		zap.Uint64("EndTs", bt.EndTs()))
 
 	if err := bt.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(ctx, rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", bt.BeginTs()),
 			zap.Uint64("EndTs", bt.EndTs()))
@@ -7700,12 +7491,12 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	method := "RefreshExternalCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("dbName", req.GetDbName()))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	// Validate collection name
 	if err := validateCollectionName(req.GetCollectionName()); err != nil {
@@ -7742,7 +7533,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// Get collection info from cache (includes schema for validation)
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
-		log.Warn("failed to get collection info", zap.Error(err))
+		log.Warn(ctx, "failed to get collection info", zap.Error(err))
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -7750,7 +7541,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 
 	// Validate it's an external collection
 	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
-		log.Warn("collection is not an external collection")
+		log.Warn(ctx, "collection is not an external collection")
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 		}, nil
@@ -7785,13 +7576,13 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		ExternalSpec:   req.GetExternalSpec(),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to refresh external collection", zap.Error(err))
+		log.Warn(ctx, "failed to refresh external collection", zap.Error(err))
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(rpcDone(method), zap.Int64("jobID", resp.GetJobId()))
+	log.Debug(ctx, rpcDone(method), zap.Int64("jobID", resp.GetJobId()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
@@ -7815,11 +7606,11 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	method := "GetRefreshExternalCollectionProgress"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("jobID", req.GetJobId()))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	// Validate job ID
 	if req.GetJobId() == 0 {
@@ -7833,13 +7624,13 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 		JobId: req.GetJobId(),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to get refresh external collection progress", zap.Error(err))
+		log.Warn(ctx, "failed to get refresh external collection progress", zap.Error(err))
 		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(rpcDone(method),
+	log.Debug(ctx, rpcDone(method),
 		zap.String("state", resp.GetJobInfo().GetState().String()),
 		zap.Int64("progress", resp.GetJobInfo().GetProgress()))
 
@@ -7867,12 +7658,12 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 	method := "ListRefreshExternalCollectionJobs"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
+	log := mlog.With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("dbName", req.GetDbName()))
 
-	log.Debug(rpcReceived(method))
+	log.Debug(ctx, rpcReceived(method))
 
 	var collectionID int64
 	if req.GetCollectionName() != "" {
@@ -7885,14 +7676,14 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 		// Get collection info from cache and validate it's an external collection
 		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 		if err != nil {
-			log.Warn("failed to get collection info", zap.Error(err))
+			log.Warn(ctx, "failed to get collection info", zap.Error(err))
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(err),
 			}, nil
 		}
 
 		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
-			log.Warn("collection is not an external collection")
+			log.Warn(ctx, "collection is not an external collection")
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 			}, nil
@@ -7906,13 +7697,13 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 		CollectionId: collectionID,
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to list refresh external collection jobs", zap.Error(err))
+		log.Warn(ctx, "failed to list refresh external collection jobs", zap.Error(err))
 		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Debug(rpcDone(method), zap.Int("jobCount", len(resp.GetJobs())))
+	log.Debug(ctx, rpcDone(method), zap.Int("jobCount", len(resp.GetJobs())))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 

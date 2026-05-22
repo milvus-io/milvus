@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -58,7 +58,7 @@ func WaitForComponentStates[T interface {
 				serviceName,
 				resp.State.StateCode.String())
 		}
-		log.Info("WaitForComponentStates success", zap.String("current state", resp.State.StateCode.String()))
+		mlog.Info(ctx, "WaitForComponentStates success", zap.String("current state", resp.State.StateCode.String()))
 		return nil
 	}
 	return retry.Do(ctx, checkFunc, retry.Attempts(attempts), retry.Sleep(sleep))

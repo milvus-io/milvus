@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -36,28 +36,28 @@ func TraceLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 		return handler(ctx, req)
 	case 1: // simple info
 		fields := GetRequestBaseInfo(ctx, req, info, false)
-		log.Ctx(ctx).Info("trace info: simple", fields...)
+		mlog.Info(ctx, "trace info: simple", fields...)
 		return handler(ctx, req)
 	case 2: // detail info
 		fields := GetRequestBaseInfo(ctx, req, info, true)
 		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
-		log.Ctx(ctx).Info("trace info: detail", fields...)
+		mlog.Info(ctx, "trace info: detail", fields...)
 		return handler(ctx, req)
 	case 3: // detail info with request and response
 		fields := GetRequestBaseInfo(ctx, req, info, true)
 		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
-		log.Ctx(ctx).Info("trace info: all request", fields...)
+		mlog.Info(ctx, "trace info: all request", fields...)
 		resp, err := handler(ctx, req)
 		if err != nil {
-			log.Ctx(ctx).Info("trace info: all, error", zap.Error(err))
+			mlog.Info(ctx, "trace info: all, error", zap.Error(err))
 			return resp, err
 		}
 		if status, ok := requestutil.GetStatusFromResponse(resp); ok {
 			if status.Code != 0 {
-				log.Ctx(ctx).Info("trace info: all, fail", zap.Any("resp", resp))
+				mlog.Info(ctx, "trace info: all, fail", zap.Any("resp", resp))
 			}
 		} else {
-			log.Ctx(ctx).Info("trace info: all, unknown", zap.Any("resp", resp))
+			mlog.Info(ctx, "trace info: all, unknown", zap.Any("resp", resp))
 		}
 		return resp, nil
 	default:

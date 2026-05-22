@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -51,7 +51,8 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
 		err = fmt.Errorf("failed to get primary keys, err = %v", err)
-		log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
+		mlog.Error(context.TODO(),
+			err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 		panic(err)
 	}
 	iData, ok := insertDatas[msg.SegmentID]
@@ -68,7 +69,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			log.Error("failed to merge field data", zap.String("channel", iNode.channel), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to merge field data", zap.String("channel", iNode.channel), zap.Error(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
@@ -81,14 +82,14 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 
 	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
 	if err != nil {
-		log.Error("failed to get primary keys from insert message", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to get primary keys from insert message", zap.Error(err))
 		panic(err)
 	}
 
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	log.Ctx(context.TODO()).Debug("pipeline fetch insert msg",
+	mlog.Debug(context.TODO(), "pipeline fetch insert msg",
 		zap.Int64("collectionID", iNode.collectionID),
 		zap.Int64("segmentID", msg.SegmentID),
 		zap.Int("insertRowNum", len(pks)),

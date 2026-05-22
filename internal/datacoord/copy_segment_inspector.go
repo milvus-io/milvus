@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -134,7 +134,7 @@ func (s *copySegmentInspector) Start() {
 
 	// Log inspection interval for observability
 	inspectInterval := Params.DataCoordCfg.CopySegmentCheckInterval.GetAsDuration(time.Second)
-	log.Ctx(s.ctx).Info("start copy segment inspector", zap.Duration("inspectInterval", inspectInterval))
+	mlog.Info(s.ctx, "start copy segment inspector", zap.Duration("inspectInterval", inspectInterval))
 
 	ticker := time.NewTicker(inspectInterval)
 	defer ticker.Stop()
@@ -142,7 +142,7 @@ func (s *copySegmentInspector) Start() {
 	for {
 		select {
 		case <-s.closeChan:
-			log.Ctx(s.ctx).Info("copy segment inspector exited")
+			mlog.Info(s.ctx, "copy segment inspector exited")
 			return
 		case <-ticker.C:
 			s.inspect()
@@ -196,7 +196,7 @@ func (s *copySegmentInspector) reloadFromMeta() {
 			}
 		}
 	}
-	log.Info("copy segment inspector reloaded tasks from meta",
+	mlog.Info(s.ctx, "copy segment inspector reloaded tasks from meta",
 		zap.Int("jobCount", len(jobs)))
 }
 

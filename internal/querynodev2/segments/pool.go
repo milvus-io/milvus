@@ -36,8 +36,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -91,7 +91,7 @@ func initSQPool() {
 
 		pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key, config.NewHandler("qn.sqpool.maxconc", ResizeSQPool))
 		pt.Watch(pt.QueryNodeCfg.CGOPoolSizeRatio.Key, config.NewHandler("qn.sqpool.cgopoolratio", ResizeSQPool))
-		log.Info("init SQPool done", zap.Int("size", initPoolSize))
+		mlog.Info(context.TODO(), "init SQPool done", zap.Int("size", initPoolSize))
 	})
 }
 
@@ -109,7 +109,7 @@ func initDynamicPool() {
 		)
 
 		dp.Store(pool)
-		log.Info("init dynamicPool done", zap.Int("size", size))
+		mlog.Info(context.TODO(), "init dynamicPool done", zap.Int("size", size))
 	})
 }
 
@@ -130,7 +130,7 @@ func initLoadPool() {
 		loadPool.Store(pool)
 
 		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
-		log.Info("init loadPool done", zap.Int("size", poolSize))
+		mlog.Info(context.TODO(), "init loadPool done", zap.Int("size", poolSize))
 	})
 }
 
@@ -142,7 +142,7 @@ func initBM25LoadPool() {
 		bm25LoadPool.Store(pool)
 
 		pt.Watch(pt.CommonCfg.BM25LoadThreadCoreCoefficient.Key, config.NewHandler("qn.bm25loadpool.bm25loadthreadcorecoefficient", ResizeBM25LoadPool))
-		log.Info("init BM25LoadPool done", zap.Int("size", int(poolSize)))
+		mlog.Info(context.TODO(), "init BM25LoadPool done", zap.Int("size", int(poolSize)))
 	})
 }
 
@@ -300,21 +300,20 @@ func CollectPoolStats() []metrics.PoolStats {
 }
 
 func resizePool(pool *conc.Pool[any], newSize int, tag string) {
-	log := log.Ctx(context.Background()).
-		With(
-			zap.String("poolTag", tag),
-			zap.Int("newSize", newSize),
-		)
+	log := mlog.With(
+		zap.String("poolTag", tag),
+		zap.Int("newSize", newSize),
+	)
 
 	if newSize <= 0 {
-		log.Warn("cannot set pool size to non-positive value")
+		log.Warn(context.TODO(), "cannot set pool size to non-positive value")
 		return
 	}
 
 	err := pool.Resize(newSize)
 	if err != nil {
-		log.Warn("failed to resize pool", zap.Error(err))
+		log.Warn(context.TODO(), "failed to resize pool", zap.Error(err))
 		return
 	}
-	log.Info("pool resize successfully")
+	log.Info(context.TODO(), "pool resize successfully")
 }

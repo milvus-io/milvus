@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -163,7 +163,7 @@ func (t *ImportTask) Clone() Task {
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := t.GetBufferSize()
-	log.Info("start to import", WrapLogFields(t,
+	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("files", t.req.GetFiles()),
@@ -176,7 +176,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	fn := func(file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
 		if err != nil {
-			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
@@ -185,12 +185,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		start := time.Now()
 		err = t.importFile(reader)
 		if err != nil {
-			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
-		log.Info("import file done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
+		mlog.Info(t.ctx, "import file done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
 	}
@@ -226,7 +226,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		}
 		rowNum, _ := GetInsertDataRowCount(data, t.GetSchema())
 		if rowNum == 0 {
-			log.Info("0 row was imported, the data may have been deleted", WrapLogFields(t)...)
+			mlog.Info(t.ctx, "0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
 		}
 		err = AppendSystemFieldsData(t, data, rowNum)
@@ -244,7 +244,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)
 			if err != nil {
-				log.Warn("run embedding function failed", WrapLogFields(t, zap.Error(err))...)
+				mlog.Warn(t.ctx, "run embedding function failed", WrapLogFields(t, zap.Error(err))...)
 				return err
 			}
 		}
@@ -269,13 +269,13 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			return err
 		}
 		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		log.Info("sync import data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
+		mlog.Info(t.ctx, "sync import data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Ctx(context.TODO()).Info("start to sync import data", WrapLogFields(t)...)
+	mlog.Info(t.ctx, "start to sync import data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, datas := range hashedData {
@@ -306,7 +306,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 			if err != nil {
-				log.Ctx(context.TODO()).Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
+				mlog.Error(context.TODO(), "sync data failed", WrapLogFields(t, zap.Error(err))...)
 				return nil, nil, err
 			}
 			futures = append(futures, future)

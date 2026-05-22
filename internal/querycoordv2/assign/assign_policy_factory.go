@@ -17,6 +17,7 @@
 package assign
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
@@ -24,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -67,7 +68,7 @@ func InitGlobalAssignPolicyFactory(
 ) {
 	policyFactoryOnce.Do(func() {
 		globalPolicyFactory = NewAssignPolicyFactory(scheduler, nodeManager, dist, meta, targetMgr)
-		log.Info("Global assign policy factory initialized")
+		mlog.Info(context.TODO(), "Global assign policy factory initialized")
 	})
 }
 
@@ -113,7 +114,7 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 		return policy
 	}
 
-	log.Info("Creating new assign policy", zap.String("type", policyType))
+	mlog.Info(context.TODO(), "Creating new assign policy", zap.String("type", policyType))
 
 	switch policyType {
 	case PolicyTypeRoundRobin:
@@ -123,7 +124,7 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 	case PolicyTypeScoreBased:
 		policy = newScoreBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
 	default:
-		log.Info("Unknown assign policy type, using default",
+		mlog.Info(context.TODO(), "Unknown assign policy type, using default",
 			zap.String("requested", policyType),
 			zap.String("default", PolicyTypeScoreBased))
 		policy = newScoreBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
