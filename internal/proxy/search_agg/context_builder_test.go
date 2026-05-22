@@ -47,6 +47,7 @@ func TestBuildSearchAggregationContext(t *testing.T) {
 	require.False(t, ctx.IsGroupByField(103))
 	require.False(t, ctx.IsGroupByField(104))
 
+	require.Equal(t, []int64{101, 102}, ctx.AllGroupByFieldIDs())
 	require.Equal(t, []int64{103, 104}, ctx.ExtraOutputFieldIDs())
 	require.Equal(t, ScoreFieldID, ctx.Levels[0].TopHits.Sort[0].FieldID)
 	require.Equal(t, int64(2), ctx.DerivedGroupSize)
@@ -397,6 +398,20 @@ func TestBuildSearchAggregationContextAllowsCountJSONMetric(t *testing.T) {
 	require.Empty(t, ctx.DynamicOutputFields())
 }
 
+func TestBuildSearchAggregationContextAllowsScoreMetric(t *testing.T) {
+	ctx, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+		Fields: []string{"brand"},
+		Metrics: map[string]*commonpb.MetricAggSpec{
+			"avg_score": {Op: "avg", FieldName: "_score"},
+		},
+	}, testCollectionSchema(), 1)
+
+	require.NoError(t, err)
+	require.Empty(t, ctx.ExtraOutputFieldIDs())
+	require.Equal(t, ScoreFieldID, ctx.Levels[0].Metrics["avg_score"].FieldID)
+	require.Equal(t, schemapb.DataType_Float, ctx.Levels[0].Metrics["avg_score"].FieldType)
+}
+
 func TestBuildSearchAggregationContextRejectsTopHitsSortJSONPath(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "agg_test",
@@ -710,6 +725,15 @@ func TestBuildSearchAggregationContextValidationMatrix(t *testing.T) {
 			},
 			schema:  schema,
 			wantErr: "metric field_name is empty",
+		},
+		{
+			name: "unknown metric field",
+			spec: &commonpb.SearchAggregationSpec{
+				Fields:  []string{"brand"},
+				Metrics: map[string]*commonpb.MetricAggSpec{"bad": {Op: "sum", FieldName: "missing"}},
+			},
+			schema:  schema,
+			wantErr: "field \"missing\" not found in schema",
 		},
 		{
 			name: "non count star metric",
