@@ -125,6 +125,7 @@ const (
 	HTTPAliasName            = "aliasName"
 	HTTPRequestData          = "data"
 	HTTPRequestDefaultValue  = "defaultValue"
+	ContextRequestTimeout    = "request_timeout"
 	DefaultDbName            = "default"
 	DefaultIndexName         = "vector_idx"
 	DefaultAliasName         = "the_alias"

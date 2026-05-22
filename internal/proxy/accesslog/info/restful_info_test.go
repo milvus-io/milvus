@@ -19,6 +19,7 @@ package info
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -268,6 +270,19 @@ func (s *RestfulAccessInfoSuite) TestQueryParams() {
 	}
 
 	s.Equal(kvsToString(params), Get(s.info, "$query_params")[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestRequestTimeout() {
+	s.ctx.Set(ContextRequestTimeout, 2*time.Second)
+	s.Equal("2s", Get(s.info, "$request_timeout")[0])
+	s.Equal("2s", Get(s.info, "$timeout")[0])
+
+	ctx := &gin.Context{}
+	req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", nil)
+	req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "3")
+	ctx.Request = req
+	info := &RestfulInfo{ctx: ctx}
+	s.Equal("3s", Get(info, "$request_timeout")[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestTemplateValueLength() {

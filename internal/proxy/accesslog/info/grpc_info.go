@@ -366,6 +366,23 @@ func (i *GrpcAccessInfo) ClientRequestTime() string {
 	return time.UnixMilli(unixmsec).Format(timeFormat)
 }
 
+func (i *GrpcAccessInfo) RequestTimeout() string {
+	deadline, ok := i.ctx.Deadline()
+	if !ok {
+		return Unknown
+	}
+
+	start := i.start
+	if start.IsZero() {
+		start = time.Now()
+	}
+	timeout := deadline.Sub(start)
+	if timeout < 0 {
+		return "0s"
+	}
+	return timeout.String()
+}
+
 func (i *GrpcAccessInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
 	i.actualConsistencyLevel = &acl
 }
