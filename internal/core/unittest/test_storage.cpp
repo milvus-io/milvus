@@ -400,6 +400,14 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
     // that combination (x-oss-ec=0017-00000804). MinioChunkManager must
     // override both directions to WHEN_REQUIRED so the SDK only adds
     // checksums when the operation model demands them.
+
+    // Aws::Client::ClientConfiguration's default ctor reads SDK globals
+    // (logger / http client factory) set up by Aws::InitAPI; without it the
+    // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
+    // share init_count_ with any production code paths in the same binary.
+    TestableMinioChunkManager init_guard;
+    init_guard.InitSDKAPIDefault("info");
+
     Aws::Client::ClientConfiguration config;
     // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.
     EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,

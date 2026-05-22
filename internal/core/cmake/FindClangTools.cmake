@@ -92,4 +92,3 @@ else()
   set(CLANG_FORMAT_FOUND 1)
   message("clang-format found at ${CLANG_FORMAT_BIN}")
 endif()
-
