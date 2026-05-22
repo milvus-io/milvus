@@ -4433,6 +4433,57 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_embedding_list_field_nullable_insert_none_not_supported(self):
+        """
+        target: test embedding list field nullable boundary
+        method: create struct array field with nullable=True and insert None
+        expected: create collection succeeds, but None row value is not supported
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector",
+            datatype=DataType.FLOAT_VECTOR,
+            dim=default_dim,
+        )
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+            nullable=True,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        data = [
+            {
+                "id": 0,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": None,
+            }
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: "Expected list, got NoneType",
+        }
+        self.insert(
+            client,
+            collection_name,
+            data,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):
         """
