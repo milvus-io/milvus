@@ -148,6 +148,28 @@ func checkNullableListLikeVectorAligned(listReader *listLikeArray, dim int, data
 	if err != nil {
 		return err
 	}
+	return checkNullableListLikeVectorAlignedWithExpected(listReader, expected)
+}
+
+func checkListLikeVectorAlignedWithExpected(listReader *listLikeArray, expected int32) error {
+	if fixedSize, ok := listReader.FixedSize(); ok {
+		return checkVectorAlignWithDim([]int32{0, fixedSize}, expected)
+	}
+	offsets := make([]int32, 0, listReader.Len()+1)
+	for i := 0; i < listReader.Len(); i++ {
+		start, _ := listReader.ValueOffsets(i)
+		offsets = append(offsets, int32(start))
+	}
+	if listReader.Len() > 0 {
+		_, end := listReader.ValueOffsets(listReader.Len() - 1)
+		offsets = append(offsets, int32(end))
+	} else {
+		offsets = append(offsets, 0)
+	}
+	return checkVectorAlignWithDim(offsets, expected)
+}
+
+func checkNullableListLikeVectorAlignedWithExpected(listReader *listLikeArray, expected int32) error {
 	for i := 0; i < listReader.Len(); i++ {
 		if listReader.IsNull(i) {
 			continue
