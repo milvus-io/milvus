@@ -4356,6 +4356,9 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
         std::shared_lock lck(mutex_);
         current_schema = schema_;
     }
+    // Schema-only reopen carries no load-info updates, so equal-version input
+    // cannot produce work. Reopen(load_info, schema) still accepts equal schema
+    // versions because load info may have changed independently.
     if (sch->get_schema_version() <= current_schema->get_schema_version()) {
         return;
     }
@@ -4450,14 +4453,20 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     // TODO: pass trace_ctx separately when needed
     milvus::tracer::TraceContext trace_ctx;
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // Load new indexes (fields without existing index)
     if (!diff.indexes_to_load.empty()) {
         LoadBatchIndexes(trace_ctx, diff.indexes_to_load, op_ctx);
     }
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // Replace indexes (fields that already have an index loaded)
     if (!diff.indexes_to_replace.empty()) {
         LoadBatchIndexes(trace_ctx, diff.indexes_to_replace, op_ctx, true);
     }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     // reload fields (warmup for fields already in memory)
     if (!diff.fields_to_reload.empty()) {
@@ -4466,6 +4475,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
 
     // Load field data from storage BEFORE dropping indexes, so that queries
     // always have a data source available during the transition.
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     // load column groups
     if (diff.load_external_manifest) {
@@ -4531,19 +4542,27 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
         }
     }
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // Initialize LOB paths for TEXT fields after any column group loading
     if (segment_load_info.HasManifestPath()) {
         InitTextLobPaths(segment_load_info.GetManifestPath());
     }
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // Load new field binlogs
     if (!diff.binlogs_to_load.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
     }
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // Replace field binlogs
     if (!diff.binlogs_to_replace.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_replace, op_ctx, true);
     }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     // drop index — field data is already loaded/restored above, so queries
     // can fall back to raw data after the index is dropped.
@@ -4558,10 +4577,14 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
         }
     }
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // load pre-built text indexes
     if (!diff.text_indexes_to_load.empty()) {
         LoadBatchTextIndexes(op_ctx, diff.text_indexes_to_load);
     }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     if (!diff.json_stats_to_load.empty()) {
         LoadBatchJsonKeyIndexes(op_ctx, diff.json_stats_to_load);
@@ -4587,11 +4610,15 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
         }
     }
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+
     // fill default values for fields without data sources (schema evolution)
     if (!diff.fields_to_fill_default.empty()) {
         FillDefaultValueFields(diff.fields_to_fill_default);
         RecordDefaultFieldsFilled(diff.fields_to_fill_default);
     }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     // create text indexes from raw data
     if (!diff.text_indexes_to_create.empty()) {
@@ -4599,6 +4626,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
             CreateTextIndex(field_id, op_ctx);
         }
     }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
 
     // Drop field data — only for schema evolution scenarios where
     // the field has been removed from the data source (binlogs/column_groups).
@@ -5293,6 +5322,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto num_rows = snapshot->GetNumOfRows();
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
+    // reopen_mutex_ synchronizes this read with all schema_ writers.
     SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
     mutable_copy.SetFieldsFilledWithDefault(
         snapshot->GetFieldsFilledWithDefault());

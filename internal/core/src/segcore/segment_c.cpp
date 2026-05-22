@@ -514,6 +514,9 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
             milvus::tracer::AutoSpan span(
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
+
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
 

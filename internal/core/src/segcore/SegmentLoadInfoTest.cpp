@@ -1113,6 +1113,43 @@ TEST_F(SegmentLoadInfoTest, CopyPreservesDefaultFilledFields) {
     EXPECT_TRUE(found_replace);
 }
 
+TEST_F(SegmentLoadInfoTest, MovePreservesRawDataIndexFieldsForDefaultDiff) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk");
+    log->set_entries_num(1000);
+
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(1001);
+    index_info->add_index_file_paths("/path/to/index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    auto assert_field_101_has_data = [](SegmentLoadInfo& info) {
+        auto diff = info.GetLoadDiff();
+        EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+        for (const auto& field_id : diff.fields_to_fill_default) {
+            EXPECT_NE(field_id, FieldId(101));
+        }
+    };
+
+    SegmentLoadInfo original(proto, schema_);
+    SegmentLoadInfo moved(std::move(original));
+    assert_field_101_has_data(moved);
+
+    SegmentLoadInfo original_for_assignment(proto, schema_);
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo assigned(empty_proto, schema_);
+    assigned = std::move(original_for_assignment);
+    assert_field_101_has_data(assigned);
+}
+
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffClearsDefaultFilledWhenDataSourceAppears) {
     proto::segcore::SegmentLoadInfo current_proto;
@@ -3017,6 +3054,7 @@ TEST_F(SegmentLoadInfoTest,
 
     SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
     current_info.SetColumnGroupsForTesting(current_cgs);
+    current_info.SetFieldFilledWithDefault(FieldId(101));
     SegmentLoadInfo new_info(MakeManifestProto("/manifest/v2"), schema_);
     new_info.SetColumnGroupsForTesting(new_cgs);
 
@@ -3029,6 +3067,13 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+
+    std::set<FieldId> default_fields;
+    EXPECT_NO_THROW({
+        default_fields =
+            current_info.GetDefaultFilledFieldsForNewInfo(new_info);
+    });
+    EXPECT_TRUE(default_fields.empty());
 }
 
 TEST_F(SegmentLoadInfoTest,

@@ -664,6 +664,11 @@ SegmentLoadInfo::CollectDataFields() const {
 std::set<FieldId>
 SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
     const SegmentLoadInfo& new_info) const {
+    if (schema_->is_external_collection() ||
+        new_info.schema_->is_external_collection()) {
+        return {};
+    }
+
     auto new_info_fields = new_info.CollectDataFields();
     std::set<FieldId> fields;
     for (const auto& field_id : fields_filled_with_default_) {
@@ -674,33 +679,6 @@ SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
             continue;
         }
         fields.insert(field_id);
-    }
-    return fields;
-}
-
-std::vector<FieldId>
-SegmentLoadInfo::GetFieldsToFillDefaultForSchema(
-    const SchemaPtr& new_schema) const {
-    if (!new_schema || schema_->is_external_collection() ||
-        new_schema->is_external_collection()) {
-        return {};
-    }
-
-    auto data_fields = CollectDataFields();
-    std::set<FieldId> handled = data_fields;
-    handled.insert(fields_filled_with_default_.begin(),
-                   fields_filled_with_default_.end());
-
-    std::vector<FieldId> fields;
-    for (const auto& field_entry : new_schema->get_fields()) {
-        const auto& field_id = field_entry.first;
-        if (field_id.get() < START_USER_FIELDID) {
-            continue;
-        }
-        if (handled.count(field_id) > 0) {
-            continue;
-        }
-        fields.push_back(field_id);
     }
     return fields;
 }

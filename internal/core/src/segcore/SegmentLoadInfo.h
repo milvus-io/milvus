@@ -434,10 +434,11 @@ class SegmentLoadInfo {
           converted_index_infos_(std::move(other.converted_index_infos_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
-          field_binlog_cache_(std::move(other.field_binlog_cache_)),
-          column_groups_(std::move(other.column_groups_)),
+          field_index_has_raw_data_(std::move(other.field_index_has_raw_data_)),
           fields_filled_with_default_(
               std::move(other.fields_filled_with_default_)),
+          field_binlog_cache_(std::move(other.field_binlog_cache_)),
+          column_groups_(std::move(other.column_groups_)),
           created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
@@ -469,10 +470,12 @@ class SegmentLoadInfo {
             converted_index_infos_ = std::move(other.converted_index_infos_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
-            field_binlog_cache_ = std::move(other.field_binlog_cache_);
-            column_groups_ = std::move(other.column_groups_);
+            field_index_has_raw_data_ =
+                std::move(other.field_index_has_raw_data_);
             fields_filled_with_default_ =
                 std::move(other.fields_filled_with_default_);
+            field_binlog_cache_ = std::move(other.field_binlog_cache_);
+            column_groups_ = std::move(other.column_groups_);
             created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
@@ -917,9 +920,6 @@ class SegmentLoadInfo {
 
     [[nodiscard]] std::set<FieldId>
     GetDefaultFilledFieldsForNewInfo(const SegmentLoadInfo& new_info) const;
-
-    [[nodiscard]] std::vector<FieldId>
-    GetFieldsToFillDefaultForSchema(const SchemaPtr& new_schema) const;
 
     // ==================== Created Text Indexes Tracking ====================
 
