@@ -19,6 +19,7 @@ package info
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,15 +29,18 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 const (
-	ContextUsername      = "username"
-	ContextReturnCode    = "code"
-	ContextReturnMessage = "message"
-	ContextRequest       = "request"
-	ContextToken         = "token"
+	ContextUsername       = "username"
+	ContextReturnCode     = "code"
+	ContextReturnMessage  = "message"
+	ContextRequest        = "request"
+	ContextToken          = "token"
+	ContextRequestTimeout = "request_timeout"
 )
 
 type RestfulInfo struct {
@@ -275,6 +279,23 @@ func (i *RestfulInfo) QueryParams() string {
 
 func (i *RestfulInfo) ClientRequestTime() string {
 	return Unknown
+}
+
+func (i *RestfulInfo) RequestTimeout() string {
+	if value, ok := i.ctx.Get(ContextRequestTimeout); ok {
+		if timeout, ok := value.(time.Duration); ok {
+			return timeout.String()
+		}
+	}
+
+	if i.ctx.Request != nil {
+		timeoutSecond, err := strconv.ParseInt(i.ctx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
+		if err == nil {
+			return (time.Duration(timeoutSecond) * time.Second).String()
+		}
+	}
+
+	return paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond).String()
 }
 
 func (i *RestfulInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
