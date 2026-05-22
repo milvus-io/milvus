@@ -7,6 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import AnnSearchRequest, DataType, WeightedRanker
+from pymilvus.client.embedding_list import EmbeddingList
 
 prefix = "regex_filter"
 default_dim = ct.default_dim
@@ -176,6 +177,106 @@ def setup_regex_collection(client, collection_name, dim=default_dim, data=None):
     client.create_index(collection_name, index_params)
     client.load_collection(collection_name)
     return collection_name
+
+
+def drain_iterator(iterator):
+    rows = []
+    while True:
+        batch = iterator.next()
+        if not batch:
+            break
+        rows.extend(batch)
+    iterator.close()
+    return rows
+
+
+def gen_struct_array_regex_schema(client, dim=default_dim):
+    schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+    schema.add_field("id", DataType.INT64, is_primary=True)
+    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+    struct_schema = client.create_struct_field_schema()
+    struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+    struct_schema.add_field("name", DataType.VARCHAR, max_length=128)
+    struct_schema.add_field("status", DataType.VARCHAR, max_length=64)
+    struct_schema.add_field("code", DataType.INT64)
+    schema.add_field(
+        "events",
+        datatype=DataType.ARRAY,
+        element_type=DataType.STRUCT,
+        struct_schema=struct_schema,
+        max_capacity=4,
+        nullable=True,
+    )
+    return schema
+
+
+def setup_struct_array_regex_collection(client, collection_name, create_scalar_index=False):
+    schema = gen_struct_array_regex_schema(client)
+    client.create_collection(collection_name, schema=schema, consistency_level="Strong")
+    data = [
+        {
+            "id": 1,
+            "vec": [0.01] + [0.0] * (default_dim - 1),
+            "events": [
+                {
+                    "embedding": [0.01] + [0.0] * (default_dim - 1),
+                    "name": "login-error-timeout",
+                    "status": "ERROR",
+                    "code": 500,
+                },
+                {
+                    "embedding": [0.02] + [0.0] * (default_dim - 1),
+                    "name": "login-ok",
+                    "status": "OK",
+                    "code": 200,
+                },
+            ],
+        },
+        {
+            "id": 2,
+            "vec": [0.02] + [0.0] * (default_dim - 1),
+            "events": [
+                {
+                    "embedding": [0.03] + [0.0] * (default_dim - 1),
+                    "name": "checkout-warning",
+                    "status": "WARN",
+                    "code": 300,
+                },
+                {
+                    "embedding": [0.04] + [0.0] * (default_dim - 1),
+                    "name": "",
+                    "status": "EMPTY",
+                    "code": 0,
+                },
+            ],
+        },
+        {
+            "id": 3,
+            "vec": [0.03] + [0.0] * (default_dim - 1),
+            "events": [
+                {
+                    "embedding": [0.05] + [0.0] * (default_dim - 1),
+                    "name": "deploy-success",
+                    "status": "OK",
+                    "code": 200,
+                }
+            ],
+        },
+        {
+            "id": 4,
+            "vec": [0.04] + [0.0] * (default_dim - 1),
+            "events": [],
+        },
+    ]
+    client.insert(collection_name=collection_name, data=data)
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+    index_params.add_index(field_name="events[embedding]", index_type="HNSW", metric_type="MAX_SIM_L2")
+    if create_scalar_index:
+        index_params.add_index(field_name="events[name]", index_type="INVERTED")
+    client.create_index(collection_name, index_params)
+    client.load_collection(collection_name)
+    return data
 
 
 class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
@@ -531,6 +632,29 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_on_json_nested_path(self):
+        """
+        target: verify regex and !~ on nested JSON string paths
+        expected: metadata["nested"]["x"] =~ "^abc$" -> [1], !~ "^abc$" -> [2,3,4,5,6,7]
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_regex_collection(client, collection_name)
+
+        res = client.query(collection_name, filter='metadata["nested"]["x"] =~ "^abc$"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1], f'nested =~ "^abc$": expected [1], got {result}'
+
+        res = client.query(collection_name, filter='metadata["nested"]["x"] !~ "^abc$"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [2, 3, 4, 5, 6, 7], f'nested !~ "^abc$": expected [2,3,4,5,6,7], got {result}'
+
+        res = client.query(collection_name, filter='metadata["nested"]["missing"] =~ ".*"', output_fields=["id"])
+        assert res == [], f"missing nested key: expected [], got {res}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_null_path(self):
         """
         target: verify JSON null value and empty string do not match regex
@@ -706,6 +830,65 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         res = client.query(collection_name, filter='tags[0] =~ "^$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [6], f"expected [6], got {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_array_element_negation(self):
+        """
+        target: verify !~ on ARRAY<VARCHAR> element paths
+        expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ includes all rows
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_regex_collection(client, collection_name)
+
+        res = client.query(collection_name, filter='tags[0] !~ "^release"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [3, 4, 6, 7], f'tags[0] !~ "^release": expected [3,4,6,7], got {result}'
+
+        res = client.query(collection_name, filter='tags[10] !~ ".*"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1, 2, 3, 4, 5, 6, 7], f"out-of-range !~: expected all rows, got {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_dynamic_json_field_paths(self):
+        """
+        target: regex on dynamic JSON field paths is explicit and stable
+        expected: supported dynamic paths match strings; non-string and missing paths return empty
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(enable_dynamic_field=True, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_dim)
+        client.create_collection(collection_name, schema=schema, consistency_level="Strong")
+        data = [
+            {"id": 1, "vec": [0.1] * default_dim, "dyn_text": "ERROR dynamic timeout", "dyn_num": 10},
+            {"id": 2, "vec": [0.2] * default_dim, "dyn_text": "INFO dynamic ok", "dyn_num": 20},
+            {"id": 3, "vec": [0.3] * default_dim, "dyn_other": "missing dyn_text", "dyn_num": 30},
+        ]
+        client.insert(collection_name=collection_name, data=data)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name, index_params)
+        client.load_collection(collection_name)
+
+        res = client.query(collection_name, filter='$meta["dyn_text"] =~ "ERROR.*timeout"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1], f"dynamic dyn_text regex expected [1], got {result}"
+
+        res = client.query(collection_name, filter='$meta["dyn_text"] !~ "ERROR"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [2, 3], f"dynamic dyn_text !~ ERROR expected [2,3], got {result}"
+
+        res = client.query(collection_name, filter='$meta["dyn_num"] =~ "10"', output_fields=["id"])
+        assert res == [], f"dynamic non-string regex expected [], got {res}"
+
+        res = client.query(collection_name, filter='$meta["missing"] =~ ".*"', output_fields=["id"])
+        assert res == [], f"dynamic missing regex expected [], got {res}"
 
         self.drop_collection(client, collection_name)
 
@@ -1507,10 +1690,85 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_scalar_index_paths_with_sealed_data(self):
+        """
+        target: scalar index regex paths match expected ids on sealed data with non-trivial value distribution
+        expected: INVERTED, NGRAM, STL_SORT, Trie, and BITMAP return expected ids without false negatives
+        """
+        client = self._client()
+        rows = []
+        expected_error_timeout = []
+        expected_level = []
+        expected_url = []
+        for i in range(1000):
+            is_error_timeout = i % 20 == 0
+            level = "ERROR" if i % 3 == 0 else "INFO"
+            text = f"ERROR sealed row {i} timeout" if is_error_timeout else f"INFO sealed row {i} ok"
+            url = f"/api/v{i % 10}/users/{i}" if i % 4 == 0 else f"/static/{i}"
+            if is_error_timeout:
+                expected_error_timeout.append(i)
+            if level == "ERROR":
+                expected_level.append(i)
+            if url.startswith("/api/v"):
+                expected_url.append(i)
+            rows.append(
+                {
+                    "id": i,
+                    "vec": [float(i) / 1000] + [0.0] * (default_dim - 1),
+                    "text_inverted": text,
+                    "text_ngram": text,
+                    "text_sort": text,
+                    "email": f"sealed-{i}@example.com",
+                    "url": url,
+                    "level": level,
+                    "metadata": {"level": level, "version": f"v{i % 10}.0", "trace": f"sealed-{i}"},
+                    "tags": [level.lower()],
+                }
+            )
+
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("text_inverted", DataType.VARCHAR, max_length=512)
+        schema.add_field("text_ngram", DataType.VARCHAR, max_length=512)
+        schema.add_field("text_sort", DataType.VARCHAR, max_length=512)
+        schema.add_field("email", DataType.VARCHAR, max_length=256)
+        schema.add_field("url", DataType.VARCHAR, max_length=512)
+        schema.add_field("level", DataType.VARCHAR, max_length=32)
+        schema.add_field("metadata", DataType.JSON)
+        schema.add_field("tags", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=8, max_length=128)
+        client.create_collection(collection_name, schema=schema, consistency_level="Strong")
+        client.insert(collection_name=collection_name, data=rows)
+        self.flush(client, collection_name)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name="text_inverted", index_type="INVERTED")
+        index_params.add_index(field_name="text_ngram", index_type="NGRAM", params={"min_gram": 2, "max_gram": 4})
+        index_params.add_index(field_name="text_sort", index_type="STL_SORT")
+        index_params.add_index(field_name="url", index_type="Trie")
+        index_params.add_index(field_name="level", index_type="BITMAP")
+        client.create_index(collection_name, index_params)
+        client.load_collection(collection_name)
+
+        for label, filter_expr, expected in [
+            ("INVERTED", 'text_inverted =~ "ERROR.*timeout"', expected_error_timeout),
+            ("NGRAM", 'text_ngram =~ "ERROR.*timeout"', expected_error_timeout),
+            ("STL_SORT", 'text_sort =~ "ERROR.*timeout"', expected_error_timeout),
+            ("Trie", 'url =~ "^/api/v[0-9]+/users"', expected_url),
+            ("BITMAP", 'level =~ "^ERROR$"', expected_level),
+        ]:
+            res = client.query(collection_name, filter=filter_expr, output_fields=["id"], limit=len(expected) + 10)
+            result = sorted([r["id"] for r in res])
+            assert result == expected, f"{label} {filter_expr}: expected {expected}, got {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_growing_and_sealed_segments(self):
         """
-        target: one regex query covers both sealed and growing segments
-        expected: text =~ "ERROR|WARN" returns [1,2,101,102] with no duplicates or misses
+        target: regex and negated regex cover both sealed and growing segments
+        expected: =~ returns [1,2,101,102], !~ returns [3,4,5,6,7,103] with no duplicates or misses
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1576,17 +1834,21 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
                 "tags": ["growing"],
             },
         ]
-        client.insert(collection_name=collection_name, data=extra_data)
-
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
         index_params.add_index(field_name="text", index_type="INVERTED")
         client.create_index(collection_name, index_params)
         self.load_collection(client, collection_name)
 
+        client.insert(collection_name=collection_name, data=extra_data)
+
         res = client.query(collection_name, filter='text =~ "ERROR|WARN"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 101, 102], f'text =~ "ERROR|WARN": expected [1,2,101,102], got {result}'
+
+        res = client.query(collection_name, filter='text !~ "ERROR|WARN"', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [3, 4, 5, 6, 7, 103], f'text !~ "ERROR|WARN": expected [3,4,5,6,7,103], got {result}'
 
         self.drop_collection(client, collection_name)
 
@@ -1651,6 +1913,39 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         )
         filtered_ids = [hit["id"] for hit in filtered[0]]
         assert set(filtered_ids) == {1, 3, 5}, f"filtered expected ids [1,3,5], got {filtered_ids}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_search_nullable_and_json_paths(self):
+        """
+        target: search supports regex filters on nullable fields and JSON string paths
+        expected: =~/!~/or is null all return only rows satisfying the predicate
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        data = gen_regex_test_data()
+        setup_regex_collection(client, collection_name, data=data)
+        query_vector = data[0]["vec"]
+
+        for filter_expr, expected in [
+            ('email =~ "gmail"', {1, 5, 6}),
+            ('email !~ "gmail"', {2, 3, 7}),
+            ('email !~ "gmail" or email is null', {2, 3, 4, 7}),
+            ('metadata["version"] =~ "^v[0-9]+\\.[0-9]+$"', {1, 2, 3, 5, 7}),
+            ('metadata["nested"]["x"] !~ "^abc$"', {2, 3, 4, 5, 6, 7}),
+        ]:
+            res = client.search(
+                collection_name=collection_name,
+                data=[query_vector],
+                anns_field="vec",
+                search_params={"metric_type": "L2", "params": {"ef": 64}},
+                filter=filter_expr,
+                limit=len(expected),
+                output_fields=["id", "email", "metadata"],
+            )
+            result = {hit["id"] for hit in res[0]}
+            assert result == expected, f"{filter_expr}: expected {expected}, got {result}"
 
         self.drop_collection(client, collection_name)
 
@@ -1888,6 +2183,100 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_hybrid_search_filter_variants(self):
+        """
+        target: hybrid_search supports single/both sub-search regex filters, !~, nullable, JSON path, and template params
+        expected: filtered hybrid_search results are constrained by each AnnSearchRequest expr
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 4
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("vec2", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("text", DataType.VARCHAR, max_length=128)
+        schema.add_field("email", DataType.VARCHAR, max_length=128, nullable=True)
+        schema.add_field("metadata", DataType.JSON)
+        client.create_collection(collection_name, schema=schema, consistency_level="Strong")
+        data = [
+            {
+                "id": 1,
+                "vec": [0.01, 0.0, 0.0, 0.0],
+                "vec2": [10.0, 10.0, 10.0, 10.0],
+                "text": "ERROR alpha timeout",
+                "email": "a@gmail.com",
+                "metadata": {"trace": "api-001", "nested": {"x": "alpha"}},
+            },
+            {
+                "id": 2,
+                "vec": [10.0, 10.0, 10.0, 10.0],
+                "vec2": [0.01, 0.0, 0.0, 0.0],
+                "text": "WARN beta retry",
+                "email": None,
+                "metadata": {"trace": "api-002", "nested": {"x": "beta"}},
+            },
+            {
+                "id": 3,
+                "vec": [0.02, 0.0, 0.0, 0.0],
+                "vec2": [10.0, 10.0, 10.0, 10.0],
+                "text": "INFO gamma ok",
+                "email": "c@example.com",
+                "metadata": {"trace": "ops-003", "nested": {"x": "gamma"}},
+            },
+            {
+                "id": 4,
+                "vec": [10.0, 10.0, 10.0, 10.0],
+                "vec2": [0.02, 0.0, 0.0, 0.0],
+                "text": "ERROR delta fail",
+                "email": "d@gmail.com",
+                "metadata": {"trace": "ops-004", "nested": {"x": "delta"}},
+            },
+        ]
+        client.insert(collection_name=collection_name, data=data)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+        index_params.add_index(field_name="vec2", index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name, index_params)
+        self.load_collection(client, collection_name)
+        query_vector = [[0.0, 0.0, 0.0, 0.0]]
+        ranker = WeightedRanker(0.5, 0.5)
+
+        regex_req = AnnSearchRequest(
+            query_vector,
+            "vec",
+            {"metric_type": "L2", "params": {"ef": 64}},
+            2,
+            expr='text =~ "ERROR"',
+        )
+        all_req = AnnSearchRequest(query_vector, "vec2", {"metric_type": "L2", "params": {"ef": 64}}, 4)
+        res = client.hybrid_search(collection_name, [regex_req, all_req], ranker, limit=4, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert {1, 4}.issubset(result), f"single regex sub-search missing ERROR ids, got {result}"
+
+        json_req = AnnSearchRequest(
+            query_vector,
+            "vec",
+            {"metric_type": "L2", "params": {"ef": 64}},
+            2,
+            expr='metadata["trace"] =~ {pattern}',
+            expr_params={"pattern": r"^api-"},
+        )
+        nullable_req = AnnSearchRequest(
+            query_vector,
+            "vec2",
+            {"metric_type": "L2", "params": {"ef": 64}},
+            2,
+            expr='email !~ "gmail" or email is null',
+        )
+        res = client.hybrid_search(collection_name, [json_req, nullable_req], ranker, limit=4, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert {1, 2, 3}.issubset(result), f"both-regex/template/nullable hybrid ids missing, got {result}"
+        assert 4 not in result, f"id 4 should match neither request but appeared: {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_search_no_match_returns_empty_list(self):
         """
         target: vector search with regex filter no match returns empty list
@@ -1919,6 +2308,119 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert filtered[0] == [], f"no-match regex search expected [], got {filtered[0]}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_partition_query_search_delete(self):
+        """
+        target: partition query/search/delete honor regex filters and partition boundaries
+        expected: regex results stay within requested partition and delete affects only that partition
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = gen_regex_test_schema(client)
+        client.create_collection(collection_name, schema=schema, consistency_level="Strong")
+        self.create_partition(client, collection_name, "p_error")
+        self.create_partition(client, collection_name, "p_warn")
+        data = gen_regex_test_data()
+        client.insert(collection_name=collection_name, data=[data[0], data[4]], partition_name="p_error")
+        client.insert(collection_name=collection_name, data=[data[1], data[2]], partition_name="p_warn")
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+        client.create_index(collection_name, index_params)
+        client.load_collection(collection_name)
+
+        res = client.query(
+            collection_name, filter='level =~ "ERROR"', partition_names=["p_error"], output_fields=["id"]
+        )
+        result = sorted([r["id"] for r in res])
+        assert result == [1, 5], f"query p_error expected [1,5], got {result}"
+
+        res = client.query(collection_name, filter='level =~ "ERROR"', partition_names=["p_warn"], output_fields=["id"])
+        assert res == [], f"query p_warn should not leak ERROR rows, got {res}"
+
+        search_res = client.search(
+            collection_name=collection_name,
+            data=[data[0]["vec"]],
+            anns_field="vec",
+            search_params={"metric_type": "L2", "params": {"ef": 64}},
+            filter='level =~ "ERROR"',
+            partition_names=["p_error"],
+            limit=2,
+            output_fields=["id", "level"],
+        )
+        result = {hit["id"] for hit in search_res[0]}
+        assert result == {1, 5}, f"search p_error expected {{1,5}}, got {result}"
+
+        self.delete(client, collection_name, filter='text =~ "timeout"', partition_name="p_error")
+        res = client.query(collection_name, filter="id > 0", partition_names=["p_error"], output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [5], f"delete in p_error should leave only [5], got {result}"
+
+        res = client.query(collection_name, filter="id > 0", partition_names=["p_warn"], output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [2, 3], f"delete in p_error leaked into p_warn, got {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_query_and_search_iterator(self):
+        """
+        target: query_iterator and search_iterator support regex filters
+        expected: iterators return all matching rows without duplicate PKs
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        rows = []
+        for i in range(200):
+            level = "ERROR" if i % 4 == 0 else "INFO"
+            rows.append(
+                {
+                    "id": i,
+                    "vec": [float(i) / 1000] + [0.0] * (default_dim - 1),
+                    "text": f"{level} iterator row {i}",
+                    "email": f"user{i}@example.com",
+                    "url": f"/iter/{i}",
+                    "level": level,
+                    "metadata": {"level": level, "version": f"v{i % 10}.0", "trace": f"iter-{i}"},
+                    "tags": [level.lower()],
+                }
+            )
+        setup_regex_collection(client, collection_name, data=rows)
+
+        expected = {i for i in range(200) if i % 4 == 0}
+        iterator = client.query_iterator(
+            collection_name,
+            batch_size=17,
+            filter='text =~ "^ERROR"',
+            output_fields=["id", "text"],
+        )
+        query_rows = drain_iterator(iterator)
+        query_ids = [r["id"] for r in query_rows]
+        assert set(query_ids) == expected, f"query_iterator expected {expected}, got {set(query_ids)}"
+        assert len(query_ids) == len(set(query_ids)), f"query_iterator duplicated ids: {query_ids}"
+        assert all(r["text"].startswith("ERROR") for r in query_rows), (
+            f"query_iterator returned non-matching rows: {query_rows}"
+        )
+
+        iterator = client.search_iterator(
+            collection_name,
+            data=[rows[0]["vec"]],
+            batch_size=13,
+            anns_field="vec",
+            search_params={"metric_type": "L2", "params": {"ef": 64}},
+            filter='text =~ "^ERROR"',
+            limit=len(expected),
+            output_fields=["id", "text"],
+        )
+        search_hits = drain_iterator(iterator)
+        search_ids = [hit["id"] for hit in search_hits]
+        assert set(search_ids) == expected, f"search_iterator expected {expected}, got {set(search_ids)}"
+        assert len(search_ids) == len(set(search_ids)), f"search_iterator duplicated ids: {search_ids}"
+        assert all(hit["text"].startswith("ERROR") for hit in search_hits), (
+            f"search_iterator returned non-matching rows: {search_hits}"
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -1976,6 +2478,95 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
 
         res = client.query(collection_name, filter="id > 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 7, f"post-concurrency health query expected count 7, got {res}"
+
+        self.drop_collection(client, collection_name)
+
+
+class TestRegexFilterStructArray(TestMilvusClientV2Base):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_struct_array_scalar_field_query(self):
+        """
+        target: regex filtering on scalar fields inside StructArray elements
+        expected: MATCH_ANY covers =~, !~, empty array, and non-string values
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_struct_array_regex_collection(client, collection_name)
+
+        res = client.query(
+            collection_name, filter='MATCH_ANY(events, $[name] =~ "error.*timeout")', output_fields=["id"]
+        )
+        result = sorted([r["id"] for r in res])
+        assert result == [1], f"struct name =~ error.*timeout: expected [1], got {result}"
+
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[status] !~ "ERROR")', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1, 2, 3], f"struct status !~ ERROR: expected [1,2,3], got {result}"
+
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[name] =~ "^$")', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [2], f"struct empty name =~ ^$: expected [2], got {result}"
+
+        error = {ct.err_code: 1100, ct.err_msg: "regex match on non-string or non-json field"}
+        self.query(
+            client,
+            collection_name,
+            filter='MATCH_ANY(events, $[code] =~ "500")',
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_struct_array_scalar_index_path(self):
+        """
+        target: indexed StructArray scalar field regex path returns the same result as raw path
+        expected: INVERTED index on events[name] has no false negatives for regex filtering
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_struct_array_regex_collection(client, collection_name, create_scalar_index=True)
+
+        res = client.query(
+            collection_name, filter='MATCH_ANY(events, $[name] =~ "error.*timeout")', output_fields=["id"]
+        )
+        result = sorted([r["id"] for r in res])
+        assert result == [1], f"indexed struct name =~ error.*timeout: expected [1], got {result}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_struct_array_hybrid_search(self):
+        """
+        target: hybrid_search supports regex filters on StructArray scalar paths
+        expected: one request filters struct name =~ error.*timeout; another uses struct status !~ ERROR
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_struct_array_regex_collection(client, collection_name)
+        query_vector = EmbeddingList()
+        query_vector.add([0.0] * default_dim)
+        req_name = AnnSearchRequest(
+            [query_vector],
+            "events[embedding]",
+            {"metric_type": "MAX_SIM_L2", "params": {"ef": 64}},
+            1,
+            expr='MATCH_ANY(events, $[name] =~ "error.*timeout")',
+        )
+        req_status = AnnSearchRequest(
+            [query_vector],
+            "events[embedding]",
+            {"metric_type": "MAX_SIM_L2", "params": {"ef": 64}},
+            3,
+            expr='MATCH_ANY(events, $[status] !~ "ERROR")',
+        )
+        res = client.hybrid_search(
+            collection_name, [req_name, req_status], WeightedRanker(0.5, 0.5), limit=3, output_fields=["id"]
+        )
+        result = {hit["id"] for hit in res[0]}
+        assert {1, 2, 3}.issubset(result), f"struct hybrid regex ids missing, got {result}"
+        assert 4 not in result, f"empty struct array row should not match, got {result}"
 
         self.drop_collection(client, collection_name)
 
