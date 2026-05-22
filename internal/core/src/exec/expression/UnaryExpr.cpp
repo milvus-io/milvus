@@ -61,6 +61,46 @@ namespace milvus {
 class SkipIndex;
 
 namespace exec {
+
+namespace {
+
+void
+ApplyArrowValidityBitmap(const arrow::Array& array,
+                         int size,
+                         size_t processed_cursor,
+                         const TargetBitmap& bitmap_input,
+                         TargetBitmapView res,
+                         TargetBitmapView valid_res) {
+    if (size <= 0 || array.null_count() == 0) {
+        return;
+    }
+
+    auto* validity_data = array.null_bitmap_data();
+    AssertInfo(validity_data != nullptr,
+               "Arrow array reports {} nulls but has no validity bitmap",
+               array.null_count());
+
+    const auto row_count = static_cast<size_t>(size);
+    TargetBitmapView validity(const_cast<uint8_t*>(validity_data),
+                              static_cast<size_t>(array.offset()),
+                              row_count);
+    if (bitmap_input.empty()) {
+        res.inplace_and(validity, row_count);
+        valid_res.inplace_and(validity, row_count);
+        return;
+    }
+
+    TargetBitmap invalid_active(row_count, false);
+    auto invalid_active_view = invalid_active.view();
+    invalid_active_view |= bitmap_input.view(processed_cursor, row_count);
+    invalid_active_view -= validity;
+
+    res.inplace_sub(invalid_active_view, row_count);
+    valid_res.inplace_sub(invalid_active_view, row_count);
+}
+
+}  // namespace
+
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
@@ -1976,18 +2016,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                             "unsupported operator type for unary expr: {}",
                             expr_type));
             }
-            if (array->null_count() > 0) {
-                bool has_bitmap_input = !bitmap_input.empty();
-                for (int i = 0; i < size; i++) {
-                    if (has_bitmap_input &&
-                        !bitmap_input[i + processed_cursor]) {
-                        continue;
-                    }
-                    if (array->IsNull(i)) {
-                        res[i] = valid_res[i] = false;
-                    }
-                }
-            }
+            ApplyArrowValidityBitmap(*array,
+                                     size,
+                                     processed_cursor,
+                                     bitmap_input,
+                                     res,
+                                     valid_res);
             processed_cursor += size;
         }
     };
