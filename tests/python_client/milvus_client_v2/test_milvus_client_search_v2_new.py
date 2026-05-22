@@ -64,8 +64,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         self.binary_vector_index = "BIN_IVF_FLAT"
         self.primary_keys = []
         self.enable_dynamic_field = True
-        self.dyna_filed_name1 = "dyna_filed_name1"
-        self.dyna_filed_name2 = "dyna_filed_name2"
+        self.dyna_field_name1 = "dyna_field_name1"
+        self.dyna_field_name2 = "dyna_field_name2"
         self.datas = []
 
     @pytest.fixture(scope="class", autouse=True)
@@ -119,8 +119,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
                     self.binary_vector_field_name: binary_vectors[pk],
                     ct.default_float_field_name: pk * 1.0 if pk % 5 == 0 else None,
                     ct.default_string_field_name: str(pk) if pk % 5 == 0 else None,
-                    self.dyna_filed_name1: f"dyna_value_{pk}",
-                    self.dyna_filed_name2: pk * 1.0,
+                    self.dyna_field_name1: f"dyna_value_{pk}",
+                    self.dyna_field_name2: pk * 1.0,
                 }
                 self.datas.append(row)
 
@@ -424,14 +424,14 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             search_params=search_params,
             limit=default_limit,
             consistency_level=consistency_level,
-            output_fields=[ct.default_string_field_name, self.dyna_filed_name1, self.dyna_filed_name2],
+            output_fields=[ct.default_string_field_name, self.dyna_field_name1, self.dyna_field_name2],
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
                 "nq": default_nq,
                 "limit": default_limit,
                 "metric": self.float_vector_metric,
-                "output_fields": [ct.default_string_field_name, self.dyna_filed_name1, self.dyna_filed_name2],
+                "output_fields": [ct.default_string_field_name, self.dyna_field_name1, self.dyna_field_name2],
                 "original_entities": self.datas,
                 "pk_name": self.pk_field_name,
             },
@@ -447,7 +447,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        self.describe_collection(client, collection_name)[0]
+        collection_info = self.describe_collection(client, collection_name)[0]
         fields = collection_info.get("fields", None)
         field_names = [field.get("name") for field in fields]
 
@@ -470,7 +470,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
                 "nq": default_nq,
                 "limit": default_limit,
                 "metric": self.float_vector_metric,
-                "output_fields": field_names.extend([self.dyna_filed_name1, self.dyna_filed_name2]),
+                "output_fields": field_names + [self.dyna_field_name1, self.dyna_field_name2],
                 "original_entities": self.datas,
                 "pk_name": self.pk_field_name,
             },
@@ -489,7 +489,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        self.describe_collection(client, collection_name)[0]
+        collection_info = self.describe_collection(client, collection_name)[0]
         partition_name = self.partition_names[0]
 
         # Generate vectors to search
@@ -498,7 +498,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
 
         # search with output fields
         expected_outputs = cf.get_wildcard_output_field_names(collection_info, wildcard_output_fields)
-        expected_outputs.extend([self.dyna_filed_name1, self.dyna_filed_name2])
+        expected_outputs.extend([self.dyna_field_name1, self.dyna_field_name2])
         log.info(f"search with output fields: {wildcard_output_fields}")
         search_res, _ = self.search(
             client,
@@ -514,6 +514,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
                 "enable_milvus_client_api": True,
                 "nq": default_nq,
                 "pk_name": self.pk_field_name,
+                "metric": self.float_vector_metric,
                 "limit": default_limit,
                 "output_fields": expected_outputs,
             },
