@@ -5944,6 +5944,37 @@ func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {
 	assert.Equal(t, int64(2), got[2], "ArrayOfVector at row 2 -> rowIdx 2")
 }
 
+func TestNewEmptyArrayOfVectorRow(t *testing.T) {
+	cases := []struct {
+		name string
+		elem schemapb.DataType
+		data any
+	}{
+		{name: "FloatVector", elem: schemapb.DataType_FloatVector, data: &schemapb.VectorField_FloatVector{}},
+		{name: "BinaryVector", elem: schemapb.DataType_BinaryVector, data: &schemapb.VectorField_BinaryVector{}},
+		{name: "Float16Vector", elem: schemapb.DataType_Float16Vector, data: &schemapb.VectorField_Float16Vector{}},
+		{name: "BFloat16Vector", elem: schemapb.DataType_BFloat16Vector, data: &schemapb.VectorField_Bfloat16Vector{}},
+		{name: "Int8Vector", elem: schemapb.DataType_Int8Vector, data: &schemapb.VectorField_Int8Vector{}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			vf, err := NewEmptyArrayOfVectorRow(8, c.elem)
+			require.NoError(t, err)
+			require.NotNil(t, vf)
+			assert.EqualValues(t, 8, vf.GetDim())
+			assert.IsType(t, c.data, vf.GetData())
+		})
+	}
+
+	t.Run("unsupported element type returns error", func(t *testing.T) {
+		vf, err := NewEmptyArrayOfVectorRow(8, schemapb.DataType_None)
+		require.Error(t, err)
+		assert.Nil(t, vf)
+		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
+	})
+}
+
 func TestAppendFieldData_ArrayOfVectorNullRowAppendsPlaceholder(t *testing.T) {
 	validData := []bool{true, false, true, false}
 	src := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, validData)

@@ -3799,8 +3799,13 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		structField2 := &schemapb.StructArrayFieldSchema{
 			Name: "struct2",
 			Fields: []*schemapb.FieldSchema{
-				{Name: "field2", DataType: schemapb.DataType_Array},
-				{Name: "field3", DataType: schemapb.DataType_ArrayOfVector},
+				{Name: "field2", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				{
+					Name:        "field3",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "1"}},
+				},
 			},
 		}
 		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField1, structField2}, nil)

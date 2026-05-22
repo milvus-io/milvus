@@ -602,31 +602,14 @@ func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []boo
 			res[i] = array[srcIdx]
 			srcIdx++
 		} else {
-			res[i] = newEmptyPerRowVectorField(dim, elementType)
+			emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, elementType)
+			if err != nil {
+				return nil, err
+			}
+			res[i] = emptyRow
 		}
 	}
 	return res, nil
-}
-
-// newEmptyPerRowVectorField builds a placeholder VectorField representing a single
-// ArrayOfVector row with zero vectors. Dim matches the field schema, and the Data
-// oneof is populated with an empty container of the element type so that the
-// placeholder structure is consistent with non-null rows.
-func newEmptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
-	vf := &schemapb.VectorField{Dim: dim}
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
-	case schemapb.DataType_BinaryVector:
-		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
-	case schemapb.DataType_Float16Vector:
-		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
-	case schemapb.DataType_BFloat16Vector:
-		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
-	case schemapb.DataType_Int8Vector:
-		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
-	}
-	return vf
 }
 
 func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
