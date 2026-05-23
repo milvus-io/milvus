@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -61,6 +62,8 @@
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -107,6 +110,74 @@ MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
     // Fallback CSR has csr_offsets_ <= num_rows and csr_index_ <= num_rows + 1.
     // During rebuild, fill_offsets also holds a temporary write_pos copy.
     return (arrays_per_row * rows + 1) * sizeof(uint32_t);
+}
+
+std::string
+GetFileName(const std::string& path) {
+    auto pos = path.find_last_of('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+IndexType
+HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
+    switch (type) {
+        case ScalarIndexType::BITMAP:
+            return BITMAP_INDEX_TYPE;
+        case ScalarIndexType::STLSORT:
+            return ASCENDING_SORT;
+        case ScalarIndexType::MARISA:
+            return MARISA_TRIE;
+        case ScalarIndexType::INVERTED:
+            return INVERTED_INDEX_TYPE;
+        default:
+            return "";
+    }
+}
+
+std::optional<ScalarIndexType>
+ResolveHybridInternalIndexType(
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (index_files.empty() || !file_manager_context.Valid()) {
+        return std::nullopt;
+    }
+
+    auto load_priority = milvus::proto::common::LoadPriority::HIGH;
+    storage::MemFileManagerImpl file_manager(file_manager_context);
+
+    auto index_type_file =
+        std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
+            return GetFileName(f) == INDEX_TYPE;
+        });
+    if (index_type_file != index_files.end()) {
+        auto index_datas = file_manager.LoadIndexToMemory(
+            std::vector<std::string>{*index_type_file}, load_priority);
+        BinarySet binary_set;
+        AssembleIndexDatas(index_datas, binary_set);
+
+        auto index_type_buffer = binary_set.GetByName(INDEX_TYPE);
+        AssertInfo(index_type_buffer != nullptr,
+                   "index type file not found in hybrid index binary set");
+        uint8_t index_type;
+        memcpy(&index_type, index_type_buffer->data.get(), sizeof(uint8_t));
+        return static_cast<ScalarIndexType>(index_type);
+    }
+
+    if (index_files.size() == 1 && file_manager_context.fs != nullptr) {
+        auto input = file_manager.OpenInputStream(index_files[0]);
+        AssertInfo(input != nullptr,
+                   "failed to open packed hybrid index file: {}",
+                   index_files[0]);
+        auto reader = storage::IndexEntryReader::Open(input, input->Size());
+        AssertInfo(reader != nullptr,
+                   "failed to create IndexEntryReader for hybrid index file");
+        if (reader->HasMeta(INDEX_TYPE)) {
+            return static_cast<ScalarIndexType>(
+                reader->GetMeta<uint8_t>(INDEX_TYPE));
+        }
+    }
+
+    return std::nullopt;
 }
 
 }  // namespace
@@ -204,6 +275,38 @@ IndexFactory::IndexLoadResource(
                                        mmap_enable,
                                        num_rows);
     }
+}
+
+LoadResourceRequest
+IndexFactory::IndexLoadResource(
+    DataType field_type,
+    DataType element_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (milvus::IsVectorDataType(field_type)) {
+        return VecIndexLoadResource(field_type,
+                                    element_type,
+                                    index_version,
+                                    index_size_in_bytes,
+                                    index_params,
+                                    mmap_enable,
+                                    num_rows,
+                                    dim);
+    }
+    return ScalarIndexLoadResource(field_type,
+                                   index_version,
+                                   index_size_in_bytes,
+                                   index_params,
+                                   mmap_enable,
+                                   num_rows,
+                                   index_files,
+                                   file_manager_context);
 }
 
 LoadResourceRequest
@@ -515,6 +618,64 @@ IndexFactory::ScalarIndexLoadResource(
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
     return request;
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    if (index_type_it->second != milvus::index::HYBRID_INDEX_TYPE) {
+        return ScalarIndexLoadResource(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows);
+    }
+
+    try {
+        auto internal_index_type =
+            ResolveHybridInternalIndexType(index_files, file_manager_context);
+        if (internal_index_type.has_value()) {
+            auto resolved_index_type =
+                HybridInternalIndexTypeToIndexType(internal_index_type.value());
+            if (!resolved_index_type.empty()) {
+                auto resolved_params = index_params;
+                resolved_params["index_type"] = resolved_index_type;
+                auto request = ScalarIndexLoadResource(field_type,
+                                                       index_version,
+                                                       index_size_in_bytes,
+                                                       resolved_params,
+                                                       mmap_enable,
+                                                       num_rows);
+                LOG_INFO(
+                    "estimate hybrid scalar index load resource by internal "
+                    "index type: {}",
+                    resolved_index_type);
+                return request;
+            }
+        }
+    } catch (std::exception& e) {
+        LOG_WARN(
+            "failed to resolve hybrid scalar internal index type, fallback to "
+            "hybrid estimate: {}",
+            e.what());
+    }
+
+    return ScalarIndexLoadResource(field_type,
+                                   index_version,
+                                   index_size_in_bytes,
+                                   index_params,
+                                   mmap_enable,
+                                   num_rows);
 }
 
 IndexBasePtr
