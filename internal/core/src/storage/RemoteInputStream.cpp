@@ -1,9 +1,11 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #include "log/Log.h"
@@ -18,7 +20,7 @@
 namespace milvus::storage {
 namespace {
 
-constexpr int kRemoteInputStreamMaxReadRetries = 2;
+constexpr int kRemoteInputStreamMaxReadRetries = 5;
 constexpr const char* kFailedFlushResponseStreamError =
     "Failed to flush response stream";
 
@@ -39,20 +41,24 @@ ReadWithRetry(const char* operation,
               ResetFunc&& reset_func) {
     auto result = read_func();
     int retries = 0;
+    int64_t sleep_ms = 1;
     for (int retry = 1; !result.ok() && IsRetryableReadError(result.status()) &&
                         retry <= kRemoteInputStreamMaxReadRetries;
          ++retry) {
         retries = retry;
         LOG_WARN(
             "Failed to {} from remote input stream, retry {}/{}, size: {}, "
-            "file size: {}, offset: {}, error is: {}",
+            "file size: {}, offset: {}, error is: {}, sleep {} ms before retry",
             operation,
             retry,
             kRemoteInputStreamMaxReadRetries,
             size,
             file_size,
             offset,
-            result.status().ToString());
+            result.status().ToString(),
+            sleep_ms);
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+        sleep_ms *= 2;
         auto reset_status = reset_func();
         if (!reset_status.ok()) {
             auto read_status = result.status();
