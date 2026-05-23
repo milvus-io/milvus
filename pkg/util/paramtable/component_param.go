@@ -3515,11 +3515,12 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
 	MaxGroupNQ            ParamItem `refreshable:"true"`
+	NQMergeRatio          ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
@@ -3551,6 +3552,7 @@ type queryNodeConfig struct {
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
 	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
+	SchedulePolicyTaskDeadlineAdvance     ParamItem `refreshable:"true"`
 	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
 	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
 
@@ -3610,6 +3612,20 @@ type queryNodeConfig struct {
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+}
+
+func formatDurationWithMillisecondFallback(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	if _, err := time.ParseDuration(v); err == nil {
+		return v
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return v + "ms"
+	}
+	return v
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4350,14 +4366,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
 
-	p.MaxReceiveChanSize = ParamItem{
-		Key:          "queryNode.scheduler.receiveChanSize",
-		Version:      "2.0.0",
-		DefaultValue: "10240",
-		Export:       true,
-	}
-	p.MaxReceiveChanSize.Init(base.mgr)
-
 	p.MaxReadConcurrency = ParamItem{
 		Key:          "queryNode.scheduler.maxReadConcurrentRatio",
 		Version:      "2.0.0",
@@ -4392,7 +4400,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxUnsolvedQueueSize = ParamItem{
 		Key:          "queryNode.scheduler.unsolvedQueueSize",
 		Version:      "2.0.0",
-		DefaultValue: "10240",
+		DefaultValue: "1024",
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
@@ -4400,10 +4408,29 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "16",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
+
+	p.NQMergeRatio = ParamItem{
+		Key:          "queryNode.grouping.nqMergeRatio",
+		Version:      "2.6.17",
+		DefaultValue: "3.0",
+		Doc:          "Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.",
+		Export:       true,
+	}
+	p.NQMergeRatio.Init(base.mgr)
+
+	p.MaxDeadlineMergeGap = ParamItem{
+		Key:          "queryNode.grouping.maxDeadlineMergeGap",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.MaxDeadlineMergeGap.Init(base.mgr)
 
 	p.TopKMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.topKMergeRatio",
@@ -4643,7 +4670,7 @@ user-task-polling:
 	Scheduling is fair on task granularity.
 	The policy is based on the username for authentication.
 	And an empty username is considered the same user.
-	When there are no multi-users, the policy decay into FIFO"`,
+	When there are no multi-users, the policy decay into FIFO.`,
 		Export: true,
 	}
 	p.SchedulePolicyName.Init(base.mgr)
@@ -4655,6 +4682,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyTaskQueueExpire.Init(base.mgr)
+	p.SchedulePolicyTaskDeadlineAdvance = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.taskDeadlineAdvance",
+		Version:      "2.6.17",
+		DefaultValue: "50ms",
+		Doc:          "Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.",
+		Formatter:    formatDurationWithMillisecondFallback,
+		Export:       true,
+	}
+	p.SchedulePolicyTaskDeadlineAdvance.Init(base.mgr)
 	p.SchedulePolicyEnableCrossUserGrouping = ParamItem{
 		Key:          "queryNode.scheduler.scheduleReadPolicy.enableCrossUserGrouping",
 		Version:      "2.3.0",
@@ -4671,7 +4707,6 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
-
 	p.CGOPoolSizeRatio = ParamItem{
 		Key:          "queryNode.segcore.cgoPoolSizeRatio",
 		Version:      "2.3.0",

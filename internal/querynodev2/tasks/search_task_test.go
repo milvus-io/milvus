@@ -318,6 +318,21 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 	})
 }
 
+func (s *SearchTaskSuite) TestSearchTaskMinNQ() {
+	s.Run("fallback_to_total_nq_without_origin", func() {
+		task := &SearchTask{nq: 8}
+		s.Equal(int64(8), task.MinNQ())
+	})
+
+	s.Run("minimum_origin_nq", func() {
+		task := &SearchTask{
+			nq:        11,
+			originNqs: []int64{5, 2, 4},
+		}
+		s.Equal(int64(2), task.MinNQ())
+	})
+}
+
 func TestSearchTask(t *testing.T) {
 	suite.Run(t, new(SearchTaskSuite))
 }
