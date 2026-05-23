@@ -175,15 +175,15 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
-		topCtx, cancel := context.WithCancel(gCtx.Request.Context())
-		defer cancel()
-		gCtx.Request = gCtx.Request.WithContext(topCtx)
-
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
 		if err == nil {
 			timeout = time.Duration(timeoutSecond) * time.Second
 		}
+		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
+		defer cancel()
+		gCtx.Request = gCtx.Request.WithContext(topCtx)
+
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
 
