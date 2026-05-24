@@ -30,6 +30,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,6 +119,30 @@ func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
 		FinalDiskCost:   uint64(estimate.final_disk_cost),
 		HasRawData:      bool(estimate.has_raw_data),
 	}
+}
+
+// gpuVecIndexClassifier reports whether the given index type is a GPU vector
+// index. It is defined as a package-level variable so unit tests can swap it
+// out without depending on the GPU build of Knowhere being registered.
+var gpuVecIndexClassifier = func(indexType string) bool {
+	return vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(indexType)
+}
+
+func isGPUIndexForLoad(indexParams []*commonpb.KeyValuePair) bool {
+	params := funcutil.KeyValuePair2Map(indexParams)
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), params); err != nil {
+		return gpuVecIndexClassifier(params[common.IndexTypeKey])
+	}
+
+	indexType := params[common.IndexTypeKey]
+	if !gpuVecIndexClassifier(indexType) {
+		return false
+	}
+
+	if indexType == "GPU_CAGRA" && strings.EqualFold(params["adapt_for_cpu"], "true") {
+		return false
+	}
+	return true
 }
 
 type requestResourceResult struct {
@@ -2010,7 +2035,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
 
-			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
+			if isGPUIndexForLoad(fieldIndexInfo.IndexParams) {
 				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
 			}
 

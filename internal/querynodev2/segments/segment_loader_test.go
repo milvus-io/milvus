@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1806,4 +1807,234 @@ func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderDetailSuite{})
 	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
 	suite.Run(t, &ExternalSegmentEstimateSuite{})
+}
+
+// gpuIndexTypeWhitelist enables isGPUIndexForLoad's GPU classification path
+// even when the local Knowhere build does not register any GPU index. Tests
+// that depend on it must call patchGPUIndexClassification(t) so the patch is
+// reverted when the test exits.
+var gpuIndexTypeWhitelist = map[string]struct{}{
+	"GPU_CAGRA":    {},
+	"GPU_IVF_FLAT": {},
+}
+
+func patchGPUIndexClassification(t *testing.T) {
+	t.Helper()
+	original := gpuVecIndexClassifier
+	gpuVecIndexClassifier = func(indexType string) bool {
+		_, ok := gpuIndexTypeWhitelist[indexType]
+		return ok
+	}
+	t.Cleanup(func() { gpuVecIndexClassifier = original })
+}
+
+func TestIsGPUIndexForLoad(t *testing.T) {
+	paramtable.Init()
+	patchGPUIndexClassification(t)
+
+	t.Run("gpu_cagra_by_default", func(t *testing.T) {
+		indexParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}
+		assert.True(t, isGPUIndexForLoad(indexParams))
+	})
+
+	t.Run("gpu_cagra_adapt_for_cpu", func(t *testing.T) {
+		key := paramtable.Get().KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		paramtable.Get().Save(key, "true")
+		t.Cleanup(func() {
+			paramtable.Get().Reset(key)
+		})
+
+		indexParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}
+		assert.False(t, isGPUIndexForLoad(indexParams))
+	})
+
+	t.Run("non_gpu_index_unaffected", func(t *testing.T) {
+		indexParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}
+		assert.False(t, isGPUIndexForLoad(indexParams))
+	})
+
+	t.Run("adapt_for_cpu_only_applies_to_gpu_cagra", func(t *testing.T) {
+		indexParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_IVF_FLAT"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "adapt_for_cpu", Value: "true"},
+		}
+		assert.True(t, isGPUIndexForLoad(indexParams))
+	})
+
+	// Covers strings.EqualFold: indexParams may carry adapt_for_cpu directly
+	// (without going through paramtable). Both literal "true" and mixed-case
+	// variants must trigger the CPU-adapted branch.
+	t.Run("gpu_cagra_adapt_for_cpu_via_index_params", func(t *testing.T) {
+		cases := []string{"true", "True", "TRUE"}
+		for _, v := range cases {
+			indexParams := []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: "adapt_for_cpu", Value: v},
+			}
+			assert.False(t, isGPUIndexForLoad(indexParams),
+				"adapt_for_cpu=%q should be treated as CPU-adapted", v)
+		}
+	})
+
+	// adapt_for_cpu=false (or any non-true value) must keep GPU_CAGRA on the
+	// GPU resource accounting path.
+	t.Run("gpu_cagra_adapt_for_cpu_explicit_false", func(t *testing.T) {
+		for _, v := range []string{"false", "False", "no", ""} {
+			indexParams := []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: "adapt_for_cpu", Value: v},
+			}
+			assert.True(t, isGPUIndexForLoad(indexParams),
+				"adapt_for_cpu=%q must not bypass GPU accounting", v)
+		}
+	})
+
+	// When AppendPrepareLoadParams returns an error, the function must fall
+	// back to reporting whether the raw index_type is a GPU vec index.
+	t.Run("fallback_when_append_prepare_load_params_fails", func(t *testing.T) {
+		patch := mockey.Mock(indexparams.AppendPrepareLoadParams).
+			To(func(*paramtable.ComponentParam, map[string]string) error {
+				return errors.New("inject prepare load params failure")
+			}).Build()
+		defer patch.UnPatch()
+
+		gpuParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			// adapt_for_cpu is intentionally set; the fallback branch ignores it
+			// because it never reaches the EqualFold check.
+			{Key: "adapt_for_cpu", Value: "true"},
+		}
+		assert.True(t, isGPUIndexForLoad(gpuParams),
+			"fallback branch must defer to IsGPUVecIndex on the raw index_type")
+
+		nonGPUParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+		}
+		assert.False(t, isGPUIndexForLoad(nonGPUParams),
+			"fallback branch must return false for non-GPU index types")
+	})
+}
+
+// TestEstimateLoadingResourceUsageOfSegment_GPUIndexAccounting verifies the
+// PART 1 call site of estimateLoadingResourceUsageOfSegment: only the indexes
+// classified as "GPU index for load" must contribute to FieldGpuMemorySize.
+//
+// The real estimate path goes through C.EstimateLoadIndexResource which is
+// not safe to invoke under unit tests, so GetCLoadInfoWithFunc is patched to
+// skip the user callback entirely. This leaves estimateResult at its zero
+// value, which is sufficient: we only assert on the *length* of
+// FieldGpuMemorySize, i.e. on the branch selection driven by
+// isGPUIndexForLoad. The numeric size accumulation is exercised by existing
+// CGO-backed integration tests.
+func TestEstimateLoadingResourceUsageOfSegment_GPUIndexAccounting(t *testing.T) {
+	paramtable.Init()
+	patchGPUIndexClassification(t)
+
+	const (
+		gpuFieldID    = int64(101)
+		gpuCPUFieldID = int64(102)
+		hnswFieldID   = int64(103)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "gpu_index_accounting",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: gpuFieldID, Name: "vec_gpu", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
+			{
+				FieldID: gpuCPUFieldID, Name: "vec_gpu_cpu", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
+			{
+				FieldID: hnswFieldID, Name: "vec_hnsw", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
+		},
+	}
+
+	calls := atomic.NewInt32(0)
+	patchGetC := mockey.Mock(GetCLoadInfoWithFunc).To(
+		func(ctx context.Context, fieldSchema *schemapb.FieldSchema, loadInfo *querypb.SegmentLoadInfo,
+			indexInfo *querypb.FieldIndexInfo, f func(c *LoadIndexInfo) error,
+		) error {
+			calls.Inc()
+			// Intentionally do not invoke `f` — the real callback would call
+			// C.EstimateLoadIndexResource which is unsafe under unit tests.
+			// Leaving estimateResult at zero is fine because we only assert on
+			// FieldGpuMemorySize length (branch selection), not on the
+			// numeric MaxMemoryCost contribution.
+			return nil
+		},
+	).Build()
+	defer patchGetC.UnPatch()
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  2,
+		CollectionID: 3,
+		NumOfRows:    10,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        gpuFieldID,
+				IndexFilePaths: []string{"file://gpu"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+			{
+				FieldID:        gpuCPUFieldID,
+				IndexFilePaths: []string{"file://gpu-cpu"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: "adapt_for_cpu", Value: "true"},
+				},
+			},
+			{
+				FieldID:        hnswFieldID,
+				IndexFilePaths: []string{"file://hnsw"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		},
+	}
+
+	// TieredEvictionEnabled=true keeps PART 1 focused on GPU classification:
+	// it skips indexMemorySize / segDiskLoadingSize accumulation but still
+	// runs the `if isGPUIndexForLoad(...)` branch under test.
+	factor := resourceEstimateFactor{TieredEvictionEnabled: true}
+
+	usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+	assert.NoError(t, err)
+	assert.NotNil(t, usage)
+	assert.EqualValues(t, 3, calls.Load(),
+		"GetCLoadInfoWithFunc must be called once per indexed field with paths")
+
+	// Only the pure GPU_CAGRA index (gpuFieldID) should be classified as
+	// GPU-resident. GPU_CAGRA + adapt_for_cpu=true must be excluded — that
+	// is exactly the bug fix under test. HNSW is not a GPU index and must
+	// also be excluded.
+	assert.Len(t, usage.FieldGpuMemorySize, 1,
+		"only the pure GPU_CAGRA index must be accounted as GPU memory; got %v",
+		usage.FieldGpuMemorySize)
 }
