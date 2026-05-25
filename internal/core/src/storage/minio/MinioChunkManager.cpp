@@ -355,6 +355,31 @@ MinioChunkManager::BuildGoogleCloudClient(
     }
 }
 
+void
+MinioChunkManager::ApplyChecksumConfigOverrides(
+    Aws::Client::ClientConfiguration& config) {
+    // Non-AWS S3-compatible APIs (GCP, Aliyun OSS, Tencent COS, Huawei OBS) do
+    // not accept the extra x-amz-checksum-* headers / aws-chunked streaming
+    // that AWS SDK >= 1.11.x sends by default (WHEN_SUPPORTED). The V4 signer
+    // emits Transfer-Encoding: aws-chunked + x-amz-content-sha256:
+    // STREAMING-UNSIGNED-PAYLOAD-TRAILER, which Aliyun OSS rejects with
+    // x-oss-ec=0017-00000804, Huawei OBS with XAmzContentSHA256Mismatch, etc.
+    // Restrict to WHEN_REQUIRED so the SDK only adds checksums when the
+    // operation model mandates them (PutObject does not), restoring the
+    // simple PUT behavior we had with AWS SDK 1.11.352. Same approach as
+    // milvus-storage PR #500.
+    config.checksumConfig.requestChecksumCalculation =
+        Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED;
+    config.checksumConfig.responseChecksumValidation =
+        Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED;
+}
+
+bool
+MinioChunkManager::NeedChecksumOverride(const std::string& cloud_provider) {
+    return cloud_provider == "gcp" || cloud_provider == "aliyun" ||
+           cloud_provider == "tencent" || cloud_provider == "huawei";
+}
+
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name),
       use_crc32c_checksum_(storage_config.use_crc32c_checksum) {
@@ -405,6 +430,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
     if (!storage_config.region.empty()) {
         config.region = ConvertToAwsString(storage_config.region);
+    }
+
+    if (NeedChecksumOverride(storage_config.cloud_provider)) {
+        ApplyChecksumConfigOverrides(config);
     }
 
     if (storageType == RemoteStorageType::S3) {

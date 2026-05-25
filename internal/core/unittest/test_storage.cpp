@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 
+#include "aws/core/client/ClientConfiguration.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
@@ -35,8 +36,17 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+
+// Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
+// and NeedChecksumOverride helpers so we can assert their behavior directly.
+class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
+ public:
+    using MinioChunkManager::ApplyChecksumConfigOverrides;
+    using MinioChunkManager::NeedChecksumOverride;
+};
 
 using namespace std;
 using namespace milvus;
@@ -382,4 +392,49 @@ TEST_F(StorageUtilTest, NormalizePath) {
     EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
+}
+
+TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
+    // Regression guard: AWS SDK C++ 1.11.x defaults the checksum policy to
+    // WHEN_SUPPORTED, which makes the V4 signer switch PutObject uploads to
+    // aws-chunked + STREAMING-UNSIGNED-PAYLOAD-TRAILER. Aliyun OSS rejects
+    // that combination (x-oss-ec=0017-00000804). MinioChunkManager must
+    // override both directions to WHEN_REQUIRED so the SDK only adds
+    // checksums when the operation model demands them.
+
+    // Aws::Client::ClientConfiguration's default ctor reads SDK globals
+    // (logger / http client factory) set up by Aws::InitAPI; without it the
+    // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
+    // share init_count_ with any production code paths in the same binary.
+    TestableMinioChunkManager init_guard;
+    init_guard.InitSDKAPIDefault("info");
+
+    Aws::Client::ClientConfiguration config;
+    // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_SUPPORTED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_SUPPORTED);
+
+    TestableMinioChunkManager::ApplyChecksumConfigOverrides(config);
+
+    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
+              Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED);
+    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
+              Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
+}
+
+TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
+    using Mgr = TestableMinioChunkManager;
+
+    // Non-AWS S3-compatible backends need the override.
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("gcp"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("aliyun"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("tencent"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("huawei"));
+
+    // AWS S3 / MinIO accept the default WHEN_SUPPORTED behavior.
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
 }
