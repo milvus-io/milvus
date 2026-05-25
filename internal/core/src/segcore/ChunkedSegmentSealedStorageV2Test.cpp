@@ -261,23 +261,19 @@ TEST_P(TestChunkSegmentStorageV2,
     const auto& group_info = load_info_.field_infos.at(group_id);
     ASSERT_FALSE(group_info.insert_files.empty());
 
-    proto::segcore::FieldBinlog group_binlog;
-    group_binlog.set_fieldid(group_id);
-    group_binlog.add_child_fields(int64_field.get());
-    group_binlog.add_child_fields(pk_field.get());
-    auto* binlog = group_binlog.add_binlogs();
-    binlog->set_log_path(group_info.insert_files[0]);
-    binlog->set_entries_num(group_info.row_count);
-    binlog->set_memory_size(1);
+    auto add_group_binlog = [&](FieldId child_field) {
+        auto* group_binlog = segment_load_info.add_binlog_paths();
+        group_binlog->set_fieldid(group_id);
+        group_binlog->add_child_fields(child_field.get());
+        auto* binlog = group_binlog->add_binlogs();
+        binlog->set_log_path(group_info.insert_files[0]);
+        binlog->set_entries_num(group_info.row_count);
+        binlog->set_memory_size(1);
+    };
+    add_group_binlog(int64_field);
+    add_group_binlog(pk_field);
 
-    std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
-        binlogs_to_load;
-    binlogs_to_load.emplace_back(std::vector<FieldId>{int64_field},
-                                 group_binlog);
-    binlogs_to_load.emplace_back(std::vector<FieldId>{pk_field}, group_binlog);
-
-    milvus::tracer::TraceContext trace_ctx;
-    sealed->LoadBatchFieldData(trace_ctx, binlogs_to_load);
+    sealed->Reopen(nullptr, segment_load_info);
 
     EXPECT_TRUE(sealed->HasFieldData(int64_field));
     EXPECT_TRUE(sealed->HasFieldData(pk_field));
