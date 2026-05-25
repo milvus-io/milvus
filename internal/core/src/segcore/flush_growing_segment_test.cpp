@@ -18,6 +18,8 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
+#include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/transaction/transaction.h"
 
@@ -46,6 +48,30 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     }
 
     std::string test_dir_;
+
+    std::vector<FieldDataPtr>
+    ReadFlushedFieldData(const std::string& segment_path,
+                         const CFlushResult& result,
+                         FieldId field_id,
+                         DataType data_type,
+                         bool nullable,
+                         int64_t dim,
+                         DataType element_type = DataType::NONE) {
+        auto properties =
+            storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+        EXPECT_NE(properties, nullptr);
+        auto field_meta = gen_field_meta(
+            1, 2, 3, field_id.get(), data_type, element_type, nullable);
+        std::string manifest_json =
+            "{\"base_path\":\"" + segment_path +
+            "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+        return storage::GetFieldDatasFromManifest(manifest_json,
+                                                  properties,
+                                                  field_meta,
+                                                  data_type,
+                                                  dim,
+                                                  element_type);
+    }
 
     void
     AssertManifestHasColumn(const std::string& segment_path,
@@ -360,6 +386,214 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
     ASSERT_EQ(result.num_rows, N);
 
     // cleanup
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, 2, "L2", true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    bool valid_data[N] = {false, true, true};
+    std::vector<float> compact_vectors = {1.0F, 2.0F, 3.0F, 4.0F};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto vec_array = CreateVectorDataArrayFrom(
+        compact_vectors.data(), valid_data, N, 2, (*schema)[vec_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config;
+    std::string segment_path = test_dir_ + "/segment_nullable_vec";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result;
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_NE(result.manifest_path, nullptr);
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(
+        segment_path, result, vec_fid, DataType::VECTOR_FLOAT, true, 2);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), N);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    EXPECT_FALSE(field_data->is_valid(0));
+    ASSERT_TRUE(field_data->is_valid(1));
+    ASSERT_TRUE(field_data->is_valid(2));
+
+    auto row1 = static_cast<const float*>(field_data->RawValue(1));
+    auto row2 = static_cast<const float*>(field_data->RawValue(2));
+    ASSERT_NE(row1, nullptr);
+    ASSERT_NE(row2, nullptr);
+    EXPECT_FLOAT_EQ(row1[0], 1.0F);
+    EXPECT_FLOAT_EQ(row1[1], 2.0F);
+    EXPECT_FLOAT_EQ(row2[0], 3.0F);
+    EXPECT_FLOAT_EQ(row2[1], 4.0F);
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_INT8, 4, "L2", true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    bool valid_data[N] = {true, false, true};
+    std::vector<int8> compact_vectors = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto vec_array = CreateVectorDataArrayFrom(
+        compact_vectors.data(), valid_data, N, 2, (*schema)[vec_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config;
+    std::string segment_path = test_dir_ + "/segment_int8_vec";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result;
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(
+        segment_path, result, vec_fid, DataType::VECTOR_INT8, true, 4);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), N);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    ASSERT_TRUE(field_data->is_valid(0));
+    EXPECT_FALSE(field_data->is_valid(1));
+    ASSERT_TRUE(field_data->is_valid(2));
+
+    auto row0 = static_cast<const int8*>(field_data->RawValue(0));
+    auto row2 = static_cast<const int8*>(field_data->RawValue(2));
+    ASSERT_NE(row0, nullptr);
+    ASSERT_NE(row2, nullptr);
+    EXPECT_EQ(std::vector<int8>(row0, row0 + 4),
+              std::vector<int8>({1, 2, 3, 4}));
+    EXPECT_EQ(std::vector<int8>(row2, row2 + 4),
+              std::vector<int8>({5, 6, 7, 8}));
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_SPARSE_U32_F32, 0, std::nullopt, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    bool valid_data[N] = {false, true, true};
+    auto sparse_vectors = GenerateRandomSparseFloatVector(2, 16, 0.5);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto vec_array = CreateVectorDataArrayFrom(
+        sparse_vectors.get(), valid_data, N, 2, (*schema)[vec_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config;
+    std::string segment_path = test_dir_ + "/segment_sparse_vec";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result;
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_fid,
+                                            DataType::VECTOR_SPARSE_U32_F32,
+                                            true,
+                                            0);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto field_data = field_datas[0];
+    ASSERT_EQ(field_data->get_num_rows(), N);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    EXPECT_FALSE(field_data->is_valid(0));
+    ASSERT_TRUE(field_data->is_valid(1));
+    ASSERT_TRUE(field_data->is_valid(2));
+
+    auto row1 =
+        static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+            field_data->RawValue(1));
+    auto row2 =
+        static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+            field_data->RawValue(2));
+    ASSERT_NE(row1, nullptr);
+    ASSERT_NE(row2, nullptr);
+    EXPECT_EQ(row1->data_byte_size(), sparse_vectors[0].data_byte_size());
+    EXPECT_EQ(row2->data_byte_size(), sparse_vectors[1].data_byte_size());
+
     FreeFlushResult(&result);
 }
 

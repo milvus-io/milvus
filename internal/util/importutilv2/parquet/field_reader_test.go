@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -246,6 +247,111 @@ func TestParseSparseFloatRowVector(t *testing.T) {
 	}
 }
 
+func TestReadNullableByteVectorBinaryRowsRejectWrongRowWidth(t *testing.T) {
+	tests := []struct {
+		name      string
+		dataType  schemapb.DataType
+		dim       string
+		firstRow  []byte
+		secondRow []byte
+	}{
+		{
+			name:      "binary_vector",
+			dataType:  schemapb.DataType_BinaryVector,
+			dim:       "16",
+			firstRow:  []byte{1},
+			secondRow: []byte{2, 3, 4},
+		},
+		{
+			name:      "float16_vector",
+			dataType:  schemapb.DataType_Float16Vector,
+			dim:       "2",
+			firstRow:  []byte{1, 2},
+			secondRow: []byte{3, 4, 5, 6, 7, 8},
+		},
+		{
+			name:      "bfloat16_vector",
+			dataType:  schemapb.DataType_BFloat16Vector,
+			dim:       "2",
+			firstRow:  []byte{1, 2},
+			secondRow: []byte{3, 4, 5, 6, 7, 8},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const (
+				pkFieldID  = int64(100)
+				vecFieldID = int64(101)
+				numRows    = int64(2)
+			)
+			schema := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      pkFieldID,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID:  vecFieldID,
+						Name:     "vec",
+						DataType: tt.dataType,
+						Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: tt.dim},
+						},
+					},
+				},
+			}
+
+			filePath := fmt.Sprintf("/tmp/test_nullable_byte_vector_binary_width_%s_%d.parquet", tt.name, rand.Int())
+			defer os.Remove(filePath)
+			wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+			require.NoError(t, err)
+
+			pqSchema := arrow.NewSchema([]arrow.Field{
+				{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "vec", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			}, nil)
+			fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+				parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)),
+				pqarrow.DefaultWriterProps())
+			require.NoError(t, err)
+
+			pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+			defer pkBuilder.Release()
+			pkBuilder.AppendValues([]int64{1, 2}, nil)
+			pkArr := pkBuilder.NewArray()
+			defer pkArr.Release()
+
+			vecBuilder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			defer vecBuilder.Release()
+			vecBuilder.Append(tt.firstRow)
+			vecBuilder.Append(tt.secondRow)
+			vecArr := vecBuilder.NewArray()
+			defer vecArr.Release()
+
+			recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, vecArr}, numRows)
+			defer recordBatch.Release()
+			require.NoError(t, fw.Write(recordBatch))
+			require.NoError(t, fw.Close())
+
+			ctx := context.Background()
+			f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+			cm, err := f.NewPersistentStorageChunkManager(ctx)
+			require.NoError(t, err)
+			reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+			require.NoError(t, err)
+			defer reader.Close()
+
+			_, err = reader.Read()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "vector row width mismatch")
+		})
+	}
+}
+
 func TestParseSparseFloatVectorStructs(t *testing.T) {
 	mem := memory.NewGoAllocator()
 
@@ -416,6 +522,129 @@ func TestParseSparseFloatVectorStructs(t *testing.T) {
 	isValidFunc(genUint64ArrList(indices), genFloat64ArrList(values))
 	isValidFunc(genInt64ArrList(indices), genFloat32ArrList(values))
 	isValidFunc(genInt64ArrList(indices), genFloat64ArrList(values))
+}
+
+func TestReadNullableSparseFloatVectorStructKeepsCompactRows(t *testing.T) {
+	rowA := typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1})
+	rowB := typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2})
+	rowC := typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3})
+
+	tests := []struct {
+		name           string
+		validData      []bool
+		contents       [][]byte
+		rowGroupLength int64
+	}{
+		{
+			name:           "null_first",
+			validData:      []bool{false, true, true},
+			contents:       [][]byte{rowA, rowB},
+			rowGroupLength: 3,
+		},
+		{
+			name:           "valid_null_valid",
+			validData:      []bool{true, false, true},
+			contents:       [][]byte{rowA, rowB},
+			rowGroupLength: 3,
+		},
+		{
+			name:           "all_null",
+			validData:      []bool{false, false},
+			contents:       [][]byte{},
+			rowGroupLength: 2,
+		},
+		{
+			name:           "multi_row_group",
+			validData:      []bool{true, false, true, false, true},
+			contents:       [][]byte{rowA, rowB, rowC},
+			rowGroupLength: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkNullableSparseFloatVectorStructRead(t, tt.validData, tt.contents, tt.rowGroupLength)
+		})
+	}
+}
+
+func checkNullableSparseFloatVectorStructRead(t *testing.T, validData []bool, contents [][]byte, rowGroupLength int64) {
+	const (
+		pkFieldID     = int64(100)
+		sparseFieldID = int64(101)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: sparseFieldID, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+		},
+	}
+	sparseFields := []arrow.Field{
+		{Name: sparseVectorIndice, Type: arrow.ListOf(&arrow.Uint32Type{})},
+		{Name: sparseVectorValues, Type: arrow.ListOf(&arrow.Float32Type{})},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: &arrow.Int64Type{}},
+		{Name: "sparse", Type: arrow.StructOf(sparseFields...), Nullable: true},
+	}, nil)
+
+	numRows := int64(len(validData))
+	filePath := fmt.Sprintf("/tmp/test_%d_nullable_sparse_struct_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	defer wf.Close()
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(rowGroupLength)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	mem := memory.NewGoAllocator()
+	pkBuilder := array.NewInt64Builder(mem)
+	pks := make([]int64, len(validData))
+	for i := range pks {
+		pks[i] = int64(i + 1)
+	}
+	pkBuilder.AppendValues(pks, nil)
+	pkArray := pkBuilder.NewArray()
+	defer pkArray.Release()
+	pkBuilder.Release()
+
+	sparseArray, err := testutil.BuildSparseVectorData(mem, contents, pqSchema.Field(1).Type, validData)
+	require.NoError(t, err)
+	defer sparseArray.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArray, sparseArray}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	gotInsertData, err := reader.Read()
+	require.NoError(t, err)
+	gotSparse := gotInsertData.Data[sparseFieldID].(*storage.SparseFloatVectorFieldData)
+	require.Equal(t, validData, gotSparse.ValidData)
+	require.Len(t, gotSparse.GetContents(), len(contents))
+	if len(contents) > 0 {
+		require.Equal(t, contents, gotSparse.GetContents())
+	}
+
+	physicalIdx := 0
+	for rowIdx, valid := range validData {
+		if !valid {
+			require.Nil(t, gotSparse.GetRow(rowIdx))
+			continue
+		}
+		require.Equal(t, contents[physicalIdx], gotSparse.GetRow(rowIdx))
+		physicalIdx++
+	}
 }
 
 func TestReadFieldData(t *testing.T) {

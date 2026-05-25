@@ -184,7 +184,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         TargetBitmap transformed_bitset;
         BitsetView search_bitset = bitset;
-        if (offset_mapping.IsEnabled()) {
+        if (offset_mapping.IsEnabled() && !bitset.empty()) {
             transformed_bitset = TransformBitset(bitset, offset_mapping);
         }
 
@@ -203,7 +203,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.unity_topK_ = info.topk_;
             return;
         }
-        if (offset_mapping.IsEnabled()) {
+        if (offset_mapping.IsEnabled() && !bitset.empty()) {
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }

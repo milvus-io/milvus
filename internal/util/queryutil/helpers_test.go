@@ -48,6 +48,52 @@ func makeNullableSchema(fieldID int64, dataType schemapb.DataType, dim int64) *s
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{fs}}
 }
 
+func requireRangeSliceRetrieveResults(t *testing.T, result *internalpb.RetrieveResults, start, end int) *internalpb.RetrieveResults {
+	t.Helper()
+	return rangeSliceRetrieveResults(result, start, end)
+}
+
+func requireRangeSliceFieldData(t *testing.T, fd *schemapb.FieldData, start, end int) *schemapb.FieldData {
+	t.Helper()
+	return rangeSliceFieldData(fd, start, end)
+}
+
+func requireRangeSliceVectorField(t *testing.T, vf *schemapb.VectorField, start, end int, validData []bool) *schemapb.VectorField {
+	t.Helper()
+	return rangeSliceVectorField(vf, start, end, validData)
+}
+
+func requireSliceFieldData(t *testing.T, fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
+	t.Helper()
+	return sliceFieldData(fd, indices)
+}
+
+func requireSliceVectorField(t *testing.T, vf *schemapb.VectorField, indices []int, validData []bool) *schemapb.VectorField {
+	t.Helper()
+	return sliceVectorField(vf, indices, validData)
+}
+
+func TestGetRowCountNullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T) {
+	result := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+					},
+				}},
+				ValidData: []bool{true, false, true},
+			},
+		},
+	}
+
+	assert.Equal(t, 3, getRowCount(result))
+}
+
 // =========================================================================
 // buildMergedFieldData: ValidData preservation
 // =========================================================================
@@ -718,6 +764,137 @@ func TestCalcRowSize_FloatVector(t *testing.T) {
 	// FloatVector: dim * 4 bytes per row = 8 * 4 = 32
 	size := calcRowSize(r, 0)
 	assert.Equal(t, int64(dim*4), size)
+}
+
+func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    *schemapb.FieldData
+		wantSize int64
+	}{
+		{
+			name: "float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+				}},
+			},
+			wantSize: 8,
+		},
+		{
+			name: "binary_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BinaryVector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  16,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02}},
+				}},
+			},
+			wantSize: 2,
+		},
+		{
+			name: "float16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Float16Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+		{
+			name: "bfloat16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BFloat16Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+		{
+			name: "int8_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Int8Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  4,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{tt.field}}
+			assert.Equal(t, int64(0), calcRowSize(r, 0))
+			assert.Equal(t, tt.wantSize, calcRowSize(r, 1))
+		})
+	}
+}
+
+func TestCalcRowSize_NullableSparseVectorUsesCompactMapping(t *testing.T) {
+	rowA := makeTestSparseVec(1, 0.5)
+	rowC := makeTestSparseVec(3, 1.5)
+
+	tests := []struct {
+		name      string
+		validData []bool
+		contents  [][]byte
+		wantSizes []int64
+	}{
+		{
+			name:      "null_before_valid",
+			validData: []bool{false, true},
+			contents:  [][]byte{rowA},
+			wantSizes: []int64{0, int64(len(rowA))},
+		},
+		{
+			name:      "valid_null_valid",
+			validData: []bool{true, false, true},
+			contents:  [][]byte{rowA, rowC},
+			wantSizes: []int64{int64(len(rowA)), 0, int64(len(rowC))},
+		},
+		{
+			name:      "all_null",
+			validData: []bool{false, false},
+			contents:  nil,
+			wantSizes: []int64{0, 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &internalpb.RetrieveResults{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_SparseFloatVector,
+						ValidData: tt.validData,
+						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+							Dim: 4,
+							Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+								Dim:      4,
+								Contents: tt.contents,
+							}},
+						}},
+					},
+				},
+			}
+			for rowIdx, want := range tt.wantSizes {
+				assert.Equal(t, want, calcRowSize(r, int64(rowIdx)))
+			}
+		})
+	}
 }
 
 func TestCalcRowSize_MultipleFieldTypes(t *testing.T) {
@@ -2442,16 +2619,17 @@ func TestSliceVectorField_NullableCompact_Sparse(t *testing.T) {
 	assert.Equal(t, [][]byte{{0x02}}, sliced.GetSparseFloatVector().GetContents())
 }
 
-func TestSliceVectorField_NullableCompact_VectorArray(t *testing.T) {
+func TestSliceVectorField_NullableVectorArrayUsesLogicalRows(t *testing.T) {
 	dim := int64(2)
 	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nil}}}
 	v2 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
 
 	vf := &schemapb.VectorField{
 		Dim: dim,
 		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 			Dim:         dim,
-			Data:        []*schemapb.VectorField{v1, v2},
+			Data:        []*schemapb.VectorField{v1, empty, v2},
 			ElementType: schemapb.DataType_FloatVector,
 		}},
 	}
@@ -2545,16 +2723,17 @@ func TestRangeSliceVectorField_NullableCompact_Sparse(t *testing.T) {
 	assert.Equal(t, [][]byte{{0x02}}, sliced.GetSparseFloatVector().GetContents())
 }
 
-func TestRangeSliceVectorField_NullableCompact_VectorArray(t *testing.T) {
+func TestRangeSliceVectorField_NullableVectorArrayUsesLogicalRows(t *testing.T) {
 	dim := int64(2)
 	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nil}}}
 	v2 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
 
 	vf := &schemapb.VectorField{
 		Dim: dim,
 		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 			Dim:         dim,
-			Data:        []*schemapb.VectorField{v1, v2},
+			Data:        []*schemapb.VectorField{v1, empty, v2},
 			ElementType: schemapb.DataType_FloatVector,
 		}},
 	}

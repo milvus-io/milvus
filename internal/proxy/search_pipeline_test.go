@@ -340,6 +340,90 @@ func (s *SearchPipelineSuite) TestHybridAssembleOp_MixedFieldsDataLayoutErrors()
 		"error message must mention FieldsData inconsistency")
 }
 
+func (s *SearchPipelineSuite) TestHybridAssembleOpNullableVectorCompactData() {
+	sub0 := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "nullable_vec",
+					FieldId:   101,
+					ValidData: []bool{false, true, true},
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{20, 20, 30, 30}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	sub1 := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{40, 50}},
+				},
+			},
+			Scores: []float32{0.6, 0.5},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "nullable_vec",
+					FieldId:   101,
+					ValidData: []bool{true, false},
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{40, 40}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	rankResult := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       5,
+			Topks:      []int64{5},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{30, 10, 50, 40, 20}},
+				},
+			},
+			Scores: []float32{0.95, 0.85, 0.75, 0.65, 0.55},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 12345}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{sub0, sub1}, rankResult)
+
+	s.NoError(err)
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Require().Len(result.GetFieldsData(), 1)
+	field := result.GetFieldsData()[0]
+	s.Equal([]bool{true, false, false, true, true}, field.GetValidData())
+	s.Equal([]float32{30, 30, 40, 40, 20, 20}, field.GetVectors().GetFloatVector().GetData())
+}
+
 func (s *SearchPipelineSuite) TestRequeryOp() {
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "int64", 20)
 	f1.FieldId = 101
@@ -2113,6 +2197,80 @@ func (s *SearchPipelineSuite) TestOrderByOperator() {
 	s.Equal(expectedPrices, actualPrices)
 }
 
+func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOutput() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7},
+			Topks:  []int64{3},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "nullable_float_vec",
+					ValidData: []bool{true, false, true},
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_SparseFloatVector,
+					FieldName: "nullable_sparse_vec",
+					ValidData: []bool{true, false, true},
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 3,
+							Data: &schemapb.VectorField_SparseFloatVector{
+								SparseFloatVector: &schemapb.SparseFloatArray{
+									Dim:      3,
+									Contents: [][]byte{{0x01}, {0x03}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields: []OrderByField{
+			{FieldName: "price", Ascending: true},
+		},
+		groupByFieldId: -1,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+	s.Equal([]int64{2, 3, 1}, sortedResult.Results.Ids.GetIntId().Data)
+	s.Equal([]int64{10, 20, 30}, sortedResult.Results.FieldsData[0].GetScalars().GetLongData().Data)
+	s.Equal([]bool{false, true, true}, sortedResult.Results.FieldsData[1].GetValidData())
+	s.Equal([]float32{5, 6, 1, 2}, sortedResult.Results.FieldsData[1].GetVectors().GetFloatVector().GetData())
+	s.Equal([]bool{false, true, true}, sortedResult.Results.FieldsData[2].GetValidData())
+	s.Equal([][]byte{{0x03}, {0x01}}, sortedResult.Results.FieldsData[2].GetVectors().GetSparseFloatVector().GetContents())
+}
+
 // Test orderByOperator with nq>1 (multiple queries)
 // Each query's results should be sorted independently
 func (s *SearchPipelineSuite) TestOrderByOperatorMultipleQueries() {
@@ -3779,6 +3937,231 @@ func (s *SearchPipelineSuite) TestReorderFieldDataInt8Vector() {
 	s.Equal(expected, field.GetVectors().GetInt8Vector())
 }
 
+func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
+	indices := []int{2, 0, 1}
+	expectedValidData := []bool{true, true, false}
+
+	tests := []struct {
+		name   string
+		field  *schemapb.FieldData
+		assert func(*schemapb.FieldData)
+	}{
+		{
+			name: "float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_float_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([]float32{5, 6, 1, 2}, field.GetVectors().GetFloatVector().GetData())
+			},
+		},
+		{
+			name: "binary_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BinaryVector,
+				FieldName: "nullable_binary_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  16,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x05, 0x06}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([]byte{0x05, 0x06, 0x01, 0x02}, field.GetVectors().GetBinaryVector())
+			},
+		},
+		{
+			name: "float16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Float16Vector,
+				FieldName: "nullable_float16_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([]byte{0x09, 0x0A, 0x0B, 0x0C, 0x01, 0x02, 0x03, 0x04}, field.GetVectors().GetFloat16Vector())
+			},
+		},
+		{
+			name: "bfloat16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BFloat16Vector,
+				FieldName: "nullable_bfloat16_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x11, 0x12, 0x13, 0x14, 0x31, 0x32, 0x33, 0x34}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([]byte{0x31, 0x32, 0x33, 0x34, 0x11, 0x12, 0x13, 0x14}, field.GetVectors().GetBfloat16Vector())
+			},
+		},
+		{
+			name: "int8_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Int8Vector,
+				FieldName: "nullable_int8_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  4,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([]byte{0x09, 0x0A, 0x0B, 0x0C, 0x01, 0x02, 0x03, 0x04}, field.GetVectors().GetInt8Vector())
+			},
+		},
+		{
+			name: "sparse_float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_SparseFloatVector,
+				FieldName: "nullable_sparse_vec",
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 3,
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+						Dim:      3,
+						Contents: [][]byte{{0x01}, {0x03}},
+					}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Equal([][]byte{{0x03}, {0x01}}, field.GetVectors().GetSparseFloatVector().GetContents())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			err := reorderFieldData(tt.field, indices)
+			s.NoError(err)
+			s.Equal(expectedValidData, tt.field.GetValidData())
+			tt.assert(tt.field)
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactData() {
+	indices := []int{1, 0}
+	expectedValidData := []bool{false, false}
+
+	tests := []struct {
+		name   string
+		field  *schemapb.FieldData
+		assert func(*schemapb.FieldData)
+	}{
+		{
+			name: "float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_float_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetFloatVector().GetData())
+			},
+		},
+		{
+			name: "binary_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BinaryVector,
+				FieldName: "nullable_binary_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  16,
+					Data: &schemapb.VectorField_BinaryVector{},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetBinaryVector())
+			},
+		},
+		{
+			name: "float16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Float16Vector,
+				FieldName: "nullable_float16_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Float16Vector{},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetFloat16Vector())
+			},
+		},
+		{
+			name: "bfloat16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BFloat16Vector,
+				FieldName: "nullable_bfloat16_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Bfloat16Vector{},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetBfloat16Vector())
+			},
+		},
+		{
+			name: "int8_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Int8Vector,
+				FieldName: "nullable_int8_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  4,
+					Data: &schemapb.VectorField_Int8Vector{},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetInt8Vector())
+			},
+		},
+		{
+			name: "sparse_float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_SparseFloatVector,
+				FieldName: "nullable_sparse_vec",
+				ValidData: []bool{false, false},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  3,
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 3}},
+				}},
+			},
+			assert: func(field *schemapb.FieldData) {
+				s.Empty(field.GetVectors().GetSparseFloatVector().GetContents())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			err := reorderFieldData(tt.field, indices)
+			s.NoError(err)
+			s.Equal(expectedValidData, tt.field.GetValidData())
+			tt.assert(tt.field)
+		})
+	}
+}
+
 // Test reorderFieldData with ValidData (nullable fields)
 func (s *SearchPipelineSuite) TestReorderFieldDataWithValidData() {
 	field := &schemapb.FieldData{
@@ -4511,7 +4894,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
 	}
 
 	// Call pickFieldData - this should NOT panic
-	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
 	s.NoError(err)
 	s.NotNil(result)
 	s.Len(result, 2)
@@ -4580,7 +4963,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 		},
 	}
 
-	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, nil, 12345)
 	s.NoError(err)
 	s.NotNil(result)
 
@@ -4588,4 +4971,64 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 	sparseValidData := result[1].GetValidData()
 	s.Equal([]bool{false, false}, sparseValidData)
 	s.Len(result[1].GetVectors().GetSparseFloatVector().GetContents(), 0)
+}
+
+func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVectorMissingValidData() {
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+	pkOffset := map[any]int{
+		int64(1): 0,
+		int64(2): 1,
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "sparse_vec",
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: true,
+			},
+		},
+	}
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, schema, 12345)
+	s.NoError(err)
+	s.Equal([]int64{2, 1}, result[0].GetScalars().GetLongData().GetData())
+	s.Equal([]bool{false, false}, result[1].GetValidData())
+	s.Empty(result[1].GetVectors().GetSparseFloatVector().GetContents())
 }

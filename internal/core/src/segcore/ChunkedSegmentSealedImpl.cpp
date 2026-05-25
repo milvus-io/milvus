@@ -5354,6 +5354,89 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             }
             break;
         }
+        case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_INT8: {
+            int dim = field_meta.get_dim();
+            auto byte_width = field_meta.get_sizeof();
+            auto vectors = data_array->mutable_vectors();
+            vectors->set_dim(dim);
+            std::string* vector_data = nullptr;
+            switch (field_meta.get_data_type()) {
+                case DataType::VECTOR_BINARY:
+                    vector_data = vectors->mutable_binary_vector();
+                    break;
+                case DataType::VECTOR_FLOAT16:
+                    vector_data = vectors->mutable_float16_vector();
+                    break;
+                case DataType::VECTOR_BFLOAT16:
+                    vector_data = vectors->mutable_bfloat16_vector();
+                    break;
+                case DataType::VECTOR_INT8:
+                    vector_data = vectors->mutable_int8_vector();
+                    break;
+                default:
+                    break;
+            }
+            int64_t valid_count = size;
+            if (field_meta.is_nullable()) {
+                valid_count = 0;
+                for (int64_t i = 0; i < size; i++) {
+                    if (arr->IsValid(result_mapping[i])) {
+                        valid_count++;
+                    }
+                }
+            }
+            vector_data->resize(valid_count * byte_width);
+            int64_t data_pos = 0;
+            for (int64_t i = 0; i < size; i++) {
+                auto idx = result_mapping[i];
+                if (arr->IsNull(idx)) {
+                    continue;
+                }
+                const uint8_t* val = nullptr;
+                if (arr->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
+                    val = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                              arr)
+                              ->Value(idx);
+                } else {
+                    auto bin_val =
+                        std::static_pointer_cast<arrow::BinaryArray>(arr)
+                            ->Value(idx);
+                    AssertInfo(
+                        static_cast<size_t>(bin_val.size()) == byte_width,
+                        "vector byte width mismatch, expected {}, actual {}",
+                        byte_width,
+                        bin_val.size());
+                    val = reinterpret_cast<const uint8_t*>(bin_val.data());
+                }
+                std::memcpy(vector_data->data() + data_pos * byte_width,
+                            val,
+                            byte_width);
+                data_pos++;
+            }
+            break;
+        }
+        case DataType::VECTOR_SPARSE_U32_F32: {
+            auto vectors = data_array->mutable_vectors();
+            auto sparse_data = vectors->mutable_sparse_float_vector();
+            auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
+            int64_t max_dim = 0;
+            for (int64_t i = 0; i < size; i++) {
+                auto idx = result_mapping[i];
+                if (arr->IsNull(idx)) {
+                    continue;
+                }
+                auto val = typed->Value(idx);
+                sparse_data->add_contents(val.data(), val.size());
+                auto row = CopyAndWrapSparseRow(val.data(), val.size(), true);
+                max_dim = std::max(max_dim, row.dim());
+            }
+            sparse_data->set_dim(max_dim);
+            vectors->set_dim(sparse_data->dim());
+            break;
+        }
         case DataType::VECTOR_ARRAY: {
             // After normalize, arr is List<FixedSizeBinaryArray>.
             auto outer_list = std::static_pointer_cast<arrow::ListArray>(arr);

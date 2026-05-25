@@ -329,6 +329,89 @@ TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
 }
 
+TEST(storage, NullableFloatVectorArrowAllValidMaterializesValidData) {
+    std::array<float, 2> row0 = {1.0F, 2.0F};
+    std::array<float, 2> row1 = {3.0F, 4.0F};
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row0.data()),
+                            sizeof(float) * row0.size())
+                    .ok());
+    ASSERT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row1.data()),
+                            sizeof(float) * row1.size())
+                    .ok());
+    std::shared_ptr<arrow::Array> binary_array;
+    ASSERT_TRUE(builder.Finish(&binary_array).ok());
+    ASSERT_EQ(binary_array->null_count(), 0);
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(binary_array);
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+
+    ASSERT_EQ(field_data->get_num_rows(), 2);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    ASSERT_EQ(field_data->get_null_count(), 0);
+    ASSERT_TRUE(field_data->is_valid(0));
+    ASSERT_TRUE(field_data->is_valid(1));
+
+    auto actual0 = static_cast<const float*>(field_data->RawValue(0));
+    auto actual1 = static_cast<const float*>(field_data->RawValue(1));
+    ASSERT_NE(actual0, nullptr);
+    ASSERT_NE(actual1, nullptr);
+    EXPECT_FLOAT_EQ(actual0[0], row0[0]);
+    EXPECT_FLOAT_EQ(actual0[1], row0[1]);
+    EXPECT_FLOAT_EQ(actual1[0], row1[0]);
+    EXPECT_FLOAT_EQ(actual1[1], row1[1]);
+}
+
+TEST(storage, NullableFloatVectorArrowChunksAccumulateNullCount) {
+    std::array<float, 2> row0 = {1.0F, 2.0F};
+    std::array<float, 2> row3 = {7.0F, 8.0F};
+
+    arrow::BinaryBuilder first_builder;
+    ASSERT_TRUE(first_builder
+                    .Append(reinterpret_cast<const uint8_t*>(row0.data()),
+                            sizeof(float) * row0.size())
+                    .ok());
+    ASSERT_TRUE(first_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> first_array;
+    ASSERT_TRUE(first_builder.Finish(&first_array).ok());
+
+    arrow::BinaryBuilder second_builder;
+    ASSERT_TRUE(second_builder.AppendNull().ok());
+    ASSERT_TRUE(second_builder
+                    .Append(reinterpret_cast<const uint8_t*>(row3.data()),
+                            sizeof(float) * row3.size())
+                    .ok());
+    std::shared_ptr<arrow::Array> second_array;
+    ASSERT_TRUE(second_builder.Finish(&second_array).ok());
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+        arrow::ArrayVector{first_array, second_array});
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+
+    ASSERT_EQ(field_data->get_num_rows(), 4);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    ASSERT_EQ(field_data->get_null_count(), 2);
+    EXPECT_TRUE(field_data->is_valid(0));
+    EXPECT_FALSE(field_data->is_valid(1));
+    EXPECT_FALSE(field_data->is_valid(2));
+    EXPECT_TRUE(field_data->is_valid(3));
+
+    auto actual0 = static_cast<const float*>(field_data->RawValue(0));
+    auto actual3 = static_cast<const float*>(field_data->RawValue(3));
+    ASSERT_NE(actual0, nullptr);
+    ASSERT_NE(actual3, nullptr);
+    EXPECT_FLOAT_EQ(actual0[0], row0[0]);
+    EXPECT_FLOAT_EQ(actual0[1], row0[1]);
+    EXPECT_FLOAT_EQ(actual3[0], row3[0]);
+    EXPECT_FLOAT_EQ(actual3[1], row3[1]);
+}
+
 TEST(storage, ExternalBinaryVectorListNormalizeFails) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);

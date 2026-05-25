@@ -119,6 +119,21 @@ func (c *FieldReader) getCount(count int64) int64 {
 	return count
 }
 
+func (c *FieldReader) logicalRowCount(readCount int64) int64 {
+	switch c.field.GetDataType() {
+	case schemapb.DataType_BinaryVector:
+		return readCount / (c.dim / 8)
+	case schemapb.DataType_FloatVector:
+		return readCount / c.dim
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return readCount / (c.dim * 2)
+	case schemapb.DataType_Int8Vector:
+		return readCount / c.dim
+	default:
+		return readCount
+	}
+}
+
 func (c *FieldReader) Next(count int64) (any, any, error) {
 	readCount := c.getCount(count)
 	if readCount == 0 {
@@ -134,8 +149,9 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 	// construct a bool array with all-true if the field is nullable
 
 	if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
-		validData = make([]bool, 0, readCount)
-		for i := int64(0); i < readCount; i++ {
+		validRows := c.logicalRowCount(readCount)
+		validData = make([]bool, 0, validRows)
+		for i := int64(0); i < validRows; i++ {
 			validData = append(validData, true)
 		}
 	}

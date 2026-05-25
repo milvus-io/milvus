@@ -902,11 +902,20 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 			}
 		case arrow.BINARY:
 			binaryReader := chunk.(*array.Binary)
+			expectedRowWidth, err := expectedVectorListLength(pcr.dim, dataType)
+			if err != nil {
+				return nil, nil, err
+			}
 			for i := 0; i < rows; i++ {
 				if binaryReader.IsNull(i) {
 					validData = append(validData, false)
 				} else {
-					data = append(data, binaryReader.Value(i)...)
+					value := binaryReader.Value(i)
+					if len(value) != int(expectedRowWidth) {
+						return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("vector row width mismatch: field %s, row %d, expected %d bytes but got %d bytes, data type: %s",
+							pcr.field.GetName(), len(validData), expectedRowWidth, len(value), dataType.String()))
+					}
+					data = append(data, value...)
 					validData = append(validData, true)
 				}
 			}
@@ -959,118 +968,141 @@ func parseSparseFloatRowVector(str string) ([]byte, uint32, error) {
 // to return one-dim list. We use the start/end position of ValueOffsets() to get the correct sparse vector
 // from ListValues().
 // Note that arrow.Uint32.Value(int i) accepts an int32 value, the max length of indices/values is max value of int32
+func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte, uint32, error) {
+	indices, ok1 := st[sparseVectorIndice]
+	values, ok2 := st[sparseVectorValues]
+	if !ok1 || !ok2 {
+		return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: 'indices' or 'values' missed")
+	}
+
+	indicesList, ok1 := indices.(*array.List)
+	valuesList, ok2 := values.(*array.List)
+	if !ok1 || !ok2 {
+		return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: 'indices' or 'values' is not list")
+	}
+
+	// Len() is the number of rows in this row group
+	if indices.Len() != values.Len() {
+		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: number of rows of 'indices' and 'values' mismatched, '%d' vs '%d'", indices.Len(), values.Len())
+		return nil, 0, merr.WrapErrImportFailed(msg)
+	}
+	if row < 0 || row >= indicesList.Len() {
+		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: row index %d out of range, rows=%d", row, indicesList.Len())
+		return nil, 0, merr.WrapErrImportFailed(msg)
+	}
+	if indicesList.IsNull(row) || valuesList.IsNull(row) {
+		return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: 'indices' or 'values' is null for a valid sparse row")
+	}
+
+	// technically, DataType() of array.List must be arrow.ListType, but we still check here to ensure safety
+	indicesListType, ok1 := indicesList.DataType().(*arrow.ListType)
+	valuesListType, ok2 := valuesList.DataType().(*arrow.ListType)
+	if !ok1 || !ok2 {
+		return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: incorrect arrow type of 'indices' or 'values'")
+	}
+
+	indexDataType := indicesListType.Elem().ID()
+	valueDataType := valuesListType.Elem().ID()
+
+	// The array.Uint32/array.Int64/array.Float32/array.Float64 are derived from arrow.Array
+	// The ListValues() returns arrow.Array interface, but the arrow.Array doesn't have Value(int) interface
+	// To call array.Uint32.Value(int), we need to explicitly cast the ListValues() to array.Uint32
+	// So, we declare two methods here to avoid type casting in the "for" loop
+	type GetIndex func(position int) uint32
+	type GetValue func(position int) float32
+
+	var getIndexFunc GetIndex
+	switch indexDataType {
+	case arrow.INT32:
+		indicesList := indicesList.ListValues().(*array.Int32)
+		getIndexFunc = func(position int) uint32 {
+			return (uint32)(indicesList.Value(position))
+		}
+	case arrow.UINT32:
+		indicesList := indicesList.ListValues().(*array.Uint32)
+		getIndexFunc = func(position int) uint32 {
+			return indicesList.Value(position)
+		}
+	case arrow.INT64:
+		indicesList := indicesList.ListValues().(*array.Int64)
+		getIndexFunc = func(position int) uint32 {
+			return (uint32)(indicesList.Value(position))
+		}
+	case arrow.UINT64:
+		indicesList := indicesList.ListValues().(*array.Uint64)
+		getIndexFunc = func(position int) uint32 {
+			return (uint32)(indicesList.Value(position))
+		}
+	default:
+		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: index type must be uint32/int32/uint64/int64 but actual type is '%s'", indicesListType.Elem().Name())
+		return nil, 0, merr.WrapErrImportFailed(msg)
+	}
+
+	var getValueFunc GetValue
+	switch valueDataType {
+	case arrow.FLOAT32:
+		valuesList := valuesList.ListValues().(*array.Float32)
+		getValueFunc = func(position int) float32 {
+			return valuesList.Value(position)
+		}
+	case arrow.FLOAT64:
+		valuesList := valuesList.ListValues().(*array.Float64)
+		getValueFunc = func(position int) float32 {
+			return (float32)(valuesList.Value(position))
+		}
+	default:
+		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: value type must be float32 or float64 but actual type is '%s'", valuesListType.Elem().Name())
+		return nil, 0, merr.WrapErrImportFailed(msg)
+	}
+
+	start, end := indicesList.ValueOffsets(row)
+	start2, end2 := valuesList.ValueOffsets(row)
+	rowLen := (int)(end - start)
+	rowLenValues := (int)(end2 - start2)
+	if rowLenValues != rowLen {
+		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: number of elements of 'indices' and 'values' mismatched, '%d' vs '%d'", rowLen, rowLenValues)
+		return nil, 0, merr.WrapErrImportFailed(msg)
+	}
+
+	rowIndices := make([]uint32, rowLen)
+	rowValues := make([]float32, rowLen)
+	for i := start; i < end; i++ {
+		rowIndices[i-start] = getIndexFunc((int)(i))
+		rowValues[i-start] = getValueFunc((int)(i))
+	}
+
+	// ensure the indices is sorted
+	sortedIndices, sortedValues := typeutil.SortSparseFloatRow(rowIndices, rowValues)
+	rowVec := typeutil.CreateSparseFloatRow(sortedIndices, sortedValues)
+	if err := typeutil.ValidateSparseFloatRows(rowVec); err != nil {
+		return nil, 0, err
+	}
+
+	maxDim := uint32(0)
+	// set the maxDim as the last value of sortedIndices since it has been sorted
+	if len(sortedIndices) > 0 {
+		maxDim = sortedIndices[len(sortedIndices)-1]
+	}
+	return rowVec, maxDim, nil // rowVec could be an empty sparse
+}
+
 func parseSparseFloatVectorStructs(structs []map[string]arrow.Array) ([][]byte, uint32, error) {
 	byteArr := make([][]byte, 0)
 	maxDim := uint32(0)
 	for _, st := range structs {
-		indices, ok1 := st[sparseVectorIndice]
-		values, ok2 := st[sparseVectorValues]
-		if !ok1 || !ok2 {
+		indices, ok := st[sparseVectorIndice]
+		if !ok {
 			return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: 'indices' or 'values' missed")
 		}
-
-		indicesList, ok1 := indices.(*array.List)
-		valuesList, ok2 := values.(*array.List)
-		if !ok1 || !ok2 {
-			return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: 'indices' or 'values' is not list")
-		}
-
-		// Len() is the number of rows in this row group
-		if indices.Len() != values.Len() {
-			msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: number of rows of 'indices' and 'values' mismatched, '%d' vs '%d'", indices.Len(), values.Len())
-			return nil, 0, merr.WrapErrImportFailed(msg)
-		}
-
-		// technically, DataType() of array.List must be arrow.ListType, but we still check here to ensure safety
-		indicesListType, ok1 := indicesList.DataType().(*arrow.ListType)
-		valuesListType, ok2 := valuesList.DataType().(*arrow.ListType)
-		if !ok1 || !ok2 {
-			return nil, 0, merr.WrapErrImportFailed("Invalid parquet struct for SparseFloatVector: incorrect arrow type of 'indices' or 'values'")
-		}
-
-		indexDataType := indicesListType.Elem().ID()
-		valueDataType := valuesListType.Elem().ID()
-
-		// The array.Uint32/array.Int64/array.Float32/array.Float64 are derived from arrow.Array
-		// The ListValues() returns arrow.Array interface, but the arrow.Array doesn't have Value(int) interface
-		// To call array.Uint32.Value(int), we need to explicitly cast the ListValues() to array.Uint32
-		// So, we declare two methods here to avoid type casting in the "for" loop
-		type GetIndex func(position int) uint32
-		type GetValue func(position int) float32
-
-		var getIndexFunc GetIndex
-		switch indexDataType {
-		case arrow.INT32:
-			indicesList := indicesList.ListValues().(*array.Int32)
-			getIndexFunc = func(position int) uint32 {
-				return (uint32)(indicesList.Value(position))
-			}
-		case arrow.UINT32:
-			indicesList := indicesList.ListValues().(*array.Uint32)
-			getIndexFunc = func(position int) uint32 {
-				return indicesList.Value(position)
-			}
-		case arrow.INT64:
-			indicesList := indicesList.ListValues().(*array.Int64)
-			getIndexFunc = func(position int) uint32 {
-				return (uint32)(indicesList.Value(position))
-			}
-		case arrow.UINT64:
-			indicesList := indicesList.ListValues().(*array.Uint64)
-			getIndexFunc = func(position int) uint32 {
-				return (uint32)(indicesList.Value(position))
-			}
-		default:
-			msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: index type must be uint32/int32/uint64/int64 but actual type is '%s'", indicesListType.Elem().Name())
-			return nil, 0, merr.WrapErrImportFailed(msg)
-		}
-
-		var getValueFunc GetValue
-		switch valueDataType {
-		case arrow.FLOAT32:
-			valuesList := valuesList.ListValues().(*array.Float32)
-			getValueFunc = func(position int) float32 {
-				return valuesList.Value(position)
-			}
-		case arrow.FLOAT64:
-			valuesList := valuesList.ListValues().(*array.Float64)
-			getValueFunc = func(position int) float32 {
-				return (float32)(valuesList.Value(position))
-			}
-		default:
-			msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: value type must be float32 or float64 but actual type is '%s'", valuesListType.Elem().Name())
-			return nil, 0, merr.WrapErrImportFailed(msg)
-		}
-
-		for i := 0; i < indicesList.Len(); i++ {
-			start, end := indicesList.ValueOffsets(i)
-			start2, end2 := valuesList.ValueOffsets(i)
-			rowLen := (int)(end - start)
-			rowLenValues := (int)(end2 - start2)
-			if rowLenValues != rowLen {
-				msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: number of elements of 'indices' and 'values' mismatched, '%d' vs '%d'", rowLen, rowLenValues)
-				return nil, 0, merr.WrapErrImportFailed(msg)
-			}
-
-			rowIndices := make([]uint32, rowLen)
-			rowValues := make([]float32, rowLen)
-			for i := start; i < end; i++ {
-				rowIndices[i-start] = getIndexFunc((int)(i))
-				rowValues[i-start] = getValueFunc((int)(i))
-			}
-
-			// ensure the indices is sorted
-			sortedIndices, sortedValues := typeutil.SortSparseFloatRow(rowIndices, rowValues)
-			rowVec := typeutil.CreateSparseFloatRow(sortedIndices, sortedValues)
-			if err := typeutil.ValidateSparseFloatRows(rowVec); err != nil {
+		for i := 0; i < indices.Len(); i++ {
+			rowVec, rowMaxDim, err := parseSparseFloatVectorStructRow(st, i)
+			if err != nil {
 				return byteArr, maxDim, err
 			}
-
-			// set the maxDim as the last value of sortedIndices since it has been sorted
-			if len(sortedIndices) > 0 && sortedIndices[len(sortedIndices)-1] > maxDim {
-				maxDim = sortedIndices[len(sortedIndices)-1]
+			if rowMaxDim > maxDim {
+				maxDim = rowMaxDim
 			}
-			byteArr = append(byteArr, rowVec) // rowVec could be an empty sparse
+			byteArr = append(byteArr, rowVec)
 		}
 	}
 	return byteArr, maxDim, nil
@@ -1169,31 +1201,49 @@ func ReadNullableSparseFloatVectorData(pcr *FieldReader, count int64) (any, []bo
 		}, validData, nil
 	}
 
-	data, validData, err := ReadNullableStructData(pcr, count)
+	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, nil, err
 	}
-	if data == nil {
+	if chunked == nil || len(chunked.Chunks()) == 0 {
 		return nil, nil, nil
 	}
 
 	// Sparse storage: only store valid rows' data
 	byteArr := make([][]byte, 0, count)
+	validData := make([]bool, 0, count)
 	maxDim := uint32(0)
 
-	for i, structData := range data {
-		if validData[i] {
-			singleByteArr, singleMaxDim, err := parseSparseFloatVectorStructs([]map[string]arrow.Array{structData})
+	for _, chunk := range chunked.Chunks() {
+		structReader, ok := chunk.(*array.Struct)
+		if !ok {
+			return nil, nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
+		}
+
+		structType := structReader.DataType().(*arrow.StructType)
+		st := make(map[string]arrow.Array)
+		for k, field := range structType.Fields() {
+			st[field.Name] = structReader.Field(k)
+		}
+
+		for i := 0; i < structReader.Len(); i++ {
+			valid := !structReader.IsNull(i)
+			validData = append(validData, valid)
+			if !valid {
+				continue
+			}
+			rowVec, rowMaxDim, err := parseSparseFloatVectorStructRow(st, i)
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(singleByteArr) > 0 {
-				byteArr = append(byteArr, singleByteArr[0])
-				if singleMaxDim > maxDim {
-					maxDim = singleMaxDim
-				}
+			byteArr = append(byteArr, rowVec)
+			if rowMaxDim > maxDim {
+				maxDim = rowMaxDim
 			}
 		}
+	}
+	if len(validData) == 0 {
+		return nil, nil, nil
 	}
 
 	return &storage.SparseFloatVectorFieldData{
@@ -1243,6 +1293,21 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
 		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+	}
+}
+
+func expectedVectorListLength(dim int, dataType schemapb.DataType) (int32, error) {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		return int32(dim / 8), nil
+	case schemapb.DataType_FloatVector:
+		return int32(dim), nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return int32(dim * 2), nil
+	case schemapb.DataType_Int8Vector:
+		return int32(dim), nil
+	default:
+		return 0, fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}
 }
 

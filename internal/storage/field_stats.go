@@ -173,38 +173,32 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			stats.BF = bf
 		}
 	} else {
-		stats.initCentroids(data, stats.Type)
-		err = json.Unmarshal(*messageMap["centroids"], &stats.Centroids)
+		centroids, ok := messageMap["centroids"]
+		if !ok || centroids == nil {
+			return nil
+		}
+		var centroidMessages []json.RawMessage
+		err = json.Unmarshal(*centroids, &centroidMessages)
 		if err != nil {
 			return err
+		}
+		stats.Centroids = make([]VectorFieldValue, 0, len(centroidMessages))
+		for _, centroidMessage := range centroidMessages {
+			switch stats.Type {
+			case schemapb.DataType_FloatVector:
+				centroid := &FloatVectorFieldValue{}
+				err = centroid.UnmarshalJSON(centroidMessage)
+				if err != nil {
+					return err
+				}
+				stats.Centroids = append(stats.Centroids, centroid)
+			default:
+				// other vector datatype
+			}
 		}
 	}
 
 	return nil
-}
-
-func (stats *FieldStats) initCentroids(data []byte, dataType schemapb.DataType) {
-	type FieldStatsAux struct {
-		FieldID   int64                            `json:"fieldID"`
-		Type      schemapb.DataType                `json:"type"`
-		Max       json.RawMessage                  `json:"max"`
-		Min       json.RawMessage                  `json:"min"`
-		BF        bloomfilter.BloomFilterInterface `json:"bf"`
-		Centroids []json.RawMessage                `json:"centroids"`
-	}
-	// Unmarshal JSON into the auxiliary struct
-	var aux FieldStatsAux
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return
-	}
-	for i := 0; i < len(aux.Centroids); i++ {
-		switch dataType {
-		case schemapb.DataType_FloatVector:
-			stats.Centroids = append(stats.Centroids, &FloatVectorFieldValue{})
-		default:
-			// other vector datatype
-		}
-	}
 }
 
 func (stats *FieldStats) UpdateByMsgs(msgs FieldData) {

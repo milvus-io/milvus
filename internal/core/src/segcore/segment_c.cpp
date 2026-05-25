@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/Common.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -904,9 +905,166 @@ GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
             return dim * sizeof(milvus::float16);
         case milvus::DataType::VECTOR_BFLOAT16:
             return dim * sizeof(milvus::bfloat16);
+        case milvus::DataType::VECTOR_INT8:
+            return dim * sizeof(milvus::int8);
         default:
             return 0;  // variable length
     }
+}
+
+bool
+IsSupportedNullableVectorDataType(milvus::DataType data_type) {
+    switch (data_type) {
+        case milvus::DataType::VECTOR_FLOAT:
+        case milvus::DataType::VECTOR_BINARY:
+        case milvus::DataType::VECTOR_FLOAT16:
+        case milvus::DataType::VECTOR_BFLOAT16:
+        case milvus::DataType::VECTOR_INT8:
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool
+IsFixedWidthVectorDataType(milvus::DataType data_type) {
+    return data_type == milvus::DataType::VECTOR_FLOAT ||
+           data_type == milvus::DataType::VECTOR_BINARY ||
+           data_type == milvus::DataType::VECTOR_FLOAT16 ||
+           data_type == milvus::DataType::VECTOR_BFLOAT16 ||
+           data_type == milvus::DataType::VECTOR_INT8;
+}
+
+const uint8_t*
+GetPhysicalVectorValue(const milvus::segcore::VectorBase* vec_base,
+                       int64_t physical_offset,
+                       int64_t byte_width) {
+    if (physical_offset < 0) {
+        return nullptr;
+    }
+
+    auto size_per_chunk = vec_base->get_size_per_chunk();
+    auto chunk_id = physical_offset / size_per_chunk;
+    auto offset_in_chunk = physical_offset % size_per_chunk;
+    auto chunk_data = vec_base->get_chunk_data(chunk_id);
+    return static_cast<const uint8_t*>(chunk_data) +
+           offset_in_chunk * byte_width;
+}
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
+                                   int64_t start_offset,
+                                   int64_t num_rows,
+                                   int64_t byte_width) {
+    if (!field_info.valid_data) {
+        return arrow::Status::Invalid(
+            "nullable vector field missing ValidData");
+    }
+
+    bool all_valid = true;
+    for (int64_t i = 0; i < num_rows; i++) {
+        if (!field_info.valid_data->is_valid(start_offset + i)) {
+            all_valid = false;
+            break;
+        }
+    }
+    if (all_valid && num_rows > 0) {
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(start_offset);
+        auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
+        if (physical_offset >= 0 &&
+            physical_offset / size_per_chunk ==
+                (physical_offset + num_rows - 1) / size_per_chunk &&
+            num_rows * byte_width <= std::numeric_limits<int32_t>::max()) {
+            auto value = GetPhysicalVectorValue(
+                field_info.vec_base, physical_offset, byte_width);
+            if (value == nullptr) {
+                return arrow::Status::Invalid(
+                    "valid nullable vector row missing physical data");
+            }
+
+            ARROW_ASSIGN_OR_RAISE(
+                auto offsets_buffer,
+                arrow::AllocateBuffer((num_rows + 1) * sizeof(int32_t)));
+            auto offsets =
+                reinterpret_cast<int32_t*>(offsets_buffer->mutable_data());
+            for (int64_t i = 0; i <= num_rows; i++) {
+                offsets[i] = static_cast<int32_t>(i * byte_width);
+            }
+            std::shared_ptr<arrow::Buffer> offsets_buffer_shared(
+                std::move(offsets_buffer));
+            auto data_buffer =
+                arrow::Buffer::Wrap(value, num_rows * byte_width);
+            return std::make_shared<arrow::BinaryArray>(
+                num_rows, offsets_buffer_shared, data_buffer, nullptr, 0);
+        }
+    }
+
+    arrow::BinaryBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (!field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        auto value = GetPhysicalVectorValue(
+            field_info.vec_base, physical_offset, byte_width);
+        if (value == nullptr) {
+            return arrow::Status::Invalid(
+                "valid nullable vector row missing physical data");
+        }
+        ARROW_RETURN_NOT_OK(builder.Append(value, byte_width));
+    }
+
+    return builder.Finish();
+}
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildSparseFloatVectorArrayForChunk(const FieldInfo& field_info,
+                                    int64_t start_offset,
+                                    int64_t num_rows) {
+    arrow::BinaryBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (field_info.valid_data &&
+            !field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        if (physical_offset < 0) {
+            return arrow::Status::Invalid(
+                "valid nullable sparse vector row missing physical data");
+        }
+
+        auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
+        auto chunk_id = physical_offset / size_per_chunk;
+        auto offset_in_chunk = physical_offset % size_per_chunk;
+        auto chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+        auto rows = static_cast<
+            const knowhere::sparse::SparseRow<milvus::SparseValueType>*>(
+            chunk_data);
+        auto row = rows + offset_in_chunk;
+        auto byte_size = row->data_byte_size();
+        if (byte_size == 0) {
+            ARROW_RETURN_NOT_OK(builder.Append(""));
+        } else {
+            ARROW_RETURN_NOT_OK(builder.Append(
+                static_cast<const uint8_t*>(row->data()), byte_size));
+        }
+    }
+
+    return builder.Finish();
 }
 
 // build Arrow Array for a single chunk of fixed-size data (zero-copy when possible)
@@ -1083,42 +1241,67 @@ BuildArrayForChunk(const FieldInfo& field_info,
                    int64_t offset_in_chunk,
                    int64_t num_rows,
                    int64_t global_offset) {
-    const void* chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
     int64_t element_size =
         GetElementByteWidth(field_info.data_type, field_info.dim);
 
-    // adjust data pointer for offset within chunk
-    const uint8_t* data_ptr = static_cast<const uint8_t*>(chunk_data) +
-                              offset_in_chunk * element_size;
+    auto get_data_ptr = [&]() {
+        const void* chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+        return static_cast<const uint8_t*>(chunk_data) +
+               offset_in_chunk * element_size;
+    };
 
     switch (field_info.data_type) {
         case milvus::DataType::BOOL:
             return BuildBoolArrayForChunk(
-                data_ptr, num_rows, field_info.valid_data, global_offset);
+                get_data_ptr(), num_rows, field_info.valid_data, global_offset);
 
         case milvus::DataType::INT8:
             return WrapChunkAsArrowArray<arrow::Int8Array>(
-                data_ptr, num_rows, 1, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                1,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT16:
             return WrapChunkAsArrowArray<arrow::Int16Array>(
-                data_ptr, num_rows, 2, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                2,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT32:
             return WrapChunkAsArrowArray<arrow::Int32Array>(
-                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                4,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT64:
             return WrapChunkAsArrowArray<arrow::Int64Array>(
-                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                8,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::FLOAT:
             return WrapChunkAsArrowArray<arrow::FloatArray>(
-                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                4,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::DOUBLE:
             return WrapChunkAsArrowArray<arrow::DoubleArray>(
-                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                8,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING: {
@@ -1207,16 +1390,25 @@ BuildArrayForChunk(const FieldInfo& field_info,
         case milvus::DataType::VECTOR_FLOAT:
         case milvus::DataType::VECTOR_BINARY:
         case milvus::DataType::VECTOR_FLOAT16:
-        case milvus::DataType::VECTOR_BFLOAT16: {
+        case milvus::DataType::VECTOR_BFLOAT16:
+        case milvus::DataType::VECTOR_INT8: {
+            if (field_info.nullable) {
+                return BuildNullableFixedWidthVectorArray(
+                    field_info, global_offset, num_rows, element_size);
+            }
             auto arrow_type =
                 milvus::GetArrowDataType(field_info.data_type, field_info.dim);
-            return WrapChunkAsFixedSizeBinaryArray(data_ptr,
+            return WrapChunkAsFixedSizeBinaryArray(get_data_ptr(),
                                                    num_rows,
                                                    element_size,
                                                    arrow_type,
                                                    field_info.valid_data,
                                                    global_offset);
         }
+
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
+            return BuildSparseFloatVectorArrayForChunk(
+                field_info, global_offset, num_rows);
 
         default:
             return arrow::Status::NotImplemented("Unsupported data type");
@@ -1326,16 +1518,23 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 }
             }
 
-            auto arrow_type = milvus::GetArrowDataType(
-                field_meta.get_data_type(),
-                field_meta.is_vector() ? field_meta.get_dim() : 0);
+            auto data_type = field_meta.get_data_type();
+            auto dim = field_meta.is_vector() &&
+                               !milvus::IsSparseFloatVectorDataType(data_type)
+                           ? field_meta.get_dim()
+                           : 0;
+            auto arrow_type = milvus::GetArrowDataType(data_type, dim);
+            if (field_meta.is_nullable() &&
+                IsSupportedNullableVectorDataType(data_type)) {
+                arrow_type = arrow::binary();
+            }
 
             FieldInfo info;
             info.field_id = field_id;
             info.field_name = field_meta.get_name().get();
-            info.data_type = field_meta.get_data_type();
+            info.data_type = data_type;
             info.nullable = field_meta.is_nullable();
-            info.dim = field_meta.is_vector() ? field_meta.get_dim() : 0;
+            info.dim = dim;
             info.vec_base = vec_base;
             info.valid_data = nullptr;
             if (field_meta.is_nullable() &&
@@ -1353,9 +1552,17 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             field_infos.push_back(std::move(info));
 
             // create Arrow field with metadata
-            auto metadata = arrow::KeyValueMetadata::Make(
-                {milvus_storage::ARROW_FIELD_ID_KEY},
-                {std::to_string(field_id.get())});
+            std::vector<std::string> metadata_keys = {
+                milvus_storage::ARROW_FIELD_ID_KEY};
+            std::vector<std::string> metadata_values = {
+                std::to_string(field_id.get())};
+            if (field_meta.is_nullable() &&
+                IsFixedWidthVectorDataType(data_type)) {
+                metadata_keys.push_back(DIM_KEY);
+                metadata_values.push_back(std::to_string(dim));
+            }
+            auto metadata =
+                arrow::KeyValueMetadata::Make(metadata_keys, metadata_values);
             arrow_fields.push_back(arrow::field(std::to_string(field_id.get()),
                                                 arrow_type,
                                                 field_meta.is_nullable(),
