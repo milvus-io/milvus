@@ -40,7 +40,7 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.28
+	github.com/zilliztech/woodpecker v0.1.29
 	go.etcd.io/etcd/api/v3 v3.5.23
 	go.etcd.io/etcd/client/v3 v3.5.23
 	go.etcd.io/etcd/server/v3 v3.5.23
@@ -61,6 +61,7 @@ require (
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.42.0
+	golang.org/x/time v0.10.0
 	google.golang.org/api v0.224.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
@@ -223,7 +224,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
-	golang.org/x/time v0.10.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect

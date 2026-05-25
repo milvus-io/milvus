@@ -69,10 +69,8 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.17
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260514121806-9b60a053353f
 	github.com/milvus-io/milvus/client/v2 v2.6.2
-	github.com/milvus-io/milvus/pkg/v2 v2.6.17
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/spaolacci/murmur3 v1.1.0
@@ -265,7 +263,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.28 // indirect
+	github.com/zilliztech/woodpecker v0.1.29 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
