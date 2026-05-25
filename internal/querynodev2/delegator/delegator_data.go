@@ -307,7 +307,7 @@ func (sd *shardDelegator) ProcessManualFlush(ctx context.Context, flushTs uint64
 			zap.Int("segmentCount", len(segmentIDs)),
 			zap.Int("failCount", failCount),
 			zap.Error(firstErr))
-		return fmt.Errorf("manual flush failed for %d/%d segments: %w", failCount, len(segmentIDs), firstErr)
+		return merr.Wrapf(firstErr, "manual flush failed for %d/%d segments", failCount, len(segmentIDs))
 	}
 	log.Info("manual flush completed", zap.Int("segmentCount", len(segmentIDs)))
 	return nil
@@ -485,7 +485,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 			flushedOffset := segment.RowNum()
 			manifest := segment.LoadInfo().GetManifestPath()
 			if manifest == "" && flushedOffset > 0 {
-				return fmt.Errorf("recovered growing segment %d has %d flushed rows but no manifest path, cannot safely resume flush", segment.ID(), flushedOffset)
+				return merr.WrapErrDataIntegrityMsg("recovered growing segment %d has %d flushed rows but no manifest path, cannot safely resume flush", segment.ID(), flushedOffset)
 			}
 			sd.checkpointTracker.InitSegmentWithManifest(segment.ID(), flushedOffset, manifest)
 			log.Info("initialized checkpoint tracker for recovered growing segment",
@@ -1254,7 +1254,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	datas := []any{texts}
 	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
 	if !ok {
-		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+		return 0, merr.WrapErrParameterInvalidMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	if len(functionRunner.GetInputFields()) == 2 {
@@ -1279,7 +1279,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return 0, errors.New("functionRunner return unknown data")
+		return 0, merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
 	}
 
 	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1323,7 +1323,7 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 	datas := []any{texts}
 	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
 	if !ok {
-		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+		return merr.WrapErrParameterInvalidMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	output, err := functionRunner.BatchRun(datas...)
@@ -1331,22 +1331,22 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 		return err
 	}
 	if len(output) == 0 {
-		return errors.New("MinHash embedding failed: runner returned empty output")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
 	}
 
 	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
 	}
 
 	vectorField := fieldData.GetVectors()
 	if vectorField == nil {
-		return errors.New("MinHash embedding failed: output is not a vector field")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 	}
 
 	binaryVector := vectorField.GetBinaryVector()
 	if binaryVector == nil {
-		return errors.New("MinHash embedding failed: output is not a binary vector")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 	}
 
 	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
@@ -1370,7 +1370,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
-			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
+			return nil, merr.WrapErrServiceInternalMsg("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
 		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
 		if !ok {
