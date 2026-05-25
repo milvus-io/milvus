@@ -816,6 +816,14 @@ func WrapErrChannelDroppedSentinel(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelDroppedSentinel, name, msg...)
 }
 
+// WrapErrChannelMisrouted is used by a delegator/querynode when it receives a
+// request for a channel it does not own. Encodes the requested channel name
+// in the structured field; callers can put additional context (e.g. the list
+// of channels the node actually owns) into msg.
+func WrapErrChannelMisrouted(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelMisrouted, name, msg...)
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotFound, value("segment", id))
@@ -1073,6 +1081,37 @@ func WrapErrStorage(err error, format string, args ...any) error {
 		msg:      fmt.Sprintf(format, args...),
 		inner:    err,
 		sentinel: ErrStorage,
+	}
+}
+
+// WrapErrFunctionFailedMsg creates a new ErrFunctionFailed (code 2400) with a
+// detail message. Use when a function / BM25 / MinHash / analyzer runner
+// returns a malformed output (wrong type, empty, unexpected shape) and there
+// is no underlying Go error to wrap.
+func WrapErrFunctionFailedMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return errors.Wrap(ErrFunctionFailed, detail)
+}
+
+// WrapErrFunctionFailed wraps an existing underlying error 'err' with
+// ErrFunctionFailed (code 2400). Use when a function-pipeline call surfaces
+// a non-typed inner error (runner I/O, model invocation, dependency failure).
+//
+// IMPORTANT: only use when 'err' is a raw error. If 'err' is already a typed
+// merr, use merr.Wrap(err, msg) instead — wrapping a typed merr here would
+// mask its inner code (defect#3 pattern).
+//
+// merr.Code(result) returns ErrFunctionFailed.code() = 2400; errors.Is(result,
+// ErrFunctionFailed) succeeds; errors.Is(result, err) also succeeds (inner
+// chain preserved via Unwrap).
+func WrapErrFunctionFailed(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrFunctionFailedMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrFunctionFailed,
 	}
 }
 

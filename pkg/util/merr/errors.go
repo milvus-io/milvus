@@ -112,6 +112,11 @@ var (
 	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
 	ErrChannelTSafeStalled     = newMilvusError("channel tsafe stalled", 505, true)
 	ErrChannelDroppedSentinel  = newMilvusError("channel checkpoint is dropped sentinel", 506, false)
+	// Channel routed to the wrong node — the requested channel is not owned by
+	// the delegator/querynode that received the request. Typically caused by
+	// stale shard-map at the caller (proxy). Retryable so the caller can
+	// re-resolve the shard map and dispatch to the correct node.
+	ErrChannelMisrouted = newMilvusError("channel misrouted: not owned by this node", 507, true)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
@@ -275,6 +280,13 @@ var (
 	ErrCompactionBlocked = newMilvusError("compaction blocked by snapshot protection", 2317, true)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
+
+	// Function / runner execution failed — BM25 / MinHash / embedding /
+	// analyzer runner returned a malformed output (wrong type, empty,
+	// unexpected shape). Distinct from generic ServiceInternal: callers can
+	// pattern-match this code when they specifically care about function
+	// pipeline failures vs other internal errors.
+	ErrFunctionFailed = newMilvusError("function execution failed", 2400, false)
 
 	// Cipher/Encryption related
 	ErrKMSKeyRevoked = newMilvusError("KMS key has been revoked, access denied", 2500, false)
