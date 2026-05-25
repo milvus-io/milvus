@@ -2,7 +2,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -30,7 +29,7 @@ func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk inte
 	}
 	elementIndices := data.GetElementIndices()
 	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
-		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+		return nil, merr.WrapErrServiceInternalMsg("element-level search result missing element index at offset %d", idx)
 	}
 	return elementSearchResultKey{
 		pk:           pk,
@@ -84,7 +83,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
 					data.ElementIndices = &schemapb.LongArray{}
 				} else {
-					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+					return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
 				}
 			}
 		}
@@ -97,7 +96,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	totalOffsetElements := 0
 	for i, data := range searchResultData {
 		if int64(len(data.Topks)) < nq {
-			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+			return nil, merr.WrapErrServiceInternalMsg("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
 		}
 		totalOffsetElements += len(data.Topks)
 	}
@@ -168,7 +167,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
@@ -222,7 +221,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
 					data.ElementIndices = &schemapb.LongArray{}
 				} else {
-					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+					return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
 				}
 			}
 		}
@@ -235,7 +234,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	totalOffsetElements := 0
 	for i, data := range searchResultData {
 		if int64(len(data.Topks)) < nq {
-			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+			return nil, merr.WrapErrServiceInternalMsg("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
 		}
 		totalOffsetElements += len(data.Topks)
 	}
@@ -300,7 +299,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		ret.Topks = append(ret.Topks, j)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	if err := writeGroupByOutput(ret, acceptedRows, searchResultData, info); err != nil {

@@ -189,7 +189,7 @@ func (t *SearchTask) Execute() error {
 	// In filter-only mode, extract filter results and return early
 	if searchReq.FilterOnly() {
 		if len(results) != len(searchedSegments) {
-			return fmt.Errorf("filter-only search: result count %d != segment count %d", len(results), len(searchedSegments))
+			return merr.WrapErrServiceInternalMsg("filter-only search: result count %d != segment count %d", len(results), len(searchedSegments))
 		}
 		segmentIDs := make([]int64, 0, len(searchedSegments))
 		validCounts := make([]int64, 0, len(searchedSegments))

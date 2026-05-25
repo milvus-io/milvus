@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -347,7 +347,7 @@ func (m *GrowingFlushManager) doSync(ctx context.Context, segment Segment, isSea
 	flushConfig.ReadVersion = m.checkpointTracker.GetAcknowledgedVersion(segID)
 	flushResult, err := segment.FlushData(ctx, flushedOffset, currentOffset, flushConfig)
 	if err != nil {
-		return errors.Wrap(err, "failed to flush data via C++ milvus-storage")
+		return merr.Wrap(err, "failed to flush data via C++ milvus-storage")
 	}
 	if flushResult == nil || flushResult.ManifestPath == "" {
 		if isSeal {
@@ -438,7 +438,7 @@ func (m *GrowingFlushManager) saveManifestAndCheckpoint(
 	isSeal bool,
 ) error {
 	if m.binlogSaver == nil {
-		return errors.New("binlogSaver is nil, cannot save manifest and checkpoint")
+		return merr.WrapErrServiceInternalMsg("binlogSaver is nil, cannot save manifest and checkpoint")
 	}
 
 	segID := segment.ID()

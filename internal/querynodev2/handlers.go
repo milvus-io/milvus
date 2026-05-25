@@ -556,7 +556,7 @@ func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*inte
 		for _, pair := range partialResult.Stats {
 			fn, ok := fieldMethod[pair.Key]
 			if !ok {
-				return nil, fmt.Errorf("unknown statistic field: %s", pair.Key)
+				return nil, merr.WrapErrParameterInvalidMsg("unknown statistic field: %s", pair.Key)
 			}
 			if err := fn(pair.Value); err != nil {
 				return nil, err

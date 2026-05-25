@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -107,7 +106,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %v", err)
+		err = merr.Wrap(err, "failed to get primary keys")
 		log.Error(err.Error(), zap.String("channel", eNode.channel))
 		return err
 	}
@@ -157,12 +156,12 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 	}
 
 	if len(output) == 0 {
-		return errors.New("BM25 runner returned empty output")
+		return merr.WrapErrFunctionFailedMsg("BM25 runner returned empty output")
 	}
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return errors.New("BM25 runner return unknown type output")
+		return merr.WrapErrFunctionFailedMsg("BM25 runner return unknown type output")
 	}
 
 	if _, ok := stats[outputFieldID]; !ok {
@@ -188,21 +187,21 @@ func (eNode *embeddingNode) minhashEmbedding(runner function.FunctionRunner, msg
 	}
 
 	if len(output) == 0 {
-		return errors.New("MinHash runner returned empty output")
+		return merr.WrapErrFunctionFailedMsg("MinHash runner returned empty output")
 	}
 
 	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash runner output not FieldData")
 	}
 	vectorField := fieldData.GetVectors()
 	if vectorField == nil {
-		return errors.New("MinHash embedding failed: output is not a vector field")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 	}
 
 	binaryVector := vectorField.GetBinaryVector()
 	if binaryVector == nil {
-		return errors.New("MinHash embedding failed: output is not a binary vector")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 	}
 
 	outputFieldData := &schemapb.FieldData{
@@ -239,7 +238,7 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
-			return errors.New("unknown function type")
+			return merr.WrapErrServiceInternalMsg("unknown function type")
 		}
 	}
 
@@ -294,5 +293,5 @@ func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string
 			return data.GetScalars().GetStringData().GetData(), nil
 		}
 	}
-	return nil, fmt.Errorf("field %d not found", fieldID)
+	return nil, merr.WrapErrFieldNotFound(fieldID)
 }
