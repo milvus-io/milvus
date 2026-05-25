@@ -55,8 +55,18 @@ VectorBase::set_data_raw(ssize_t element_offset,
             auto& vector_array = data->vectors().vector_array().data();
             std::vector<VectorArray> data_raw{};
             data_raw.reserve(vector_array.size());
-            for (auto& e : vector_array) {
-                data_raw.emplace_back(VectorArray(e));
+            if (field_meta.is_nullable() &&
+                data->valid_data_size() == element_count &&
+                vector_array.size() == element_count) {
+                for (ssize_t i = 0; i < element_count; ++i) {
+                    if (data->valid_data(i)) {
+                        data_raw.emplace_back(VectorArray(vector_array[i]));
+                    }
+                }
+            } else {
+                for (auto& e : vector_array) {
+                    data_raw.emplace_back(VectorArray(e));
+                }
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         } else {
