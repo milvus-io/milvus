@@ -195,8 +195,12 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 		panic("broadcast vchannels not set when overwrite replicate vchannel")
 	}
 	bh := m.broadcastHeader()
-	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
-		panic("broadcast vchannels length mismatch")
+	// Allow shrinking the broadcast vchannels (e.g. when a replicated
+	// AlterReplicateConfig removes the current cluster from the topology while also
+	// adding new pchannels — the receiver filters out source pchannels it doesn't have).
+	// Growing the broadcast set is still forbidden — callers must not invent vchannels.
+	if len(broadcastVChannels[0]) > len(bh.Vchannels) {
+		panic("broadcast vchannels length cannot grow")
 	}
 	bh.Vchannels = broadcastVChannels[0]
 	bhVal, err := EncodeProto(bh)

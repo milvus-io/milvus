@@ -135,21 +135,36 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	// message header to map ALL channels (including newly added ones).
 	// The current config only knows about old pchannels, so both the main vchannel and
 	// broadcast vchannels need the new config for mapping.
+	// Special case: if the new config no longer contains the current cluster, it means
+	// the AlterReplicateConfig is removing this cluster from the topology. Fall through
+	// with the OLD source mapping; overwriteAlterReplicateConfigMessage below will rewrite
+	// the header to standalone-primary, and any source pchannels that the current cluster
+	// doesn't know about will be filtered from the broadcast vchannels.
 	channelMappingSourceCluster := sourceCluster
+	currentClusterRemoved := false
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		alterMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
 		if alterMsg.Header().GetIsPchannelIncreasing() {
 			newCfg, newCfgErr := replicateutil.NewConfigHelper(s.clusterID, alterMsg.Header().GetReplicateConfiguration())
-			if newCfgErr != nil {
+			switch {
+			case newCfgErr == nil:
+				channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
+				if channelMappingSourceCluster == nil {
+					return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
+				}
+			case errors.Is(newCfgErr, replicateutil.ErrCurrentClusterNotFound):
+				currentClusterRemoved = true
+			default:
 				return nil, status.NewReplicateViolation("failed to parse new replicate config from message header: %s", newCfgErr.Error())
-			}
-			channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
-			if channelMappingSourceCluster == nil {
-				return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
 			}
 		}
 	}
 
+	// Main vchannel mapping stays strict even when currentClusterRemoved is true.
+	// CDC only forwards messages from OLD source pchannels (those that already had a
+	// replicator targeting the current cluster before the topology change), so
+	// msg.VChannel() is always an OLD pchannel the current cluster knows about. A
+	// failure here would indicate a CDC topology-sync bug, not a config-rewrite case.
 	targetVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, msg.VChannel())
 	if err != nil {
 		return nil, err
@@ -161,6 +176,13 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		for _, vchannel := range bh.VChannels {
 			targetBroadcastVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, vchannel)
 			if err != nil {
+				if currentClusterRemoved {
+					// This broadcast vchannel maps to a source pchannel the current cluster
+					// doesn't know about (a source-side newly-added pchannel). Skip it — the
+					// current cluster is becoming standalone and only needs to write to
+					// pchannels it actually has.
+					continue
+				}
 				return nil, status.NewReplicateViolation("failed to get target channel, %s", err.Error())
 			}
 			targetBroadcastVChannels = append(targetBroadcastVChannels, targetBroadcastVChannel)
