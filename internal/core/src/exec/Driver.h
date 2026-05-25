@@ -210,7 +210,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
 
     void
     Init(std::unique_ptr<DriverContext> driver_ctx,
-         std::vector<std::unique_ptr<Operator>> operators);
+         std::vector<std::shared_ptr<Operator>> operators);
 
     void
     CloseByTask() {
@@ -238,13 +238,16 @@ class Driver : public std::enable_shared_from_this<Driver> {
                 RowVectorPtr& result);
 
     void
+    PrefetchAsync();
+
+    void
     Close();
 
     std::unique_ptr<DriverContext> ctx_;
 
     std::atomic_bool closed_{false};
 
-    std::vector<std::unique_ptr<Operator>> operators_;
+    std::vector<std::shared_ptr<Operator>> operators_;
 
     size_t current_operator_index_{0};
 
@@ -253,6 +256,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
     BlockingReason blocking_reason_{BlockingReason::kNotBlocked};
 
     friend struct DriverFactory;
+    std::once_flag once_;
 };
 
 using Consumer = std::function<BlockingReason(RowVectorPtr, ContinueFuture*)>;

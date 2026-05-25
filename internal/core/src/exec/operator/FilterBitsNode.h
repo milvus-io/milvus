@@ -71,6 +71,12 @@ class PhyFilterBitsNode : public Operator {
         return "PhyFilterBitsNode";
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        exprs_->PrefetchAsync(prefetch_pool);
+    }
+
  private:
     std::unique_ptr<ExprSet> exprs_;
     QueryContext* query_context_;

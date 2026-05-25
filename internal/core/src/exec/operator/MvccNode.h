@@ -66,6 +66,19 @@ class PhyMvccNode : public Operator {
         return "PhyMvccNode";
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        auto self = std::static_pointer_cast<PhyMvccNode>(shared_from_this());
+        folly::via(prefetch_pool.get(), [self]() {
+            self->segment_->prefetch_chunks(
+                self->operator_context_->get_exec_context()
+                    ->get_query_context()
+                    ->get_op_context(),
+                TimestampFieldID);
+        });
+    }
+
  private:
     const segcore::SegmentInternalInterface* segment_;
     milvus::Timestamp query_timestamp_;

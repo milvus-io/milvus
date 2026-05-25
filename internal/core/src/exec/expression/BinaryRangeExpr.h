@@ -300,7 +300,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -368,6 +368,13 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     template <typename T>
     VectorPtr
     ExecRangeVisitorImplForPk(EvalCtx& context);
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
