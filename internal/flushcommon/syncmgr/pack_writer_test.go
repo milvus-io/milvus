@@ -169,6 +169,60 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	}
 }
 
+func TestBulkPackWriter_WriteDelta_RetryTransientWriteFailure(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	schema := &schemapb.CollectionSchema{
+		Name: "sync_task_test_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	callCount := 0
+	cm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, key string, data []byte) error {
+			callCount++
+			if callCount == 1 {
+				return errors.New("transient object storage timeout")
+			}
+			return nil
+		})
+
+	deletes := &storage.DeleteData{}
+	for i := 0; i < 10; i++ {
+		pk := storage.NewInt64PrimaryKey(int64(i + 1))
+		ts := uint64(100 + i)
+		deletes.Append(pk, ts)
+	}
+
+	bw := &BulkPackWriter{
+		schema:         schema,
+		chunkManager:   cm,
+		allocator:      allocator.NewLocalAllocator(10000, 100000),
+		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond)},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := bw.writeDelta(ctx, new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithDeleteData(deletes))
+
+	require.NoError(t, err)
+	require.Equal(t, 2, callCount)
+	require.Equal(t, int64(10), got.GetBinlogs()[0].GetEntriesNum())
+}
+
 func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 	arrayOfVectorField := func(nullable bool) *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{
