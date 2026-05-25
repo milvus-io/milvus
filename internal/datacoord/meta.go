@@ -336,7 +336,7 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
-		if pos.Timestamp != math.MaxUint64 {
+		if !funcutil.IsDroppedChannelCheckpoint(pos) {
 			// Should not be set as metric since it's a tombstone value.
 			ts, _ := tsoutil.ParseTS(pos.Timestamp)
 			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
@@ -2106,15 +2106,17 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 	return nil
 }
 
-// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
-// and remove the metrics for channel checkpoint lag.
+// MarkChannelCheckpointDropped writes the dropped-channel sentinel
+// (funcutil.DroppedChannelCheckpointTimestamp) so no later
+// UpdateChannelCheckpoint can overwrite it, and removes the channel-checkpoint
+// lag metric.
 func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 
 	cp := &msgpb.MsgPosition{
 		ChannelName: channel,
-		Timestamp:   math.MaxUint64,
+		Timestamp:   funcutil.DroppedChannelCheckpointTimestamp,
 	}
 
 	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
