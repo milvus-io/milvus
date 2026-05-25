@@ -1086,6 +1086,18 @@ common:
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
+  AiSAQIndex:
+    MaxDegree: 56
+    SearchListSize: 100
+    PQCodeBudgetGBRatio: 0.125
+    SearchCacheBudgetGBRatio: 0
+    BeamWidthRatio: 4
+    DiskPQCodeBudgetGBRatio: 0.25
+    inlinePQ: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.
+    pqCacheSize: 0 # compressed vectors cache DRAM size in MiB.
+    rearrange: true # Enable vectors rearrangement during build.
+    pqReadPageCacheSize: 0 # compressed vectors read cache DRAM size in bytes per thread.
+    numEntryPoints: 100 # Number of entry points that should be generated to be used as a search start points
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
