@@ -329,6 +329,95 @@ func TestDispatch_CommitImportMessage(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDispatch_CommitImportMessage_ChannelNotFoundIsStaleNoPanic(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "by-dev-rootcoord-dml_5_466452018080884567v0"
+		jobID    = int64(466452018080884572)
+		timeTick = uint64(466453106370543641)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 466452018080884567,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(2637))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(2639))
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().
+		FlushChannel(mock.Anything, vchannel, timeTick).
+		Return(merr.WrapErrChannelNotFound(vchannel)).
+		Once()
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	resource.InitForTest(t, resource.OptWriteBufferManager(mockWBMgr))
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          log.With(log.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.NotPanics(t, func() {
+		err := impl.dispatch(immutableMsg)
+		require.NoError(t, err)
+	})
+}
+
+func TestDispatch_CommitImportMessage_FlushUnexpectedErrorPanics(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().
+		FlushChannel(mock.Anything, vchannel, timeTick).
+		Return(errors.New("temporary flush failure")).
+		Once()
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	resource.InitForTest(t, resource.OptWriteBufferManager(mockWBMgr))
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          log.With(log.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.Panics(t, func() {
+		_ = impl.dispatch(immutableMsg)
+	})
+}
+
 func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()

@@ -295,6 +295,11 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
 		if err := resource.Resource().WriteBufferManager().
 			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				impl.logger.Info("CommitImport targets stale vchannel, skip local flush",
+					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
+				return nil
+			}
 			impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
 				zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
 		}
