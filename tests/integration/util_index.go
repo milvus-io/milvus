@@ -41,7 +41,6 @@ const (
 	IndexFaissBinIvfFlat     = "BIN_IVF_FLAT"
 	IndexHNSW                = "HNSW"
 	IndexDISKANN             = "DISKANN"
-	IndexAISAQ               = "AISAQ"
 	IndexSparseInvertedIndex = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand          = "SPARSE_WAND"
 )
@@ -172,7 +171,6 @@ func ConstructIndexParam(dim int, indexType string, metricType string) []*common
 	case IndexSparseInvertedIndex:
 	case IndexSparseWand:
 	case IndexDISKANN:
-	case IndexAISAQ:
 	default:
 		panic(fmt.Sprintf("unimplemented index param for %s, please help to improve it", indexType))
 	}
@@ -189,8 +187,6 @@ func GetSearchParams(indexType string, metricType string) map[string]any {
 	case IndexHNSW:
 		params["ef"] = 200
 	case IndexDISKANN:
-		params["search_list"] = 20
-	case IndexAISAQ:
 		params["search_list"] = 20
 	case IndexSparseInvertedIndex:
 	case IndexSparseWand:
