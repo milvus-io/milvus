@@ -820,3 +820,59 @@ TEST(Query, ExecWithPredicateBinary) {
     std::cout << json.dump(2);
     // ASSERT_EQ(json.dump(2), ref.dump(2));
 }
+
+TEST(Query, VectorArrayElementLevelInference) {
+    auto dim = 32;
+
+    auto make_plan = [&](const std::string& metric) {
+        auto schema = std::make_shared<Schema>();
+        auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+        schema->AddDebugVectorArrayField(
+            "array_vec", DataType::VECTOR_FLOAT, dim, metric);
+        schema->set_primary_field_id(int64_field);
+
+        ScopedSchemaHandle handle(*schema);
+        auto plan_str =
+            handle.ParseSearch("", "array_vec", 5, metric, R"({"nprobe": 10})");
+        return CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    };
+
+    int num_queries = 2;
+    std::vector<float> query_vec = generate_float_vector(num_queries, dim);
+
+    {
+        auto plan = make_plan("MAX_SIM");
+        std::vector<size_t> offsets = {0, 1, 2};
+        auto ph_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            num_queries, dim, query_vec.data(), offsets);
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_FALSE(ph->at(0).element_level_);
+    }
+
+    {
+        auto plan = make_plan("COSINE");
+        auto ph_raw =
+            CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_TRUE(ph->at(0).element_level_);
+    }
+
+    {
+        auto plan = make_plan("MAX_SIM");
+        auto ph_raw =
+            CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+        EXPECT_THROW(
+            ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString()),
+            std::exception);
+    }
+
+    {
+        auto plan = make_plan("COSINE");
+        std::vector<size_t> offsets = {0, 1, 2};
+        auto ph_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            num_queries, dim, query_vec.data(), offsets);
+        EXPECT_THROW(
+            ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString()),
+            std::exception);
+    }
+}

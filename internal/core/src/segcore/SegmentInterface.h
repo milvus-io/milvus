@@ -24,6 +24,7 @@
 #include <index/ScalarIndex.h>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -252,6 +253,9 @@ class SegmentInterface {
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) = 0;
+
+    virtual std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation

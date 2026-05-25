@@ -458,6 +458,11 @@ class VectorArrayView {
         }
     }
 
+    int
+    length() const {
+        return length_;
+    }
+
  private:
     char* data_{nullptr};
     int64_t dim_ = 0;

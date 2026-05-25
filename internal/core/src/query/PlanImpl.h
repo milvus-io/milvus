@@ -85,6 +85,7 @@ struct Placeholder {
         sparse_matrix_;
     // offsets for embedding list
     aligned_vector<size_t> offsets_;
+    bool element_level_{false};
 
     const void*
     get_blob() const {
@@ -104,11 +105,17 @@ struct Placeholder {
 
     const size_t*
     get_offsets() const {
+        if (offsets_.empty()) {
+            return nullptr;
+        }
         return offsets_.data();
     }
 
     size_t*
     get_offsets() {
+        if (offsets_.empty()) {
+            return nullptr;
+        }
         return offsets_.data();
     }
 };

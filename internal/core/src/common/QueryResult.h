@@ -29,6 +29,7 @@
 
 #include "common/BitsetView.h"
 #include "common/FieldMeta.h"
+#include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
 #include "common/Types.h"
 #include "pb/schema.pb.h"
@@ -317,6 +318,10 @@ struct SearchResult {
     // record the storage usage in search
     StorageCost search_storage_cost_;
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
+
+    bool element_level_{false};
+    std::vector<int32_t> element_indices_;
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;

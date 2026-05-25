@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <queue>
@@ -31,6 +33,26 @@ namespace milvus::segcore {
 struct SearchResultDataBlobs {
     std::vector<std::vector<char>> blobs;  // the marshal blobs of each slice
     std::vector<StorageCost> costs;        // the cost of each slice
+};
+
+struct ElementSearchResultKey {
+    milvus::PkType pk;
+    int32_t element_index;
+
+    bool
+    operator==(const ElementSearchResultKey& other) const {
+        return pk == other.pk && element_index == other.element_index;
+    }
+};
+
+struct ElementSearchResultKeyHash {
+    size_t
+    operator()(const ElementSearchResultKey& key) const {
+        auto seed = std::hash<milvus::PkType>{}(key.pk);
+        seed ^= std::hash<int32_t>{}(key.element_index) + 0x9e3779b9 +
+                (seed << 6) + (seed >> 2);
+        return seed;
+    }
 };
 
 class ReduceHelper {
@@ -61,6 +83,11 @@ class ReduceHelper {
     }
 
  protected:
+    void
+    CheckElementIndicesSize(const SearchResult* search_result,
+                            size_t expected_size,
+                            const char* context) const;
+
     virtual void
     FilterInvalidSearchResult(SearchResult* search_result);
 
@@ -105,6 +132,9 @@ class ReduceHelper {
     void
     FillEntryData();
 
+    bool
+    TryAcceptSearchResult(const SearchResultPair& result);
+
     std::pair<std::vector<char>, StorageCost>
     GetSearchResultDataSlice(const int slice_index,
                              const StorageCost& total_cost);
@@ -123,6 +153,8 @@ class ReduceHelper {
     // define these here to avoid allocating them for each query
     std::vector<SearchResultPair> pairs_;
     std::unordered_set<milvus::PkType> pk_set_;
+    std::unordered_set<ElementSearchResultKey, ElementSearchResultKeyHash>
+        element_result_set_;
     // dim0: num_segments_; dim1: total_nq_; dim2: offset
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     std::vector<int64_t> slice_nqs_;

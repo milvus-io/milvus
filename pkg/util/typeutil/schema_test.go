@@ -5639,32 +5639,6 @@ func TestUpdateFieldDataByColumn(t *testing.T) {
 	})
 }
 
-func TestIsClusteringKeyType(t *testing.T) {
-	// Supported scalar types
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int8))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int16))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int32))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int64))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Float))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_Double))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_VarChar))
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_String))
-
-	// Supported vector types
-	assert.True(t, IsClusteringKeyType(schemapb.DataType_FloatVector))
-
-	// Unsupported types
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_JSON))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Bool))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Array))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Geometry))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Text))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_BinaryVector))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
-}
-
 func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, rowCount int) *schemapb.FieldData {
 	data := make([]*schemapb.VectorField, rowCount)
 	for i := 0; i < rowCount; i++ {

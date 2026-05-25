@@ -2309,6 +2309,44 @@ TEST_P(SealedVectorArrayTest, QueryVectorArrayAllFields) {
     EXPECT_EQ(array_vector_result->valid_data_size(), 0);
 }
 
+TEST(Sealed, ElementLevelSearchVectorArrayCountsElements) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::COSINE);
+    schema->set_primary_field_id(int64_field);
+
+    int64_t row_count = 64;
+    int array_len = 3;
+    auto dataset = DataGen(schema, row_count, 42, 0, 1, array_len);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "", "structA[array_vec]", 5, "COSINE", R"({"nprobe": 10})", 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    int num_queries = 2;
+    auto query_vec = generate_float_vector(num_queries, dim);
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto sr = sealed_segment->Search(plan.get(), ph_group.get(), 1000000);
+    ASSERT_TRUE(sr->element_level_);
+    EXPECT_EQ(sr->total_data_cnt_, row_count * array_len);
+    ASSERT_EQ(sr->element_indices_.size(), sr->seg_offsets_.size());
+    for (auto elem_idx : sr->element_indices_) {
+        EXPECT_GE(elem_idx, 0);
+        EXPECT_LT(elem_idx, array_len);
+    }
+}
+
 TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;

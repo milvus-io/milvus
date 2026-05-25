@@ -813,6 +813,16 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
     });
 }
 
+std::shared_ptr<const IArrayOffsets>
+ChunkedSegmentSealedImpl::GetArrayOffsets(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    auto it = array_offsets_map_.find(field_id);
+    if (it != array_offsets_map_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
 int64_t
 ChunkedSegmentSealedImpl::get_row_count() const {
     std::shared_lock lck(mutex_);
@@ -2700,27 +2710,67 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
+    std::string struct_name;
+    const FieldMeta* field_meta_ptr = nullptr;
+    bool should_drop_field_data = false;
 
-    std::unique_lock lck(mutex_);
-    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
-               "field {} data already loaded",
-               field_id.get());
-    set_bit(field_data_ready_bitset_, field_id, true);
-    update_row_count(num_rows);
-    // Only drop field data when the interim index has raw data.
-    // If the interim index doesn't have raw data, we need to keep the field data
-    // because the data cannot be retrieved from the index.
-    auto iter = index_has_raw_data_.find(field_id);
-    const bool keep_nullable_vector_field_data =
-        column->IsNullable() && IsVectorDataType(data_type);
-    if (generated_interim_index && iter != index_has_raw_data_.end() &&
-        iter->second && !keep_nullable_vector_field_data) {
-        drop_field_data_locked(field_id);
+    {
+        std::unique_lock lck(mutex_);
+        AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+                   "field {} data already loaded",
+                   field_id.get());
+        set_bit(field_data_ready_bitset_, field_id, true);
+        update_row_count(num_rows);
+        // Only drop field data when the interim index has raw data.
+        // If the interim index doesn't have raw data, we need to keep the field data
+        // because the data cannot be retrieved from the index.
+        auto iter = index_has_raw_data_.find(field_id);
+        const bool keep_nullable_vector_field_data =
+            column->IsNullable() && IsVectorDataType(data_type);
+        should_drop_field_data =
+            generated_interim_index && iter != index_has_raw_data_.end() &&
+            iter->second && !keep_nullable_vector_field_data;
+        if (data_type == DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache()) {
+            // Construct GeometryCache for the entire field
+            LoadGeometryCache(field_id, column);
+        }
+
+        if (data_type == DataType::ARRAY ||
+            data_type == DataType::VECTOR_ARRAY) {
+            auto& field_meta = schema_->operator[](field_id);
+            const std::string& field_name = field_meta.get_name().get();
+            if (field_name.find('[') != std::string::npos &&
+                field_name.find(']') != std::string::npos) {
+                struct_name = field_name.substr(0, field_name.find('['));
+
+                auto it = struct_to_array_offsets_.find(struct_name);
+                if (it != struct_to_array_offsets_.end()) {
+                    array_offsets_map_[field_id] = it->second;
+                } else {
+                    field_meta_ptr = &field_meta;
+                }
+            }
+        }
     }
-    if (data_type == DataType::GEOMETRY &&
-        segcore_config_.get_enable_geometry_cache()) {
-        // Construct GeometryCache for the entire field
-        LoadGeometryCache(field_id, column);
+
+    if (field_meta_ptr) {
+        auto new_offsets =
+            ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr);
+
+        std::unique_lock lck(mutex_);
+        auto it = struct_to_array_offsets_.find(struct_name);
+        if (it == struct_to_array_offsets_.end()) {
+            struct_to_array_offsets_[struct_name] = new_offsets;
+            array_offsets_map_[field_id] = new_offsets;
+        } else {
+            array_offsets_map_[field_id] = it->second;
+        }
+    }
+
+    if (should_drop_field_data) {
+        std::unique_lock lck(mutex_);
+        drop_field_data_locked(field_id);
     }
 }
 

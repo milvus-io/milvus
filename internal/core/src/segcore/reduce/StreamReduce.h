@@ -21,13 +21,16 @@
 #include "segcore/ReduceStructure.h"
 #include "segcore/Utils.h"
 #include "common/EasyAssert.h"
+#include "segcore/reduce/Reduce.h"
 
 namespace milvus::segcore {
 class MergedSearchResult {
  public:
-    bool has_result_;
+    bool has_result_{false};
+    bool element_level_{false};
     std::vector<PkType> primary_keys_;
     std::vector<float> distances_;
+    std::vector<int32_t> element_indices_;
     std::optional<std::vector<GroupByValueType>> group_by_values_;
 
     // set output fields data when filling target entity
@@ -48,6 +51,7 @@ struct StreamSearchResultPair {
     int64_t segment_index_;
     int64_t offset_;
     int64_t offset_rb_;
+    int32_t element_index_{-1};
     std::optional<milvus::GroupByValueType> group_by_value_;
 
     StreamSearchResultPair(milvus::PkType primary_key,
@@ -87,6 +91,41 @@ struct StreamSearchResultPair {
             search_result_ != nullptr || merged_result_ != nullptr,
             "For a valid StreamSearchResult pair, "
             "at least one of merged_result_ or search_result_ is not nullptr");
+        element_index_ = CurrentElementIndex();
+    }
+
+    bool
+    IsElementLevel() const {
+        if (search_result_ != nullptr) {
+            return search_result_->element_level_;
+        }
+        return merged_result_->element_level_;
+    }
+
+    int32_t
+    CurrentElementIndex() const {
+        if (!IsElementLevel()) {
+            return -1;
+        }
+        AssertInfo(offset_ >= 0,
+                   "invalid element-level stream reduce offset {}",
+                   offset_);
+        if (search_result_ != nullptr) {
+            AssertInfo(static_cast<size_t>(offset_) <
+                           search_result_->element_indices_.size(),
+                       "invalid element-level search result offset {}, "
+                       "element_indices size {}",
+                       offset_,
+                       search_result_->element_indices_.size());
+            return search_result_->element_indices_[offset_];
+        }
+        AssertInfo(static_cast<size_t>(offset_) <
+                       merged_result_->element_indices_.size(),
+                   "invalid element-level merged search result offset {}, "
+                   "element_indices size {}",
+                   offset_,
+                   merged_result_->element_indices_.size());
+        return merged_result_->element_indices_[offset_];
     }
 
     bool
@@ -104,6 +143,7 @@ struct StreamSearchResultPair {
             if (search_result_ != nullptr) {
                 primary_key_ = search_result_->primary_keys_.at(offset_);
                 distance_ = search_result_->distances_.at(offset_);
+                group_by_value_ = std::nullopt;
                 if (search_result_->group_by_values_.has_value() &&
                     offset_ < search_result_->group_by_values_.value().size()) {
                     group_by_value_ =
@@ -112,15 +152,19 @@ struct StreamSearchResultPair {
             } else {
                 primary_key_ = merged_result_->primary_keys_.at(offset_);
                 distance_ = merged_result_->distances_.at(offset_);
+                group_by_value_ = std::nullopt;
                 if (merged_result_->group_by_values_.has_value() &&
                     offset_ < merged_result_->group_by_values_.value().size()) {
                     group_by_value_ =
                         merged_result_->group_by_values_.value().at(offset_);
                 }
             }
+            element_index_ = CurrentElementIndex();
         } else {
             primary_key_ = INVALID_PK;
             distance_ = std::numeric_limits<float>::min();
+            element_index_ = -1;
+            group_by_value_ = std::nullopt;
         }
     }
 };
@@ -208,6 +252,9 @@ class StreamReducerHelper {
     void
     CleanReduceStatus();
 
+    bool
+    TryAcceptSearchResult(const StreamSearchResultPair& result);
+
     void
     SetNullableVectorValidDataOffsets(
         const std::map<FieldId, std::unique_ptr<milvus::DataArray>>&
@@ -215,7 +262,10 @@ class StreamReducerHelper {
         int64_t ki,
         MergeBase& merge_base);
 
+ protected:
     std::unique_ptr<MergedSearchResult> merged_search_result;
+
+ private:
     milvus::query::Plan* plan_;
     std::vector<int64_t> slice_nqs_;
     std::vector<int64_t> slice_topKs_;
@@ -228,6 +278,8 @@ class StreamReducerHelper {
                         StreamSearchResultPairComparator>
         heap_;
     std::unordered_set<milvus::PkType> pk_set_;
+    std::unordered_set<ElementSearchResultKey, ElementSearchResultKeyHash>
+        element_result_set_;
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     int64_t total_nq_{0};

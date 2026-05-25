@@ -118,6 +118,12 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
     new_distances.reserve(size);
     new_seg_offsets.reserve(size);
 
+    bool has_element_indices = !result.element_indices_.empty();
+    std::vector<int32_t> new_element_indices;
+    if (has_element_indices) {
+        new_element_indices.reserve(size);
+    }
+
     std::vector<size_t> idx(topk);
 
     for (size_t start = 0; start < size; start += topk) {
@@ -141,11 +147,17 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
         for (auto i : idx) {
             new_distances.push_back(result.distances_[i]);
             new_seg_offsets.push_back(result.seg_offsets_[i]);
+            if (has_element_indices) {
+                new_element_indices.push_back(result.element_indices_[i]);
+            }
         }
     }
 
-    result.distances_ = new_distances;
-    result.seg_offsets_ = new_seg_offsets;
+    result.distances_ = std::move(new_distances);
+    result.seg_offsets_ = std::move(new_seg_offsets);
+    if (has_element_indices) {
+        result.element_indices_ = std::move(new_element_indices);
+    }
 }
 
 }  // namespace exec
