@@ -140,6 +140,7 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 
 	err = HandleLoonFFIResult(result)
 	if err != nil {
+		C.loon_properties_free(cProperties)
 		return nil, err
 	}
 
@@ -176,10 +177,43 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return HandleLoonFFIResult(result)
 }
 
+// Abort closes the underlying writer and releases resources without committing
+// the returned column groups to the manifest.
+func (pw *FFIPackedWriter) Abort() error {
+	defer func() {
+		if pw.cWriterHandle != 0 {
+			C.loon_writer_destroy(pw.cWriterHandle)
+			pw.cWriterHandle = 0
+		}
+		if pw.cProperties != nil {
+			C.loon_properties_free(pw.cProperties)
+			pw.cProperties = nil
+		}
+	}()
+
+	var cColumnGroups *C.LoonColumnGroups
+	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
+	defer C.loon_column_groups_destroy(cColumnGroups)
+
+	return HandleLoonFFIResult(result)
+}
+
 func (pw *FFIPackedWriter) Close() (string, error) {
+	defer func() {
+		if pw.cWriterHandle != 0 {
+			C.loon_writer_destroy(pw.cWriterHandle)
+			pw.cWriterHandle = 0
+		}
+		if pw.cProperties != nil {
+			C.loon_properties_free(pw.cProperties)
+			pw.cProperties = nil
+		}
+	}()
+
 	var cColumnGroups *C.LoonColumnGroups
 
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
+	defer C.loon_column_groups_destroy(cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
@@ -222,6 +256,5 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
 
-	defer C.loon_properties_free(pw.cProperties)
 	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
 }
