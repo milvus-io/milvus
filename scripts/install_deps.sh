@@ -279,8 +279,8 @@ install_ubuntu_deps() {
         libopenblas-dev libgoogle-perftools-dev
     )
 
-    # Version-specific GCC. Keep clang-format at 12 because the cpp format
-    # checker invokes clang-format-12 explicitly.
+    # Version-specific GCC and clang-format. CI runs the cpp format checker on
+    # ubuntu22.04 with clang-format-15, so 22.04 must install that exact version.
     local gcc_packages=()
     local clang_format_package=""
 
@@ -291,7 +291,7 @@ install_ubuntu_deps() {
             ;;
         22.04)
             gcc_packages=(g++ gcc gfortran g++-11 gcc-11)
-            clang_format_package="clang-format-12 clang-tidy-12"
+            clang_format_package="clang-format-15 clang-tidy-15"
             ;;
         24.04)
             gcc_packages=(g++ gcc gfortran g++-13 gcc-13)

@@ -78,6 +78,7 @@ if (CLANG_FORMAT_VERSION)
 else()
     find_program(CLANG_FORMAT_BIN
       NAMES
+      clang-format-15
       clang-format-12
       clang-format
       PATHS ${ClangTools_PATH} $ENV{CLANG_TOOLS_PATH} /usr/local/bin /usr/bin

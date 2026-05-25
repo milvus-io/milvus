@@ -10,7 +10,7 @@ else
 fi
 CorePath=$1
 
-CLANG_FORMAT=${CLANG_FORMAT:-clang-format-12}
+CLANG_FORMAT=${CLANG_FORMAT:-clang-format-15}
 
 if ! command -v "$CLANG_FORMAT" >/dev/null 2>&1; then
     echo "ERROR: $CLANG_FORMAT is required for cpp format check but was not found in PATH" >&2

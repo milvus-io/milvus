@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
-    clang-format-12 clang-tidy-12  lcov libtool m4 autoconf automake python3 python3-pip \
+    clang-format-15 clang-tidy-15  lcov libtool m4 autoconf automake python3 python3-pip \
     pkg-config uuid-dev libaio-dev libgoogle-perftools-dev libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
