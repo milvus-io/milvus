@@ -70,6 +70,15 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 	return resp
 }
 
+func (w *walAccesserImpl) appendReplicateMessageToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+	guard, err := w.getProducer(msg.VChannel()).BeginProduce(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	resp := producer.BatchCommitProduce(ctx, guard)
+	return resp.Responses[0].AppendResult, resp.Responses[0].Error
+}
+
 // dispatchMessages dispatches the messages into different vchannel.
 func (w *walAccesserImpl) dispatchMessages(msgs ...message.MutableMessage) (map[string][]message.MutableMessage, map[string][]int) {
 	dispatchedMessages := make(map[string][]message.MutableMessage, 0)
