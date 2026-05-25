@@ -2249,6 +2249,60 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
 
+TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
+    bool with_sealed = GetParam();
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 16;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 0);
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_bytes =
+        handle.ParseSearch("element_filter(structA, $[price_array] >= 0)",
+                           "structA[array_float_vec]",
+                           1,
+                           knowhere::metric::L2,
+                           R"({"ef": 50})",
+                           3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    std::unique_ptr<SearchResult> search_result;
+    ASSERT_NO_THROW(search_result =
+                        segment->Search(plan.get(), ph_group.get(), 1L << 63));
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_TRUE(search_result->seg_offsets_.empty());
+}
+
 enum class NestedIndexType { NONE, STL_SORT, INVERTED };
 
 std::string
