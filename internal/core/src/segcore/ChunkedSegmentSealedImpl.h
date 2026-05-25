@@ -446,6 +446,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     FieldId field_id,
                     const std::vector<int64_t>& chunk_ids) const override;
 
+    void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
+    void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
  protected:
     // blob and row_count
     PinWrapper<SpanBase>

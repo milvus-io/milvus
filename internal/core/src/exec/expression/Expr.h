@@ -74,7 +74,7 @@ PinIndex(milvus::OpContext* op_ctx,
     }
 }
 
-class Expr {
+class Expr : public std::enable_shared_from_this<Expr> {
  public:
     Expr(DataType type,
          const std::vector<std::shared_ptr<Expr>>&& inputs,
@@ -158,6 +158,14 @@ class Expr {
     std::vector<std::shared_ptr<Expr>>&
     GetInputsRef() {
         return inputs_;
+    }
+
+    virtual void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+        for (const auto& input : inputs_) {
+            input->PrefetchAsync(prefetch_pool);
+        }
     }
 
  protected:
@@ -2223,6 +2231,62 @@ class SegmentExpr : public Expr {
                                               TargetBitmap(size, true));
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
+        LOG_INFO(
+            "[sss] segment expr PrefetchAsync enqueue, partition: {}, "
+            "segment: {}, "
+            "field: {}",
+            self->segment_->get_partition_id(),
+            self->segment_->get_segment_id(),
+            self->field_id_.get());
+        prefetch_future_ = folly::via(prefetch_pool.get(), [self]() {
+            if (self->op_ctx_ != nullptr &&
+                self->op_ctx_->cancellation_token.isCancellationRequested()) {
+                return;
+            }
+            LOG_INFO(
+                "[sss] segment expr PrefetchAsync start, partition: {}, "
+                "segment: {}, "
+                "field: {}",
+                self->segment_->get_partition_id(),
+                self->segment_->get_segment_id(),
+                self->field_id_.get());
+            self->DetermineExecPath();
+            if (self->exec_path_ == ExprExecPath::RawData) {
+                self->PrefetchRawData(self->field_id_);
+            }
+            LOG_INFO(
+                "[sss] segment expr PrefetchAsync end, partition: {}, "
+                "segment: {}, "
+                "field: {}, "
+                "exec_path: {}",
+                self->segment_->get_partition_id(),
+                self->segment_->get_segment_id(),
+                self->field_id_.get(),
+                static_cast<int>(self->exec_path_));
+        });
+    }
+
+    virtual void
+    PrefetchRawData() {
+        PrefetchRawData(field_id_);
+    }
+
+    void
+    PrefetchRawData(FieldId field_id) {
+        segment_->prefetch_chunks(op_ctx_, field_id);
+    }
+
+    void
+    WaitPrefetch() {
+        if (prefetch_future_.valid()) {
+            std::move(prefetch_future_).wait();
+        }
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -2287,6 +2351,7 @@ class SegmentExpr : public Expr {
     double json_filter_stats_latency_us_{0.0};
     double json_stats_shredding_latency_us_{0.0};
     double json_stats_shared_latency_us_{0.0};
+    folly::Future<folly::Unit> prefetch_future_;
 };
 
 bool
@@ -2378,6 +2443,14 @@ class ExprSet {
     SetExecuteAllAtOnce() {
         for (auto& expr : exprs_) {
             expr->SetExecuteAllAtOnce();
+        }
+    }
+
+    void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+        for (const auto& expr : exprs_) {
+            expr->PrefetchAsync(prefetch_pool);
         }
     }
 

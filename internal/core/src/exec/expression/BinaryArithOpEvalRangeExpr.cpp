@@ -20,10 +20,13 @@
 #include <cstdint>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
+#include "exec/expression/Expr.h"
+#include "exec/expression/Utils.h"
 #include "fmt/core.h"
 #include "opentelemetry/trace/span.h"
 
@@ -34,6 +37,7 @@ namespace exec {
 
 void
 PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryArithOpEvalRangeExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -241,8 +245,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     } while (false)
 
     auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
+        [op_type, arith_type]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -252,265 +255,265 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             ValueType val,
             ValueType right_operand,
             const std::string& pointer) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // Nothing to do here since the caller has already handled valid_res.
-        if (data == nullptr) {
-            return;
-        }
-        switch (op_type) {
-            case proto::plan::OpType::Equal: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand ==
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand ==
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand ==
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand ==
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length ==
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
-                }
-                break;
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // Nothing to do here since the caller has already handled valid_res.
+            if (data == nullptr) {
+                return;
             }
-            case proto::plan::OpType::NotEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v + right_operand != val);
-                        break;
+            switch (op_type) {
+                case proto::plan::OpType::Equal: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompare(
+                                json_v + right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompare(
+                                json_v - right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompare(
+                                json_v * right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompare(
+                                json_v / right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompare(
+                                safe_mod(json_v, right_operand) == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(
+                                array_length == val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v - right_operand != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v * right_operand != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v / right_operand != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            safe_mod(json_v, right_operand) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length !=
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand >
-                                                    val);
-                        break;
+                case proto::plan::OpType::NotEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompareNotEqual(
+                                json_v + right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompareNotEqual(
+                                json_v - right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompareNotEqual(
+                                json_v * right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompareNotEqual(
+                                json_v / right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompareNotEqual(
+                                safe_mod(json_v, right_operand) != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(
+                                array_length != val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand >
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand >
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand >
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length >
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand >=
-                                                    val);
-                        break;
+                case proto::plan::OpType::GreaterThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompare(json_v + right_operand >
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompare(json_v - right_operand >
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompare(json_v * right_operand >
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompare(json_v / right_operand >
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompare(
+                                safe_mod(json_v, right_operand) > val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(array_length >
+                                                                  val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand >=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand >=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand >=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length >=
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand <
-                                                    val);
-                        break;
+                case proto::plan::OpType::GreaterEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompare(
+                                json_v + right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompare(
+                                json_v - right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompare(
+                                json_v * right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompare(
+                                json_v / right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompare(
+                                safe_mod(json_v, right_operand) >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(
+                                array_length >= val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand <
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand <
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand <
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length <
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand <=
-                                                    val);
-                        break;
+                case proto::plan::OpType::LessThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompare(json_v + right_operand <
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompare(json_v - right_operand <
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompare(json_v * right_operand <
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompare(json_v / right_operand <
+                                                        val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompare(
+                                safe_mod(json_v, right_operand) < val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(array_length <
+                                                                  val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand <=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand <=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand <=
-                                                    val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeJONCompareArrayLength(array_length <=
-                                                              val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
+                case proto::plan::OpType::LessEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeJSONCompare(
+                                json_v + right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeJSONCompare(
+                                json_v - right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeJSONCompare(
+                                json_v * right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeJSONCompare(
+                                json_v / right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeJSONCompare(
+                                safe_mod(json_v, right_operand) <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeJONCompareArrayLength(
+                                array_length <= val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
+                    }
+                    break;
+                }
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "unsupported operator type for binary "
+                              "arithmetic eval expr: {}",
+                              op_type);
             }
-            default:
-                ThrowInfo(OpTypeInvalid,
-                          "unsupported operator type for binary "
-                          "arithmetic eval expr: {}",
-                          op_type);
-        }
-    };
+        };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
@@ -622,8 +625,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     } while (false)
 
     auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
+        [op_type, arith_type]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -633,266 +635,266 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // Nothing to do here since the caller has already handled valid_res.
-        if (data == nullptr) {
-            return;
-        }
-        switch (op_type) {
-            case proto::plan::OpType::Equal: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand ==
-                                                     val);
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // Nothing to do here since the caller has already handled valid_res.
+            if (data == nullptr) {
+                return;
+            }
+            switch (op_type) {
+                case proto::plan::OpType::Equal: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand == val);
 
-                        break;
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() == val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() == val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::NotEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand !=
-                                                     val);
-                        break;
+                case proto::plan::OpType::NotEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() != val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() != val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >
-                                                     val);
-                        break;
+                case proto::plan::OpType::GreaterThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(value + right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(value - right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(value * right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(value / right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) > val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() > val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() > val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >=
-                                                     val);
-                        break;
+                case proto::plan::OpType::GreaterEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() >= val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() >= val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <
-                                                     val);
-                        break;
+                case proto::plan::OpType::LessThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(value + right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(value - right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(value * right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(value / right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) < val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() < val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() < val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <=
-                                                     val);
-                        break;
+                case proto::plan::OpType::LessEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::ArrayLength: {
+                            BinaryArithRangeArrayLengthCompate(
+                                data[offset].length() <= val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() <= val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "unsupported operator type for binary "
+                              "arithmetic eval expr: {}",
+                              op_type);
             }
-            default:
-                ThrowInfo(OpTypeInvalid,
-                          "unsupported operator type for binary "
-                          "arithmetic eval expr: {}",
-                          op_type);
-        }
-    };
+        };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -960,478 +962,479 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
 
     auto execute_sub_batch =
-        [ op_type, arith_type,
-          sub_batch_size ]<FilterType filter_type = FilterType::sequential>(
-            Index * index_ptr,
+        [op_type,
+         arith_type,
+         sub_batch_size]<FilterType filter_type = FilterType::sequential>(
+            Index* index_ptr,
             HighPrecisionType value,
             HighPrecisionType right_operand,
             const int32_t* offsets = nullptr) {
-        TargetBitmap res;
-        switch (op_type) {
-            case proto::plan::OpType::Equal: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::Equal,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+            TargetBitmap res;
+            switch (op_type) {
+                case proto::plan::OpType::Equal: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::Equal,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::Equal,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::Equal,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::Equal,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::Equal,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::Equal,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::Equal,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::Equal,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::Equal,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::NotEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::NotEqual,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+                case proto::plan::OpType::NotEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::NotEqual,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::NotEqual,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::NotEqual,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::NotEqual,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::NotEqual,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::NotEqual,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::NotEqual,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::NotEqual,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::NotEqual,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterThan,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+                case proto::plan::OpType::GreaterThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterThan,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterThan,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterThan,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterThan,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterThan,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterThan,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterThan,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterThan,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterThan,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterEqual,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+                case proto::plan::OpType::GreaterEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterEqual,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterEqual,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterEqual,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterEqual,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::GreaterEqual,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterEqual,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterEqual,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterEqual,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::GreaterEqual,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessThan,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+                case proto::plan::OpType::LessThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessThan,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessThan,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessThan,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessThan,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessThan,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessThan,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessThan,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessThan,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessThan,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessEqual,
-                                         proto::plan::ArithOpType::Add,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
+                case proto::plan::OpType::LessEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessEqual,
+                                             proto::plan::ArithOpType::Add,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessEqual,
+                                             proto::plan::ArithOpType::Sub,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessEqual,
+                                             proto::plan::ArithOpType::Mul,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessEqual,
+                                             proto::plan::ArithOpType::Div,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            ArithOpIndexFunc<T,
+                                             proto::plan::OpType::LessEqual,
+                                             proto::plan::ArithOpType::Mod,
+                                             filter_type>
+                                func;
+                            res = std::move(func(index_ptr,
+                                                 sub_batch_size,
+                                                 value,
+                                                 right_operand,
+                                                 offsets));
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessEqual,
-                                         proto::plan::ArithOpType::Sub,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessEqual,
-                                         proto::plan::ArithOpType::Mul,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessEqual,
-                                         proto::plan::ArithOpType::Div,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        ArithOpIndexFunc<T,
-                                         proto::plan::OpType::LessEqual,
-                                         proto::plan::ArithOpType::Mod,
-                                         filter_type>
-                            func;
-                        res = std::move(func(index_ptr,
-                                             sub_batch_size,
-                                             value,
-                                             right_operand,
-                                             offsets));
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            OpTypeInvalid,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "unsupported operator type for binary "
+                              "arithmetic eval expr: {}",
+                              op_type);
             }
-            default:
-                ThrowInfo(OpTypeInvalid,
-                          "unsupported operator type for binary "
-                          "arithmetic eval expr: {}",
-                          op_type);
-        }
-        return res;
-    };
+            return res;
+        };
     if (has_offset_input_) {
         auto res = ProcessIndexChunksByOffsets<T>(
             execute_sub_batch, input, value, right_operand);
@@ -1487,17 +1490,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
 
-    auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            const bool* valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            HighPrecisionType value,
-            HighPrecisionType right_operand) {
+    auto execute_sub_batch = [op_type, arith_type]<FilterType filter_type =
+                                                       FilterType::sequential>(
+                                 const T* data,
+                                 const bool* valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 HighPrecisionType value,
+                                 HighPrecisionType right_operand) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
@@ -1914,6 +1916,75 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+void
+PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL: {
+            PrefetchRawData<bool>();
+            break;
+        }
+        case DataType::INT8: {
+            PrefetchRawData<int8_t>();
+            break;
+        }
+        case DataType::INT16: {
+            PrefetchRawData<int16_t>();
+            break;
+        }
+        case DataType::INT32: {
+            PrefetchRawData<int32_t>();
+            break;
+        }
+        case DataType::INT64: {
+            PrefetchRawData<int64_t>();
+            break;
+        }
+        case DataType::FLOAT: {
+            PrefetchRawData<float>();
+            break;
+        }
+        case DataType::DOUBLE: {
+            PrefetchRawData<double>();
+            break;
+        }
+        default: {
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+        }
+    }
+}
+
+template <typename T>
+void
+PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
+    using H =
+        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           T>;
+    auto& skip_index = segment_->GetSkipIndex();
+    auto value = GetValueWithCastNumber<H>(expr_->value_);
+    auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = 0; i < num_data_chunk_; ++i) {
+        auto skip = skip_index.CanSkipBinaryArithRange<T>(field_id_,
+                                                          i,
+                                                          expr_->op_type_,
+                                                          expr_->arith_op_type_,
+                                                          value,
+                                                          right_value);
+        if (!skip) {
+            chunks_may_hit.push_back(i);
+        }
+    }
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 template VectorPtr
