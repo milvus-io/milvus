@@ -76,7 +76,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 		nodeIDs     []int64
 		segmentCnts []int
 		states      []session.State
-		deltaCnts   []int
 		assignments []*meta.Segment
 		expectPlans []assign.SegmentAssignPlan
 	}{
@@ -85,16 +84,15 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			nodeIDs:     []int64{1, 2, 3},
 			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateStopping},
 			segmentCnts: []int{100, 200, 0},
-			deltaCnts:   []int{0, -200, 0},
 			assignments: []*meta.Segment{
 				{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 2}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 3}},
 			},
 			expectPlans: []assign.SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}}, From: -1, To: 2},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2}}, From: -1, To: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3}}, From: -1, To: 2},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}}, From: -1, To: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2}}, From: -1, To: 2},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3}}, From: -1, To: 1},
 			},
 		},
 		{
@@ -102,7 +100,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			nodeIDs:     []int64{},
 			segmentCnts: []int{},
 			states:      []session.State{},
-			deltaCnts:   []int{},
 			assignments: []*meta.Segment{
 				{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 2}},
@@ -117,15 +114,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			suite.SetupTest()
 			suite.mockScheduler.ExpectedCalls = nil
 
-			// Setup mock scheduler to return the correct delta for each node
-			nodeDeltas := make(map[int64]int, len(c.nodeIDs))
-			for i := range c.nodeIDs {
-				nodeID := c.nodeIDs[i]
-				delta := c.deltaCnts[i]
-				nodeDeltas[nodeID] = delta
-			}
-			suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
-				Return(task.NewSegmentTaskDeltaSnapshot(nodeDeltas, nil)).Maybe()
 			suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 			for i := range c.nodeIDs {
