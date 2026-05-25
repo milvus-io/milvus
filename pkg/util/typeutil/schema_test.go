@@ -3079,6 +3079,44 @@ func TestGetDataIterator(t *testing.T) {
 			},
 			want: []any{int64(1), nil, int64(2), int64(3)},
 		},
+		{
+			name: "compact nullable float vector",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 5, 6},
+							},
+						},
+					},
+				},
+				ValidData: []bool{true, false, true},
+			},
+			want: []any{[]float32{1, 2}, nil, []float32{5, 6}},
+		},
+		{
+			name: "compact nullable sparse vector",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_SparseFloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_SparseFloatVector{
+							SparseFloatVector: &schemapb.SparseFloatArray{
+								Contents: [][]byte{
+									CreateSparseFloatRow([]uint32{1}, []float32{1}),
+									CreateSparseFloatRow([]uint32{3}, []float32{3}),
+								},
+							},
+						},
+					},
+				},
+				ValidData: []bool{false, true, false, true},
+			},
+			want: []any{nil, CreateSparseFloatRow([]uint32{1}, []float32{1}), nil, CreateSparseFloatRow([]uint32{3}, []float32{3})},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -5807,13 +5845,13 @@ func TestUpdateFieldDataByColumn(t *testing.T) {
 		assert.Equal(t, [][]byte{{10}, {2}, {20}}, base.GetVectors().GetSparseFloatVector().Contents)
 	})
 
-	t.Run("nullable array of vector", func(t *testing.T) {
+	t.Run("nullable array of vector stays row-dense", func(t *testing.T) {
 		base := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, []bool{true, true, true})
 		update := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, []bool{false, true})
 
 		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
 
 		got := base.GetVectors().GetVectorArray()
@@ -5823,6 +5861,114 @@ func TestUpdateFieldDataByColumn(t *testing.T) {
 		assert.Equal(t, []float32{2}, got.GetData()[2].GetFloatVector().GetData())
 		assert.EqualValues(t, 1, got.GetDim())
 		assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+	})
+
+	t.Run("nullable compact float vector changes validity", func(t *testing.T) {
+		dim := int64(2)
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 1,
+							3, 3,
+						}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{20, 20}},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0, 1})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
+		assert.Equal(t, []float32{20, 20, 3, 3}, base.GetVectors().GetFloatVector().GetData())
+	})
+
+	t.Run("nullable compact sparse vector changes validity", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{CreateSparseFloatRow([]uint32{1}, []float32{1}), CreateSparseFloatRow([]uint32{3}, []float32{3})},
+						},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{CreateSparseFloatRow([]uint32{20}, []float32{20})},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0, 1})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
+		assert.Equal(t, [][]byte{
+			CreateSparseFloatRow([]uint32{20}, []float32{20}),
+			CreateSparseFloatRow([]uint32{3}, []float32{3}),
+		}, base.GetVectors().GetSparseFloatVector().GetContents())
+	})
+
+	t.Run("nullable compact sparse vector all null base accepts valid update", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, false},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{},
+			},
+		}
+		updateRow := CreateSparseFloatRow([]uint32{20}, []float32{20})
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{updateRow},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{1}, []int64{0})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true}, base.GetValidData())
+		assert.Equal(t, [][]byte{updateRow}, base.GetVectors().GetSparseFloatVector().GetContents())
 	})
 }
 
@@ -5852,26 +5998,117 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
 }
 
-// newArrayOfVectorFieldData builds a dense (post-FillWithNullValue) ArrayOfVector
-// FieldData with len(Data) == len(validData). Null rows are empty placeholders.
-func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, validData []bool) *schemapb.FieldData {
-	data := make([]*schemapb.VectorField, len(validData))
-	for i := range validData {
-		if validData[i] {
+func TestAppendFieldDataNullableVectorWithSchemaWithoutValidData(t *testing.T) {
+	const fieldID = int64(101)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "nullable_sparse",
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: true,
+			},
+		},
+	}
+	src := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "nullable_sparse",
+			FieldId:   fieldID,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			}},
+		},
+	}
+	dst := PrepareResultFieldData(src, 1)
+	idxComputer := NewFieldDataIdxComputerWithSchema(src, schema)
+	fieldIdxs := idxComputer.Compute(0)
+
+	require.NotPanics(t, func() {
+		AppendFieldData(dst, src, 0, fieldIdxs...)
+	})
+	require.Len(t, dst, 1)
+	assert.Equal(t, []bool{false}, dst[0].GetValidData())
+	assert.Empty(t, dst[0].GetVectors().GetSparseFloatVector().GetContents())
+}
+
+func TestAppendFieldDataNullableVectorWithSchemaAndValidData(t *testing.T) {
+	const (
+		fieldID = int64(101)
+		dim     = int64(2)
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "nullable_float",
+				DataType: schemapb.DataType_FloatVector,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "2"},
+				},
+			},
+		},
+	}
+	src := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "nullable_float",
+			FieldId:   fieldID,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+				},
+			}},
+		},
+	}
+	dst := PrepareResultFieldData(src, 3)
+	idxComputer := NewFieldDataIdxComputerWithSchema(src, schema)
+	for _, rowIdx := range []int64{0, 1, 2} {
+		fieldIdxs := idxComputer.Compute(rowIdx)
+		AppendFieldData(dst, src, rowIdx, fieldIdxs...)
+	}
+
+	assert.Equal(t, []bool{true, false, true}, dst[0].GetValidData())
+	assert.Equal(t, []float32{1, 2, 3, 4}, dst[0].GetVectors().GetFloatVector().GetData())
+}
+
+func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, rows any) *schemapb.FieldData {
+	var rowCount int
+	var validData []bool
+	switch v := rows.(type) {
+	case int:
+		rowCount = v
+	case []bool:
+		validData = v
+		rowCount = len(v)
+	default:
+		panic("unexpected ArrayOfVector row spec")
+	}
+
+	data := make([]*schemapb.VectorField, rowCount)
+	for i := 0; i < rowCount; i++ {
+		if len(validData) > 0 && !validData[i] {
 			data[i] = &schemapb.VectorField{
 				Dim: dim,
 				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{Data: []float32{float32(i + 1)}},
+					FloatVector: &schemapb.FloatArray{},
 				},
 			}
-		} else {
-			data[i] = &schemapb.VectorField{
-				Dim:  dim,
-				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
-			}
+			continue
+		}
+		data[i] = &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{float32(i + 1)}},
+			},
 		}
 	}
-	return &schemapb.FieldData{
+	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
 		FieldName: fieldName,
 		FieldId:   fieldID,
@@ -5887,8 +6124,11 @@ func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, eleme
 				},
 			},
 		},
-		ValidData: append([]bool{}, validData...),
 	}
+	if len(validData) > 0 {
+		fd.ValidData = validData
+	}
+	return fd
 }
 
 func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {
@@ -5920,8 +6160,7 @@ func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {
 		ValidData: []bool{true, false, true, false},
 	}
 
-	arrVec := newArrayOfVectorFieldData(102, "arrvec", 1, schemapb.DataType_FloatVector,
-		[]bool{true, false, true, false})
+	arrVec := newArrayOfVectorFieldData(102, "arrvec", 1, schemapb.DataType_FloatVector, []bool{true, false, true, false})
 
 	c := NewFieldDataIdxComputer([]*schemapb.FieldData{scalar, vec, arrVec})
 
@@ -5993,15 +6232,11 @@ func TestAppendFieldData_ArrayOfVectorNullRowAppendsPlaceholder(t *testing.T) {
 	require.NotNil(t, got)
 	// All 4 rows must be present — null rows are placeholders, not skipped.
 	require.Len(t, got.GetData(), 4)
-	// Valid rows preserve their marker.
 	assert.Equal(t, []float32{1}, got.GetData()[0].GetFloatVector().GetData())
 	assert.Equal(t, []float32{3}, got.GetData()[2].GetFloatVector().GetData())
-	// Null rows are empty placeholders.
 	assert.Empty(t, got.GetData()[1].GetFloatVector().GetData())
 	assert.Empty(t, got.GetData()[3].GetFloatVector().GetData())
-	// ValidData propagated row-by-row.
 	assert.Equal(t, validData, dst[0].GetValidData())
-	// VectorArray-level metadata carried through.
 	assert.EqualValues(t, 1, got.GetDim())
 	assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
 }

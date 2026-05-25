@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -519,6 +520,19 @@ func (m *LogicalToPhysicalMapping) Build(validData []bool, startLogical, totalCo
 	m.validCount = physicalIdx
 }
 
+func getNullableVectorPhysicalOffset(validData []bool, mapping *LogicalToPhysicalMapping, logicalOffset int) int {
+	if mapping != nil && mapping.l2pMap != nil {
+		return mapping.GetPhysicalOffset(logicalOffset)
+	}
+	physicalOffset := 0
+	for i := 0; i < logicalOffset; i++ {
+		if validData[i] {
+			physicalOffset++
+		}
+	}
+	return physicalOffset
+}
+
 type BinaryVectorFieldData struct {
 	Data       []byte
 	ValidData  []bool
@@ -589,9 +603,6 @@ func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.
 }
 
 func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
-	if len(src.Contents) == 0 {
-		return
-	}
 	if dst.Dim < src.Dim {
 		dst.Dim = src.Dim
 	}
@@ -754,7 +765,10 @@ func (data *BinaryVectorFieldData) GetRow(i int) any {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Data[physicalIdx*data.Dim/8 : (physicalIdx+1)*data.Dim/8]
 }
 
@@ -762,7 +776,10 @@ func (data *SparseFloatVectorFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Contents[physicalIdx]
 }
 
@@ -770,7 +787,10 @@ func (data *FloatVectorFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Data[physicalIdx*data.Dim : (physicalIdx+1)*data.Dim]
 }
 
@@ -778,7 +798,10 @@ func (data *Float16VectorFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Data[physicalIdx*data.Dim*2 : (physicalIdx+1)*data.Dim*2]
 }
 
@@ -786,7 +809,10 @@ func (data *BFloat16VectorFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Data[physicalIdx*data.Dim*2 : (physicalIdx+1)*data.Dim*2]
 }
 
@@ -794,7 +820,10 @@ func (data *Int8VectorFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
 	}
-	physicalIdx := data.L2PMapping.GetPhysicalOffset(i)
+	physicalIdx := i
+	if data.GetNullable() {
+		physicalIdx = getNullableVectorPhysicalOffset(data.ValidData, &data.L2PMapping, i)
+	}
 	return data.Data[physicalIdx*data.Dim : (physicalIdx+1)*data.Dim]
 }
 
@@ -1261,55 +1290,128 @@ func (data *GeometryFieldData) AppendRows(dataRows interface{}, validDataRows in
 	return data.AppendValidDataRows(validDataRows)
 }
 
+func validateNullableVectorCompactRows(nullable bool, validDataRows interface{}, physicalRows int) error {
+	if !nullable {
+		return nil
+	}
+	validData, ok := validDataRows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", validDataRows, "nullable vector requires valid data")
+	}
+	if err := funcutil.ValidateNullableVectorCompactRows("vector", validData, uint64(physicalRows), 0, true); err != nil {
+		return merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	return nil
+}
+
+func validateNullableVectorTotalRows(nullable bool, existingValidData []bool, newValidData []bool, physicalRows int) error {
+	if !nullable {
+		return nil
+	}
+	validCount := funcutil.CountValidRows(existingValidData) + funcutil.CountValidRows(newValidData)
+	if uint64(physicalRows) != validCount {
+		return merr.WrapErrParameterInvalidMsg(
+			"nullable vector compact data row count mismatch: physical rows=%d, valid rows=%d",
+			physicalRows,
+			validCount)
+	}
+	return nil
+}
+
 // AppendDataRows appends FLATTEN vectors to field data.
 func (data *BinaryVectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]byte", dataRows, "Wrong rows type")
+	}
+	rowWidth := data.Dim / 8
+	if len(v)%rowWidth != 0 {
+		return merr.WrapErrParameterInvalid(rowWidth, len(v), "Wrong vector size")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/rowWidth); err != nil {
 		return err
 	}
+	data.Data = append(data.Data, v...)
 	return data.AppendValidDataRows(validDataRows)
 }
 
 // AppendDataRows appends FLATTEN vectors to field data.
 func (data *FloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.([]float32)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]float32", dataRows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
 		return err
 	}
+	data.Data = append(data.Data, v...)
 	return data.AppendValidDataRows(validDataRows)
 }
 
 // AppendDataRows appends FLATTEN vectors to field data.
 func (data *Float16VectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]byte", dataRows, "Wrong rows type")
+	}
+	rowWidth := data.Dim * 2
+	if len(v)%rowWidth != 0 {
+		return merr.WrapErrParameterInvalid(rowWidth, len(v), "Wrong vector size")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/rowWidth); err != nil {
 		return err
 	}
+	data.Data = append(data.Data, v...)
 	return data.AppendValidDataRows(validDataRows)
 }
 
 // AppendDataRows appends FLATTEN vectors to field data.
 func (data *BFloat16VectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.([]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]byte", dataRows, "Wrong rows type")
+	}
+	rowWidth := data.Dim * 2
+	if len(v)%rowWidth != 0 {
+		return merr.WrapErrParameterInvalid(rowWidth, len(v), "Wrong vector size")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/rowWidth); err != nil {
 		return err
 	}
+	data.Data = append(data.Data, v...)
 	return data.AppendValidDataRows(validDataRows)
 }
 
 func (data *SparseFloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.(*SparseFloatVectorFieldData)
+	if !ok {
+		return merr.WrapErrParameterInvalid("SparseFloatVectorFieldData", dataRows, "Wrong rows type")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v.Contents)); err != nil {
 		return err
+	}
+	data.Contents = append(data.Contents, v.Contents...)
+	if data.Dim < v.Dim {
+		data.Dim = v.Dim
 	}
 	return data.AppendValidDataRows(validDataRows)
 }
 
 func (data *Int8VectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	v, ok := dataRows.([]int8)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int8", dataRows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
+	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
 		return err
 	}
+	data.Data = append(data.Data, v...)
 	return data.AppendValidDataRows(validDataRows)
 }
 
@@ -1672,6 +1774,9 @@ func (data *BinaryVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
 	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Data)/(data.Dim/8)); err != nil {
+		return err
+	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
 	return nil
@@ -1698,6 +1803,9 @@ func (data *FloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
 	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Data)/data.Dim); err != nil {
+		return err
+	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
 	return nil
@@ -1711,6 +1819,9 @@ func (data *Float16VectorFieldData) AppendValidDataRows(rows interface{}) error 
 	v, ok := rows.([]bool)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Data)/(data.Dim*2)); err != nil {
+		return err
 	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
@@ -1726,6 +1837,9 @@ func (data *BFloat16VectorFieldData) AppendValidDataRows(rows interface{}) error
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
 	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Data)/(data.Dim*2)); err != nil {
+		return err
+	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
 	return nil
@@ -1739,6 +1853,9 @@ func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) er
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
 	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Contents)); err != nil {
+		return err
+	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
 	return nil
@@ -1751,6 +1868,9 @@ func (data *Int8VectorFieldData) AppendValidDataRows(rows interface{}) error {
 	v, ok := rows.([]bool)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	if err := validateNullableVectorTotalRows(data.GetNullable(), data.ValidData, v, len(data.Data)/data.Dim); err != nil {
+		return err
 	}
 	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)

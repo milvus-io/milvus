@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -240,6 +241,105 @@ func TestCIndex_BuildInt8VecIndex(t *testing.T) {
 
 		err = index.Delete()
 		assert.Equal(t, err, nil)
+	}
+}
+
+func TestCIndex_BuildAllNullNullableVectorsDoesNotPanic(t *testing.T) {
+	type testCase struct {
+		name   string
+		dtype  schemapb.DataType
+		raw    any
+		params func() (map[string]string, map[string]string)
+	}
+
+	cases := []testCase{
+		{
+			name:  "float",
+			dtype: schemapb.DataType_FloatVector,
+			raw:   []float32{},
+			params: func() (map[string]string, map[string]string) {
+				return generateParams(IndexFaissIDMap, metric.L2)
+			},
+		},
+		{
+			name:  "binary",
+			dtype: schemapb.DataType_BinaryVector,
+			raw:   []byte{},
+			params: func() (map[string]string, map[string]string) {
+				return generateParams(IndexFaissBinIDMap, metric.JACCARD)
+			},
+		},
+		{
+			name:  "float16",
+			dtype: schemapb.DataType_Float16Vector,
+			raw:   []byte{},
+			params: func() (map[string]string, map[string]string) {
+				return generateParams(IndexFaissIDMap, metric.L2)
+			},
+		},
+		{
+			name:  "bfloat16",
+			dtype: schemapb.DataType_BFloat16Vector,
+			raw:   []byte{},
+			params: func() (map[string]string, map[string]string) {
+				return generateParams(IndexFaissIDMap, metric.L2)
+			},
+		},
+		{
+			name:  "int8",
+			dtype: schemapb.DataType_Int8Vector,
+			raw:   []int8{},
+			params: func() (map[string]string, map[string]string) {
+				return generateParams(IndexHNSW, metric.L2)
+			},
+		},
+		{
+			name:  "sparse",
+			dtype: schemapb.DataType_SparseFloatVector,
+			raw:   []byte{},
+			params: func() (map[string]string, map[string]string) {
+				return map[string]string{}, map[string]string{
+					common.IndexTypeKey:  "SPARSE_INVERTED_INDEX",
+					common.MetricTypeKey: metric.IP,
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			typeParams, indexParams := tc.params()
+			index, err := NewCgoIndex(tc.dtype, typeParams, indexParams)
+			require.NoError(t, err)
+			require.NotNil(t, index)
+			defer func() {
+				require.NoError(t, index.Delete())
+			}()
+
+			dataset := &Dataset{
+				DType: tc.dtype,
+				Data: map[string]any{
+					keyRawArr:   tc.raw,
+					keyValidArr: []bool{false, false, false},
+				},
+			}
+			require.NotPanics(t, func() {
+				err = index.Build(dataset)
+			})
+			require.NoError(t, err)
+
+			blobs, err := index.Serialize()
+			require.NoError(t, err)
+			require.NotEmpty(t, blobs)
+
+			copyIndex, err := NewCgoIndex(tc.dtype, typeParams, indexParams)
+			require.NoError(t, err)
+			require.NotNil(t, copyIndex)
+			defer func() {
+				require.NoError(t, copyIndex.Delete())
+			}()
+			require.NoError(t, copyIndex.Load(blobs))
+		})
 	}
 }
 

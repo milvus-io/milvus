@@ -1751,6 +1751,180 @@ func TestNullableVectorAllTypes(t *testing.T) {
 	}
 }
 
+func TestNullableVectorSearchOrderByOutputCompactData(t *testing.T) {
+	t.Parallel()
+
+	vectorTypes := []NullableVectorType{
+		{Name: "FloatVector", FieldType: entity.FieldTypeFloatVector},
+		{Name: "Float16Vector", FieldType: entity.FieldTypeFloat16Vector},
+		{Name: "SparseVector", FieldType: entity.FieldTypeSparseVector},
+	}
+
+	for _, vt := range vectorTypes {
+		t.Run(vt.Name, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+			collName := common.GenRandomString("nullable_vec_order", 5)
+			pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+			queryVecField := entity.NewField().WithName("query_vec").WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+			scoreField := entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64)
+			vecField := entity.NewField().WithName("vector").WithDataType(vt.FieldType).WithNullable(true)
+			if vt.FieldType != entity.FieldTypeSparseVector {
+				vecField = vecField.WithDim(common.DefaultDim)
+			}
+			schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(queryVecField).WithField(scoreField).WithField(vecField)
+
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
+
+			pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{0, 1, 2, 3})
+			scoreColumn := column.NewColumnInt64("score", []int64{40, 10, 30, 20})
+
+			queryVecs := make([][]float32, 4)
+			for i := range queryVecs {
+				queryVecs[i] = make([]float32, common.DefaultDim)
+				for j := range common.DefaultDim {
+					queryVecs[i][j] = float32(i*common.DefaultDim+j) / 10000.0
+				}
+			}
+			queryVecColumn := column.NewColumnFloatVector("query_vec", common.DefaultDim, queryVecs)
+
+			validData := []bool{true, false, true, true}
+			var vecColumn column.Column
+			var expectedFloat map[int64][]float32
+			var expectedBytes map[int64][]byte
+			var expectedSparse map[int64]entity.SparseEmbedding
+
+			switch vt.FieldType {
+			case entity.FieldTypeFloatVector:
+				vectors := make([][]float32, 3)
+				for i := range vectors {
+					vectors[i] = make([]float32, common.DefaultDim)
+					for j := range common.DefaultDim {
+						vectors[i][j] = float32((i+1)*common.DefaultDim + j)
+					}
+				}
+				expectedFloat = map[int64][]float32{
+					0: vectors[0],
+					2: vectors[1],
+					3: vectors[2],
+				}
+				vecColumn, err = column.NewNullableColumnFloatVector("vector", common.DefaultDim, vectors, validData)
+			case entity.FieldTypeFloat16Vector:
+				vectors := [][]byte{
+					common.GenFloat16Vector(common.DefaultDim),
+					common.GenFloat16Vector(common.DefaultDim),
+					common.GenFloat16Vector(common.DefaultDim),
+				}
+				expectedBytes = map[int64][]byte{
+					0: vectors[0],
+					2: vectors[1],
+					3: vectors[2],
+				}
+				vecColumn, err = column.NewNullableColumnFloat16Vector("vector", common.DefaultDim, vectors, validData)
+			case entity.FieldTypeSparseVector:
+				vectors := make([]entity.SparseEmbedding, 3)
+				for i := range vectors {
+					vectors[i], err = entity.NewSliceSparseEmbedding([]uint32{0, uint32(i + 10)}, []float32{1.0, float32(i + 1)})
+					common.CheckErr(t, err, true)
+				}
+				expectedSparse = map[int64]entity.SparseEmbedding{
+					0: vectors[0],
+					2: vectors[1],
+					3: vectors[2],
+				}
+				vecColumn, err = column.NewNullableColumnSparseFloatVector("vector", vectors, validData)
+			}
+			common.CheckErr(t, err, true)
+
+			insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, pkColumn, queryVecColumn, scoreColumn, vecColumn))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, 4, insertRes.InsertCount)
+
+			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, flushTask.Await(ctx), true)
+
+			queryVecIndex := index.NewFlatIndex(entity.L2)
+			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "query_vec", queryVecIndex))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, indexTask.Await(ctx), true)
+
+			nullableVecIndex := CreateNullableVectorIndexWithFieldName(vt, "vector")
+			indexTask, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "vector", nullableVecIndex))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, indexTask.Await(ctx), true)
+
+			loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+			common.CheckErr(t, err, true)
+			common.CheckErr(t, loadTask.Await(ctx), true)
+
+			searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 4, []entity.Vector{entity.FloatVector(queryVecs[0])}).
+				WithANNSField("query_vec").
+				WithConsistencyLevel(entity.ClStrong).
+				WithOutputFields("score", "vector").
+				WithSearchParam("order_by_fields", "score:asc"))
+			common.CheckErr(t, err, true)
+			require.Len(t, searchRes, 1)
+			require.EqualValues(t, 4, searchRes[0].ResultCount)
+
+			ids := searchRes[0].IDs.(*column.ColumnInt64).Data()
+			require.Equal(t, []int64{1, 3, 2, 0}, ids)
+
+			scoreCol := searchRes[0].GetColumn("score")
+			vecCol := searchRes[0].GetColumn("vector")
+			require.NotNil(t, scoreCol)
+			require.NotNil(t, vecCol)
+
+			for i, id := range ids {
+				score, err := scoreCol.GetAsInt64(i)
+				require.NoError(t, err)
+				require.EqualValues(t, []int64{10, 20, 30, 40}[i], score)
+
+				isNull, err := vecCol.IsNull(i)
+				require.NoError(t, err)
+				if id == 1 {
+					require.True(t, isNull, "vector should be null for pk %d", id)
+					continue
+				}
+				require.False(t, isNull, "vector should be valid for pk %d", id)
+				raw, err := vecCol.Get(i)
+				require.NoError(t, err)
+
+				switch vt.FieldType {
+				case entity.FieldTypeFloatVector:
+					actual := []float32(raw.(entity.FloatVector))
+					expected := expectedFloat[id]
+					require.Equal(t, len(expected), len(actual))
+					for j := range expected {
+						require.InDelta(t, expected[j], actual[j], 1e-6)
+					}
+				case entity.FieldTypeFloat16Vector:
+					actual := []byte(raw.(entity.Float16Vector))
+					expected := expectedBytes[id]
+					require.Equal(t, expected, actual)
+				case entity.FieldTypeSparseVector:
+					actual := raw.(entity.SparseEmbedding)
+					expected := expectedSparse[id]
+					require.Equal(t, expected.Len(), actual.Len())
+					for j := 0; j < expected.Len(); j++ {
+						expectedPos, expectedVal, ok := expected.Get(j)
+						require.True(t, ok)
+						actualPos, actualVal, ok := actual.Get(j)
+						require.True(t, ok)
+						require.EqualValues(t, expectedPos, actualPos)
+						require.InDelta(t, expectedVal, actualVal, 1e-6)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestNullableVectorWithScalarFilter(t *testing.T) {
 	t.Parallel()
 
@@ -2369,6 +2543,20 @@ func TestNullableVectorAllNull(t *testing.T) {
 			count, err := queryRes.Fields[0].GetAsInt64(0)
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, nb, count, "query should return all %d rows even with 100%% null vectors", nb)
+
+			// query vector output should preserve all-null logical rows after index/load
+			queryVecRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("int64 < 10").WithOutputFields("vector"))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, 10, queryVecRes.ResultCount)
+			vecCol := queryVecRes.GetColumn("vector")
+			for i := 0; i < queryVecRes.ResultCount; i++ {
+				isNull, err := vecCol.IsNull(i)
+				require.NoError(t, err)
+				require.True(t, isNull, "all-null vector output row %d should stay null", i)
+				value, err := vecCol.Get(i)
+				require.NoError(t, err)
+				require.Nil(t, value, "all-null vector output row %d should have nil value", i)
+			}
 
 			// clean up
 			err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestBaseMsg(t *testing.T) {
@@ -209,6 +210,110 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 
 	msg1.Version = msgpb.InsertDataVersion_ColumnBased
 	assert.NoError(t, msg1.CheckAligned())
+}
+
+func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	testCases := []struct {
+		name      string
+		fieldData *schemapb.FieldData
+	}{
+		{
+			name: "float_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_FloatVector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+						Data: []float32{1, 2, 0, 0, 3, 4},
+					}},
+				}},
+			},
+		},
+		{
+			name: "binary_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_BinaryVector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  8,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 0, 2}},
+				}},
+			},
+		},
+		{
+			name: "float16_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_Float16Vector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
+				}},
+			},
+		},
+		{
+			name: "bfloat16_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_BFloat16Vector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
+				}},
+			},
+		},
+		{
+			name: "sparse_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_SparseFloatVector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: [][]byte{
+							typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+							typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+							typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3}),
+						},
+					}},
+				}},
+			},
+		},
+		{
+			name: "int8_vector",
+			fieldData: &schemapb.FieldData{
+				FieldName: "vec",
+				Type:      schemapb.DataType_Int8Vector,
+				ValidData: validData,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 0, 0, 3, 4}},
+				}},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := &InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					Timestamps: []uint64{1, 2, 3},
+					RowIDs:     []int64{1, 2, 3},
+					FieldsData: []*schemapb.FieldData{tc.fieldData},
+					NumRows:    3,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			}
+
+			assert.Error(t, msg.CheckAligned())
+		})
+	}
 }
 
 func TestInsertMsg_IndexMsg(t *testing.T) {

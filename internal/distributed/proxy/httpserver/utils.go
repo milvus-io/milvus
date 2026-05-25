@@ -2444,6 +2444,7 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 	if len(accessor.validData) == 0 {
 		return accessor, nil
 	}
+	isNullableVector := typeutil.IsCompactNullableVectorFieldData(fieldData)
 
 	compactIndices := make([]int64, len(accessor.validData))
 	validCount := int64(0)
@@ -2454,6 +2455,13 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 		} else {
 			compactIndices[i] = -1
 		}
+	}
+	if isNullableVector {
+		if err := funcutil.ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(accessor.validData)), true); err != nil {
+			return nil, err
+		}
+		accessor.compactIndices = compactIndices
+		return accessor, nil
 	}
 	if validCount == 0 {
 		accessor.compactIndices = compactIndices

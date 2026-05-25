@@ -55,9 +55,18 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
 inline TargetBitmap
 TransformBitset(const BitsetView& bitset,
                 const milvus::OffsetMapping& mapping) {
+    // Empty BitsetView is the Knowhere fast path for "no rows filtered".
+    // Keep it empty after logical-to-physical mapping.
+    if (bitset.empty()) {
+        return {};
+    }
+
+    // bit=true means filtered out. The logical bitset may be shorter than the
+    // full mapping on growing segments because it is sized by query timestamp
+    // visibility. Physical rows outside that logical view are not visible yet.
     TargetBitmap result;
     auto count = mapping.GetValidCount();
-    result.resize(count);
+    result.resize(count, true);
     for (int64_t physical_idx = 0; physical_idx < count; physical_idx++) {
         auto logical_idx = mapping.GetLogicalOffset(physical_idx);
         if (logical_idx >= 0 &&

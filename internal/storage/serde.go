@@ -587,7 +587,16 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return value, nil
 		}
-		return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+		if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
+			value := arr.Value(i)
+			if shouldCopy {
+				result := make([]byte, len(value))
+				copy(result, value)
+				return result, nil
+			}
+			return value, nil
+		}
+		return nil, fmt.Errorf("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 	}
 	fixedSizeSerializer := func(b array.Builder, v any, _ schemapb.DataType) error {
 		if v == nil {
@@ -637,16 +646,25 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if a.IsNull(i) {
 				return nil, nil
 			}
-			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
-				// convert to []int8
-				bytes := arr.Value(i)
+			var bytes []byte
+			switch arr := a.(type) {
+			case *array.FixedSizeBinary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			case *array.Binary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			}
+			if bytes != nil {
 				int8s := make([]int8, len(bytes))
 				for i, b := range bytes {
 					int8s[i] = int8(b)
 				}
 				return int8s, nil
 			}
-			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+			return nil, fmt.Errorf("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -680,8 +698,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if a.IsNull(i) {
 				return nil, nil
 			}
-			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
-				vector := arrow.Float32Traits.CastFromBytes(arr.Value(i))
+			var bytes []byte
+			switch arr := a.(type) {
+			case *array.FixedSizeBinary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			case *array.Binary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			}
+			if bytes != nil {
+				vector := arrow.Float32Traits.CastFromBytes(bytes)
 				if shouldCopy {
 					vectorCopy := make([]float32, len(vector))
 					copy(vectorCopy, vector)
@@ -689,7 +718,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 				return vector, nil
 			}
-			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+			return nil, fmt.Errorf("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -1096,7 +1125,7 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 		)
 	}
 
-	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) && !typeutil.IsVectorArrayType(field.DataType) {
+	if field.GetNullable() && typeutil.IsSupportedNullableVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
 		arrowType = arrow.BinaryTypes.Binary
 		fieldMetadata = arrow.NewMetadata(
 			[]string{"dim"},
@@ -1128,8 +1157,9 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 
 	// Use appropriate Arrow writer properties for ArrayOfVector
 	arrowWriterProps := pqarrow.DefaultWriterProps()
-	if field.DataType == schemapb.DataType_ArrayOfVector {
-		// Ensure schema metadata is preserved for ArrayOfVector
+	if field.DataType == schemapb.DataType_ArrayOfVector ||
+		(field.GetNullable() && isNullableDenseVectorArrowType(field.DataType)) {
+		// Preserve dim/elementType metadata required by binary-backed vector layouts.
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),
 		)
@@ -1316,7 +1346,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			elementType = field.GetElementType()
 		}
 
-		if field.GetNullable() && typeutil.IsVectorType(field.DataType) {
+		if field.GetNullable() && typeutil.IsSupportedNullableVectorType(field.DataType) {
 			var validData []bool
 			switch fd := fieldData.(type) {
 			case *FloatVectorFieldData:
@@ -1330,8 +1360,6 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			case *SparseFloatVectorFieldData:
 				validData = fd.ValidData
 			case *Int8VectorFieldData:
-				validData = fd.ValidData
-			case *VectorArrayFieldData:
 				validData = fd.ValidData
 			}
 			// Use len(validData) as logical row count, GetRow takes logical index

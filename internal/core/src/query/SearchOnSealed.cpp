@@ -99,7 +99,6 @@ SearchOnSealedIndex(const Schema& schema,
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitset, offset_mapping);
         if (offset_mapping.GetValidCount() == 0) {
             auto total_num = num_queries * topK;
             search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
@@ -108,7 +107,11 @@ SearchOnSealedIndex(const Schema& schema,
             search_result.unity_topK_ = topK;
             return;
         }
-        search_bitset = search_result.PinBitset(std::move(transformed_bitset));
+        if (!bitset.empty()) {
+            transformed_bitset = TransformBitset(bitset, offset_mapping);
+            search_bitset =
+                search_result.PinBitset(std::move(transformed_bitset));
+        }
     }
 
     if (search_info.iterator_v2_info_.has_value()) {
@@ -187,7 +190,6 @@ SearchOnSealedColumn(const Schema& schema,
         for (int64_t c = 0; c < column->num_chunks(); ++c) {
             column->EnsureChunkOffsetMapping(c, op_context);
         }
-        transformed_bitset = TransformBitset(bitview, offset_mapping);
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * search_info.topk_;
@@ -197,7 +199,10 @@ SearchOnSealedColumn(const Schema& schema,
             result.unity_topK_ = search_info.topk_;
             return;
         }
-        search_bitview = result.PinBitset(std::move(transformed_bitset));
+        if (!bitview.empty()) {
+            transformed_bitset = TransformBitset(bitview, offset_mapping);
+            search_bitview = result.PinBitset(std::move(transformed_bitset));
+        }
     }
 
     // For element-level search (embedding-search-embedding), the underlying
