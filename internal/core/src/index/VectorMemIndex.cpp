@@ -446,7 +446,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
         } else {
-            offsets.reserve(total_num_rows + 1);
+            offsets.reserve((nullable ? total_valid_rows : total_num_rows) + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
             for (auto& data : field_datas) {
@@ -456,21 +456,32 @@ VectorMemIndex<T>::Build(const Config& config) {
                            "failed to cast field data to vector array");
 
                 auto rows = vec_array_data->get_num_rows();
+                auto data_offset_before = offset;
+                int64_t physical_row = 0;
                 for (auto i = 0; i < rows; ++i) {
-                    auto size = vec_array_data->DataSize(i);
+                    if (vec_array_data->IsNullable() &&
+                        !vec_array_data->is_valid(i)) {
+                        continue;
+                    }
+                    auto size = vec_array_data->DataSize(physical_row);
                     assert(size % bytes_per_vec == 0);
                     assert(bytes_per_vec != 0);
 
-                    auto vec_array = vec_array_data->value_at(i);
+                    auto vec_array = vec_array_data->value_at(physical_row);
 
-                    std::memcpy(buf.get() + offset, vec_array->data(), size);
+                    if (size > 0) {
+                        std::memcpy(
+                            buf.get() + offset, vec_array->data(), size);
+                    }
                     offset += size;
 
                     lim_offset += size / bytes_per_vec;
                     offsets.push_back(lim_offset);
+                    physical_row++;
                 }
 
-                assert(data->Size() == offset);
+                AssertInfo(data->DataSize() == offset - data_offset_before,
+                           "inconsistent vector array data size");
 
                 data.reset();
             }

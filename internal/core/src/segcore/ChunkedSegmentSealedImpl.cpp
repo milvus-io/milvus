@@ -1751,33 +1751,59 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
 
     auto metric_type = vec_index->GetMetricType();
 
-    // Build el_ids dataset from seg_offsets (seg_offsets are el_ids for VECTOR_ARRAY)
-    auto ids_ds = GenIdsDataset(count, seg_offsets);
+    ValidResult filter_result;
+    int64_t valid_count = count;
+    const bool* valid_data = nullptr;
+    const int64_t* valid_offsets = seg_offsets;
+    if (field_meta.is_nullable()) {
+        filter_result =
+            FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
+        if (filter_result.valid_data != nullptr) {
+            valid_count = filter_result.valid_count;
+            valid_data = filter_result.valid_data.get();
+            valid_offsets = filter_result.valid_offsets.data();
+        }
+    }
+
+    auto data_array =
+        CreateEmptyVectorDataArray(count, valid_count, valid_data, field_meta);
+    if (valid_count == 0) {
+        return data_array;
+    }
+
+    // Build el_ids dataset from valid_offsets. For nullable VECTOR_ARRAY,
+    // FilterVectorValidOffsets maps logical row offsets to the index's compact
+    // physical embedding-list ids.
+    auto ids_ds = GenIdsDataset(valid_count, valid_offsets);
 
     auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
-    AssertInfo(offsets.size() == static_cast<size_t>(count + 1),
+    AssertInfo(offsets.size() == static_cast<size_t>(valid_count + 1),
                "GetEmbListByIds returned invalid offsets size {}, expected {}",
                offsets.size(),
-               count + 1);
+               valid_count + 1);
 
     auto dim = field_meta.get_dim();
     auto element_type = field_meta.get_element_type();
     const size_t vec_size_per_element =
         milvus::vector_bytes_per_element(element_type, dim);
 
-    auto data_array = std::make_unique<DataArray>();
-    data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(static_cast<milvus::proto::schema::DataType>(
-        field_meta.get_data_type()));
-
     auto vector_array = data_array->mutable_vectors();
     auto obj = vector_array->mutable_vector_array();
-    obj->set_dim(dim);
-    obj->set_element_type(milvus::ToProtoDataType(element_type));
+
+    std::vector<int64_t> valid_logical_offsets;
+    if (valid_data != nullptr) {
+        valid_logical_offsets.reserve(valid_count);
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data[i]) {
+                valid_logical_offsets.push_back(i);
+            }
+        }
+    }
 
     // Build a VectorFieldProto for each embedding list
-    for (int64_t i = 0; i < count; i++) {
-        auto* entry = obj->mutable_data()->Add();
+    for (int64_t i = 0; i < valid_count; i++) {
+        auto dst_index = valid_data != nullptr ? valid_logical_offsets[i] : i;
+        auto* entry = obj->mutable_data()->Mutable(dst_index);
         entry->set_dim(dim);
         size_t vec_start = offsets[i];
         size_t vec_count = offsets[i + 1] - offsets[i];

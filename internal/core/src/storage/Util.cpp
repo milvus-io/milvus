@@ -334,25 +334,11 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "builder must be ListBuilder for VECTOR_ARRAY");
 
             auto vector_arrays = reinterpret_cast<VectorArray*>(raw_data);
+            auto valid_data = payload.valid_data;
+            AssertInfo((nullable && valid_data) || !nullable,
+                       "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto element_type = vector_arrays[0].get_element_type();
-
-                // Validate element type
-                switch (element_type) {
-                    case DataType::VECTOR_FLOAT:
-                    case DataType::VECTOR_BINARY:
-                    case DataType::VECTOR_FLOAT16:
-                    case DataType::VECTOR_BFLOAT16:
-                    case DataType::VECTOR_INT8:
-                        break;
-                    default:
-                        ThrowInfo(DataTypeInvalid,
-                                  "Unsupported element type in VectorArray: {}",
-                                  element_type);
-                }
-
-                // All supported vector types use FixedSizeBinaryBuilder
                 auto value_builder =
                     static_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
@@ -360,23 +346,60 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                            "value_builder must be FixedSizeBinaryBuilder for "
                            "VectorArray");
 
-                for (int i = 0; i < length; ++i) {
+                DataType element_type = DataType::NONE;
+                auto append_vector_array = [&](const VectorArray& array) {
+                    if (element_type == DataType::NONE) {
+                        element_type = array.get_element_type();
+                        switch (element_type) {
+                            case DataType::VECTOR_FLOAT:
+                            case DataType::VECTOR_BINARY:
+                            case DataType::VECTOR_FLOAT16:
+                            case DataType::VECTOR_BFLOAT16:
+                            case DataType::VECTOR_INT8:
+                                break;
+                            default:
+                                ThrowInfo(
+                                    DataTypeInvalid,
+                                    "Unsupported element type in VectorArray: "
+                                    "{}",
+                                    element_type);
+                        }
+                    } else {
+                        AssertInfo(array.get_element_type() == element_type,
+                                   "Inconsistent element types in "
+                                   "VectorArray");
+                    }
                     auto status = list_builder->Append();
                     AssertInfo(status.ok(),
                                "Failed to append list: {}",
                                status.ToString());
 
-                    const auto& array = vector_arrays[i];
-                    AssertInfo(array.get_element_type() == element_type,
-                               "Inconsistent element types in VectorArray");
-
                     int num_vectors = array.length();
-                    auto ast = value_builder->AppendValues(
-                        reinterpret_cast<const uint8_t*>(array.data()),
-                        num_vectors);
-                    AssertInfo(ast.ok(),
-                               "Failed to batch append vectors: {}",
-                               ast.ToString());
+                    if (num_vectors > 0) {
+                        auto ast = value_builder->AppendValues(
+                            reinterpret_cast<const uint8_t*>(array.data()),
+                            num_vectors);
+                        AssertInfo(ast.ok(),
+                                   "Failed to batch append vectors: {}",
+                                   ast.ToString());
+                    }
+                };
+
+                int valid_index = 0;
+                for (int i = 0; i < length; ++i) {
+                    if (nullable) {
+                        auto bit = (valid_data[i >> 3] >> (i & 0x07)) & 1;
+                        if (!bit) {
+                            auto status = list_builder->AppendNull();
+                            AssertInfo(status.ok(),
+                                       "Failed to append null list: {}",
+                                       status.ToString());
+                            continue;
+                        }
+                        append_vector_array(vector_arrays[valid_index++]);
+                    } else {
+                        append_vector_array(vector_arrays[i]);
+                    }
                 }
             }
             break;
@@ -1262,7 +1285,7 @@ CreateFieldData(const DataType& type,
                 dim, type, nullable, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
-                dim, element_type, total_num_rows);
+                dim, element_type, nullable, total_num_rows);
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +

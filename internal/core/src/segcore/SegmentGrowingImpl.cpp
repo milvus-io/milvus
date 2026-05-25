@@ -93,6 +93,29 @@ using namespace milvus::cachinglayer;
 
 namespace {
 
+int32_t
+GetVectorArrayLength(const proto::schema::VectorField& vec_field,
+                     DataType element_type,
+                     int64_t dim) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT:
+            return vec_field.float_vector().data_size() / dim;
+        case DataType::VECTOR_FLOAT16:
+            return vec_field.float16_vector().size() / (dim * 2);
+        case DataType::VECTOR_BFLOAT16:
+            return vec_field.bfloat16_vector().size() / (dim * 2);
+        case DataType::VECTOR_BINARY:
+            return vec_field.binary_vector().size() / (dim / 8);
+        case DataType::VECTOR_INT8:
+            return vec_field.int8_vector().size() / dim;
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Unexpected VECTOR_ARRAY element type: {}",
+                      element_type);
+    }
+    return 0;
+}
+
 void
 ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                                  const FieldMeta& field_meta,
@@ -104,10 +127,15 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
         auto num_rows = data->get_num_rows();
 
         if (data_type == DataType::VECTOR_ARRAY) {
-            // Get raw pointer to VectorArray data
             auto* raw_data = static_cast<const VectorArray*>(data->Data());
+            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
-                array_lengths[offset + i] = raw_data[i].length();
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
+                auto source_index = data->IsNullable() ? physical_row++ : i;
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
             // For regular array types (INT32, FLOAT, etc.)
@@ -130,34 +158,23 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         const auto& vector_array = field_data.vectors().vector_array();
         int64_t dim = field_meta.get_dim();
         auto element_type = field_meta.get_element_type();
+        bool compact_nullable = field_meta.is_nullable() &&
+                                field_data.valid_data_size() == num_rows &&
+                                vector_array.data_size() != num_rows;
+        int64_t physical_row = 0;
 
         for (int i = 0; i < num_rows; ++i) {
-            const auto& vec_field = vector_array.data(i);
-            int32_t array_len = 0;
-
-            switch (element_type) {
-                case DataType::VECTOR_FLOAT:
-                    array_len = vec_field.float_vector().data_size() / dim;
-                    break;
-                case DataType::VECTOR_FLOAT16:
-                    array_len = vec_field.float16_vector().size() / (dim * 2);
-                    break;
-                case DataType::VECTOR_BFLOAT16:
-                    array_len = vec_field.bfloat16_vector().size() / (dim * 2);
-                    break;
-                case DataType::VECTOR_BINARY:
-                    array_len = vec_field.binary_vector().size() / (dim / 8);
-                    break;
-                case DataType::VECTOR_INT8:
-                    array_len = vec_field.int8_vector().size() / dim;
-                    break;
-                default:
-                    ThrowInfo(ErrorCode::UnexpectedError,
-                              "Unexpected VECTOR_ARRAY element type: {}",
-                              element_type);
+            if (compact_nullable && !field_data.valid_data(i)) {
+                array_lengths[i] = 0;
+                continue;
             }
 
-            array_lengths[i] = array_len;
+            auto source_index = compact_nullable ? physical_row++ : i;
+            AssertInfo(source_index < vector_array.data_size(),
+                       "VECTOR_ARRAY row {} is missing from field data",
+                       source_index);
+            array_lengths[i] = GetVectorArrayLength(
+                vector_array.data(source_index), element_type, dim);
         }
     } else {
         // ARRAY: extract from scalars().array_data().data(i)

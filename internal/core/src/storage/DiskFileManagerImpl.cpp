@@ -674,7 +674,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
 
         // Calculate total data size needed
         int64_t total_size = 0;
-        for (auto i = 0; i < rows; ++i) {
+        for (auto i = 0; i < vec_array_data->get_valid_rows(); ++i) {
             total_size += vec_array_data->DataSize(i);
         }
 
@@ -682,9 +682,14 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[total_size]);
         int64_t buf_offset = 0;
 
+        int64_t physical_row = 0;
         for (auto i = 0; i < rows; ++i) {
-            auto vec_array = vec_array_data->value_at(i);
-            auto size = vec_array_data->DataSize(i);
+            if (vec_array_data->IsNullable() && !vec_array_data->is_valid(i)) {
+                continue;
+            }
+
+            auto vec_array = vec_array_data->value_at(physical_row);
+            auto size = vec_array_data->DataSize(physical_row);
 
             // Collect offsets information if needed (cumulative offsets)
             if (offsets != nullptr) {
@@ -693,8 +698,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                 offsets->push_back(last_offset + vec_array->length());
             }
 
-            std::memcpy(buf.get() + buf_offset, vec_array->data(), size);
+            if (size > 0) {
+                std::memcpy(buf.get() + buf_offset, vec_array->data(), size);
+            }
             buf_offset += size;
+            physical_row++;
         }
 
         // Write flattened data to disk
