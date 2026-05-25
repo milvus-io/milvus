@@ -34,6 +34,7 @@ default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 
+fast_create_pk_field = "id"
 default_vector_field_name = "vector"
 
 
@@ -64,8 +65,8 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         self.binary_vector_index = "BIN_IVF_FLAT"
         self.primary_keys = []
         self.enable_dynamic_field = True
-        self.dyna_filed_name1 = "dyna_filed_name1"
-        self.dyna_filed_name2 = "dyna_filed_name2"
+        self.dyna_field_name1 = "dyna_field_name1"
+        self.dyna_field_name2 = "dyna_field_name2"
         self.datas = []
 
     @pytest.fixture(scope="class", autouse=True)
@@ -119,8 +120,8 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
                     self.binary_vector_field_name: binary_vectors[pk],
                     ct.default_float_field_name: pk * 1.0 if pk % 5 == 0 else None,
                     ct.default_string_field_name: str(pk) if pk % 5 == 0 else None,
-                    self.dyna_filed_name1: f"dyna_value_{pk}",
-                    self.dyna_filed_name2: pk * 1.0,
+                    self.dyna_field_name1: f"dyna_value_{pk}",
+                    self.dyna_field_name2: pk * 1.0,
                 }
                 self.datas.append(row)
 
@@ -316,7 +317,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         # Create collection with nullable sparse vector field
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(fast_create_pk_field, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("sparse_vec", DataType.SPARSE_FLOAT_VECTOR, nullable=True)
         self.create_collection(client, collection_name, schema=schema)
 
@@ -326,9 +327,9 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         rows = []
         for i in range(nb):
             if i in null_indices:
-                row = {"id": i, "sparse_vec": None}
+                row = {fast_create_pk_field: i, "sparse_vec": None}
             else:
-                row = {"id": i, "sparse_vec": {i: 1.0, i + 100: 0.5}}
+                row = {fast_create_pk_field: i, "sparse_vec": {i: 1.0, i + 100: 0.5}}
             rows.append(row)
 
         self.insert(client, collection_name, rows)
@@ -597,14 +598,14 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
             search_params=search_params,
             limit=default_limit,
             consistency_level=consistency_level,
-            output_fields=[ct.default_string_field_name, self.dyna_filed_name1, self.dyna_filed_name2],
+            output_fields=[ct.default_string_field_name, self.dyna_field_name1, self.dyna_field_name2],
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
                 "nq": default_nq,
                 "limit": default_limit,
                 "metric": self.float_vector_metric,
-                "output_fields": [ct.default_string_field_name, self.dyna_filed_name1, self.dyna_filed_name2],
+                "output_fields": [ct.default_string_field_name, self.dyna_field_name1, self.dyna_field_name2],
                 "original_entities": self.datas,
                 "pk_name": self.pk_field_name,
             },
@@ -620,7 +621,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        self.describe_collection(client, collection_name)[0]
+        collection_info = self.describe_collection(client, collection_name)[0]
         fields = collection_info.get("fields", None)
         field_names = [field.get("name") for field in fields]
 
@@ -643,7 +644,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
                 "nq": default_nq,
                 "limit": default_limit,
                 "metric": self.float_vector_metric,
-                "output_fields": field_names.extend([self.dyna_filed_name1, self.dyna_filed_name2]),
+                "output_fields": field_names + [self.dyna_field_name1, self.dyna_field_name2],
                 "original_entities": self.datas,
                 "pk_name": self.pk_field_name,
             },
@@ -662,7 +663,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        self.describe_collection(client, collection_name)[0]
+        collection_info = self.describe_collection(client, collection_name)[0]
         partition_name = self.partition_names[0]
 
         # Generate vectors to search
@@ -671,7 +672,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         # search with output fields
         expected_outputs = cf.get_wildcard_output_field_names(collection_info, wildcard_output_fields)
-        expected_outputs.extend([self.dyna_filed_name1, self.dyna_filed_name2])
+        expected_outputs.extend([self.dyna_field_name1, self.dyna_field_name2])
         log.info(f"search with output fields: {wildcard_output_fields}")
         self.search(
             client,
@@ -688,6 +689,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
                 "nq": len(ids_to_search),
                 "pk_name": self.pk_field_name,
                 "limit": default_limit,
+                "metric": "COSINE",
                 "output_fields": expected_outputs,
             },
         )
