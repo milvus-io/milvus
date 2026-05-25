@@ -29,7 +29,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Types.h"
 
-constexpr int64_t DIM = 16;
+constexpr int64_t DIM = 4;
 constexpr int64_t BINARY_DIM =
     8;  // Binary vectors need dim to be multiple of 8
 constexpr int64_t NQ = 10;
