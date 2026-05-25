@@ -331,6 +331,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const VectorBase& vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
+        const bool* valid_data,
         google::protobuf::RepeatedPtrField<T>* dst) const;
 
     template <typename T>

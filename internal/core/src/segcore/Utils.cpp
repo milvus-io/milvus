@@ -66,6 +66,42 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+void
+InitEmptyVectorArrayRow(proto::schema::VectorField* row,
+                        DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            row->mutable_float_vector();
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            row->mutable_binary_vector();
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            row->mutable_float16_vector();
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            row->mutable_bfloat16_vector();
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            row->mutable_int8_vector();
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported ArrayOfVector element type {}",
+                      element_type);
+        }
+    }
+}
+
+}  // namespace
+
 void
 // Takes a non-const DataArray& because VARCHAR strings are moved (not copied)
 // into the PkType variant vector. Callers must ensure the DataArray is
@@ -508,6 +544,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             for (int i = 0; i < count; i++) {
                 auto* row = obj->mutable_data()->Add();
                 row->set_dim(dim);
+                InitEmptyVectorArrayRow(row, field_meta.get_element_type());
             }
             break;
         }
