@@ -1399,6 +1399,35 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	}
 }
 
+// ResetImportingSegmentRows clears NumOfRows and MaxRowNum on each given
+// segment that is still in the Importing state. Used to discard partial
+// progress reported by a failed import attempt before the task is rescheduled,
+// so segments the retried attempt skips do not keep stale row counts that
+// would break sort compaction.
+func ResetImportingSegmentRows(segmentIDs ...int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		anyReset := false
+		for _, segmentID := range segmentIDs {
+			segment := modPack.Get(segmentID)
+			if segment == nil {
+				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows failed - segment not found",
+					zap.Int64("segmentID", segmentID))
+				continue
+			}
+			if segment.GetState() != commonpb.SegmentState_Importing {
+				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows skipped - segment not in Importing state",
+					zap.Int64("segmentID", segmentID),
+					zap.String("state", segment.GetState().String()))
+				continue
+			}
+			segment.NumOfRows = 0
+			segment.MaxRowNum = 0
+			anyReset = true
+		}
+		return anyReset
+	}
+}
+
 func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
