@@ -25,9 +25,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
@@ -80,9 +83,52 @@ func (s *analyzeTaskSuite) SetupSuite() {
 	}
 	analyzeMt.tasks[s.taskID] = analyzeTask
 
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  s.fieldID,
+				Name:     "vector_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+
+	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
+	collections.Insert(s.collID, &collectionInfo{Schema: schema})
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           101,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			State:        commonpb.SegmentState_Flushed,
+			NumOfRows:    1000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 1001}, {LogID: 1002}}},
+			},
+		},
+	})
+	segments.SetSegment(102, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           102,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			State:        commonpb.SegmentState_Flushed,
+			NumOfRows:    2000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 2001}, {LogID: 2002}}},
+			},
+		},
+	})
+
 	s.mt = &meta{
 		analyzeMeta: analyzeMt,
-		collections: typeutil.NewConcurrentMap[int64, *collectionInfo](),
+		collections: collections,
+		segments:    segments,
 	}
 }
 
@@ -147,6 +193,177 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
 		at.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
 	})
+}
+
+func (s *analyzeTaskSuite) newTask() *analyzeTask {
+	return newAnalyzeTask(&indexpb.AnalyzeTask{
+		CollectionID: s.collID,
+		TaskID:       s.taskID,
+		State:        indexpb.JobState_JobStateInit,
+	}, s.mt)
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
+	// Replace segment 102 with a dropped segment so it's filtered out by isSegmentHealthy
+	s.mt.segments.SetSegment(102, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:    102,
+			State: commonpb.SegmentState_Dropped,
+		},
+	})
+	defer func() {
+		s.mt.segments.SetSegment(102, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           102,
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				State:        commonpb.SegmentState_Flushed,
+				NumOfRows:    2000,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 2001}, {LogID: 2002}}},
+				},
+			},
+		})
+	}()
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	s.Equal(indexpb.JobState_JobStateFailed, at.GetState())
+	s.Contains(at.GetFailReason(), "102")
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
+	// Use a schema with missing dim TypeParams
+	badSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:    s.fieldID,
+				Name:       "vector_field",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{}, // no dim
+			},
+		},
+	}
+	origCollections := s.mt.collections
+	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
+	collections.Insert(s.collID, &collectionInfo{Schema: badSchema})
+	s.mt.collections = collections
+	defer func() { s.mt.collections = origCollections }()
+
+	// Must create task AFTER swapping collections so schema is the bad one
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	// Should reset to Init state on dim error
+	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
+	// Set MinCentroidsNum very high so data is considered too small
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	// data too small → skip → mark as finished
+	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
+	// Set MaxCentroidsNum=1, MinCentroidsNum=1, SegmentMaxSize very small to force numClusters > max
+	origMax := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue(origMax)
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+	origSegSize := Params.DataCoordCfg.SegmentMaxSize.SwapTempValue("0.0001")
+	defer Params.DataCoordCfg.SegmentMaxSize.SwapTempValue(origSegSize)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		return req.NumClusters == 1 // capped at MaxCentroidsNum=1
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {
+	// Ensure numClusters passes the min check
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything).Return(fmt.Errorf("node down"))
+	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	// Should NOT be InProgress since CreateAnalyze failed
+	s.NotEqual(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
+	// Ensure numClusters passes the min check
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		// Verify SegmentStats are populated correctly
+		if len(req.SegmentStats) != 2 {
+			return false
+		}
+		stat101 := req.SegmentStats[101]
+		stat102 := req.SegmentStats[102]
+		if stat101 == nil || stat102 == nil {
+			return false
+		}
+		// segment 101: 1000 rows, binlogs [1001, 1002]
+		if stat101.NumRows != 1000 || len(stat101.LogIDs) != 2 {
+			return false
+		}
+		// segment 102: 2000 rows, binlogs [2001, 2002]
+		if stat102.NumRows != 2000 || len(stat102.LogIDs) != 2 {
+			return false
+		}
+		// Dim should be 128
+		if req.Dim != 128 {
+			return false
+		}
+		// Clustering params should be populated
+		if req.MaxTrainSizeRatio == 0 || req.MaxClusterSize == 0 || req.TaskSlot == 0 {
+			return false
+		}
+		return true
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
 }
 
 func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {

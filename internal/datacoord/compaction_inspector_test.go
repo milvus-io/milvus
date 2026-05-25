@@ -58,7 +58,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
-	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, newMockVersionManager())
+	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 }
@@ -461,7 +461,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 			t.QueryTaskOnWorker(cluster)
 		}
 	}).Maybe()
-	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, newMockVersionManager())
+	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -495,7 +495,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 			t.QueryTaskOnWorker(cluster)
 		}
 	}).Maybe()
-	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, newMockVersionManager())
+	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,
