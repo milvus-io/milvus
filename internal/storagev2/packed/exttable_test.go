@@ -381,58 +381,6 @@ func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
-func TestEnsureHTTPScheme(t *testing.T) {
-	tests := []struct {
-		name    string
-		address string
-		useSSL  bool
-		want    string
-	}{
-		{
-			name:    "no scheme, no SSL → prepend http://",
-			address: "localhost:9000",
-			useSSL:  false,
-			want:    "http://localhost:9000",
-		},
-		{
-			name:    "no scheme, with SSL → prepend https://",
-			address: "localhost:9000",
-			useSSL:  true,
-			want:    "https://localhost:9000",
-		},
-		{
-			name:    "has http:// scheme, no SSL → keep as-is",
-			address: "http://localhost:9000",
-			useSSL:  false,
-			want:    "http://localhost:9000",
-		},
-		{
-			name:    "has https:// scheme, no SSL → keep as-is",
-			address: "https://s3.amazonaws.com",
-			useSSL:  false,
-			want:    "https://s3.amazonaws.com",
-		},
-		{
-			name:    "has https:// scheme, with SSL → keep as-is",
-			address: "https://s3.amazonaws.com",
-			useSSL:  true,
-			want:    "https://s3.amazonaws.com",
-		},
-		{
-			name:    "IP address, no SSL → prepend http://",
-			address: "10.0.0.1:9000",
-			useSSL:  false,
-			want:    "http://10.0.0.1:9000",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ensureHTTPScheme(tt.address, tt.useSSL)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 // The cgo bridge (loon_properties_inject_external_spec) and Tier-1/2 endpoint
 // derivation logic are covered by the C++ gtest suite in test_external_take.cpp.
 // Go-side coverage is exercised indirectly through callers that invoke
