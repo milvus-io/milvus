@@ -270,6 +270,15 @@ class MinioChunkManager : public ChunkManager {
     static void
     ApplyChecksumConfigOverrides(Aws::Client::ClientConfiguration& config);
 
+    // Decide whether the checksum override is required for a given
+    // cloud_provider. Aliyun OSS, Tencent COS, Huawei OBS, and GCP all
+    // reject the streaming aws-chunked encoding the SDK adds when
+    // checksums are computed; AWS S3 / MinIO accept the default. Mirrors
+    // the cloud_provider-based dispatch used by milvus-storage PR #500.
+    // Exposed for unit testing.
+    static bool
+    NeedChecksumOverride(const std::string& cloud_provider);
+
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;

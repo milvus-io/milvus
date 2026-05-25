@@ -374,6 +374,12 @@ MinioChunkManager::ApplyChecksumConfigOverrides(
         Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED;
 }
 
+bool
+MinioChunkManager::NeedChecksumOverride(const std::string& cloud_provider) {
+    return cloud_provider == "gcp" || cloud_provider == "aliyun" ||
+           cloud_provider == "tencent" || cloud_provider == "huawei";
+}
+
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name),
       use_crc32c_checksum_(storage_config.use_crc32c_checksum) {
@@ -426,9 +432,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         config.region = ConvertToAwsString(storage_config.region);
     }
 
-    // Apply checksum overrides only for non-AWS S3-compatible backends.
-    // AWS S3 / MinIO accept the default WHEN_SUPPORTED behavior.
-    if (storageType != RemoteStorageType::S3) {
+    if (NeedChecksumOverride(storage_config.cloud_provider)) {
         ApplyChecksumConfigOverrides(config);
     }
 

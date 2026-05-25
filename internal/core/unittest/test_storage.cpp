@@ -41,10 +41,11 @@
 #include "test_utils/Constants.h"
 
 // Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
-// helper so we can assert its effect on ClientConfiguration directly.
+// and NeedChecksumOverride helpers so we can assert their behavior directly.
 class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
  public:
     using MinioChunkManager::ApplyChecksumConfigOverrides;
+    using MinioChunkManager::NeedChecksumOverride;
 };
 
 using namespace std;
@@ -421,4 +422,19 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
               Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED);
     EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
               Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
+}
+
+TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
+    using Mgr = TestableMinioChunkManager;
+
+    // Non-AWS S3-compatible backends need the override.
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("gcp"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("aliyun"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("tencent"));
+    EXPECT_TRUE(Mgr::NeedChecksumOverride("huawei"));
+
+    // AWS S3 / MinIO accept the default WHEN_SUPPORTED behavior.
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
+    EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
 }
