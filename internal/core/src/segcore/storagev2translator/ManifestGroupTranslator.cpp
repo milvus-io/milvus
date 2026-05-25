@@ -317,23 +317,12 @@ ManifestGroupTranslator::get_cells(
                                             DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                             load_priority_);
 
-    {
-        std::string rg_info;
-        for (size_t i = 0; i < cids.size(); ++i) {
-            auto [start, end] = meta_.get_row_group_range(cids[i]);
-            if (i > 0)
-                rg_info += ", ";
-            rg_info += fmt::format("cid{}:[{},{})", cids[i], start, end);
-        }
-        LOG_INFO(
-            "[StorageV2] translator {} submits {} batch tasks for manifest "
-            "column group {}, loading cids=[{}], row_group_ranges=[{}]",
-            key_,
-            load_futures.size(),
-            column_group_index_,
-            fmt::join(cids, ","),
-            rg_info);
-    }
+    LOG_INFO(
+        "[StorageV2] translator {} submits {} batch tasks for manifest "
+        "column group {}",
+        key_,
+        load_futures.size(),
+        column_group_index_);
 
     // Pop loop — convert each cell immediately, no ArrowTable accumulation
     std::unordered_map<milvus::cachinglayer::cid_t,
