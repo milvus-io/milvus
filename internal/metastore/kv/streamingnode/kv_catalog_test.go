@@ -26,7 +26,7 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	assert.NoError(t, err)
 
 	kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(vs), nil)
-	catalog := NewCataLog(kv)
+	catalog := NewCatalog(kv)
 	ctx := context.Background()
 	checkpoint, err := catalog.GetConsumeCheckpoint(ctx, "p1")
 	assert.NotNil(t, checkpoint)
@@ -62,7 +62,7 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	assert.NoError(t, err)
 
 	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
-	catalog := NewCataLog(kv)
+	catalog := NewCatalog(kv)
 	ctx := context.Background()
 	metas, err := catalog.ListSegmentAssignment(ctx, "p1")
 	assert.Len(t, metas, 1)
@@ -88,7 +88,7 @@ func TestCatalogVChannel(t *testing.T) {
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	rootPath := "testCatalogVChannel-" + uuid.New().String() + "/meta"
 	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	catalog := NewCataLog(kv)
+	catalog := NewCatalog(kv)
 	ctx := context.Background()
 
 	channel1 := "p1"
@@ -203,7 +203,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("save_and_get_success", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		cp := &commonpb.ReplicateCheckpoint{
 			ClusterId: "source-cluster",
@@ -230,7 +230,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("save_error", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("etcd error"))
 		err := catalog.SaveSalvageCheckpoint(ctx, "p1", &commonpb.ReplicateCheckpoint{ClusterId: "c1"})
@@ -239,7 +239,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("get_load_error", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, errors.New("etcd error"))
 		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
@@ -249,7 +249,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("get_unmarshal_error", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
 			[]string{"key"},
@@ -263,7 +263,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("get_empty", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil)
 		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
@@ -273,7 +273,7 @@ func TestCatalogSalvageCheckpoint(t *testing.T) {
 
 	t.Run("get_multiple_clusters", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
-		catalog := NewCataLog(kv)
+		catalog := NewCatalog(kv)
 
 		cp1 := &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a"}
 		cp2 := &commonpb.ReplicateCheckpoint{ClusterId: "cluster-b"}

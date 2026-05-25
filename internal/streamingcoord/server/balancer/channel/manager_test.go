@@ -29,7 +29,7 @@ func TestChannelManager(t *testing.T) {
 
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
 
 	ctx := context.Background()
@@ -424,7 +424,7 @@ func TestAllocVirtualChannels(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -469,7 +469,7 @@ func TestStreamingEnableChecker(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -509,7 +509,7 @@ func TestChannelManagerWatch(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -579,7 +579,7 @@ func TestChannelManager_AddPChannels(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -633,7 +633,7 @@ func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -664,7 +664,7 @@ func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -707,7 +707,7 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -751,7 +751,7 @@ func TestRecovery_NoReplicateConfig_AllAvailable(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -773,7 +773,7 @@ func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -818,7 +818,7 @@ func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
@@ -861,7 +861,7 @@ func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))

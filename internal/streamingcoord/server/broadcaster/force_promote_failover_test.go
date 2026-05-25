@@ -188,7 +188,7 @@ type forcePromoteTestEnv struct {
 	t           *testing.T
 	broadcaster Broadcaster
 	walCtrl     *walController
-	catalog     *mock_metastore.MockStreamingCoordCataLog
+	catalog     *mock_metastore.MockStreamingCoordCatalog
 	tombstoned  *typeutil.ConcurrentSet[uint64]
 
 	// catalogRecordsMu protects catalogRecords.
@@ -239,7 +239,7 @@ func setupForcePromoteTest(
 	recoveryTasks []*streamingpb.BroadcastTask,
 	walBehaviors []appendBehavior,
 ) *forcePromoteTestEnv {
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	catalog.EXPECT().ListBroadcastTask(mock.Anything).
 		Return(recoveryTasks, nil).Times(1)
 

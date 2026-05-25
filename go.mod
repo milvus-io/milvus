@@ -77,6 +77,7 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/zeebo/xxh3 v1.0.2
+	github.com/zilliztech/milvus-catalog v0.0.0-20260525062754-05aa1954ca07
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
 	google.golang.org/api v0.224.0
 	google.golang.org/protobuf v1.36.11

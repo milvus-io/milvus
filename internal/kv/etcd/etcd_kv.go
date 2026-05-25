@@ -229,6 +229,23 @@ func (kv *etcdKV) Load(ctx context.Context, key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
+// LoadWithModRevision returns value and etcd modification revision of the key.
+func (kv *etcdKV) LoadWithModRevision(ctx context.Context, key string) (string, int64, error) {
+	start := time.Now()
+	key = kv.GetPath(key)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+	resp, err := kv.getEtcdMeta(ctx1, key)
+	if err != nil {
+		return "", 0, err
+	}
+	if resp.Count <= 0 {
+		return "", 0, nil
+	}
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load with mod revision", zap.String("key", key))
+	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
+}
+
 // LoadBytes returns value of the key.
 func (kv *etcdKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
 	start := time.Now()

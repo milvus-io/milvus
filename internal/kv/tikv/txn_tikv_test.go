@@ -31,6 +31,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -599,6 +600,27 @@ func TestTiKVUnimplemented(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestTiKVLoadWithModRevisionUnsupported(t *testing.T) {
+	kv := NewTiKV(txnClient, "/")
+	err := kv.RemoveWithPrefix(context.TODO(), "")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(context.TODO(), "")
+
+	value, revision, err := kv.LoadWithModRevision(context.TODO(), "missing")
+	require.NoError(t, err)
+	assert.Empty(t, value)
+	assert.Zero(t, revision)
+
+	err = kv.Save(context.TODO(), "lease1", "1")
+	require.NoError(t, err)
+
+	_, _, err = kv.LoadWithModRevision(context.TODO(), "lease1")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrOperationNotSupported))
+}
+
 func TestTxnWithPredicates(t *testing.T) {
 	kv := NewTiKV(txnClient, "/")
 	err := kv.RemoveWithPrefix(context.TODO(), "")
@@ -617,9 +639,16 @@ func TestTxnWithPredicates(t *testing.T) {
 		multiSave     map[string]string
 		preds         []predicates.Predicate
 		expectSuccess bool
+		expectErr     error
 	}{
-		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
-		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
+		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true, nil},
+		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false, nil},
+		{"key_not_exists_ok", map[string]string{"new-key": "b"}, []predicates.Predicate{predicates.KeyNotExists("missing-key")}, true, nil},
+		{"key_not_exists_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExists("lease1")}, false, nil},
+		{"create_revision_nonzero_unsupported", map[string]string{"a": "b"}, []predicates.Predicate{newTestPredicate(predicates.PredTargetCreateRevision, predicates.PredTypeEqual, "lease1", int64(1))}, false, merr.ErrOperationNotSupported},
+		{"create_revision_bad_value_type", map[string]string{"a": "b"}, []predicates.Predicate{newTestPredicate(predicates.PredTargetCreateRevision, predicates.PredTypeEqual, "lease1", "0")}, false, merr.ErrParameterInvalid},
+		{"mod_revision_unsupported", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ModRevisionEqual("lease1", 1)}, false, merr.ErrOperationNotSupported},
+		{"unknown_target", map[string]string{"a": "b"}, []predicates.Predicate{newTestPredicate(predicates.PredicateTarget(99), predicates.PredTypeEqual, "lease1", "1")}, false, merr.ErrParameterInvalid},
 	}
 
 	for _, test := range multiSaveAndRemovePredTests {
@@ -630,13 +659,41 @@ func TestTxnWithPredicates(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				if test.expectErr != nil {
+					assert.True(t, errors.Is(err, test.expectErr))
+				}
 			}
 			err = kv.MultiSaveAndRemoveWithPrefix(context.TODO(), test.multiSave, nil, test.preds...)
 			if test.expectSuccess {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				if test.expectErr != nil {
+					assert.True(t, errors.Is(err, test.expectErr))
+				}
 			}
 		})
 	}
 }
+
+type testPredicate struct {
+	target predicates.PredicateTarget
+	pt     predicates.PredicateType
+	key    string
+	value  any
+}
+
+func newTestPredicate(target predicates.PredicateTarget, pt predicates.PredicateType, key string, value any) predicates.Predicate {
+	return testPredicate{
+		target: target,
+		pt:     pt,
+		key:    key,
+		value:  value,
+	}
+}
+
+func (p testPredicate) Target() predicates.PredicateTarget { return p.target }
+func (p testPredicate) Type() predicates.PredicateType     { return p.pt }
+func (p testPredicate) Key() string                        { return p.key }
+func (p testPredicate) TargetValue() any                   { return p.value }
+func (p testPredicate) IsTrue(target any) bool             { return p.value == target }

@@ -1,10 +1,11 @@
 package server
 
 import (
+	"github.com/zilliztech/milvus-catalog/pkg/milvuscompat"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
@@ -67,11 +68,14 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 
 // Build builds a streaming node server.
 func (b *ServerBuilder) Build() *Server {
+	compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{
+		StreamingNode: kvmetastore.NewCatalog(b.kv),
+	})
 	resource.Init(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
 		resource.OptMixCoordClient(b.mixc),
-		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
+		resource.OptStreamingNodeCatalog(milvuscompat.New(compatCatalog).StreamingNode),
 	)
 	s := &Server{
 		session:    b.session,

@@ -29,7 +29,7 @@ func TestInit(t *testing.T) {
 		OptChunkManager(mock_storage.NewMockChunkManager(t)),
 		OptETCD(&clientv3.Client{}),
 		OptMixCoordClient(syncutil.NewFuture[types.MixCoordClient]()),
-		OptStreamingNodeCatalog(mock_metastore.NewMockStreamingNodeCataLog(t)),
+		OptStreamingNodeCatalog(mock_metastore.NewMockStreamingNodeCatalog(t)),
 	)
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())

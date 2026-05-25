@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -531,7 +532,7 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *log.MLogger
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
 		logger.Warn("save broadcast task failed", zap.Error(err))
 		if ctx.Err() == nil {
-			panic("critical error: the save broadcast task is failed before the context is done")
+			panic(fmt.Sprintf("critical error: the save broadcast task failed before the context is done: %v", err))
 		}
 		return err
 	}

@@ -764,6 +764,8 @@ github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.3 h1:E1ctvB7uKFMOJw3fdOW32DwGE9I7t++CRUEMKvFoFiw=
 github.com/yusufpapurcu/wmi v1.2.3/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
+github.com/zilliztech/milvus-catalog v0.0.0-20260525062754-05aa1954ca07 h1:XD7qoEjMDjhbeXvh/qSd1miBMi9slvgqOsYFmZ+jntY=
+github.com/zilliztech/milvus-catalog v0.0.0-20260525062754-05aa1954ca07/go.mod h1:YN7VlZWMFy8AB2c79DjPmEFEWjYgzbk25jN30d0MkM8=
 github.com/zilliztech/woodpecker v0.1.29 h1:ooJ7rU/jH/3WQzY3pEyMKJvG2H0gDKls1etkhhWej7w=
 github.com/zilliztech/woodpecker v0.1.29/go.mod h1:XJeAWUnHx3iaXQ/S6Xd0LXoGBiu5KBHii3AzIWrV6uI=
 go.etcd.io/bbolt v1.3.12 h1:UAxZAIuJqzFwByP19gZC3zd5robK3FOangrGS+Fdczg=

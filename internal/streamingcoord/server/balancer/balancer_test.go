@@ -83,7 +83,7 @@ func TestBalancer(t *testing.T) {
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	resource.InitForTest(
 		resource.OptETCD(etcdClient),
 		resource.OptStreamingCatalog(catalog),
@@ -325,7 +325,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 		}, nil
 	})
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(
@@ -440,7 +440,7 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
 	}, nil).Maybe()
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(
@@ -522,7 +522,7 @@ func TestBalancer_DynamicChannelProviderClosed(t *testing.T) {
 		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
 	}, nil).Maybe()
 
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog := mock_metastore.NewMockStreamingCoordCatalog(t)
 	s := sessionutil.NewMockSession(t)
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	resource.InitForTest(

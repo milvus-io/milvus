@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
@@ -15,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -49,7 +49,7 @@ func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) op
 }
 
 // OptStreamingNodeCatalog provides the streaming node catalog to the resource.
-func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
+func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCatalog) optResourceInit {
 	return func(r *resourceImpl) {
 		r.streamingNodeCatalog = catalog
 	}
@@ -107,7 +107,7 @@ type resourceImpl struct {
 	etcdClient           *clientv3.Client
 	chunkManager         storage.ChunkManager
 	mixCoordClient       *syncutil.Future[types.MixCoordClient]
-	streamingNodeCatalog metastore.StreamingNodeCataLog
+	streamingNodeCatalog metastore.StreamingNodeCatalog
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
@@ -152,8 +152,8 @@ func (r *resourceImpl) MixCoordClient() *syncutil.Future[types.MixCoordClient] {
 	return r.mixCoordClient
 }
 
-// StreamingNodeCataLog returns the streaming node catalog.
-func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
+// StreamingNodeCatalog returns the streaming node catalog.
+func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCatalog {
 	return r.streamingNodeCatalog
 }
 

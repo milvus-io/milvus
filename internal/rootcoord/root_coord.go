@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
+	"github.com/zilliztech/milvus-catalog/pkg/milvuscompat"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -39,9 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -58,6 +57,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -390,21 +391,17 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
-		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
-		case util.MetaStoreTypeEtcd:
-			log.Ctx(initCtx).Info("Using etcd as meta storage.")
+		metaStoreType := Params.MetaStoreCfg.MetaStoreType.GetValue()
+		switch metaStoreType {
+		case util.MetaStoreTypeEtcd, util.MetaStoreTypeTiKV:
+			log.Ctx(initCtx).Info("Using meta storage", zap.String("type", metaStoreType))
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
-		case util.MetaStoreTypeTiKV:
-			log.Ctx(initCtx).Info("Using tikv as meta storage.")
-			metaKV := c.metaKVCreator()
-			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
-			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
+			compatCatalog := milvuscompat.Wrap(milvuscompat.Catalogs{RootCoord: kvmetastore.NewCatalog(metaKV)})
+			catalog = milvuscompat.New(compatCatalog).RootCoord
 		default:
-			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
+			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaStoreType))
 		}
 
 		if c.meta, err = NewMetaTable(c.ctx, catalog, c.tsoAllocator); err != nil {

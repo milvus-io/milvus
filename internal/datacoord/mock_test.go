@@ -73,6 +73,11 @@ func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, pagin
 	return nil
 }
 
+func (mm *metaMemoryKV) LoadWithModRevision(ctx context.Context, key string) (string, int64, error) {
+	value, err := mm.Load(ctx, key)
+	return value, 0, err
+}
+
 func (mm *metaMemoryKV) GetPath(key string) string {
 	panic("implement me")
 }

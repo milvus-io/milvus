@@ -6,12 +6,12 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -37,7 +37,7 @@ func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) op
 }
 
 // OptStreamingCatalog provides streaming catalog to the resource.
-func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceInit {
+func OptStreamingCatalog(catalog metastore.StreamingCoordCatalog) optResourceInit {
 	return func(r *resourceImpl) {
 		r.streamingCatalog = catalog
 	}
@@ -87,7 +87,7 @@ type resourceImpl struct {
 	mixCoordClient             *syncutil.Future[types.MixCoordClient]
 	session                    sessionutil.SessionInterface
 	etcdClient                 *clientv3.Client
-	streamingCatalog           metastore.StreamingCoordCataLog
+	streamingCatalog           metastore.StreamingCoordCatalog
 	streamingNodeManagerClient manager.ManagerClient
 	logger                     *log.MLogger
 }
@@ -103,7 +103,7 @@ func (r *resourceImpl) IDAllocator() idalloc.Allocator {
 }
 
 // StreamingCatalog returns the StreamingCatalog client.
-func (r *resourceImpl) StreamingCatalog() metastore.StreamingCoordCataLog {
+func (r *resourceImpl) StreamingCatalog() metastore.StreamingCoordCatalog {
 	return r.streamingCatalog
 }
 

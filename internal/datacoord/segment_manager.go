@@ -528,13 +528,19 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 	var ret []UniqueID
 	ret = append(ret, sealedSegments...)
 
-	for _, id := range growingSegments {
-		if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Sealed); err != nil {
+	// Batch-persist the Growing → Sealed transition for all segments in a
+	// single catalog call to avoid N independent gRPC round-trips and eliminate
+	// the partial-sealed middle state that would otherwise appear if the loop
+	// failed midway.
+	if len(growingSegments) > 0 {
+		if err := s.meta.SetStatesBatch(ctx, growingSegments, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
-		sealed.Insert(id)
-		growing.Remove(id)
-		ret = append(ret, id)
+		for _, id := range growingSegments {
+			sealed.Insert(id)
+			growing.Remove(id)
+			ret = append(ret, id)
+		}
 	}
 	return ret, nil
 }

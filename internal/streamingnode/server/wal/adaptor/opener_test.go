@@ -43,7 +43,7 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 		return nil, errExpected
 	})
 
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
 		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
 			Id:      "0",
@@ -106,7 +106,7 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 		Term:       1,
 		AccessMode: types.AccessModeRW,
 	}
-	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	catalog.EXPECT().
 		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.MatchedBy(func(checkpoint *streamingpb.WALCheckpoint) bool {
 			return checkpoint.GetAlterWalState().GetStage() == streamingpb.AlterWALStage_ADVANCE_CHECKPOINT

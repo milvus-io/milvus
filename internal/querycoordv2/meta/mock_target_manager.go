@@ -5,7 +5,7 @@ package meta
 import (
 	context "context"
 
-	metastore "github.com/milvus-io/milvus/internal/metastore"
+	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
 	mock "github.com/stretchr/testify/mock"

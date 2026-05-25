@@ -43,7 +43,7 @@ func TestRecoveryStorage(t *testing.T) {
 		RecoveryMagic: 0,
 	}
 
-	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog := mock_metastore.NewMockStreamingNodeCatalog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 		return lo.MapToSlice(segmentMetas, func(_ int64, v *streamingpb.SegmentAssignmentMeta) *streamingpb.SegmentAssignmentMeta {
 			return proto.Clone(v).(*streamingpb.SegmentAssignmentMeta)

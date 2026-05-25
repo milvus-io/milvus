@@ -8,7 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -292,10 +292,10 @@ type QueryCoordCatalog interface {
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
-// StreamingCoordCataLog is the interface for streamingcoord catalog
+// StreamingCoordCatalog is the interface for streamingcoord catalog
 // All write operation of catalog is reliable, the error will only be returned if the ctx is canceled,
 // otherwise it will retry until success.
-type StreamingCoordCataLog interface {
+type StreamingCoordCatalog interface {
 	// GetCChannel get the control channel from metastore.
 	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
 
@@ -337,8 +337,8 @@ type StreamingCoordCataLog interface {
 	GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error)
 }
 
-// StreamingNodeCataLog is the interface for streamingnode catalog
-type StreamingNodeCataLog interface {
+// StreamingNodeCatalog is the interface for streamingnode catalog
+type StreamingNodeCatalog interface {
 	// WAL select the wal related recovery infos.
 	// Which must give the pchannel name.
 
