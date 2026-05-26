@@ -304,6 +304,8 @@ func (snapshot *SegmentTaskDeltaSnapshot) GetByNode(nodeID int64) int {
 	return snapshot.nodeDeltas[nodeID]
 }
 
+// GetByNodeInCollection returns the pending segment-task delta on nodeID,
+// scoped to the collection used when the snapshot was built.
 func (snapshot *SegmentTaskDeltaSnapshot) GetByNodeInCollection(nodeID int64) int {
 	if snapshot == nil {
 		return 0
@@ -370,6 +372,8 @@ func (delta *SegmentTaskDelta) Sub(task *SegmentTask) {
 	delete(delta.records, task.ID())
 }
 
+// GetSegmentSnapshot builds a snapshot for nodeIDs. collectionID binds the scope
+// used by SegmentTaskDeltaSnapshot.GetByNodeInCollection; -1 means all collections.
 func (delta *SegmentTaskDelta) GetSegmentSnapshot(nodeIDs []int64, collectionID int64, distMgr *meta.DistributionManager) *SegmentTaskDeltaSnapshot {
 	snapshot := NewSegmentTaskDeltaSnapshot(make(map[int64]int, len(nodeIDs)), make(map[int64]int, len(nodeIDs)))
 	nodeSet := NewUniqueSet(nodeIDs...)
@@ -556,6 +560,8 @@ type Scheduler interface {
 	GetSegmentTaskNum(filters ...TaskFilter) int
 	GetTasksJSON() string
 
+	// GetSegmentTaskDeltaSnapshot returns pending segment-task deltas for nodeIDs.
+	// collectionID == -1 means the collection-scoped snapshot covers all collections.
 	GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot
 	GetChannelTaskDelta(nodeID int64, collectionID int64) int
 }

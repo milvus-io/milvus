@@ -193,7 +193,6 @@ func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testin
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key)
 
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()

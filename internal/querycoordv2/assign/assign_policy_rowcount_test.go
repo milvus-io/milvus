@@ -133,7 +133,8 @@ func TestRowCountBasedAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *tes
 
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
+		Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	dist := meta.NewDistributionManager(nodeManager)
 
