@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestExploreFiles_EmptyColumns(t *testing.T) {
@@ -545,6 +546,48 @@ func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
+}
+
+func TestMakePropertiesFromStorageConfig_UsesConfiguredStorageFormat(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "parquet"))
+	t.Cleanup(func() {
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  t.TempDir(),
+		RootPath:    t.TempDir(),
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	assert.Equal(t, "parquet", loonPropertyString(props, PropertyWriterFormat))
+}
+
+func TestMakePropertiesFromStorageConfig_ExtraKVsOverrideStorageFormat(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	t.Cleanup(func() {
+		_ = params.Reset(params.DataNodeCfg.StorageFormat.Key)
+	})
+
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  t.TempDir(),
+		RootPath:    t.TempDir(),
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		PropertyWriterFormat: "parquet",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	assert.Equal(t, "parquet", loonPropertyString(props, PropertyWriterFormat))
 }
 
 func TestNormalizeExternalPathForStorage_UsesInjectedExtfsEndpoint(t *testing.T) {

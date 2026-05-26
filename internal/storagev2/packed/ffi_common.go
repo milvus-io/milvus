@@ -21,6 +21,7 @@ import (
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
@@ -59,6 +60,7 @@ var (
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
+	PropertyWriterFormat             = "writer.format"
 	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
@@ -189,6 +191,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	} else {
 		values = append(values, "false")
 	}
+
+	keys = append(keys, PropertyWriterFormat)
+	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
 	// No extfs.default.* properties here. Per-collection extfs properties
 	// (extfs.{collectionID}.*) are injected downstream via
