@@ -17,12 +17,11 @@
 package queryutil
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,7 +72,7 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	for _, ref := range selectedRows {
 		refFields := len(results[ref.resultIdx].GetFieldsData())
 		if refFields != numFields {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"FieldsData count mismatch: result[%d] has %d fields, expected %d",
 				ref.resultIdx, refFields, numFields)
 		}
@@ -147,7 +146,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 
 	for i, r := range results {
 		if r.GetElementLevel() != isElementLevel {
-			return fmt.Errorf(
+			return merr.WrapErrParameterInvalidMsg(
 				"inconsistent element-level flag: result[%d] has ElementLevel=%v, expected %v",
 				i, r.GetElementLevel(), isElementLevel)
 		}
@@ -155,7 +154,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 			idsLen := typeutil.GetSizeOfIDs(r.GetIds())
 			indicesLen := len(r.GetElementIndices())
 			if indicesLen != idsLen {
-				return fmt.Errorf(
+				return merr.WrapErrParameterInvalidMsg(
 					"element_indices length (%d) does not match ids length (%d) in result[%d]",
 					indicesLen, idsLen, i)
 			}
@@ -428,14 +427,14 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 		// but that path is unreachable for merge inputs (HasRawData gate + empty IDs filtering).
 		// Therefore empty ValidData here is always a segcore bug, not a legitimate state.
 		if len(vd) == 0 {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
 					"segcore must always provide ValidData for nullable fields with rows",
 				fd.GetFieldId(), fd.GetFieldName(), numRows, ri)
 		}
 
 		if len(vd) != numRows {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
 					"segcore violated the nullable contract (len(ValidData) must equal numRows)",
 				fd.GetFieldId(), fd.GetFieldName(), len(vd), numRows, ri)
@@ -449,7 +448,7 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 
 func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool, numRows int, resultIdx int) (bool, error) {
 	if rowIdx < 0 {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrParameterInvalidMsg(
 			"arrayOfVectorRowValid: field fid=%d name=%q in result[%d] has invalid rowIdx=%d",
 			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx)
 	}
@@ -457,7 +456,7 @@ func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool
 	validData := fd.GetValidData()
 	if len(validData) == 0 {
 		if isNullable {
-			return false, fmt.Errorf(
+			return false, merr.WrapErrParameterInvalidMsg(
 				"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
 					"segcore must always provide ValidData for nullable fields with rows",
 				fd.GetFieldId(), fd.GetFieldName(), numRows, resultIdx)
@@ -466,12 +465,12 @@ func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool
 	}
 
 	if int(rowIdx) >= len(validData) {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrParameterInvalidMsg(
 			"arrayOfVectorRowValid: ArrayOfVector field fid=%d name=%q in result[%d] has rowIdx=%d outside ValidData bounds len(ValidData)=%d",
 			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx, len(validData))
 	}
 	if isNullable && numRows > 0 && len(validData) != numRows {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrParameterInvalidMsg(
 			"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
 				"segcore violated the nullable contract (len(ValidData) must equal numRows)",
 			fd.GetFieldId(), fd.GetFieldName(), len(validData), numRows, resultIdx)
@@ -576,7 +575,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 	// This indicates segcore returned truncated/malformed vector data.
 	vecDataOOB := func(ref rowRef, di int, dataLen int) error {
 		fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"buildMergedVectorField: vector data too short for %s field fid=%d name=%q in result[%d]: "+
 				"dataIdx=%d requires offset beyond data length %d (dim=%d, numRows=%d); segcore returned truncated data",
 			dataType, fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -679,7 +678,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			sparse := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetSparseFloatVector()
 			if sparse == nil || di >= len(sparse.GetContents()) {
 				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrParameterInvalidMsg(
 					"buildMergedVectorField: sparse vector data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but SparseFloatArray is nil or has only %d contents (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -740,14 +739,14 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			}
 			va := fd.GetVectors().GetVectorArray()
 			if va == nil || len(va.GetData()) == 0 {
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrParameterInvalidMsg(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has no entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
 					di, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
 			if di >= len(va.GetData()) {
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrParameterInvalidMsg(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,

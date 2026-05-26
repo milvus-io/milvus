@@ -325,7 +325,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(float64(value)); err != nil {
-							return nil, nil, fmt.Errorf("float32 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float32 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.Float64:
@@ -334,7 +334,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(value); err != nil {
-							return nil, nil, fmt.Errorf("float64 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float64 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.String:

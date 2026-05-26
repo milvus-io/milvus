@@ -3,7 +3,7 @@ package contextutil
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -18,14 +18,14 @@ func WithClusterID(ctx context.Context, clusterID string) context.Context {
 func GetClusterID(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", errors.New("cluster id not found from context")
+		return "", merr.WrapErrParameterInvalidMsg("cluster id not found from context")
 	}
 	msg := md.Get(clusterIDKey)
 	if len(msg) == 0 {
-		return "", errors.New("cluster id not found in context")
+		return "", merr.WrapErrParameterInvalidMsg("cluster id not found in context")
 	}
 	if msg[0] == "" {
-		return "", errors.New("cluster id is empty")
+		return "", merr.WrapErrParameterInvalidMsg("cluster id is empty")
 	}
 	return msg[0], nil
 }

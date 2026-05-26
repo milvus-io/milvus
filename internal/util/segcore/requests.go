@@ -12,14 +12,13 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -57,7 +56,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
 	status := C.NewLoadFieldDataInfo(&cLoadFieldDataInfo, C.int64_t(req.StorageVersion))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "NewLoadFieldDataInfo failed")
+		return nil, merr.Wrap(err, "NewLoadFieldDataInfo failed")
 	}
 	defer func() {
 		if err != nil {
@@ -70,7 +69,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		cFieldID := C.int64_t(field.Field.GetFieldID())
 		status = C.AppendLoadFieldInfo(cLoadFieldDataInfo, cFieldID, rowCount)
 		if err := ConsumeCStatusIntoError(&status); err != nil {
-			return nil, errors.Wrapf(err, "AppendLoadFieldInfo failed at fieldID, %d", field.Field.GetFieldID())
+			return nil, merr.Wrapf(err, "AppendLoadFieldInfo failed at fieldID, %d", field.Field.GetFieldID())
 		}
 		for _, binlog := range field.Field.Binlogs {
 			cEntriesNum := C.int64_t(binlog.GetEntriesNum())
@@ -80,7 +79,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 
 			status = C.AppendLoadFieldDataPath(cLoadFieldDataInfo, cFieldID, cEntriesNum, cMemorySize, cFile)
 			if err := ConsumeCStatusIntoError(&status); err != nil {
-				return nil, errors.Wrapf(err, "AppendLoadFieldDataPath failed at binlog, %d, %s", field.Field.GetFieldID(), binlog.GetLogPath())
+				return nil, merr.Wrapf(err, "AppendLoadFieldDataPath failed at binlog, %d, %s", field.Field.GetFieldID(), binlog.GetLogPath())
 			}
 		}
 
@@ -88,7 +87,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		if len(childField) > 0 {
 			status = C.SetLoadFieldInfoChildFields(cLoadFieldDataInfo, cFieldID, (*C.int64_t)(unsafe.Pointer(&childField[0])), C.int64_t(len(childField)))
 			if err := ConsumeCStatusIntoError(&status); err != nil {
-				return nil, errors.Wrapf(err, "SetLoadFieldInfoChildFields failed at binlog, %d", field.Field.GetFieldID())
+				return nil, merr.Wrapf(err, "SetLoadFieldInfoChildFields failed at binlog, %d", field.Field.GetFieldID())
 			}
 		}
 
@@ -98,7 +97,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		if len(field.WarmupPolicy) > 0 {
 			fieldWarmupPolicy, err := initcore.ConvertCacheWarmupPolicy(field.WarmupPolicy)
 			if err != nil {
-				return nil, errors.Wrapf(err, "ConvertCacheWarmupPolicy failed at field %d", field.Field.GetFieldID())
+				return nil, merr.Wrapf(err, "ConvertCacheWarmupPolicy failed at field %d", field.Field.GetFieldID())
 			}
 			C.SetFieldWarmupPolicy(cLoadFieldDataInfo, cFieldID, C.CacheWarmupPolicy(fieldWarmupPolicy))
 		}

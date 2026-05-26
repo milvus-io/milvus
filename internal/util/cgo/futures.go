@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrConsumed = errors.New("future is already consumed")
+var ErrConsumed = merr.WrapErrParameterInvalidMsg("future is already consumed")
 
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble

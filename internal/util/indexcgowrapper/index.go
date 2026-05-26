@@ -11,7 +11,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Blob = storage.Blob
@@ -182,7 +182,7 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 func (index *CgoIndex) Build(dataset *Dataset) error {
 	switch dataset.DType {
 	case schemapb.DataType_None:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on supported data type: %s", dataset.DType.String())
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
 	case schemapb.DataType_Float16Vector:
@@ -214,7 +214,7 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	case schemapb.DataType_VarChar:
 		return index.buildStringIndex(dataset)
 	default:
-		return fmt.Errorf("build index on unsupported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on unsupported data type: %s", dataset.DType.String())
 	}
 }
 
@@ -306,7 +306,7 @@ func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
 	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
 		validRows := validCount(validData)
 		if validRows > 0 && len(vectors) == 0 {
-			return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+			return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
 		}
 		status := C.BuildSparseFloatVecIndexWithValidData(
 			index.indexPtr,
@@ -318,7 +318,7 @@ func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
 		return HandleCStatus(&status, "failed to build sparse float vector index with valid data")
 	}
 	if len(vectors) == 0 {
-		return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+		return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
 	}
 	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build sparse float vector index")

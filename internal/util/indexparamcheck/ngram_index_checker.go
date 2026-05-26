@@ -1,7 +1,6 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -68,7 +67,7 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType s
 func (c *NgramIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dType := field.GetDataType()
 	if !typeutil.IsStringType(dType) && dType != schemapb.DataType_JSON {
-		return fmt.Errorf("ngram index can only be created on VARCHAR or JSON field")
+		return merr.WrapErrParameterInvalidMsg("ngram index can only be created on VARCHAR or JSON field")
 	}
 	return nil
 }

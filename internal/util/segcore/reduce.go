@@ -26,13 +26,11 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type SliceInfo struct {
@@ -85,21 +83,21 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, place
 	}
 
 	if plan.cSearchPlan == nil {
-		return nil, errors.New("nil search plan")
+		return nil, merr.WrapErrParameterInvalidMsg("nil search plan")
 	}
 
 	if len(sliceNQs) == 0 {
-		return nil, errors.New("empty slice nqs is not allowed")
+		return nil, merr.WrapErrParameterInvalidMsg("empty slice nqs is not allowed")
 	}
 
 	if len(sliceNQs) != len(sliceTopKs) {
-		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
+		return nil, merr.WrapErrParameterInvalidMsg("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
 	}
 
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		if res == nil {
-			return nil, errors.New("nil searchResult detected when reduceSearchResultsAndFillData")
+			return nil, merr.WrapErrSegcoreMsg("nil searchResult detected when reduceSearchResultsAndFillData")
 		}
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
@@ -134,7 +132,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, place
 	defer future.Release()
 	result, err := future.BlockAndLeakyGet()
 	if err != nil {
-		return nil, errors.Wrap(err, "ReduceSearchResultsAndFillData failed")
+		return nil, merr.Wrap(err, "ReduceSearchResultsAndFillData failed")
 	}
 	return SearchResultDataBlobs(result), nil
 }
@@ -145,7 +143,7 @@ func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchR
 	var scannedTotalBytes C.int64_t
 	status := C.GetSearchResultDataBlob(&blob, &scannedRemoteBytes, &scannedTotalBytes, cSearchResultDataBlobs, C.int32_t(blobIndex))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, StorageCost{ScannedRemoteBytes: 0, ScannedTotalBytes: 0}, errors.Wrap(err, "marshal failed")
+		return nil, StorageCost{ScannedRemoteBytes: 0, ScannedTotalBytes: 0}, merr.Wrap(err, "marshal failed")
 	}
 	return getCProtoBlob(&blob), StorageCost{ScannedRemoteBytes: int64(scannedRemoteBytes), ScannedTotalBytes: int64(scannedTotalBytes)}, nil
 }

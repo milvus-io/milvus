@@ -727,7 +727,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 0, 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int32: %w", err)
+				return nil, merr.Wrap(err, "failed to parse int32")
 			}
 			values[i] = int32(num)
 		}
@@ -747,7 +747,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int64: %w", err)
+				return nil, merr.Wrap(err, "failed to parse int64")
 			}
 			values[i] = num
 		}
@@ -767,12 +767,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float32: %w", err)
+				return nil, merr.Wrap(err, "failed to parse float32")
 			}
 			values[i] = float32(num)
 		}
 		if err := typeutil.VerifyFloats32(values); err != nil {
-			return nil, fmt.Errorf("float32 verification failed: %w", err)
+			return nil, merr.Wrap(err, "float32 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -790,12 +790,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float64: %w", err)
+				return nil, merr.Wrap(err, "failed to parse float64")
 			}
 			values[i] = num
 		}
 		if err := typeutil.VerifyFloats64(values); err != nil {
-			return nil, fmt.Errorf("float64 verification failed: %w", err)
+			return nil, merr.Wrap(err, "float64 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{

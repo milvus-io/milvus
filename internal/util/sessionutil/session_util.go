@@ -614,7 +614,7 @@ func (s *Session) processKeepAliveResponse() {
 			newCH, err := s.etcdCli.KeepAlive(s.ctx, *s.LeaseID)
 			if err != nil {
 				s.Logger().Error("failed to keep alive with etcd", zap.Error(err))
-				lastErr = errors.Wrap(err, "failed to keep alive")
+				lastErr = merr.Wrap(err, "failed to keep alive")
 				continue
 			}
 			s.Logger().Info("keep alive...", zap.Int64("leaseID", int64(*s.LeaseID)))
@@ -652,7 +652,7 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 			log.Cleanup()
 			os.Exit(ExitCodeEtcd)
 		}
-		return errors.Wrap(err, "failed to check TTL")
+		return merr.Wrap(err, "failed to check TTL")
 	}
 	if ttlResp.TTL <= 0 {
 		s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
@@ -726,11 +726,11 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 
 func (s *Session) GoingStop() error {
 	if s == nil || s.etcdCli == nil || s.LeaseID == nil {
-		return errors.New("the session hasn't been init")
+		return merr.WrapErrServiceInternalMsg("the session hasn't been init")
 	}
 
 	if s.Disconnected() {
-		return errors.New("this session has disconnected")
+		return merr.WrapErrServiceUnavailable("this session has disconnected")
 	}
 
 	completeKey := s.getCompleteKey()

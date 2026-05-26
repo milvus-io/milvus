@@ -23,14 +23,17 @@
 package balancer
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/resolver"
 )
+
+// errProducedZeroAddresses is the resolver-side sentinel reported via
+// ClientConn.ResolverError when address resolution returns zero addresses.
+// Wrapped with merr so the wire code is ServiceUnavailable (transient).
+var errProducedZeroAddresses = merr.WrapErrServiceUnavailable("produced zero addresses")
 
 var (
 	_ balancer.Balancer  = (*baseBalancer)(nil)
@@ -136,7 +139,7 @@ func (b *baseBalancer) UpdateClientConnState(s balancer.ClientConnState) error {
 	// the overall state turns transient failure, the error message will have
 	// the zero address information.
 	if len(s.ResolverState.Addresses) == 0 {
-		b.ResolverError(errors.New("produced zero addresses"))
+		b.ResolverError(errProducedZeroAddresses)
 		return balancer.ErrBadResolverState
 	}
 
@@ -151,12 +154,12 @@ func (b *baseBalancer) mergeErrors() error {
 	// connErr must always be non-nil unless there are no SubConns, in which
 	// case resolverErr must be non-nil.
 	if b.connErr == nil {
-		return fmt.Errorf("last resolver error: %v", b.resolverErr)
+		return merr.Wrap(b.resolverErr, "last resolver error")
 	}
 	if b.resolverErr == nil {
-		return fmt.Errorf("last connection error: %v", b.connErr)
+		return merr.Wrap(b.connErr, "last connection error")
 	}
-	return fmt.Errorf("last connection error: %v; last resolver error: %v", b.connErr, b.resolverErr)
+	return merr.Wrapf(b.connErr, "last connection error; last resolver error: %v", b.resolverErr)
 }
 
 // regeneratePicker takes a snapshot of the balancer, and generates a picker

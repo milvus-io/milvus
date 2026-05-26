@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
@@ -1298,7 +1297,7 @@ func ReadNullableSparseFloatVectorData(pcr *FieldReader, count int64) (any, []bo
 func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
+			return merr.WrapErrParameterInvalidMsg("expected %d but got %d", dim, offsets[i]-offsets[i-1])
 		}
 	}
 	return nil
@@ -1306,7 +1305,7 @@ func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return errors.New("empty offsets")
+		return merr.WrapErrParameterInvalidMsg("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -1321,7 +1320,7 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	case schemapb.DataType_Int8Vector:
 		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+		return merr.WrapErrParameterInvalidMsg("unexpected vector data type %s", dataType.String())
 	}
 }
 
@@ -1766,7 +1765,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float32Array.([][]float32) {
 			if err := typeutil.VerifyFloats32(elementArray); err != nil {
-				return nil, fmt.Errorf("float32 verification failed: %w", err)
+				return nil, merr.Wrap(err, "float32 verification failed")
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
@@ -1789,7 +1788,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float64Array.([][]float64) {
 			if err := typeutil.VerifyFloats64(elementArray); err != nil {
-				return nil, fmt.Errorf("float64 verification failed: %w", err)
+				return nil, merr.Wrap(err, "float64 verification failed")
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
