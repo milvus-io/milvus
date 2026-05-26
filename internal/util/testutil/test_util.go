@@ -464,17 +464,18 @@ func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType
 		for i := 0; i < logicalRows; i++ {
 			isValid := len(validData) == 0 || validData[i]
 			builder.Append(isValid)
-			indicesBuilder.Append(isValid)
-			valuesBuilder.Append(isValid)
-			if isValid {
-				rowVecData := contents[physicalIdx]
-				elemCount := len(rowVecData) / 8
-				for j := 0; j < elemCount; j++ {
-					appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
-					appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
-				}
-				physicalIdx++
+			if !isValid {
+				continue
 			}
+			indicesBuilder.Append(true)
+			valuesBuilder.Append(true)
+			rowVecData := contents[physicalIdx]
+			elemCount := len(rowVecData) / 8
+			for j := 0; j < elemCount; j++ {
+				appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
+				appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
+			}
+			physicalIdx++
 		}
 		return builder.NewStructArray(), nil
 	}

@@ -2148,6 +2148,20 @@ func TestNullableVectorAllNull(t *testing.T) {
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, nb, count, "query should return all %d rows even with 100%% null vectors", nb)
 
+			// query vector output should preserve all-null logical rows after index/load
+			queryVecRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("int64 < 10").WithOutputFields("vector"))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, 10, queryVecRes.ResultCount)
+			vecCol := queryVecRes.GetColumn("vector")
+			for i := 0; i < queryVecRes.ResultCount; i++ {
+				isNull, err := vecCol.IsNull(i)
+				require.NoError(t, err)
+				require.True(t, isNull, "all-null vector output row %d should stay null", i)
+				value, err := vecCol.Get(i)
+				require.NoError(t, err)
+				require.Nil(t, value, "all-null vector output row %d should have nil value", i)
+			}
+
 			// clean up
 			err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
 			common.CheckErr(t, err, true)

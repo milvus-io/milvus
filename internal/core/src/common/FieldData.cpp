@@ -120,7 +120,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    null_count_ = array->null_count();
+    if (!IsVectorDataType(data_type_)) {
+        null_count_ = array->null_count();
+    }
     switch (data_type_) {
         case DataType::BOOL: {
             AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
@@ -651,6 +653,9 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
             this->valid_data_.data(),
             this->length_,
             total_element_count);
+    } else {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+            this->valid_data_.data(), this->length_, total_element_count, true);
     }
 
     // update logical to physical offset mapping
@@ -667,7 +672,7 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
         this->valid_count_ += valid_count;
     }
 
-    this->null_count_ = total_element_count - valid_count;
+    this->null_count_ += total_element_count - valid_count;
     this->length_ += total_element_count;
 }
 

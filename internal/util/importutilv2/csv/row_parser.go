@@ -53,6 +53,10 @@ type rowParser struct {
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
+	if err := common.RejectNullableArrayOfVector(schema); err != nil {
+		return nil, merr.WrapErrImportFailed(err.Error())
+	}
+
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err

@@ -866,6 +866,37 @@ func (suite *RowParserSuite) TestFunctionOutputField() {
 	suite.False(hasEmbedding) // embedding not provided, should not be in row
 }
 
+func TestNewRowParserRejectsNullableArrayOfVector(t *testing.T) {
+	rpSuite := &RowParserSuite{autoID: true, hasNullable: true, hasDynamic: true}
+
+	t.Run("nullable top-level ArrayOfVector", func(t *testing.T) {
+		schema := rpSuite.createAllTypesSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:     2000,
+			Name:        "top_array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "2"},
+			},
+		})
+
+		_, err := NewRowParser(schema, nil, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
+	})
+
+	t.Run("nullable ArrayOfVector subfield", func(t *testing.T) {
+		schema := rpSuite.createAllTypesSchema()
+		schema.StructArrayFields[0].Fields[8].Nullable = true
+
+		_, err := NewRowParser(schema, nil, "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
+	})
+}
+
 func TestCsvRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
 }

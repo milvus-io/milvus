@@ -721,6 +721,9 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 		if err := ValidateFieldsInStruct(subField, schema); err != nil {
 			return err
 		}
+		if subField.GetDataType() == schemapb.DataType_ArrayOfVector && subField.GetNullable() {
+			return merr.WrapErrParameterInvalidMsg("ArrayOfVector does not support nullable, structName=%s, fieldName=%s", structArrayField.GetName(), subField.GetName())
+		}
 	}
 	return nil
 }

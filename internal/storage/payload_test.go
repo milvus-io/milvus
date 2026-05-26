@@ -1794,6 +1794,39 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	})
 }
 
+func TestNullableSparseFloatVectorPayloadReaderKeepsCompactRows(t *testing.T) {
+	validData := []bool{false, true, false, true}
+	contents := [][]byte{
+		typeutil.CreateSparseFloatRow([]uint32{1, 3}, []float32{1.1, 1.3}),
+		typeutil.CreateSparseFloatRow([]uint32{2, 4}, []float32{2.2, 2.4}),
+	}
+
+	w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, WithNullable(true))
+	require.NoError(t, err)
+	err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim:      5,
+			Contents: contents,
+		},
+		ValidData: validData,
+		Nullable:  true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, w.FinishPayloadWriter())
+
+	buffer, err := w.GetPayloadBufferFromWriter()
+	require.NoError(t, err)
+	r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer, true)
+	require.NoError(t, err)
+	defer r.ReleasePayloadReader()
+
+	readData, readDim, readValid, err := r.GetSparseFloatVectorFromPayload()
+	require.NoError(t, err)
+	require.Equal(t, 5, readDim)
+	require.Equal(t, validData, readValid)
+	require.Equal(t, contents, readData.Contents)
+}
+
 func TestPayload_NullableReaderAndWriter(t *testing.T) {
 	t.Run("TestBool", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool, WithNullable(true))
@@ -2728,7 +2761,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 			require.NoError(t, err)
 
 			validData := make([]bool, numRows)
-			tc.validDataSetup(validData)
+			validCount := tc.validDataSetup(validData)
 
 			data := &SparseFloatVectorFieldData{
 				SparseFloatArray: schemapb.SparseFloatArray{
@@ -2761,21 +2794,95 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 			readData, _, readValid, err := r.GetSparseFloatVectorFromPayload()
 			require.NoError(t, err)
 			require.Equal(t, numRows, len(readValid))
-			require.Equal(t, numRows, len(readData.Contents))
+			require.Equal(t, validCount, len(readData.Contents))
 
+			dataIdx := 0
 			for i := 0; i < numRows; i++ {
 				require.Equal(t, validData[i], readValid[i])
 				if validData[i] {
-					require.NotNil(t, readData.Contents[i])
-					require.Equal(t, 16, len(readData.Contents[i]))
+					require.NotNil(t, readData.Contents[dataIdx])
+					require.Equal(t, 16, len(readData.Contents[dataIdx]))
 					for j := 0; j < 16; j++ {
-						require.Equal(t, byte((i*10+j)%256), readData.Contents[i][j])
+						require.Equal(t, byte((i*10+j)%256), readData.Contents[dataIdx][j])
 					}
-				} else {
-					require.Nil(t, readData.Contents[i])
+					dataIdx++
 				}
 			}
 		}
+	})
+
+	t.Run("TestNullableVectorRequiresValidData", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			dataTyp schemapb.DataType
+			dim     int
+			add     func(PayloadWriterInterface) error
+		}{
+			{
+				name:    "FloatVector",
+				dataTyp: schemapb.DataType_FloatVector,
+				dim:     2,
+				add: func(w PayloadWriterInterface) error {
+					return w.AddFloatVectorToPayload([]float32{1, 2}, 2, nil)
+				},
+			},
+			{
+				name:    "BinaryVector",
+				dataTyp: schemapb.DataType_BinaryVector,
+				dim:     8,
+				add: func(w PayloadWriterInterface) error {
+					return w.AddBinaryVectorToPayload([]byte{1}, 8, nil)
+				},
+			},
+			{
+				name:    "Float16Vector",
+				dataTyp: schemapb.DataType_Float16Vector,
+				dim:     1,
+				add: func(w PayloadWriterInterface) error {
+					return w.AddFloat16VectorToPayload([]byte{1, 2}, 1, nil)
+				},
+			},
+			{
+				name:    "BFloat16Vector",
+				dataTyp: schemapb.DataType_BFloat16Vector,
+				dim:     1,
+				add: func(w PayloadWriterInterface) error {
+					return w.AddBFloat16VectorToPayload([]byte{1, 2}, 1, nil)
+				},
+			},
+			{
+				name:    "Int8Vector",
+				dataTyp: schemapb.DataType_Int8Vector,
+				dim:     2,
+				add: func(w PayloadWriterInterface) error {
+					return w.AddInt8VectorToPayload([]int8{1, 2}, 2, nil)
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				w, err := NewPayloadWriter(tt.dataTyp, WithDim(tt.dim), WithNullable(true))
+				require.NoError(t, err)
+				defer w.Close()
+
+				err = tt.add(w)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "validData")
+			})
+		}
+
+		t.Run("SparseFloatVector", func(t *testing.T) {
+			w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, WithNullable(true))
+			require.NoError(t, err)
+			defer w.Close()
+
+			err = w.AddSparseFloatVectorToPayload(&SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{Contents: [][]byte{{1}}},
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "validData")
+		})
 	})
 
 	t.Run("TestAddBool with wrong valids", func(t *testing.T) {
