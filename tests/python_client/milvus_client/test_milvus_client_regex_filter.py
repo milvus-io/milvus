@@ -280,45 +280,57 @@ def setup_struct_array_regex_collection(client, collection_name, create_scalar_i
 
 
 class RegexFilterSharedWideBase(TestMilvusClientV2Base):
+    """Shared read-only regex dataset.
+
+    Add tests here only when they do not mutate collection state, require custom schema/data,
+    or depend on reload/index lifecycle behavior.
+    """
+
     def setup_class(self):
         super().setup_class(self)
-        self.collection_name = "TestRegexFilterSharedWide" + cf.gen_unique_str("_")
+        self.collection_name = self.__class__.__name__ + cf.gen_unique_str("_")
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_shared_wide_collection(self, request):
         client = self._client()
-        setup_regex_collection(client, self.collection_name)
 
         def teardown():
             client.drop_collection(self.collection_name)
 
         request.addfinalizer(teardown)
+        setup_regex_collection(client, self.collection_name)
 
     def _shared_collection(self):
         return self._client(), self.collection_name
 
 
 class RegexFilterStructArraySharedBase(TestMilvusClientV2Base):
+    """Shared read-only StructArray regex dataset.
+
+    Add tests here only when they do not mutate collection state, require custom schema/data,
+    or depend on reload/index lifecycle behavior.
+    """
+
     def setup_class(self):
         super().setup_class(self)
-        self.collection_name = "TestRegexFilterStructArrayShared" + cf.gen_unique_str("_")
+        self.collection_name = self.__class__.__name__ + cf.gen_unique_str("_")
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_struct_array_collection(self, request):
         client = self._client()
-        setup_struct_array_regex_collection(client, self.collection_name, create_scalar_index=True)
 
         def teardown():
             client.drop_collection(self.collection_name)
 
         request.addfinalizer(teardown)
+        setup_struct_array_regex_collection(client, self.collection_name, create_scalar_index=True)
 
     def _shared_collection(self):
         return self._client(), self.collection_name
 
 
 class TestRegexFilterBasicSemantic(RegexFilterSharedWideBase):
-    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_regex_substring_match(self):
         """
         target: verify default regex behavior is substring matching
@@ -672,7 +684,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
         res = client.query(collection_name, filter='tags[10] =~ ".*"', output_fields=["id"])
         assert res == [], f"expected [], got {[r['id'] for r in res]}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_array_does_not_match_any_element_implicitly(self):
         """
         target: verify regex on array field without index raises error
@@ -842,7 +854,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_invalid_pattern(self):
         """
         target: verify invalid regex pattern is rejected
@@ -891,24 +903,24 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
         )
         assert res == [], f"expected [], got {[r['id'] for r in res]}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_unsupported_backreference(self):
         """
         target: verify RE2 backreference is rejected
-        expected: text =~ "(a)\\1" -> error "invalid escape sequence"
+        expected: text =~ "(a)\\1" -> error "invalid regex pattern"
         """
         client, collection_name = self._shared_collection()
 
-        error = {ct.err_code: 1100, ct.err_msg: "invalid escape sequence"}
+        error = {ct.err_code: 1100, ct.err_msg: "invalid regex pattern"}
         self.query(
             client,
             collection_name,
-            filter=r'text =~ "(a)\1"',
+            filter=r'text =~ "(a)\\1"',
             check_task=CheckTasks.err_res,
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_unsupported_lookahead(self):
         """
         target: verify RE2 lookahead is rejected
@@ -925,7 +937,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_on_numeric_field(self):
         """
         target: verify regex on numeric field is rejected
@@ -958,7 +970,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_right_operand_must_be_string_literal(self):
         """
         target: verify =~ right operand must be string literal
@@ -1045,7 +1057,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
         result = sorted([r["id"] for r in res])
         assert result == [], f'!~ ".*": expected [], got {result}'
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_invalid_escape(self):
         """
         target: verify invalid escape sequences are rejected
@@ -1067,7 +1079,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
                 check_items=error,
             )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_invalid_regex_negation(self):
         """
         target: verify invalid regex template parameter is rejected for !~
@@ -1087,7 +1099,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             f"expected invalid regex error for !~ template parameter, got: {err}"
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_unknown_field(self):
         """
         target: verify regex on unknown field raises error
@@ -1104,7 +1116,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_right_operand_cannot_be_field(self):
         """
         target: verify right operand cannot be a field reference
@@ -1121,7 +1133,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_right_operand_unsupported_literal_types(self):
         """
         target: verify right operand cannot be bool/array
@@ -1146,7 +1158,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_long_pattern_and_large_alternation(self):
         """
         target: verify long pattern and large alternation do not crash
@@ -1213,7 +1225,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
             f'not text =~ "ERROR" or text =~ "WARN": expected [2,3,4,5,6,7], got {result}'
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_delete_expression_smoke(self):
         """
         target: verify delete supports regex filter expression
@@ -1421,7 +1433,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_with_ngram_index(self):
         """
         target: ngram index two-phase path has no false negative
@@ -1441,7 +1453,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_with_inverted_index(self):
         """
         target: inverted index regex/fallback path matches the no-index baseline
@@ -1461,7 +1473,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_with_sort_index(self):
         """
         target: string STL_SORT index unique-value iteration path matches the no-index baseline
@@ -1484,7 +1496,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_with_bitmap_index(self):
         """
         target: bitmap index on low-cardinality VARCHAR field matches the no-index baseline
@@ -1510,7 +1522,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_with_marisa_index(self):
         """
         target: trie/marisa string index path works for regex filters on url
@@ -1536,7 +1548,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_index_after_flush_and_reload(self):
         """
         target: sealed segment with scalar index remains stable after release/load
@@ -1563,7 +1575,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_scalar_index_paths_with_sealed_data(self):
         """
         target: scalar index regex paths match expected ids on sealed data with non-trivial value distribution
@@ -1574,7 +1586,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
         expected_error_timeout = []
         expected_level = []
         expected_url = []
-        for i in range(1000):
+        for i in range(5000):
             is_error_timeout = i % 20 == 0
             level = "ERROR" if i % 3 == 0 else "INFO"
             text = f"ERROR sealed row {i} timeout" if is_error_timeout else f"INFO sealed row {i} ok"
@@ -1638,7 +1650,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_growing_and_sealed_segments(self):
         """
         target: regex and negated regex cover both sealed and growing segments
@@ -1746,7 +1758,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
         assert res[0]["text"] == "ERROR E1001: connection timeout", f"unexpected text: {res[0]['text']}"
         assert res[0]["email"] == "alice@gmail.com", f"unexpected email: {res[0]['email']}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_regex_vector_search(self):
         """
         target: vector search supports regex filter and excludes non-matching rows
@@ -2095,10 +2107,16 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
             2,
             expr='text =~ "ERROR"',
         )
-        all_req = AnnSearchRequest(query_vector, "vec2", {"metric_type": "L2", "params": {"ef": 64}}, 4)
-        res = client.hybrid_search(collection_name, [regex_req, all_req], ranker, limit=4, output_fields=["id"])
+        warn_req = AnnSearchRequest(
+            query_vector,
+            "vec2",
+            {"metric_type": "L2", "params": {"ef": 64}},
+            1,
+            expr='text =~ "WARN"',
+        )
+        res = client.hybrid_search(collection_name, [regex_req, warn_req], ranker, limit=3, output_fields=["id"])
         result = {hit["id"] for hit in res[0]}
-        assert {1, 4}.issubset(result), f"single regex sub-search missing ERROR ids, got {result}"
+        assert result == {1, 2, 4}, f"regex and WARN sub-searches should return only {{1,2,4}}, got {result}"
 
         json_req = AnnSearchRequest(
             query_vector,
@@ -2153,7 +2171,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
         )
         assert filtered[0] == [], f"no-match regex search expected [], got {filtered[0]}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_partition_query_search_delete(self):
         """
         target: partition query/search/delete honor regex filters and partition boundaries
@@ -2206,7 +2224,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_query_and_search_iterator(self):
         """
         target: query_iterator and search_iterator support regex filters
@@ -2266,7 +2284,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_concurrent_correctness(self):
         """
         target: concurrent regex query/search requests remain correct and service stays healthy
@@ -2325,7 +2343,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
 
 
 class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
-    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_struct_array_scalar_field_query(self):
         """
         target: regex filtering on scalar fields inside StructArray elements
@@ -2347,6 +2365,28 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
         result = sorted([r["id"] for r in res])
         assert result == [2], f"struct empty name =~ ^$: expected [2], got {result}"
 
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[name] =~ ".*")', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1, 2, 3], f"struct name =~ .* should exclude null/missing paths, got {result}"
+
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[name] !~ ".*")', output_fields=["id"])
+        assert res == [], f"struct name !~ .* should exclude null/missing paths, got {res}"
+
+        # StructArray elements are strongly typed, so element-level missing required fields cannot be inserted.
+        # Use an unknown StructArray sub-field to cover missing-path expression validation for =~ and !~.
+        for filter_expr in [
+            'MATCH_ANY(events, $[unknown] =~ ".*")',
+            'MATCH_ANY(events, $[unknown] !~ ".*")',
+        ]:
+            error = {ct.err_code: 1100, ct.err_msg: "unknown"}
+            self.query(
+                client,
+                collection_name,
+                filter=filter_expr,
+                check_task=CheckTasks.err_res,
+                check_items=error,
+            )
+
         error = {ct.err_code: 1100, ct.err_msg: "regex match on non-string or non-json field"}
         self.query(
             client,
@@ -2356,7 +2396,7 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_struct_array_scalar_index_path(self):
         """
         target: indexed StructArray scalar field regex path returns the same result as raw path
@@ -2390,15 +2430,14 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
             [query_vector],
             "events[embedding]",
             {"metric_type": "MAX_SIM_L2", "params": {"ef": 64}},
-            3,
-            expr='MATCH_ANY(events, $[status] !~ "ERROR")',
+            1,
+            expr='MATCH_ANY(events, $[status] =~ "WARN")',
         )
         res = client.hybrid_search(
-            collection_name, [req_name, req_status], WeightedRanker(0.5, 0.5), limit=3, output_fields=["id"]
+            collection_name, [req_name, req_status], WeightedRanker(0.5, 0.5), limit=2, output_fields=["id"]
         )
         result = {hit["id"] for hit in res[0]}
-        assert {1, 2, 3}.issubset(result), f"struct hybrid regex ids missing, got {result}"
-        assert 4 not in result, f"empty struct array row should not match, got {result}"
+        assert result == {1, 2}, f"struct hybrid name/status regex should return only {{1,2}}, got {result}"
 
 
 class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
@@ -2471,7 +2510,7 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_invalid_regex(self):
         """
         target: verify invalid regex passed through template parameter is rejected
@@ -2495,7 +2534,7 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_type_mismatch(self):
         """
         target: verify regex template parameter rejects non-string pattern values
@@ -2527,7 +2566,7 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_injection_safety(self):
         """
         target: verify regex template parameter cannot inject filter expression grammar
