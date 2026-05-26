@@ -20,10 +20,8 @@ package function
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -137,7 +135,7 @@ func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
-		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
 	}
 
 	var inputField, outputField *schemapb.FieldSchema
@@ -153,7 +151,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	if outputField == nil {
-		return nil, errors.New("no output field")
+		return nil, merr.WrapErrParameterInvalidMsg("no output field")
 	}
 
 	if params, ok := getMultiAnalyzerParams(inputField); ok {
@@ -209,16 +207,16 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, errors.New("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, errors.New("BM25 function received more than one input column")
+		return nil, merr.WrapErrParameterInvalidMsg("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, errors.New("BM25 function batch input not string list")
+		return nil, merr.WrapErrParameterInvalidMsg("BM25 function batch input not string list")
 	}
 
 	rowNum := len(text)
@@ -292,16 +290,16 @@ func (v *BM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, errors.New("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, errors.New("analyze received should only receive text input column(not set analyzer name)")
+		return nil, merr.WrapErrParameterInvalidMsg("analyze received should only receive text input column(not set analyzer name)")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, errors.New("batch input not string list")
+		return nil, merr.WrapErrParameterInvalidMsg("batch input not string list")
 	}
 
 	rowNum := len(text)
