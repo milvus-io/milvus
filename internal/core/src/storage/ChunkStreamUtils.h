@@ -25,15 +25,21 @@
 #include <mutex>
 #include <vector>
 
-#include "storage/ThreadPools.h"
+#include "common/Common.h"
 
 namespace milvus::storage {
 
-/// Default chunk size for ReadEntryStream (2 MB).
-constexpr size_t kDefaultStreamChunkSize = 2 * 1024 * 1024;
+inline size_t
+DefaultStreamChunkSize() {
+    auto chunk_size = milvus::INDEX_ENTRY_STREAM_CHUNK_SIZE.load();
+    return chunk_size > 0 ? static_cast<size_t>(chunk_size) : 1;
+}
 
-/// Budget multiplier relative to thread pool size.
-constexpr double kScalarIndexChunkBudgetMultiplier = 1.5;
+inline double
+ScalarIndexChunkBudgetRatio() {
+    auto ratio = milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load();
+    return ratio > 0 ? ratio : 1.0;
+}
 
 /// A chunk downloaded from a V3 entry, carrying a sequence number for
 /// reordering on the consumer side. `error` carries an exception captured in
@@ -108,11 +114,11 @@ class TransientMemoryBudget {
 
     static size_t
     DefaultScalarIndexChunkBudgetBytes() {
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-        auto capacity = static_cast<size_t>(pool.GetMaxThreadNum() *
-                                            kScalarIndexChunkBudgetMultiplier) *
-                        kDefaultStreamChunkSize;
-        return std::max<size_t>(capacity, kDefaultStreamChunkSize);
+        auto core_num = std::max(1, milvus::CPU_NUM);
+        auto capacity =
+            static_cast<size_t>(core_num * ScalarIndexChunkBudgetRatio()) *
+            DefaultStreamChunkSize();
+        return std::max<size_t>(capacity, DefaultStreamChunkSize());
     }
 
     bool

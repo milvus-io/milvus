@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "test_utils/Constants.h"
@@ -39,6 +40,23 @@
 using namespace milvus::storage;
 
 namespace {
+
+class IndexEntryStreamConfigGuard {
+ public:
+    IndexEntryStreamConfigGuard()
+        : chunk_size_(milvus::INDEX_ENTRY_STREAM_CHUNK_SIZE.load()),
+          budget_ratio_(milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load()) {
+    }
+
+    ~IndexEntryStreamConfigGuard() {
+        milvus::SetIndexEntryStreamChunkSize(chunk_size_);
+        milvus::SetScalarIndexEntryStreamBudgetRatio(budget_ratio_);
+    }
+
+ private:
+    int64_t chunk_size_;
+    double budget_ratio_;
+};
 
 // Simple XOR-based mock cipher for testing (NOT for production use!)
 class MockEncryptor : public plugin::IEncryptor {
@@ -1041,6 +1059,39 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
     ASSERT_EQ(reassembled.size(), entry_size);
     VerifyPattern(reassembled, entry_size);
     ASSERT_EQ(chunk_count, 1);  // single chunk (1KB < 2MB default)
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesConfiguredDefaultChunkSize) {
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetIndexEntryStreamChunkSize(7);
+    milvus::SetScalarIndexEntryStreamBudgetRatio(2.5);
+    ASSERT_EQ(DefaultStreamChunkSize(), 7);
+    ASSERT_DOUBLE_EQ(ScalarIndexChunkBudgetRatio(), 2.5);
+
+    const std::string file_path = kV3FilePath + "_stream_configured_default";
+    const size_t entry_size = 20;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::vector<size_t> chunk_sizes;
+    std::vector<uint8_t> reassembled;
+    reader->ReadEntryStream("data", [&](const uint8_t* d, size_t len) {
+        chunk_sizes.push_back(len);
+        reassembled.insert(reassembled.end(), d, d + len);
+    });
+
+    ASSERT_EQ(reassembled, data);
+    ASSERT_EQ(chunk_sizes, (std::vector<size_t>{7, 7, 6}));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
