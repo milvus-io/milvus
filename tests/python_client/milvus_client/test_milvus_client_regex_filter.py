@@ -279,16 +279,52 @@ def setup_struct_array_regex_collection(client, collection_name, create_scalar_i
     return data
 
 
-class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
+class RegexFilterSharedWideBase(TestMilvusClientV2Base):
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestRegexFilterSharedWide" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_shared_wide_collection(self, request):
+        client = self._client()
+        setup_regex_collection(client, self.collection_name)
+
+        def teardown():
+            client.drop_collection(self.collection_name)
+
+        request.addfinalizer(teardown)
+
+    def _shared_collection(self):
+        return self._client(), self.collection_name
+
+
+class RegexFilterStructArraySharedBase(TestMilvusClientV2Base):
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestRegexFilterStructArrayShared" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_struct_array_collection(self, request):
+        client = self._client()
+        setup_struct_array_regex_collection(client, self.collection_name, create_scalar_index=True)
+
+        def teardown():
+            client.drop_collection(self.collection_name)
+
+        request.addfinalizer(teardown)
+
+    def _shared_collection(self):
+        return self._client(), self.collection_name
+
+
+class TestRegexFilterBasicSemantic(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_substring_match(self):
         """
         target: verify default regex behavior is substring matching
         expected: text =~ "timeout" returns id [1]; text =~ "ERROR" returns [1] not full-string
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "timeout"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -310,17 +346,13 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [3], f"^DEBUG cache hit$: expected [3], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_classes_and_quantifiers(self):
         """
         target: verify RE2 character classes and quantifiers
         expected: E[0-9]{4}: -> [1], [0-9]{3}-[0-9]{4} -> [4]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter=r'text =~ "E[0-9]{4}:"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -330,17 +362,13 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [4], f"[0-9]{{3}}-[0-9]{{4}}: expected [4], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_negation(self):
         """
         target: verify !~ is equivalent to NOT(field =~ pattern)
         expected: text !~ "^DEBUG" returns [1,2,4,5,6,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         expected = [1, 2, 4, 5, 6, 7]
 
@@ -352,23 +380,17 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         result_not = sorted([r["id"] for r in res])
         assert result_not == expected, f"not(=~): expected {expected}, got {result_not}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_case_insensitive(self):
         """
         target: verify inline flag (?i) for case-insensitive matching
         expected: email =~ "(?i)gmail\\.com$" returns [1,3,5,6]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter=r'email =~ "(?i)gmail\.com$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1, 3, 5, 6], f"expected [1,3,5,6], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_dot_matches_newline(self):
@@ -376,9 +398,7 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         target: verify dot_nl=true (default) and (?-s) to disable
         expected: "c.d" -> [4,5]; "(?-s)c.d" -> [4]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "c.d"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -388,17 +408,13 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [4], f'"(?-s)c.d": expected [4], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_unicode(self):
         """
         target: verify Unicode class and emoji literal matching
         expected: \\p{Han}+ -> [4], ✅ -> [7], 🚀 -> [7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "\\p{Han}+"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -412,8 +428,6 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [7], f"🚀: expected [7], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_named_group(self):
         """
@@ -422,9 +436,7 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
                 not (?<name>...) which was added in later RE2 releases.
         expected: (?P<code>E[0-9]{4}) -> [1], (?P<level>ERROR|WARN) -> [1,2]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -441,8 +453,6 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         )
         result = sorted([r["id"] for r in res])
         assert result == [1, 2], f"(?P<level>ERROR|WARN): expected [1,2], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_control_characters(self):
@@ -506,15 +516,11 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         target: verify empty pattern matches all non-NULL strings
         expected: text =~ "" -> [1,2,3,4,5,6,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ ""', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 3, 4, 5, 6, 7], f"expected [1,2,3,4,5,6,7], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_no_match_returns_empty_list(self):
@@ -522,9 +528,7 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         target: verify regex returns empty list when no match, not None or error
         expected: text =~ "NO_SUCH_PATTERN_98765" -> []
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -532,8 +536,6 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert res == [], f"expected [], got {res}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_nested_quantifier_smoke(self):
@@ -594,22 +596,18 @@ class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
+class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_varchar_field(self):
         """
         target: verify regex on basic VarChar field (url)
         expected: url =~ "/api/v[0-9]+/users" -> [1,3,5]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='url =~ "/api/v[0-9]+/users"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1, 3, 5], f"expected [1,3,5], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_string_path(self):
@@ -617,9 +615,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify regex on JSON string path
         expected: metadata["version"] =~ "^v[0-9]+\\.[0-9]+$" -> [1,2,3,5,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -629,17 +625,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 3, 5, 7], f"expected [1,2,3,5,7], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_nested_path(self):
         """
         target: verify regex and !~ on nested JSON string paths
         expected: metadata["nested"]["x"] =~ "^abc$" -> [1], !~ "^abc$" -> [2,3,4,5,6,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='metadata["nested"]["x"] =~ "^abc$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -652,8 +644,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         res = client.query(collection_name, filter='metadata["nested"]["missing"] =~ ".*"', output_fields=["id"])
         assert res == [], f"missing nested key: expected [], got {res}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_null_path(self):
         """
@@ -661,9 +651,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         expected: metadata["trace"] =~ "[a-z]+-[0-9]+" -> [1,2,3,5,7]
         id 4 trace is null (excluded), id 6 trace is "" (excluded)
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -673,22 +661,16 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 3, 5, 7], f"expected [1,2,3,5,7], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_array_index_out_of_range(self):
         """
         target: verify array index out of range returns empty without error
         expected: tags[10] =~ ".*" -> []
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='tags[10] =~ ".*"', output_fields=["id"])
         assert res == [], f"expected [], got {[r['id'] for r in res]}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_array_does_not_match_any_element_implicitly(self):
@@ -696,9 +678,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify regex on array field without index raises error
         expected: tags =~ "prod" -> error "can not comparisons array fields directly"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {
             ct.err_code: 1100,
@@ -712,8 +692,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_root_object(self):
         """
@@ -723,9 +701,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         expected: metadata =~ "ERROR" -> []
                   metadata["level"] =~ "ERROR" -> [1,5]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='metadata =~ "ERROR"', output_fields=["id"])
         assert res == [], f'root object =~ "ERROR": expected [], got {res}'
@@ -734,17 +710,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1, 5], f'metadata["level"] =~ "ERROR": expected [1,5], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_array_varchar_element(self):
         """
         target: verify regex on individual ARRAY VARCHAR element by index
         expected: tags[0] =~ "^release-v[0-9]+" -> [1,2,5]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -754,8 +726,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 5], f"expected [1,2,5], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_null_scalar_value(self):
         """
@@ -763,9 +733,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         expected: email =~ "gmail" -> [1,5,6], email !~ "gmail" -> [2,3,7]
         id 4 has email=None, excluded by both =~ and !~
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='email =~ "gmail"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -775,17 +743,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [2, 3, 7], f'!~ "gmail": expected [2,3,7], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_null_negation_equivalence(self):
         """
         target: verify !~ and not(=~) behave identically on NULL values
         expected: email !~ "gmail" == not (email =~ "gmail") -> [2,3,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res_a = client.query(collection_name, filter='email !~ "gmail"', output_fields=["id"])
         result_a = sorted([r["id"] for r in res_a])
@@ -795,17 +759,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
 
         assert result_a == result_b == [2, 3, 7], f"!~={result_a}, not(=~)={result_b}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_null_explicitly_included(self):
         """
         target: verify !~ or is null explicitly includes NULL rows
         expected: email !~ "gmail" or email is null -> [2,3,4,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -815,23 +775,17 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [2, 3, 4, 7], f"expected [2,3,4,7], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_array_empty_element(self):
         """
         target: verify regex matches empty string in array element
         expected: tags[0] =~ "^$" -> [6]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='tags[0] =~ "^$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [6], f"expected [6], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_array_element_negation(self):
@@ -839,9 +793,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify !~ on ARRAY<VARCHAR> element paths
         expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ includes all rows
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='tags[0] !~ "^release"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -850,8 +802,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         res = client.query(collection_name, filter='tags[10] !~ ".*"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 3, 4, 5, 6, 7], f"out-of-range !~: expected all rows, got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_dynamic_json_field_paths(self):
@@ -898,9 +848,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify invalid regex pattern is rejected
         expected: text =~ "(unclosed" -> error "missing closing"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "missing closing"}
         self.query(
@@ -911,17 +859,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_json_non_string_path(self):
         """
         target: verify JSON non-string values (int/bool/object/array) silently return empty
         expected: all return [] without error
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         for expr, label in [
             ('metadata["version_num"] =~ "1"', "int"),
@@ -932,17 +876,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             res = client.query(collection_name, filter=expr, output_fields=["id"])
             assert res == [], f"{label} {expr}: expected [], got {[r['id'] for r in res]}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_missing_json_path(self):
         """
         target: verify regex on missing JSON key returns empty without error
         expected: metadata["nonexistent_key"] =~ ".*" -> []
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -951,17 +891,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         )
         assert res == [], f"expected [], got {[r['id'] for r in res]}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_unsupported_backreference(self):
         """
         target: verify RE2 backreference is rejected
         expected: text =~ "(a)\\1" -> error "invalid escape sequence"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "invalid escape sequence"}
         self.query(
@@ -972,17 +908,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_unsupported_lookahead(self):
         """
         target: verify RE2 lookahead is rejected
         expected: text =~ "ERROR(?= E1001)" -> error "invalid regex pattern"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "invalid regex pattern"}
         self.query(
@@ -992,8 +924,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_numeric_field(self):
@@ -1034,9 +964,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify =~ right operand must be string literal
         expected: text =~ 123 -> error about regex pattern requiring string literal or template variable
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "string literal or template variable"}
         self.query(
@@ -1046,8 +974,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_escaped_quotes_and_backslash(self):
@@ -1109,9 +1035,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         target: verify empty string field matches ^$ and is matched by .*
         expected: text =~ "^$" -> [6], text !~ ".*" -> [1,2,3,4,5,7]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "^$"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -1121,17 +1045,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [], f'!~ ".*": expected [], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_invalid_escape(self):
         """
         target: verify invalid escape sequences are rejected
         expected: \\k, \\x, \\p{UnknownClass} -> error "invalid"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         for pattern, label in [
             (r"\k", "backslash-k"),
@@ -1147,17 +1067,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
                 check_items=error,
             )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_template_param_invalid_regex_negation(self):
         """
         target: verify invalid regex template parameter is rejected for !~
         expected: text !~ {pattern} raises regex/parse related error
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         with pytest.raises(Exception) as exc_info:
             client.query(
@@ -1171,17 +1087,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             f"expected invalid regex error for !~ template parameter, got: {err}"
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_unknown_field(self):
         """
         target: verify regex on unknown field raises error
         expected: unknown_field =~ "test" -> error "field unknown_field not exist"
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "field unknown_field not exist"}
         self.query(
@@ -1192,17 +1104,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_right_operand_cannot_be_field(self):
         """
         target: verify right operand cannot be a field reference
         expected: text =~ email -> error about regex pattern requiring string literal or template variable
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "string literal or template variable"}
         self.query(
@@ -1213,17 +1121,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_right_operand_unsupported_literal_types(self):
         """
         target: verify right operand cannot be bool/array
         expected: text =~ true -> error, text =~ [1,2] -> error about regex pattern requiring string literal or template variable
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         error = {ct.err_code: 1100, ct.err_msg: "string literal or template variable"}
         self.query(
@@ -1242,17 +1146,13 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_long_pattern_and_large_alternation(self):
         """
         target: verify long pattern and large alternation do not crash
         expected: both return [] without error
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         long_pattern = "a" * 10000
         res = client.query(collection_name, filter=f'text =~ "{long_pattern}"', output_fields=["id"])
@@ -1261,8 +1161,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         alt_pattern = "|".join([f"alt_{i}" for i in range(1000)])
         res = client.query(collection_name, filter=f'text =~ "{alt_pattern}"', output_fields=["id"])
         assert res == [], f"large alternation: expected [], got {[r['id'] for r in res]}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_not_precedence(self):
@@ -1275,9 +1173,7 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
           (text =~ "ERROR" or text =~ "WARN") and id > 3 -> [] (parens force or first)
           not text =~ "ERROR" or text =~ "WARN"  -> [2,3,4,5,6,7] (not binds regex)
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -1317,8 +1213,6 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
             f'not text =~ "ERROR" or text =~ "WARN": expected [2,3,4,5,6,7], got {result}'
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_delete_expression_smoke(self):
         """
@@ -1339,16 +1233,14 @@ class TestRegexFilterFieldAccess(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-class TestRegexFilterOptimization(TestMilvusClientV2Base):
+class TestRegexFilterOptimization(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_optimize_pure_literal_as_inner_match(self):
         """
         target: pure literal pattern optimized to inner match, same as like "%...%"
         expected: text =~ "ERROR" -> [1], text like "%ERROR%" -> [1]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res_regex = client.query(collection_name, filter='text =~ "ERROR"', output_fields=["id"])
         result_regex = sorted([r["id"] for r in res_regex])
@@ -1359,17 +1251,13 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
         assert result_regex == [1], f"regex: expected [1], got {result_regex}"
         assert result_regex == result_like, f"regex {result_regex} != like {result_like}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_optimize_prefix(self):
         """
         target: ^ERROR optimized to prefix match, same as like "ERROR%"
         expected: text =~ "^ERROR" -> [1], text like "ERROR%" -> [1]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res_regex = client.query(collection_name, filter='text =~ "^ERROR"', output_fields=["id"])
         result_regex = sorted([r["id"] for r in res_regex])
@@ -1380,17 +1268,13 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
         assert result_regex == [1], f"regex: expected [1], got {result_regex}"
         assert result_regex == result_like, f"regex {result_regex} != like {result_like}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_optimize_postfix(self):
         """
         target: hit$ optimized to postfix match, same as like "%hit"
         expected: text =~ "hit$" -> [3], text like "%hit" -> [3]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res_regex = client.query(collection_name, filter='text =~ "hit$"', output_fields=["id"])
         result_regex = sorted([r["id"] for r in res_regex])
@@ -1400,8 +1284,6 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
 
         assert result_regex == [3], f"regex: expected [3], got {result_regex}"
         assert result_regex == result_like, f"regex {result_regex} != like {result_like}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_optimize_full_equal(self):
@@ -1469,15 +1351,11 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
         target: metacharacters like []{} are not treated as literal
         expected: text =~ "E[0-9]{4}" -> [1] (matches E1001), not [] (literal)
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "E[0-9]{4}"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
         assert result == [1], f"E[0-9]{{4}}: expected [1], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_filter_like_relationship(self):
@@ -1487,9 +1365,7 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
                   text like "%ERROR%" -> [1] (with wildcards, substring)
                   text =~ "ERROR" -> [1] (regex substring)
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res_like_full = client.query(collection_name, filter='text like "ERROR"', output_fields=["id"])
         result_like_full = sorted([r["id"] for r in res_like_full])
@@ -1504,8 +1380,6 @@ class TestRegexFilterOptimization(TestMilvusClientV2Base):
         assert result_like_sub == [1], f'like "%%ERROR%%": expected [1], got {result_like_sub}'
         assert result_regex == [1], f"regex: expected [1], got {result_regex}"
         assert result_regex == result_like_sub, f"regex {result_regex} != like {result_like_sub}"
-
-        self.drop_collection(client, collection_name)
 
 
 class TestRegexFilterIndexPath(TestMilvusClientV2Base):
@@ -1853,16 +1727,14 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
+class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_query_output_fields(self):
         """
         target: query with regex filter returns requested scalar output fields
         expected: text =~ "timeout" returns id 1 with text and email fields
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -1874,18 +1746,14 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         assert res[0]["text"] == "ERROR E1001: connection timeout", f"unexpected text: {res[0]['text']}"
         assert res[0]["email"] == "alice@gmail.com", f"unexpected email: {res[0]['email']}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_vector_search(self):
         """
         target: vector search supports regex filter and excludes non-matching rows
         expected: unfiltered search can return non-url-matching ids, filtered search only returns ids in [1,3,5]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
+        client, collection_name = self._shared_collection()
         data = gen_regex_test_data()
-        setup_regex_collection(client, collection_name, data=data)
 
         query_vector = data[0]["vec"]
         unfiltered = client.search(
@@ -1914,18 +1782,14 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         filtered_ids = [hit["id"] for hit in filtered[0]]
         assert set(filtered_ids) == {1, 3, 5}, f"filtered expected ids [1,3,5], got {filtered_ids}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_search_nullable_and_json_paths(self):
         """
         target: search supports regex filters on nullable fields and JSON string paths
         expected: =~/!~/or is null all return only rows satisfying the predicate
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
+        client, collection_name = self._shared_collection()
         data = gen_regex_test_data()
-        setup_regex_collection(client, collection_name, data=data)
         query_vector = data[0]["vec"]
 
         for filter_expr, expected in [
@@ -1947,17 +1811,13 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
             result = {hit["id"] for hit in res[0]}
             assert result == expected, f"{filter_expr}: expected {expected}, got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_hybrid_boolean_and(self):
         """
         target: regex filter combines correctly with scalar AND expression
         expected: text =~ "ERROR" and id > 1 -> [], text =~ "(?i)error" and id > 1 -> [4]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "ERROR" and id > 1', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -1971,17 +1831,13 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [4], f'text =~ "(?i)error" and id > 1: expected [4], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_hybrid_boolean_or(self):
         """
         target: regex filters combine correctly with OR expression
         expected: ^WARN -> [2], ^DEBUG -> [3], OR combines them to [2,3]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='text =~ "^WARN"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -1999,17 +1855,13 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [2, 3], f'text =~ "^WARN" or text =~ "^DEBUG": expected [2,3], got {result}'
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_with_limit_offset(self):
         """
         target: regex filter works with query order_by, limit, and offset
         expected: url =~ "^/api" matches [1,2,3,5,7]; order by id asc + limit 2 offset 1 returns [2,3]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='url =~ "^/api"', output_fields=["id"])
         all_result = sorted([r["id"] for r in res])
@@ -2026,17 +1878,13 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         result = [r["id"] for r in res]
         assert result == [2, 3], f"order by id asc limit 2 offset 1: expected [2,3], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_hybrid_in_expression(self):
         """
         target: regex filter combines correctly with IN expression
         expected: IN returns [1,2,5], regex returns [1,2], AND returns their intersection [1,2]
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(collection_name, filter='level in ["ERROR", "WARN"]', output_fields=["id"])
         result = sorted([r["id"] for r in res])
@@ -2057,8 +1905,6 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         )
         result = sorted([r["id"] for r in res])
         assert result == [1, 2], f"IN and regex: expected [1,2], got {result}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_milvus_hybrid_search_filter(self):
@@ -2282,10 +2128,8 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         target: vector search with regex filter no match returns empty list
         expected: unfiltered search has results; filtered search with no matching regex returns []
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
+        client, collection_name = self._shared_collection()
         data = gen_regex_test_data()
-        setup_regex_collection(client, collection_name, data=data)
 
         query_vector = data[0]["vec"]
         unfiltered = client.search(
@@ -2308,8 +2152,6 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert filtered[0] == [], f"no-match regex search expected [], got {filtered[0]}"
-
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_partition_query_search_delete(self):
@@ -2482,16 +2324,14 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-class TestRegexFilterStructArray(TestMilvusClientV2Base):
+class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
     @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_struct_array_scalar_field_query(self):
         """
         target: regex filtering on scalar fields inside StructArray elements
         expected: MATCH_ANY covers =~, !~, empty array, and non-string values
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_struct_array_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name, filter='MATCH_ANY(events, $[name] =~ "error.*timeout")', output_fields=["id"]
@@ -2516,17 +2356,13 @@ class TestRegexFilterStructArray(TestMilvusClientV2Base):
             check_items=error,
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_struct_array_scalar_index_path(self):
         """
         target: indexed StructArray scalar field regex path returns the same result as raw path
         expected: INVERTED index on events[name] has no false negatives for regex filtering
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_struct_array_regex_collection(client, collection_name, create_scalar_index=True)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name, filter='MATCH_ANY(events, $[name] =~ "error.*timeout")', output_fields=["id"]
@@ -2534,17 +2370,13 @@ class TestRegexFilterStructArray(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1], f"indexed struct name =~ error.*timeout: expected [1], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_struct_array_hybrid_search(self):
         """
         target: hybrid_search supports regex filters on StructArray scalar paths
         expected: one request filters struct name =~ error.*timeout; another uses struct status !~ ERROR
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_struct_array_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
         query_vector = EmbeddingList()
         query_vector.add([0.0] * default_dim)
         req_name = AnnSearchRequest(
@@ -2567,8 +2399,6 @@ class TestRegexFilterStructArray(TestMilvusClientV2Base):
         result = {hit["id"] for hit in res[0]}
         assert {1, 2, 3}.issubset(result), f"struct hybrid regex ids missing, got {result}"
         assert 4 not in result, f"empty struct array row should not match, got {result}"
-
-        self.drop_collection(client, collection_name)
 
 
 class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
