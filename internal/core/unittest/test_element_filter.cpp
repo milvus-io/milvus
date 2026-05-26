@@ -3456,9 +3456,9 @@ MakeNullableElementSearchFixture() {
 
         auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
         for (int row = 0; row < kNullableElemN; ++row) {
-            auto* row_data =
-                vec_array->mutable_data(row)->mutable_float_vector()
-                    ->mutable_data();
+            auto* row_data = vec_array->mutable_data(row)
+                                 ->mutable_float_vector()
+                                 ->mutable_data();
             row_data->Clear();
             for (int elem = 0; elem < kNullableElemArrayLen; ++elem) {
                 const int axis = row * kNullableElemArrayLen + elem;
@@ -3645,13 +3645,13 @@ inline std::unique_ptr<SearchResult>
 RunNullableElementSearch(SegmentInterface* segment,
                          const NullableElementSearchFixture& f) {
     ScopedSchemaHandle handle(*f.schema);
-    auto plan_bytes = handle.ParseSearch("",
-                                         "structA[array_vec]",
-                                         /*topK=*/kNullableElemN *
-                                             kNullableElemArrayLen,
-                                         knowhere::metric::L2,
-                                         R"({"ef": 50})",
-                                         3);
+    auto plan_bytes =
+        handle.ParseSearch("",
+                           "structA[array_vec]",
+                           /*topK=*/kNullableElemN * kNullableElemArrayLen,
+                           knowhere::metric::L2,
+                           R"({"ef": 50})",
+                           3);
     auto plan =
         CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
     auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
