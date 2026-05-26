@@ -130,7 +130,14 @@ install_conan() {
 
     # Try direct user install first (works on Ubuntu 20.04/22.04)
     if $pip_cmd install --user "conan==${CONAN_VERSION}" 2>/dev/null; then
-        :
+        if [ ! -x "${HOME}/.local/bin/conan" ]; then
+            local user_bin
+            user_bin=$(python3 -c "import site; print(site.USER_BASE + '/bin')" 2>/dev/null)
+            if [ -x "${user_bin}/conan" ]; then
+                mkdir -p "${HOME}/.local/bin"
+                ln -sf "${user_bin}/conan" "${HOME}/.local/bin/conan"
+            fi
+        fi
     else
         # Ubuntu 24.04+ enforces PEP 668 — use an isolated venv instead
         print_info "System pip blocked (PEP 668). Installing Conan in isolated venv..."
