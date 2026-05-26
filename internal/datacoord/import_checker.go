@@ -454,9 +454,15 @@ func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs 
 		return segment.GetIsImporting()
 	})
 
+	if len(isImportingSegments) == 0 {
+		return false
+	}
+
+	// TODO: CommitTimestamp will be assigned by the 2PC commit flow (see companion PR).
 	for _, segmentID := range isImportingSegments {
-		op := UpdateIsImporting(segmentID, false)
-		err := c.meta.UpdateSegmentsInfo(c.ctx, op)
+		err := c.meta.UpdateSegmentsInfo(c.ctx,
+			UpdateIsImporting(segmentID, false),
+		)
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return true

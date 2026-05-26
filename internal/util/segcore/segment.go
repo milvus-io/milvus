@@ -87,7 +87,16 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
-	return &cSegmentImpl{id: req.SegmentID, ptr: ptr}, nil
+	seg := &cSegmentImpl{id: req.SegmentID, ptr: ptr}
+	if req.LoadInfo != nil {
+		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
+			if err := seg.SetCommitTimestamp(commitTs); err != nil {
+				C.DeleteSegment(ptr)
+				return nil, errors.Wrap(err, "failed to set commit timestamp on segment")
+			}
+		}
+	}
+	return seg, nil
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -383,6 +392,14 @@ func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
 }
 
+// SetCommitTimestamp sets the commit timestamp for the segment.
+// Import segments use this to ensure rows with old historical timestamps are
+// not visible to queries dispatched before T_commit.
+func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
+	status := C.SegmentSetCommitTimestamp(s.ptr, C.uint64_t(ts))
+	return ConsumeCStatusIntoError(&status)
+}
+
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
 // This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
 // depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
@@ -420,6 +437,7 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		ManifestPath:         src.GetManifestPath(),
 		UseTakeForOutput:     paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
+		CommitTimestamp:      src.GetCommitTimestamp(),
 	}
 }
 

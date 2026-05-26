@@ -1077,8 +1077,13 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                    op_ctx,
                                    is_replace);
             if (field_id == TimestampFieldID) {
-                init_storage_v2_timestamp_index(
-                    column, num_rows, info.warmup_policy);
+                if (commit_ts_ != 0) {
+                    std::vector<Timestamp> ts(num_rows, commit_ts_);
+                    init_storage_v1_timestamp_index(std::move(ts), num_rows);
+                } else {
+                    init_storage_v2_timestamp_index(
+                        column, num_rows, info.warmup_policy);
+                }
             }
         }
 
@@ -1213,6 +1218,9 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
             offset += chunk_ptr->Span().row_count();
         }
 
+        if (commit_ts_ != 0) {
+            std::fill(timestamps.begin(), timestamps.end(), commit_ts_);
+        }
         init_storage_v1_timestamp_index(std::move(timestamps), num_rows);
     } else {
         AssertInfo(system_field_type == SystemFieldType::RowId,
@@ -1975,9 +1983,13 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     const std::function<void(const SegOffset offset, const Timestamp ts)>&
         callback) const {
     // Helper to read a single timestamp by segment offset.
+    // For import/CDC segments with commit_ts_ set: every row carries commit_ts_,
+    // so short-circuit without touching the raw timestamp column or insert_record_.
     // For StorageV2: pins the timestamp column and indexes into chunks.
     // For StorageV1: reads from insert_record_ directly.
-    auto ts_column = get_column(TimestampFieldID);
+    auto effective_commit_ts = EffectiveCommitTs();
+    auto ts_column =
+        effective_commit_ts ? nullptr : get_column(TimestampFieldID);
     std::vector<cachinglayer::PinWrapper<Chunk*>> ts_chunk_pins;
     std::vector<int64_t> ts_chunk_offsets;
     if (ts_column) {
@@ -1988,11 +2000,14 @@ ChunkedSegmentSealedImpl::search_batch_pks(
             ts_chunk_offsets[c + 1] =
                 ts_chunk_offsets[c] + ts_column->chunk_row_nums(c);
         }
-    } else {
+    } else if (!effective_commit_ts) {
         AssertInfo(!insert_record_.timestamps_.empty(),
                    "timestamp data is not ready");
     }
     auto read_ts = [&](int64_t offset) -> Timestamp {
+        if (effective_commit_ts) {
+            return *effective_commit_ts;
+        }
         if (!ts_column) {
             return insert_record_.timestamps_[offset];
         }
@@ -2425,6 +2440,14 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
     switch (system_type) {
         case SystemFieldType::Timestamp: {
             auto* dst = static_cast<Timestamp*>(output);
+            // Import/CDC segments: every row carries commit_ts_, including
+            // v2/v3 column-group segments where the raw timestamp column is
+            // emplaced into fields_ but never overwritten. Short-circuit
+            // before consulting the column.
+            if (auto cts = EffectiveCommitTs()) {
+                std::fill_n(dst, count, *cts);
+                break;
+            }
             auto ts_column = get_column(TimestampFieldID);
             if (ts_column) {
                 // StorageV2: read from timestamp column directly
@@ -3903,12 +3926,26 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                "timestamp index is not ready");
     auto& ts_index_data = ts_cell != nullptr ? ts_cell->timestamp_index()
                                              : insert_record_.timestamp_index_;
-    auto ts_column =
-        ts_cell != nullptr ? get_column(TimestampFieldID) : nullptr;
+    auto effective_commit_ts = EffectiveCommitTs();
+    // When commit_ts_ is set, the per-row scan must use commit_ts_, not the
+    // raw v2/v3 timestamp column (which still holds the original row_ts). The
+    // index itself is already commit_ts-overwritten at load time, so the
+    // get_active_range narrowing above is consistent — only the per-bit scan
+    // below needs the override.
+    auto ts_column = (ts_cell != nullptr && !effective_commit_ts)
+                         ? get_column(TimestampFieldID)
+                         : nullptr;
     auto total_size = static_cast<int64_t>(get_row_count());
 
-    // Lambda to dispatch scan_timestamp_range to the right overload
+    // Lambda to dispatch scan_timestamp_range to the right overload, or to
+    // apply the predicate uniformly with commit_ts_ when set.
     auto do_scan = [&](int64_t beg, int64_t end, auto pred) {
+        if (effective_commit_ts) {
+            for (int64_t i = beg; i < end; ++i) {
+                pred(i, *effective_commit_ts);
+            }
+            return;
+        }
         if (ts_column) {
             scan_timestamp_range(*ts_column, beg, end, pred);
         } else {
@@ -4655,11 +4692,28 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 }
 
 void
+ChunkedSegmentSealedImpl::SetCommitTimestamp(uint64_t ts) {
+    std::unique_lock lck(mutex_);
+    commit_ts_ = ts;
+}
+
+uint64_t
+ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
+    return commit_ts_;
+}
+
+void
 ChunkedSegmentSealedImpl::SetLoadInfo(
     proto::segcore::SegmentLoadInfo load_info) {
     // reopen_mutex_ serializes with Reopen(pb)/Load/other SetLoadInfo so the
     // published snapshot and use_take_for_output_ bit stay in sync.
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    auto commit_ts =
+        static_cast<milvus::Timestamp>(load_info.commit_timestamp());
+    {
+        std::unique_lock lck(mutex_);
+        commit_ts_ = commit_ts;
+    }
     auto published =
         std::make_shared<const SegmentLoadInfo>(std::move(load_info), schema_);
     std::atomic_store(&segment_load_info_, published);
@@ -4667,12 +4721,13 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
                                std::memory_order_relaxed);
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
-        "storage_version: {}, use_take_for_output: {}",
+        "storage_version: {}, use_take_for_output: {}, commit_ts: {}",
         id_,
         published->GetNumOfRows(),
         published->GetIndexInfoCount(),
         published->GetStorageVersion(),
-        use_take_for_output_.load(std::memory_order_relaxed));
+        use_take_for_output_.load(std::memory_order_relaxed),
+        commit_ts);
 }
 
 void
@@ -4936,7 +4991,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             op_ctx,
             is_replace);
         if (field_id == TimestampFieldID) {
-            init_storage_v2_timestamp_index(column, load_info->GetNumOfRows());
+            int64_t num_rows = load_info->GetNumOfRows();
+            if (commit_ts_ != 0) {
+                std::vector<Timestamp> ts(num_rows, commit_ts_);
+                init_storage_v1_timestamp_index(std::move(ts), num_rows);
+            } else {
+                init_storage_v2_timestamp_index(column, num_rows);
+            }
         }
     }
 }
