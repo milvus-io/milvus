@@ -154,7 +154,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	schema.Version = coll.SchemaVersion + 1
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
-	if err := typeutil.ValidateExternalCollectionGeneratedColumns(schema); err != nil {
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
 

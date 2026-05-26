@@ -1065,7 +1065,7 @@ func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, c
 			Status:          merr.Success(),
 			State:           indexpb.JobState_JobStateFinished,
 			KeptSegments:    task.GetKeptSegmentIDs(),
-			UpdatedSegments: task.GetNewSegments(),
+			UpdatedSegments: task.GetUpdatedSegments(),
 		}
 
 		return resp, nil

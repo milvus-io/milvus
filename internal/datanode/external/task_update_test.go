@@ -453,7 +453,218 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_AllFragmentsEx
 
 	// Verify kept/new tracking
 	s.ElementsMatch([]int64{1, 2}, task.GetKeptSegmentIDs())
-	s.Empty(task.GetNewSegments())
+	s.Empty(task.GetUpdatedSegments())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsMissingFieldPatchesSegment() {
+	paramtable.Init()
+
+	ctx := context.Background()
+	partitionID := int64(2000)
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		PartitionID:    partitionID,
+		TaskID:         s.taskID,
+		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSource: "s3://bucket/data/",
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{
+			Version: 4,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", ExternalField: "id"},
+				{FieldID: 101, Name: "vec", ExternalField: "vec"},
+				{FieldID: 102, Name: "text", ExternalField: "text"},
+				{FieldID: 103, Name: "score", ExternalField: "score"},
+			},
+		},
+		CurrentSegments: []*datapb.SegmentInfo{{
+			ID:             10,
+			CollectionID:   s.collectionID,
+			PartitionID:    partitionID,
+			NumOfRows:      1000,
+			ManifestPath:   `{"base_path":"seg10","ver":1}`,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  3,
+			Binlogs: buildFakeBinlogs(10, 1000, 3000, &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", ExternalField: "id"},
+					{FieldID: 101, Name: "vec", ExternalField: "vec"},
+					{FieldID: 102, Name: "text", ExternalField: "text"},
+				},
+			}),
+		}},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"id", "vec", "text", "score"}
+
+	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).
+		To(func(ctx context.Context, oldManifestPath string, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			s.Equal(`{"base_path":"seg10","ver":1}`, oldManifestPath)
+			s.Equal([]string{"score"}, columns)
+			return `{"base_path":"seg10","ver":2}`, nil
+		}).Build()
+	defer mockAppend.UnPatch()
+
+	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).
+		To(func(manifestPath string, sampleRows int, collectionID int64, externalSource string, externalSpec string, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
+			s.Equal(`{"base_path":"seg10","ver":2}`, manifestPath)
+			s.Equal(100, sampleRows)
+			s.Equal(s.collectionID, collectionID)
+			s.Equal("s3://bucket/data/", externalSource)
+			s.Equal(`{"format":"parquet"}`, externalSpec)
+			s.Equal(req.GetSchema(), schema)
+			s.Equal(req.GetStorageConfig(), storageConfig)
+			return map[string]int64{"id": 8, "vec": 128, "text": 32, "score": 8}, nil
+		}).Build()
+	defer mockSample.UnPatch()
+
+	current := packed.SegmentFragments{
+		10: []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}},
+	}
+	next := []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000}}
+
+	result, err := task.organizeSegments(ctx, current, next)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Empty(task.GetKeptSegmentIDs())
+	s.Len(task.GetUpdatedSegments(), 1)
+	patched := task.GetUpdatedSegments()[0]
+	s.Equal(int64(10), patched.GetID())
+	s.Equal(`{"base_path":"seg10","ver":2}`, patched.GetManifestPath())
+	s.Equal(int32(4), patched.GetSchemaVersion())
+	s.ElementsMatch([]int64{100, 101, 102, 103}, patched.GetBinlogs()[0].GetChildFields())
+
+	result, err = task.organizeSegments(ctx, current, next)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Empty(task.GetKeptSegmentIDs())
+	s.Len(task.GetUpdatedSegments(), 1)
+	s.Equal(int64(10), task.GetUpdatedSegments()[0].GetID())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PatchedSegmentCountsFunctionOutputMemory() {
+	paramtable.Init()
+
+	ctx := context.Background()
+	partitionID := int64(2000)
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		PartitionID:    partitionID,
+		TaskID:         s.taskID,
+		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSource: "s3://bucket/data/",
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{
+			Version: 4,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+				{FieldID: 102, Name: "score", DataType: schemapb.DataType_Double, ExternalField: "score"},
+				{
+					FieldID:          103,
+					Name:             "embedding",
+					DataType:         schemapb.DataType_FloatVector,
+					IsFunctionOutput: true,
+					TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+				},
+			},
+		},
+		CurrentSegments: []*datapb.SegmentInfo{{
+			ID:             10,
+			CollectionID:   s.collectionID,
+			PartitionID:    partitionID,
+			NumOfRows:      100,
+			ManifestPath:   `{"base_path":"seg10","ver":1}`,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  3,
+			Binlogs: buildFakeBinlogs(10, 100, 4800, &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+					{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+					{
+						FieldID:          103,
+						Name:             "embedding",
+						DataType:         schemapb.DataType_FloatVector,
+						IsFunctionOutput: true,
+						TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+					},
+				},
+			}),
+		}},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"id", "text", "score"}
+
+	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).
+		To(func(ctx context.Context, oldManifestPath string, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			s.Equal(`{"base_path":"seg10","ver":1}`, oldManifestPath)
+			s.Equal([]string{"score"}, columns)
+			return `{"base_path":"seg10","ver":2}`, nil
+		}).Build()
+	defer mockAppend.UnPatch()
+
+	mockSample := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"id": 8, "text": 32, "score": 8}, nil).Build()
+	defer mockSample.UnPatch()
+
+	current := packed.SegmentFragments{
+		10: []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}},
+	}
+	next := []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}}
+
+	result, err := task.organizeSegments(ctx, current, next)
+	s.NoError(err)
+	s.Len(result, 1)
+	patched := task.GetUpdatedSegments()[0]
+	s.ElementsMatch([]int64{100, 101, 102, 103}, patched.GetBinlogs()[0].GetChildFields())
+	s.Equal(int64((8+32+8+16)*100), patched.GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsAllFieldsCoveredKeepsSegment() {
+	ctx := context.Background()
+	partitionID := int64(2000)
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:  s.collectionID,
+		PartitionID:   partitionID,
+		TaskID:        s.taskID,
+		ExternalSpec:  `{"format":"parquet"}`,
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{
+			Version: 4,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", ExternalField: "id"},
+				{FieldID: 101, Name: "vec", ExternalField: "vec"},
+			},
+		},
+		CurrentSegments: []*datapb.SegmentInfo{{
+			ID:             10,
+			CollectionID:   s.collectionID,
+			PartitionID:    partitionID,
+			NumOfRows:      100,
+			ManifestPath:   `{"base_path":"seg10","ver":1}`,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  4,
+			Binlogs: buildFakeBinlogs(10, 100, 3000, &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", ExternalField: "id"},
+					{FieldID: 101, Name: "vec", ExternalField: "vec"},
+				},
+			}),
+		}},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	current := packed.SegmentFragments{
+		10: []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}},
+	}
+	next := []packed.Fragment{{FilePath: "s3://bucket/data/a.parquet", StartRow: 0, EndRow: 100, RowCount: 100}}
+
+	result, err := task.organizeSegments(ctx, current, next)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.ElementsMatch([]int64{10}, task.GetKeptSegmentIDs())
+	s.Empty(task.GetUpdatedSegments())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_FragmentRemoved() {
@@ -496,7 +707,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PartialFragmen
 	// No new segments because there are no orphan fragments (all new fragments match kept segments)
 	s.Len(result, 2)
 	s.ElementsMatch([]int64{1, 3}, task.GetKeptSegmentIDs())
-	s.Empty(task.GetNewSegments(), "No orphan fragments to create new segments from")
+	s.Empty(task.GetUpdatedSegments(), "No orphan fragments to create new segments from")
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsUseBalance() {
@@ -530,7 +741,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsUs
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.ElementsMatch([]int64{1}, task.GetKeptSegmentIDs())
-	s.Equal(created, task.GetNewSegments())
+	s.Equal(created, task.GetUpdatedSegments())
 	s.Equal([]*datapb.SegmentInfo{req.GetCurrentSegments()[0], created[0]}, result)
 	s.Require().Len(gotOrphans, 1)
 	s.Equal("/data/file2.parquet", gotOrphans[0].FilePath)
@@ -543,7 +754,15 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_RewritesSegmen
 		TaskID:        s.taskID,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		CurrentSegments: []*datapb.SegmentInfo{
-			{ID: 1, CollectionID: s.collectionID, NumOfRows: 1000, ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1)},
+			{
+				ID:           1,
+				CollectionID: s.collectionID,
+				NumOfRows:    1000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1),
+				Binlogs: []*datapb.FieldBinlog{
+					{ChildFields: []int64{100}},
+				},
+			},
 		},
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -584,7 +803,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_RewritesSegmen
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.Empty(task.GetKeptSegmentIDs())
-	s.Equal(created, task.GetNewSegments())
+	s.Equal(created, task.GetUpdatedSegments())
 	s.Equal(created, result)
 	s.Equal([]string{"101"}, checkedColumns)
 	s.Require().Len(gotOrphans, 1)
@@ -598,7 +817,15 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_KeepsSegmentWi
 		TaskID:        s.taskID,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		CurrentSegments: []*datapb.SegmentInfo{
-			{ID: 1, CollectionID: s.collectionID, NumOfRows: 1000, ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1)},
+			{
+				ID:           1,
+				CollectionID: s.collectionID,
+				NumOfRows:    1000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1),
+				Binlogs: []*datapb.FieldBinlog{
+					{ChildFields: []int64{100}},
+				},
+			},
 		},
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -638,7 +865,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_KeepsSegmentWi
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.ElementsMatch([]int64{1}, task.GetKeptSegmentIDs())
-	s.Empty(task.GetNewSegments())
+	s.Empty(task.GetUpdatedSegments())
 	s.Equal([]*datapb.SegmentInfo{req.GetCurrentSegments()[0]}, result)
 	s.Equal([]string{"101"}, checkedColumns)
 	s.Empty(gotOrphans)
@@ -1954,7 +2181,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 	defer mockFetch.UnPatch()
 	mockBuild := mockey.Mock(mockey.GetMethod(task, "buildCurrentSegmentFragments")).Return(segmentFragments, nil).Build()
 	defer mockBuild.UnPatch()
-	mockOrganize := mockey.Mock(mockey.GetMethod(task, "organizeSegments")).Return(updated, nil).Build()
+	mockOrganize := mockey.Mock(mockey.GetMethod(task, "organizeSegments")).
+		To(func(ctx context.Context, currentSegmentFragments packed.SegmentFragments, newFragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+			task.updatedSegments = updated
+			return updated, nil
+		}).Build()
 	defer mockOrganize.UnPatch()
 
 	err := task.Execute(ctx)

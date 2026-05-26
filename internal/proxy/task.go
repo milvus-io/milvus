@@ -930,8 +930,19 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
-	if newFieldSchema.GetExternalField() != "" {
+	isExternalCollection := typeutil.IsExternalCollection(schema)
+	if isExternalCollection && newFieldSchema.GetExternalField() == "" {
+		return merr.WrapErrParameterInvalidMsg("add field operation on external collection requires external_field mapping, field name = %s", newFieldSchema.GetName())
+	}
+	if !isExternalCollection && newFieldSchema.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("add field operation does not support external field mapping, field name = %s", newFieldSchema.GetName())
+	}
+	if isExternalCollection {
+		schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
+		schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
+		if err := typeutil.ValidateExternalCollectionResolvedSchema(schemaWithNewField); err != nil {
+			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		}
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))

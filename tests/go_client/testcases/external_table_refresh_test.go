@@ -1486,6 +1486,153 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	t.Log("Phase 3: all verifications passed — incremental refresh works correctly")
 }
 
+// TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData verifies that
+// adding an external field to an already refreshed external collection patches
+// existing same-fragment segments and returns correct values for the new field.
+func TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*600)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_add_col", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	const rowsPerFile = int64(25)
+	totalExpectedRows := rowsPerFile * 2
+	for _, file := range []struct {
+		name    string
+		startID int64
+	}{
+		{name: "data0.parquet", startID: 0},
+		{name: "data1.parquet", startID: 100},
+	} {
+		data, genErr := generateParquetBytes(externalDataSchemaLarge, rowsPerFile, file.startID, testVecDim)
+		require.NoError(t, genErr)
+		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/"+file.name, data)
+	}
+
+	// Create the collection without the parquet "score" column. The first
+	// refresh creates external segments whose manifests and fake binlogs cover
+	// only id, value, and embedding.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
+	common.CheckErr(t, err, true)
+	rowCount, err := strconv.ParseInt(stats["row_count"], 10, 64)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, rowCount)
+
+	scoreField := entity.NewField().
+		WithName("score").
+		WithDataType(entity.FieldTypeDouble).
+		WithNullable(true).
+		WithExternalField("score")
+	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, scoreField))
+	common.CheckErr(t, err, true)
+
+	described, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	hasScore := false
+	for _, field := range described.Schema.Fields {
+		if field.Name == "score" {
+			hasScore = true
+			require.Equal(t, entity.FieldTypeDouble, field.DataType)
+			require.Equal(t, "score", field.ExternalField)
+			require.True(t, field.Nullable)
+		}
+	}
+	require.True(t, hasScore, "DescribeCollection should include the added external score field")
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, count)
+
+	lowIDRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, lowIDRows, map[int64]float64{
+		0: 0.00,
+		1: 0.01,
+		2: 0.02,
+		3: 0.03,
+		4: 0.04,
+	})
+
+	scoreFilterRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("score >= 1.0 && score < 1.05").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, scoreFilterRows, map[int64]float64{
+		100: 1.00,
+		101: 1.01,
+		102: 1.02,
+		103: 1.03,
+		104: 1.04,
+	})
+}
+
+func assertExternalScoreRows(t *testing.T, result client.ResultSet, expected map[int64]float64) {
+	t.Helper()
+
+	idCol := result.GetColumn("id")
+	scoreCol := result.GetColumn("score")
+	require.NotNil(t, idCol, "query result should contain id")
+	require.NotNil(t, scoreCol, "query result should contain score")
+	require.Equal(t, len(expected), idCol.Len())
+	require.Equal(t, len(expected), scoreCol.Len())
+
+	actual := make(map[int64]float64, idCol.Len())
+	for i := 0; i < idCol.Len(); i++ {
+		id, err := idCol.GetAsInt64(i)
+		require.NoError(t, err)
+		isNull, err := scoreCol.IsNull(i)
+		require.NoError(t, err)
+		require.False(t, isNull, "score should be non-null for id %d", id)
+		score, err := scoreCol.GetAsDouble(i)
+		require.NoError(t, err)
+		actual[id] = score
+	}
+
+	require.Len(t, actual, len(expected))
+	for id, expectedScore := range expected {
+		score, ok := actual[id]
+		require.True(t, ok, "missing row for id %d in result %v", id, actual)
+		require.InDelta(t, expectedScore, score, 1e-9, "unexpected score for id %d", id)
+	}
+}
+
 // TestExternalCollectionMultipleDataTypes tests external collections with various data types:
 // Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, FloatVector
 func TestExternalCollectionMultipleDataTypes(t *testing.T) {

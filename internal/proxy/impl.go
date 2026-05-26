@@ -999,12 +999,6 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		return merr.Status(err), nil
 	}
 
-	// Check for external collection - add field is not supported
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(
-			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
-	}
-
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),

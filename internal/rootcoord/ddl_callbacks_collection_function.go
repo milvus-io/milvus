@@ -48,7 +48,7 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
-	if err := typeutil.ValidateExternalCollectionGeneratedColumns(schema); err != nil {
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
 
