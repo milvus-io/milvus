@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
@@ -228,6 +232,96 @@ func generateParquetBytesWithCompression(schema string, numRows, startID int64, 
 	return data, nil
 }
 
+func externalTakeDenseBytes(row int64, byteWidth int, seed int64) []byte {
+	data := make([]byte, byteWidth)
+	for i := range data {
+		data[i] = byte((seed + row*int64(byteWidth) + int64(i)) % 251)
+	}
+	return data
+}
+
+func externalTakeInt8Vector(row int64) []int8 {
+	data := make([]int8, testVecDim)
+	for i := range data {
+		data[i] = int8((row*3 + int64(i)) % 127)
+	}
+	return data
+}
+
+func externalTakeInt8VectorBytes(row int64) []byte {
+	values := externalTakeInt8Vector(row)
+	data := make([]byte, len(values))
+	for i, value := range values {
+		data[i] = byte(value)
+	}
+	return data
+}
+
+func generateExternalTakeVectorParquetBytes(numRows int64) ([]byte, error) {
+	const binVecDim = 16
+	binVecByteWidth := binVecDim / 8
+	fp16ByteWidth := testVecDim * 2
+	bf16ByteWidth := testVecDim * 2
+
+	arrowSchema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "bin_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: binVecByteWidth}},
+			{Name: "fp16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: fp16ByteWidth}},
+			{Name: "bf16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bf16ByteWidth}},
+			{Name: "int8_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim}},
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, fmt.Errorf("create parquet writer: %w", err)
+	}
+
+	pool := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(pool, arrowSchema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	binBuilder := builder.Field(1).(*array.FixedSizeBinaryBuilder)
+	fp16Builder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+	bf16Builder := builder.Field(3).(*array.FixedSizeBinaryBuilder)
+	int8Builder := builder.Field(4).(*array.FixedSizeBinaryBuilder)
+
+	for row := int64(0); row < numRows; row++ {
+		idBuilder.Append(row)
+		binBuilder.Append(externalTakeDenseBytes(row, binVecByteWidth, 11))
+		fp16Builder.Append(externalTakeDenseBytes(row, fp16ByteWidth, 31))
+		bf16Builder.Append(externalTakeDenseBytes(row, bf16ByteWidth, 51))
+		int8Builder.Append(externalTakeInt8VectorBytes(row))
+	}
+
+	record := builder.NewRecord()
+	defer record.Release()
+
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// --- Multi-type parquet generation ---
+
+// generateMultiTypeParquetBytes creates a Parquet file with multiple data types:
+//   - id (Int64), bool_val (Boolean), int8_val (Int8), int16_val (Int16),
+//   - int32_val (Int32), float_val (Float32), double_val (Float64),
+//   - embedding (FixedSizeList[Float32, testVecDim])
+//
+// Data formulas for row i (startID+i):
+//
+//	bool_val = (i is even), int8_val = i%100, int16_val = i*10,
+//	int32_val = i*100, float_val = i*1.5, double_val = i*0.01
 const testBinVecDim = 8 // BinaryVector dimension must be multiple of 8
 
 // --- Helpers ---
@@ -1084,6 +1178,149 @@ func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
 	assertVector(0, []float32{0, 1, 2, 3})
 	require.True(t, rows[1].isNull, "embedding should be null for id=1")
 	assertVector(2, []float32{8, 9, 10, 11})
+}
+
+func TestExternalCollectionAdditionalVectorTakeOutput(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible (exists=%v, err=%v), skipping",
+			minioCfg.bucket, exists, err)
+	}
+
+	collName := common.GenRandomString("ext_take_vec", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	const numRows = int64(8)
+	data, err := generateExternalTakeVectorParquetBytes(numRows)
+	require.NoError(t, err, "generate vector take parquet")
+
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("bin_vec").WithDataType(entity.FieldTypeBinaryVector).
+			WithDim(16).WithExternalField("bin_vec")).
+		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).
+			WithDim(testVecDim).WithExternalField("fp16_vec")).
+		WithField(entity.NewField().WithName("bf16_vec").WithDataType(entity.FieldTypeBFloat16Vector).
+			WithDim(testVecDim).WithExternalField("bf16_vec")).
+		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).
+			WithDim(testVecDim).WithExternalField("int8_vec"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+
+	indexes := map[string]index.Index{
+		"bin_vec":  index.NewBinFlatIndex(entity.HAMMING),
+		"fp16_vec": index.NewFlatIndex(entity.L2),
+		"bf16_vec": index.NewFlatIndex(entity.L2),
+		"int8_vec": index.NewGenericIndex("int8_hnsw", map[string]string{
+			index.MetricTypeKey: string(entity.COSINE),
+			index.IndexTypeKey:  "HNSW",
+			"M":                 "8",
+			"efConstruction":    "64",
+		}),
+	}
+	for fieldName, idx := range indexes {
+		idxTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, idx))
+		common.CheckErr(t, idxErr, true)
+		require.NoError(t, idxTask.Await(ctx), "create index on %s", fieldName)
+	}
+
+	loadTask, loadErr := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, loadErr, true)
+	require.NoError(t, loadTask.Await(ctx))
+
+	assertVectorRows := func(result client.ResultSet, context string) {
+		t.Helper()
+		idCol := result.GetColumn("id")
+		require.NotNil(t, idCol, "%s id column", context)
+		for _, fieldName := range []string{"bin_vec", "fp16_vec", "bf16_vec", "int8_vec"} {
+			require.NotNil(t, result.GetColumn(fieldName), "%s %s column", context, fieldName)
+		}
+		for i := 0; i < result.ResultCount; i++ {
+			id, err := idCol.GetAsInt64(i)
+			require.NoError(t, err)
+
+			rawBin, err := result.GetColumn("bin_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, 2, 11), []byte(rawBin.(entity.BinaryVector)),
+				"%s bin_vec row id=%d", context, id)
+
+			rawFP16, err := result.GetColumn("fp16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 31), []byte(rawFP16.(entity.Float16Vector)),
+				"%s fp16_vec row id=%d", context, id)
+
+			rawBF16, err := result.GetColumn("bf16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 51), []byte(rawBF16.(entity.BFloat16Vector)),
+				"%s bf16_vec row id=%d", context, id)
+
+			rawInt8, err := result.GetColumn("int8_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeInt8Vector(id), []int8(rawInt8.(entity.Int8Vector)),
+				"%s int8_vec row id=%d", context, id)
+		}
+	}
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id in [1, 3, 5]").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, queryRes.ResultCount)
+	assertVectorRows(queryRes, "query output")
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 3,
+		[]entity.Vector{entity.Int8Vector(externalTakeInt8Vector(3))}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("int8_vec").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+	assertVectorRows(searchRes[0], "int8 search output")
+}
+
+func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	collName := common.GenRandomString("ext_sparse_reject", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("sparse_vec").WithDataType(entity.FieldTypeSparseVector).
+			WithExternalField("sparse_vec"))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support field type SparseFloatVector")
 }
 
 // TestExternalCollectionIncrementalRefresh tests that refreshing an external collection

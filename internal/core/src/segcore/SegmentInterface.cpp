@@ -447,7 +447,7 @@ SegmentInternalInterface::FillTargetEntry(
     milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
-    // Fast path: use take() API for external tables with small result sets.
+    // Fast path: use take() API for eligible output fields.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
     if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {

@@ -1132,6 +1132,52 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	})
 }
 
+func TestConfigureUseTakeForOutput(t *testing.T) {
+	paramtable.Init()
+	internalKey := paramtable.Get().QueryNodeCfg.InternalCollectionUseTakeForOutput.Key
+	externalKey := paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.Key
+	paramtable.Get().Reset(internalKey)
+	paramtable.Get().Reset(externalKey)
+	defer paramtable.Get().Reset(internalKey)
+	defer paramtable.Get().Reset(externalKey)
+
+	t.Run("nil load info", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			configureUseTakeForOutput(nil, &schemapb.CollectionSchema{})
+		})
+	})
+
+	t.Run("internal collection disabled by default", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		})
+		assert.False(t, loadInfo.GetUseTakeForOutput())
+	})
+
+	t.Run("internal collection uses internal switch", func(t *testing.T) {
+		paramtable.Get().Save(internalKey, "true")
+		defer paramtable.Get().Reset(internalKey)
+
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		})
+		assert.True(t, loadInfo.GetUseTakeForOutput())
+	})
+
+	t.Run("external collection uses external switch", func(t *testing.T) {
+		paramtable.Get().Save(externalKey, "false")
+		defer paramtable.Get().Reset(externalKey)
+
+		loadInfo := &querypb.SegmentLoadInfo{}
+		configureUseTakeForOutput(loadInfo, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"}},
+		})
+		assert.False(t, loadInfo.GetUseTakeForOutput())
+	})
+}
+
 func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	suite.Run("out_of_memory_zero_info", func() {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")

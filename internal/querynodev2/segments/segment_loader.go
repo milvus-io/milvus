@@ -249,6 +249,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Warn("failed to get collection", zap.Error(err))
 		return nil, err
 	}
+	for _, segment := range segments {
+		configureUseTakeForOutput(segment, collection.Schema())
+	}
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
@@ -455,6 +458,17 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	}
 
 	return infos
+}
+
+func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {
+	if loadInfo == nil {
+		return
+	}
+	if typeutil.IsExternalCollection(schema) {
+		loadInfo.UseTakeForOutput = paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool()
+		return
+	}
+	loadInfo.UseTakeForOutput = paramtable.Get().QueryNodeCfg.InternalCollectionUseTakeForOutput.GetAsBool()
 }
 
 func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
@@ -2375,6 +2389,10 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 		if segment == nil {
 			log.Warn("failed to reopen segment, segment not loaded", zap.Int64("segmentID", info.GetSegmentID()))
 			continue
+		}
+		collection := loader.manager.Collection.Get(info.GetCollectionID())
+		if collection != nil {
+			configureUseTakeForOutput(info, collection.Schema())
 		}
 
 		err := segment.Reopen(ctx, info)

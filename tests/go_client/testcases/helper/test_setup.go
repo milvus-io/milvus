@@ -153,7 +153,8 @@ func AlterServerConfig(key, value string) (string, error) {
 	prev, _ := GetServerConfig(key)
 
 	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
-	resp, err := http.Post(managementBaseURL()+"/management/config/alter",
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Post(managementBaseURL()+"/management/config/alter",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("management API unreachable: %w", err)
@@ -169,7 +170,8 @@ func AlterServerConfig(key, value string) (string, error) {
 
 // GetServerConfig reads a config value from the management API.
 func GetServerConfig(key string) (string, error) {
-	resp, err := http.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
 	if err != nil {
 		return "", err
 	}

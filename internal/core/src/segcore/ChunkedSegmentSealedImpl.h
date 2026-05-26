@@ -536,7 +536,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
 
-    // Override to inject take() fast path for Search on external tables.
+    // Override to inject take() fast path for Search output fields.
     // Uses existing vtable slot — no layout change.
     void
     FillTargetEntry(const query::Plan* plan,
@@ -1510,7 +1510,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
 
-    // When true, use take() API for output field retrieval from external storage.
+    // When true, use take() API for output field retrieval from storage.
     // Published alongside segment_load_info_ by the writer entry points; read
     // lock-free on query hot paths.
     std::atomic<bool> use_take_for_output_{false};

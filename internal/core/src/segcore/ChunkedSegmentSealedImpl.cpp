@@ -5209,7 +5209,7 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
                    field_id.get());
         auto future = pool.Submit(
             [this, op_ctx, info = std::move(load_text_index_info)]() mutable
-            -> void { LoadTextIndex(op_ctx, std::move(info)); });
+                -> void { LoadTextIndex(op_ctx, std::move(info)); });
         load_index_futures.emplace_back(std::move(future));
     }
 
@@ -5452,9 +5452,8 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
 
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillTargetEntry");
 
-    // Try take() for external fields; fills output_fields_data_ for
-    // external fields only. Non-external fields still go through
-    // bulk_subscript below.
+    // Try take() for eligible output fields. Fields not filled by take still
+    // go through bulk_subscript below.
     bool used_take = TryTakeForSearch(
         plan, results.seg_offsets_.data(), size, results, op_ctx);
 
@@ -5499,6 +5498,24 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----
+
+static inline void
+LogTakeFallback(const char* caller_tag,
+                int64_t segment_id,
+                int64_t rows,
+                size_t unique_rows,
+                size_t field_count,
+                std::string_view reason) {
+    LOG_INFO(
+        "[TakeAPI] {} fallback to bulk_subscript for segment {}: "
+        "reason={}, rows={}, unique_rows={}, fields={}",
+        caller_tag,
+        segment_id,
+        reason,
+        rows,
+        unique_rows,
+        field_count);
+}
 
 ChunkedSegmentSealedImpl::TakeContext
 ChunkedSegmentSealedImpl::BuildTakeContext(const int64_t* offsets,
@@ -5873,20 +5890,22 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     bool ignore_non_pk,
     bool fill_ids,
     milvus::OpContext* op_ctx) const {
-    if (!schema_->is_external_collection() || size == 0 ||
-        !use_take_for_output_.load(std::memory_order_relaxed)) {
+    if (size == 0 || !use_take_for_output_.load(std::memory_order_relaxed)) {
         return false;
     }
+    const bool is_external_collection = schema_->is_external_collection();
 
     auto pk_field_id = plan->schema_->get_primary_field_id();
     auto is_pk_field = [&](const FieldId& fid) {
         return pk_field_id.has_value() && pk_field_id.value() == fid;
     };
 
-    // Collect needed external columns and their field IDs
+    // Collect needed columns and their field IDs. External collections use
+    // user-provided external column names; internal storage v2 uses field-id
+    // strings in the Loon Arrow schema.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
-    std::vector<const FieldMeta*> take_field_metas;
+    std::vector<std::string> take_column_names;
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             continue;
@@ -5896,12 +5915,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         }
         auto& field_meta = schema_->operator[](field_id);
         if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id)) {
+            !schema_->is_function_output(field_id) && is_external_collection) {
             continue;
         }
-        needed_columns->push_back(schema_->get_storage_column_name(field_id));
+        auto column_name = schema_->get_storage_column_name(field_id);
+        needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
-        take_field_metas.push_back(&field_meta);
+        take_column_names.push_back(std::move(column_name));
     }
     if (take_field_ids.empty()) {
         return false;
@@ -5916,6 +5936,12 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
                              take_elapsed_ms,
                              op_ctx);
     if (!table) {
+        LogTakeFallback("retrieve",
+                        id_,
+                        size,
+                        ctx.unique_offsets.size(),
+                        take_field_ids.size(),
+                        "take returned no table");
         return false;
     }
 
@@ -5929,7 +5955,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
 
-    // Build lookup from field_id to index in take_field_ids/take_field_metas
+    // Build lookup from field_id to index in take_field_ids.
     std::unordered_map<int64_t, size_t> ext_field_idx;
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
         ext_field_idx[take_field_ids[fi].get()] = fi;
@@ -5939,14 +5965,20 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     std::vector<std::shared_ptr<arrow::Array>> combined_arrays(
         take_field_ids.size());
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
-        auto col_name = schema_->get_storage_column_name(take_field_ids[fi]);
-        auto col = table->GetColumnByName(col_name);
+        auto column_name = take_column_names[fi];
+        auto col = table->GetColumnByName(column_name);
         if (!col || col->num_chunks() == 0) {
             LOG_WARN(
                 "[TakeAPI] column '{}' not found in take result for "
                 "segment {}",
-                col_name,
+                column_name,
                 id_);
+            LogTakeFallback("retrieve",
+                            id_,
+                            size,
+                            ctx.unique_offsets.size(),
+                            take_field_ids.size(),
+                            fmt::format("missing column '{}'", column_name));
             return false;
         }
         if (col->num_chunks() == 1) {
@@ -5956,6 +5988,14 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             if (!combined_result.ok()) {
                 LOG_WARN("[TakeAPI] concatenate failed: {}",
                          combined_result.status().ToString());
+                LogTakeFallback(
+                    "retrieve",
+                    id_,
+                    size,
+                    ctx.unique_offsets.size(),
+                    take_field_ids.size(),
+                    fmt::format("concatenate failed: {}",
+                                combined_result.status().ToString()));
                 return false;
             }
             combined_arrays[fi] = *combined_result;
@@ -5987,9 +6027,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         auto& field_meta = schema_->operator[](field_id);
 
-        // Virtual PK field (not external, not function-output, computed on-the-fly)
+        // External virtual PK field (not external, not function-output).
         if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id)) {
+            !schema_->is_function_output(field_id) && is_external_collection) {
             if (is_pk_field(field_id) &&
                 field_meta.get_data_type() == DataType::INT64) {
                 auto data_array = std::make_unique<DataArray>();
@@ -6012,7 +6052,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
 
-        // External or function-output field — convert from take() result
+        // Convert from take() result
         auto it = ext_field_idx.find(field_id.get());
         if (it == ext_field_idx.end()) {
             continue;
@@ -6021,22 +6061,57 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         auto arr = combined_arrays[fi];
 
         // Normalize external arrow types to Milvus internal format.
-        arr = storage::NormalizeExternalArrow(arr, field_meta);
+        if (is_external_collection) {
+            arr = storage::NormalizeExternalArrow(arr, field_meta);
+        }
 
         auto data_array =
             ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
         if (!data_array) {
-            auto fname = schema_->get_storage_column_name(field_id);
             LOG_WARN(
                 "[TakeAPI] unsupported data type {} for field '{}', "
                 "falling back",
                 static_cast<int>(field_meta.get_data_type()),
-                fname);
+                take_column_names[fi]);
+            LogTakeFallback(
+                "retrieve",
+                id_,
+                size,
+                ctx.unique_offsets.size(),
+                take_field_ids.size(),
+                fmt::format("unsupported data type {} for column '{}'",
+                            static_cast<int>(field_meta.get_data_type()),
+                            take_column_names[fi]));
             results->clear_fields_data();
             results->clear_ids();
             return false;
         }
         data_array->set_field_id(field_id.get());
+
+        if (fill_ids && is_pk_field(field_id)) {
+            switch (field_meta.get_data_type()) {
+                case DataType::INT64: {
+                    auto int_ids = ids->mutable_int_id();
+                    auto& src_data = data_array->scalars().long_data();
+                    int_ids->mutable_data()->Add(src_data.data().begin(),
+                                                 src_data.data().end());
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    auto str_ids = ids->mutable_str_id();
+                    auto& src_data = data_array->scalars().string_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
+                        *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
+                    break;
+                }
+                default: {
+                    ThrowInfo(DataTypeInvalid,
+                              fmt::format("unsupported datatype {}",
+                                          field_meta.get_data_type()));
+                }
+            }
+        }
 
         if (!ignore_non_pk) {
             fields_data->AddAllocated(data_array.release());
@@ -6060,24 +6135,28 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                                            int64_t size,
                                            SearchResult& results,
                                            milvus::OpContext* op_ctx) const {
-    if (!schema_->is_external_collection() || size == 0 ||
-        !use_take_for_output_.load(std::memory_order_relaxed)) {
+    if (size == 0 || !use_take_for_output_.load(std::memory_order_relaxed)) {
         return false;
     }
+    const bool is_external_collection = schema_->is_external_collection();
 
-    // Collect needed external + function-output columns
+    // Collect needed columns. External collections use external field names;
+    // internal storage v2 uses field-id strings.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<const FieldMeta*> take_field_metas;
+    std::vector<std::string> take_column_names;
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = schema_->operator[](field_id);
         if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id)) {
+            !schema_->is_function_output(field_id) && is_external_collection) {
             continue;
         }
-        needed_columns->push_back(schema_->get_storage_column_name(field_id));
+        auto column_name = schema_->get_storage_column_name(field_id);
+        needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
+        take_column_names.push_back(std::move(column_name));
     }
     if (take_field_ids.empty()) {
         return false;
@@ -6089,6 +6168,12 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     auto table = ExecuteTake(
         ctx.unique_offsets, needed_columns, "search", take_elapsed_ms, op_ctx);
     if (!table) {
+        LogTakeFallback("search",
+                        id_,
+                        size,
+                        ctx.unique_offsets.size(),
+                        take_field_ids.size(),
+                        "take returned no table");
         return false;
     }
 
@@ -6102,12 +6187,18 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
         auto field_id = take_field_ids[fi];
         auto& field_meta = *take_field_metas[fi];
-        auto col_name = schema_->get_storage_column_name(field_id);
-        auto col = table->GetColumnByName(col_name);
+        auto column_name = take_column_names[fi];
+        auto col = table->GetColumnByName(column_name);
         if (!col || col->num_chunks() == 0) {
             LOG_WARN("[TakeAPI] search column '{}' not found for segment {}",
-                     col_name,
+                     column_name,
                      id_);
+            LogTakeFallback("search",
+                            id_,
+                            size,
+                            ctx.unique_offsets.size(),
+                            take_field_ids.size(),
+                            fmt::format("missing column '{}'", column_name));
             return false;
         }
 
@@ -6117,13 +6208,23 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
         } else {
             auto combined_result = arrow::Concatenate(col->chunks());
             if (!combined_result.ok()) {
+                LogTakeFallback(
+                    "search",
+                    id_,
+                    size,
+                    ctx.unique_offsets.size(),
+                    take_field_ids.size(),
+                    fmt::format("concatenate failed: {}",
+                                combined_result.status().ToString()));
                 return false;
             }
             arr = *combined_result;
         }
 
         // Normalize external arrow types to Milvus internal format.
-        arr = storage::NormalizeExternalArrow(arr, field_meta);
+        if (is_external_collection) {
+            arr = storage::NormalizeExternalArrow(arr, field_meta);
+        }
 
         auto data_array =
             ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
@@ -6132,7 +6233,16 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                 "[TakeAPI] search: unsupported type {} for '{}', "
                 "falling back",
                 static_cast<int>(field_meta.get_data_type()),
-                col_name);
+                column_name);
+            LogTakeFallback(
+                "search",
+                id_,
+                size,
+                ctx.unique_offsets.size(),
+                take_field_ids.size(),
+                fmt::format("unsupported data type {} for column '{}'",
+                            static_cast<int>(field_meta.get_data_type()),
+                            column_name));
             results.output_fields_data_.clear();
             return false;
         }
