@@ -60,10 +60,10 @@ class IndexEntryReader {
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
 
-    /// Stream entry data via bounded channel with sliding window.
+    /// Stream entry data via transient memory budget.
     /// Downloads are concurrent (full bandwidth). Chunks delivered in order
-    /// to the callback. Global ChunkInflightBudget controls total inflight
-    /// chunks across all concurrent scalar index loads.
+    /// to the callback. Global TransientMemoryBudget controls total inflight
+    /// chunk bytes across all concurrent scalar index loads.
     /// CRC32c is verified incrementally.
     void
     ReadEntryStream(
@@ -74,6 +74,12 @@ class IndexEntryReader {
     /// Return the uncompressed data size of an entry without reading it.
     size_t
     GetEntrySize(const std::string& name) const;
+
+    /// Check if an entry exists in the index file.
+    bool
+    HasEntry(const std::string& name) const {
+        return entry_index_.find(name) != entry_index_.end();
+    }
 
     template <typename T>
     T

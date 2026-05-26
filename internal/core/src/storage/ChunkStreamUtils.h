@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <atomic>
+#include <algorithm>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -32,94 +32,102 @@ namespace milvus::storage {
 /// Default chunk size for ReadEntryStream (2 MB).
 constexpr size_t kDefaultStreamChunkSize = 2 * 1024 * 1024;
 
-/// Capacity multiplier relative to thread pool size.
-/// Matches the kChannelCapacityMultiplier used by ManifestGroupTranslator.
-constexpr double kStreamChannelCapacityMultiplier = 1.5;
+/// Budget multiplier relative to thread pool size.
+constexpr double kScalarIndexChunkBudgetMultiplier = 1.5;
 
 /// A chunk downloaded from a V3 entry, carrying a sequence number for
 /// reordering on the consumer side. `error` carries an exception captured in
 /// the producer task so the consumer can rethrow instead of hanging on pop.
 struct ChunkResult {
-    size_t seq;
+    size_t seq{0};
+    size_t budget_bytes{0};
     std::vector<uint8_t> data;
     std::exception_ptr error = nullptr;
 };
 
-/// Global inflight chunk counter shared by all scalar index ReadEntryStream
-/// calls. Limits total memory used by in-flight chunks across all concurrent
-/// index loads.
+/// Byte budget for transient data that has been submitted for async work but
+/// has not been consumed yet.
 ///
 /// Usage:
-///   - Call Acquire() to block until a slot is available (for initial fill).
-///   - Call TryAcquire() for non-blocking attempt (for replenish in slide loop).
-///   - Call Release() after the chunk has been consumed (callback done).
-///   - Inflight slots are bounded by pool_size * kStreamChannelCapacityMultiplier.
-///
-/// Capacity is derived once from the HIGH-priority pool on first use. Streams
-/// that submit to a smaller pool (LOW/MIDDLE) share the same budget; they may
-/// therefore keep fewer slots in flight than the budget allows, which only
-/// under-utilizes the bound rather than violating it. The singleton is
-/// process-wide, so concurrent streams at any priority contend on the same
-/// counter — the practical ceiling is HIGH pool size regardless of the pool
-/// actually used by a given caller.
-class ChunkInflightBudget {
+///   - Call Acquire(bytes) to block until budget is available.
+///   - Call TryAcquire(bytes) for non-blocking replenish in slide loops.
+///   - Call Release(bytes) after the transient data has been consumed.
+///   - Oversized requests are allowed to run exclusively to guarantee progress.
+class TransientMemoryBudget {
  public:
-    static ChunkInflightBudget&
-    GetInstance() {
-        static ChunkInflightBudget instance;
+    static TransientMemoryBudget&
+    GetScalarIndexChunkBudget() {
+        static TransientMemoryBudget instance(
+            DefaultScalarIndexChunkBudgetBytes());
         return instance;
     }
 
-    /// Block until a slot is available. Uses condition_variable for efficient
-    /// waiting. Safe to call when the calling thread has no inflight tasks
-    /// (no risk of deadlock with channel pop).
+    /// Block until enough budget is available. Safe to call when the calling
+    /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
-    Acquire() {
+    Acquire(size_t bytes) {
         std::unique_lock<std::mutex> lock(mu_);
-        cv_.wait(lock, [this] { return inflight_ < max_inflight_; });
-        inflight_++;
+        cv_.wait(lock, [this, bytes] { return CanAcquireLocked(bytes); });
+        inflight_bytes_ += bytes;
     }
 
-    /// Try to claim a slot. Returns true if under budget.
+    /// Try to claim budget. Returns true if under budget.
     /// Used in the slide loop where blocking could cause deadlock.
     bool
-    TryAcquire() {
+    TryAcquire(size_t bytes) {
         std::lock_guard<std::mutex> lock(mu_);
-        if (inflight_ < max_inflight_) {
-            inflight_++;
+        if (CanAcquireLocked(bytes)) {
+            inflight_bytes_ += bytes;
             return true;
         }
         return false;
     }
 
     void
-    Release() {
+    Release(size_t bytes) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            inflight_--;
+            if (bytes >= inflight_bytes_) {
+                inflight_bytes_ = 0;
+            } else {
+                inflight_bytes_ -= bytes;
+            }
         }
-        cv_.notify_one();
+        cv_.notify_all();
     }
 
     size_t
-    MaxInflight() const {
-        return max_inflight_;
+    CapacityBytes() const {
+        return capacity_bytes_;
     }
 
  private:
-    ChunkInflightBudget() {
+    explicit TransientMemoryBudget(size_t capacity_bytes)
+        : capacity_bytes_(std::max<size_t>(capacity_bytes, 1)) {
+    }
+
+    static size_t
+    DefaultScalarIndexChunkBudgetBytes() {
         auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-        max_inflight_ = static_cast<size_t>(pool.GetMaxThreadNum() *
-                                            kStreamChannelCapacityMultiplier);
-        if (max_inflight_ == 0) {
-            max_inflight_ = 1;
+        auto capacity = static_cast<size_t>(pool.GetMaxThreadNum() *
+                                            kScalarIndexChunkBudgetMultiplier) *
+                        kDefaultStreamChunkSize;
+        return std::max<size_t>(capacity, kDefaultStreamChunkSize);
+    }
+
+    bool
+    CanAcquireLocked(size_t bytes) const {
+        if (bytes > capacity_bytes_) {
+            return inflight_bytes_ == 0;
         }
+        return inflight_bytes_ <= capacity_bytes_ &&
+               bytes <= capacity_bytes_ - inflight_bytes_;
     }
 
     std::mutex mu_;
     std::condition_variable cv_;
-    size_t inflight_{0};
-    size_t max_inflight_;
+    size_t inflight_bytes_{0};
+    size_t capacity_bytes_;
 };
 
 }  // namespace milvus::storage

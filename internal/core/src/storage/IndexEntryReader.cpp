@@ -42,6 +42,7 @@ namespace milvus::storage {
 namespace {
 
 using ChunkLoader = std::function<std::vector<uint8_t>(size_t seq)>;
+using ChunkBudgetBytes = std::function<size_t(size_t seq)>;
 
 class FutureWaiter {
  public:
@@ -68,15 +69,15 @@ ReadOrderedEntryStream(
     const std::string& crc_error_message,
     ThreadPoolPriority priority,
     const std::function<void(const uint8_t* data, size_t len)>& callback,
+    const ChunkBudgetBytes& chunk_budget_bytes,
     const ChunkLoader& load_chunk) {
     if (num_chunks == 0) {
         return;
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = ChunkInflightBudget::GetInstance();
-    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
-        budget.MaxInflight());
+    auto& budget = TransientMemoryBudget::GetScalarIndexChunkBudget();
+    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>();
 
     std::vector<std::future<void>> futures;
     futures.reserve(num_chunks);
@@ -91,8 +92,8 @@ ReadOrderedEntryStream(
     std::exception_ptr first_error = nullptr;
 
     auto releaseBuffered = [&]() {
-        for (size_t i = 0; i < reorder_buf.size(); ++i) {
-            budget.Release();
+        for (const auto& [_, chunk] : reorder_buf) {
+            budget.Release(chunk->budget_bytes);
             local_inflight--;
         }
         reorder_buf.clear();
@@ -107,20 +108,23 @@ ReadOrderedEntryStream(
 
     auto submitOne = [&]() -> bool {
         size_t seq = next_submit;
+        size_t budget_bytes = chunk_budget_bytes(seq);
         try {
-            auto future = pool.Submit([channel, load_chunk, seq]() {
-                auto r = std::make_shared<ChunkResult>();
-                r->seq = seq;
-                try {
-                    r->data = load_chunk(seq);
-                } catch (...) {
-                    r->error = std::current_exception();
-                }
-                channel->push(std::move(r));
-            });
+            auto future =
+                pool.Submit([channel, load_chunk, seq, budget_bytes]() {
+                    auto r = std::make_shared<ChunkResult>();
+                    r->seq = seq;
+                    r->budget_bytes = budget_bytes;
+                    try {
+                        r->data = load_chunk(seq);
+                    } catch (...) {
+                        r->error = std::current_exception();
+                    }
+                    channel->push(std::move(r));
+                });
             futures.push_back(std::move(future));
         } catch (...) {
-            budget.Release();
+            budget.Release(budget_bytes);
             rememberError(std::current_exception());
             return false;
         }
@@ -144,7 +148,7 @@ ReadOrderedEntryStream(
             }
         }
 
-        budget.Release();
+        budget.Release(c->budget_bytes);
         next_consume++;
         local_inflight--;
 
@@ -156,10 +160,11 @@ ReadOrderedEntryStream(
     };
 
     if (next_submit < num_chunks) {
-        budget.Acquire();
+        budget.Acquire(chunk_budget_bytes(next_submit));
         submitOne();
     }
-    while (!first_error && next_submit < num_chunks && budget.TryAcquire()) {
+    while (!first_error && next_submit < num_chunks &&
+           budget.TryAcquire(chunk_budget_bytes(next_submit))) {
         submitOne();
     }
 
@@ -175,13 +180,13 @@ ReadOrderedEntryStream(
 
         if (chunk->error) {
             rememberError(chunk->error);
-            budget.Release();
+            budget.Release(chunk->budget_bytes);
             local_inflight--;
             continue;
         }
 
         if (first_error) {
-            budget.Release();
+            budget.Release(chunk->budget_bytes);
             local_inflight--;
             continue;
         }
@@ -202,12 +207,12 @@ ReadOrderedEntryStream(
         }
 
         while (!first_error && next_submit < num_chunks &&
-               budget.TryAcquire()) {
+               budget.TryAcquire(chunk_budget_bytes(next_submit))) {
             submitOne();
         }
 
         if (!first_error && local_inflight == 0 && next_submit < num_chunks) {
-            budget.Acquire();
+            budget.Acquire(chunk_budget_bytes(next_submit));
             submitOne();
         }
     }
@@ -781,10 +786,14 @@ IndexEntryReader::ReadPlainEntryStream(
     const std::function<void(const uint8_t* data, size_t len)>& callback,
     size_t chunk_size) {
     size_t num_chunks = (pm.size + chunk_size - 1) / chunk_size;
-    auto input = input_;
-    auto load_chunk = [input, pm, chunk_size](size_t seq) {
+    auto chunkBytes = [pm, chunk_size](size_t seq) {
         size_t off = seq * chunk_size;
-        size_t len = std::min<size_t>(chunk_size, pm.size - off);
+        return std::min<size_t>(chunk_size, pm.size - off);
+    };
+    auto input = input_;
+    auto load_chunk = [input, pm, chunk_size, chunkBytes](size_t seq) {
+        size_t off = seq * chunk_size;
+        size_t len = chunkBytes(seq);
         size_t src = pm.offset + off;
         std::vector<uint8_t> data(len);
         size_t n = input->ReadAt(data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
@@ -799,6 +808,7 @@ IndexEntryReader::ReadPlainEntryStream(
                     Crc32cToHex(pm.crc32)),
         priority_,
         callback,
+        chunkBytes,
         load_chunk);
 }
 
@@ -807,6 +817,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
     const EncryptedEntryMeta& em,
     const std::function<void(const uint8_t* data, size_t len)>& callback) {
     size_t num_slices = em.slices.size();
+    auto sliceBudgetBytes = [&](size_t seq) { return em.slices[seq].size; };
     auto input = input_;
     auto cipher_plugin = cipher_plugin_;
     int64_t ez_id = ez_id_;
@@ -832,6 +843,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            "CRC-32C mismatch in encrypted stream read",
                            priority_,
                            callback,
+                           sliceBudgetBytes,
                            load_chunk);
 }
 
