@@ -1334,7 +1334,7 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-			return client.CreateIndex(ctx, req)
+			return client.DataCoordClient.CreateIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1353,7 +1353,7 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 // AlterIndex sends the alter index request to IndexCoord.
 func (c *Client) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-		return client.AlterIndex(ctx, req)
+		return client.DataCoordClient.AlterIndex(ctx, req)
 	})
 }
 
@@ -1364,7 +1364,7 @@ func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexStateResponse, error) {
-			return client.GetIndexState(ctx, req)
+			return client.DataCoordClient.GetIndexState(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1387,7 +1387,7 @@ func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetSegmentIndexStateResponse, error) {
-			return client.GetSegmentIndexState(ctx, req)
+			return client.DataCoordClient.GetSegmentIndexState(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1410,7 +1410,7 @@ func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexInfoResponse, error) {
-			return client.GetIndexInfos(ctx, req)
+			return client.DataCoordClient.GetIndexInfos(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1433,7 +1433,7 @@ func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.DescribeIndexResponse, error) {
-			return client.DescribeIndex(ctx, req)
+			return client.DataCoordClient.DescribeIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1456,7 +1456,7 @@ func (c *Client) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexStatisticsResponse, error) {
-			return client.GetIndexStatistics(ctx, req)
+			return client.DataCoordClient.GetIndexStatistics(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1478,7 +1478,7 @@ func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	var err error
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.GetIndexBuildProgressResponse, error) {
-			return client.GetIndexBuildProgress(ctx, req)
+			return client.DataCoordClient.GetIndexBuildProgress(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1501,7 +1501,7 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, o
 
 	retryErr := retry.Do(ctx, func() error {
 		resp, err = wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-			return client.DropIndex(ctx, req)
+			return client.DataCoordClient.DropIndex(ctx, req)
 		})
 
 		// retry on un implemented, to be compatible with 2.2.x
@@ -1844,6 +1844,17 @@ func (c *Client) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ListQueryNodeResponse, error) {
 		return client.ListQueryNode(ctx, req)
+	})
+}
+
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.RootCoordClient.ClearReadTaskQueue(ctx, req)
 	})
 }
 

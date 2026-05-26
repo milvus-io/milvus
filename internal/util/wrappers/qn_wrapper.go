@@ -180,6 +180,10 @@ func (qn *qnServerWrapper) SyncFileResource(ctx context.Context, in *internalpb.
 	return qn.QueryNode.SyncFileResource(ctx, in)
 }
 
+func (qn *qnServerWrapper) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return qn.QueryNode.ClearReadTaskQueue(ctx, in)
+}
+
 func (qn *qnServerWrapper) ComputePhraseMatchSlop(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, _ ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	return qn.QueryNode.ComputePhraseMatchSlop(ctx, in)
 }

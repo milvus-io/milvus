@@ -69,6 +69,7 @@ const (
 	RouteListQueryNode              = "/management/querycoord/node/list"
 	RouteGetQueryNodeDistribution   = "/management/querycoord/distribution/get"
 	RouteCheckQueryNodeDistribution = "/management/querycoord/distribution/check"
+	RouteClearReadTaskQueue         = "/management/query/task_queue/clear"
 )
 
 const (

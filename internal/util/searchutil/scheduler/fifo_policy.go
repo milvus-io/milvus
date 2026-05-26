@@ -24,6 +24,10 @@ func (p *fifoPolicy) Cleanup(now time.Time) []*queuedTask {
 	return p.queue.cleanup(now)
 }
 
+func (p *fifoPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTask {
+	return p.queue.remove(filter, now)
+}
+
 // Push add a new task into scheduler, an error will be returned if scheduler reaches some limit.
 func (p *fifoPolicy) Push(task *queuedTask) (int, error) {
 	pt := paramtable.Get()

@@ -83,6 +83,26 @@ func (q *mergeTaskQueue) cleanup(now time.Time) []*queuedTask {
 	return removed
 }
 
+func (q *mergeTaskQueue) remove(filter TaskFilter, now time.Time) []*queuedTask {
+	if q.len() == 0 {
+		return nil
+	}
+
+	removed := make([]*queuedTask, 0)
+	for _, task := range q.tasks {
+		if !task.valid() || filter != nil && !filter(task.Task) {
+			continue
+		}
+		removed = append(removed, q.markRemoved(task, now))
+	}
+
+	if q.len() == 0 {
+		clear(q.tasks)
+		q.tasks = nil
+	}
+	return removed
+}
+
 func (q *mergeTaskQueue) markRemoved(task *queuedTask, now time.Time) *queuedTask {
 	if !task.valid() {
 		return nil
@@ -278,6 +298,25 @@ func (q *fairPollingTaskQueue) cleanup(now time.Time) []*queuedTask {
 	for i := 0; i < queuesLen; i++ {
 		queue := checkpoint.Value.(*mergeTaskQueue)
 		tasks := queue.cleanup(now)
+		if len(tasks) > 0 {
+			q.count -= len(tasks)
+			removed = append(removed, tasks...)
+		}
+		checkpoint = checkpoint.Next()
+	}
+	return removed
+}
+
+func (q *fairPollingTaskQueue) remove(filter TaskFilter, now time.Time) []*queuedTask {
+	if q.count == 0 || q.checkpoint == nil {
+		return nil
+	}
+	removed := make([]*queuedTask, 0)
+	checkpoint := q.checkpoint
+	queuesLen := q.checkpoint.Len()
+	for i := 0; i < queuesLen; i++ {
+		queue := checkpoint.Value.(*mergeTaskQueue)
+		tasks := queue.remove(filter, now)
 		if len(tasks) > 0 {
 			q.count -= len(tasks)
 			removed = append(removed, tasks...)

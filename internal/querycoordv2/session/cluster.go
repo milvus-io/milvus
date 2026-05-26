@@ -57,6 +57,7 @@ type Cluster interface {
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)
 	SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	ClearReadTaskQueue(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)
 	Start()
 	Stop()
@@ -326,6 +327,22 @@ func (c *QueryCluster) SyncFileResource(ctx context.Context, nodeID int64, req *
 
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		resp, err = cli.SyncFileResource(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) ClearReadTaskQueue(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	var (
+		resp *internalpb.ClearReadTaskQueueResponse
+		err  error
+	)
+
+	req = proto.Clone(req).(*internalpb.ClearReadTaskQueueRequest)
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.ClearReadTaskQueue(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

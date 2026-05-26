@@ -19,11 +19,13 @@ package proxy
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -126,6 +128,23 @@ func (queue *baseTaskQueue) PopUnissuedTask() task {
 	queue.unissuedTasks.Remove(ft)
 
 	return ft.Value.(task)
+}
+
+func (queue *baseTaskQueue) popUnissuedTasks(filter func(task) bool) []task {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+
+	removed := make([]task, 0)
+	for e := queue.unissuedTasks.Front(); e != nil; {
+		next := e.Next()
+		t := e.Value.(task)
+		if filter == nil || filter(t) {
+			queue.unissuedTasks.Remove(e)
+			removed = append(removed, t)
+		}
+		e = next
+	}
+	return removed
 }
 
 func (queue *baseTaskQueue) AddActiveTask(t task) {
@@ -402,6 +421,47 @@ type dqTaskQueue struct {
 	*baseTaskQueue
 }
 
+type clearTaskQueueResult struct {
+	queuedCleared int64
+}
+
+func isDQLTaskMatched(t task, taskType string) bool {
+	switch taskType {
+	case "", "all":
+		return true
+	case "search":
+		return t.Name() == SearchTaskName
+	case "query":
+		return t.Name() == QueryTaskName
+	default:
+		return false
+	}
+}
+
+func clearTaskQueueError(reason string) error {
+	if reason == "" {
+		return errors.Wrap(context.Canceled, "read task queue cleared by admin")
+	}
+	return errors.Wrap(context.Canceled, fmt.Sprintf("read task queue cleared by admin: %s", reason))
+}
+
+func (queue *dqTaskQueue) clearQueuedTasks(taskType string, reason string) clearTaskQueueResult {
+	removed := queue.popUnissuedTasks(func(t task) bool {
+		return isDQLTaskMatched(t, taskType)
+	})
+	if len(removed) == 0 {
+		queue.updateMetrics()
+		return clearTaskQueueResult{}
+	}
+
+	clearErr := clearTaskQueueError(reason)
+	for _, task := range removed {
+		task.Notify(clearErr)
+	}
+	queue.updateMetrics()
+	return clearTaskQueueResult{queuedCleared: int64(len(removed))}
+}
+
 func (queue *dqTaskQueue) updateMetrics() {
 	queue.utLock.RLock()
 	unissuedTasksNum := queue.unissuedTasks.Len()
@@ -491,6 +551,10 @@ func (sched *taskScheduler) scheduleDmTask() task {
 
 func (sched *taskScheduler) scheduleDqTask() task {
 	return sched.dqQueue.PopUnissuedTask()
+}
+
+func (sched *taskScheduler) clearDQLQueue(taskType string, reason string) clearTaskQueueResult {
+	return sched.dqQueue.clearQueuedTasks(taskType, reason)
 }
 
 func (sched *taskScheduler) processTask(t task, q taskQueue) {

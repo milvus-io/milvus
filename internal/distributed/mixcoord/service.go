@@ -695,6 +695,10 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	return s.mixCoord.GetQueryNodeDistribution(ctx, req)
 }
 
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.mixCoord.ClearReadTaskQueue(ctx, req)
+}
+
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.SuspendBalance(ctx, req)
 }

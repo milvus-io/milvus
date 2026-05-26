@@ -284,7 +284,6 @@ type MixCoordClient interface {
 	rootcoordpb.RootCoordClient
 	querypb.QueryCoordClient
 	datapb.DataCoordClient
-	indexpb.IndexCoordClient
 }
 
 // MixCoord is the interface `MixCoord` package implements

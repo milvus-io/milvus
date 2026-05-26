@@ -29,6 +29,66 @@ func (_m *MockCluster) EXPECT() *MockCluster_Expecter {
 	return &MockCluster_Expecter{mock: &_m.Mock}
 }
 
+// ClearReadTaskQueue provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) ClearReadTaskQueue(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClearReadTaskQueue")
+	}
+
+	var r0 *internalpb.ClearReadTaskQueueResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.ClearReadTaskQueueRequest) *internalpb.ClearReadTaskQueueResponse); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ClearReadTaskQueueResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *internalpb.ClearReadTaskQueueRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_ClearReadTaskQueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearReadTaskQueue'
+type MockCluster_ClearReadTaskQueue_Call struct {
+	*mock.Call
+}
+
+// ClearReadTaskQueue is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *internalpb.ClearReadTaskQueueRequest
+func (_e *MockCluster_Expecter) ClearReadTaskQueue(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_ClearReadTaskQueue_Call {
+	return &MockCluster_ClearReadTaskQueue_Call{Call: _e.mock.On("ClearReadTaskQueue", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_ClearReadTaskQueue_Call) Run(run func(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest)) *MockCluster_ClearReadTaskQueue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*internalpb.ClearReadTaskQueueRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_ClearReadTaskQueue_Call) Return(_a0 *internalpb.ClearReadTaskQueueResponse, _a1 error) *MockCluster_ClearReadTaskQueue_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_ClearReadTaskQueue_Call) RunAndReturn(run func(context.Context, int64, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)) *MockCluster_ClearReadTaskQueue_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ComputePhraseMatchSlop provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	ret := _m.Called(ctx, nodeID, req)
