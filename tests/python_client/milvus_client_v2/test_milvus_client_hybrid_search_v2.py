@@ -926,9 +926,9 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         mid_distances = []
         for i in range(len(field_names)):
             field_name = field_names[i]
-            res_search = self.search(
-                client, self.collection_name, data=search_data, anns_field=field_name, limit=limit
-            )[0]
+            res_search = self.search(client, self.collection_name, data=search_data,
+                                     anns_field=field_name,
+                                     limit=limit)[0]
             field_mid_distances = []
             for j in range(nq):
                 field_mid_distances.append(res_search[j].distances[limit // 2 - 1])
@@ -937,67 +937,50 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         # 1. hybrid search without range search
         req_list = []
         for field_name in field_names:
-            req = AnnSearchRequest(
-                **{
-                    "data": search_data,
-                    "anns_field": field_name,
-                    "param": {},
-                    "limit": limit,
-                }
-            )
-            req_list.append(req)
-        self.hybrid_search(
-            client,
-            self.collection_name,
-            reqs=req_list,
-            ranker=WeightedRanker(0.5, 0.5),
-            limit=limit,
-            output_fields=[self.primary_key_field_name, self.string_field_name],
-            check_task=CheckTasks.check_search_results,
-            check_items={
-                "nq": nq,
-                "ids": self.primary_keys,
+            req = AnnSearchRequest(**{
+                "data": search_data,
+                "anns_field": field_name,
+                "param": {},
                 "limit": limit,
-                "enable_milvus_client_api": True,
-                "metric": "IP",
-                "pk_name": self.primary_key_field_name,
-                "output_fields": [self.primary_key_field_name, self.string_field_name],
-            },
-        )[0]
+            })
+            req_list.append(req)
+        res1 = self.hybrid_search(client, self.collection_name, reqs=req_list,
+                                  ranker=WeightedRanker(0.5, 0.5),
+                                  limit=limit,
+                                  output_fields=[self.primary_key_field_name, self.string_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
+                                               "enable_milvus_client_api": True,
+                                               "metric": "IP",
+                                               "pk_name": self.primary_key_field_name,
+                                               "output_fields": [self.primary_key_field_name,
+                                                                 self.string_field_name]})[0]
 
         # 2. hybrid search with range search one nq by one nq
         for i in range(nq):
             req_list2 = []
             for j in range(len(field_names)):
                 field_name = field_names[j]
-                req = AnnSearchRequest(
-                    **{
-                        "data": [search_data[i]],
-                        "anns_field": field_name,
-                        "param": {"params": {"radius": float(mid_distances[j]), "range_filter": 9999}},
-                        "limit": limit // 2,
-                    }
-                )
+                req = AnnSearchRequest(**{
+                    "data": [search_data[i]],
+                    "anns_field": field_name,
+                    "param": {"params": {"radius": float(mid_distances[j]), "range_filter": 9999}},
+                    "limit": limit // 2,
+                })
                 req_list2.append(req)
-            res2 = self.hybrid_search(
-                client,
-                self.collection_name,
-                reqs=req_list2,
-                ranker=WeightedRanker(0.5, 0.5),
-                limit=limit // 2,
-                output_fields=[self.primary_key_field_name, self.string_field_name],
-                check_task=CheckTasks.check_search_results,
-                check_items={
-                    "nq": 1,
-                    "ids": self.primary_keys,  # "limit": limit // 2,
-                    "enable_milvus_client_api": True,
-                    "metric": "IP",
-                    "pk_name": self.primary_key_field_name,
-                    "output_fields": [self.primary_key_field_name, self.string_field_name],
-                },
-            )[0]
-            hit_rate = len(set(res2[0].ids).intersection(set(res1[i].ids[: limit // 2]))) / len(res2[0].ids)
-            # log.debug(f"hybrid search with range nq={i} hit hybrid search without range, hit rate: {hit_rate}")
+            res2 = self.hybrid_search(client, self.collection_name, reqs=req_list2,
+                                      ranker=WeightedRanker(0.5, 0.5),
+                                      limit=limit // 2,
+                                      output_fields=[self.primary_key_field_name, self.string_field_name],
+                                      check_task=CheckTasks.check_search_results,
+                                      check_items={"nq": 1, "ids": self.primary_keys,  # "limit": limit // 2,
+                                                   "enable_milvus_client_api": True,
+                                                   "metric": "IP",
+                                                   "pk_name": self.primary_key_field_name,
+                                                   "output_fields": [self.primary_key_field_name,
+                                                                     self.string_field_name]})[0]
+            hit_rate = len(set(res2[0].ids).intersection(set(res1[i].ids[:limit // 2]))) / len(res2[0].ids)
+            # log.debug(f"hybrid search with range nq={i} hit hybrid search without rage, hit rate: {hit_rate}")
             assert hit_rate >= 0.7, f"failed in nq={i}"
 
     @pytest.mark.tags(CaseLabel.L2)
