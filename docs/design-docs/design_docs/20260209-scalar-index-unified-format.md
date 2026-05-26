@@ -402,8 +402,8 @@ Streaming read behavior:
 - CRC-32C is verified incrementally as chunks are consumed.
 - Consumers may receive partial data before a later chunk error is reported.
 - Slow consumers keep their chunk budget until the callback returns, which can block other streams.
-- For plain entries, `chunk_size` controls range splitting. The default is 16MB, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit values below 64KB are rejected.
-- For encrypted entries, streaming follows encryption slice boundaries and ignores `chunk_size`.
+- Streaming uses slice-sized chunks. For plain entries, the reader self-splits by `chunk_size`; the default is 16MB, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit values below 64KB are rejected.
+- For encrypted entries, the reader uses the plaintext slice boundaries stored in the V3 directory. With the default writer settings, this is also 16MB.
 
 Streaming load configuration:
 

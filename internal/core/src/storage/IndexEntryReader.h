@@ -70,8 +70,9 @@ class IndexEntryReader {
     /// CRC32c is verified incrementally. Consumers may receive partial data
     /// before a later chunk error is reported. Slow consumers keep their chunk
     /// budget until the callback returns, which can block other streams.
-    /// `chunk_size` applies only to plain entries; encrypted entries stream by
-    /// encryption slice boundaries.
+    /// Streaming uses slice-sized chunks. Plain entries are split by
+    /// `chunk_size`; encrypted entries use the slice boundaries stored in the
+    /// V3 directory.
     void
     ReadEntryStream(
         const std::string& name,
