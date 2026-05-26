@@ -1001,18 +1001,18 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamLarge) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     std::vector<uint8_t> reassembled;
-    size_t callback_count = 0;
+    size_t chunk_count = 0;
     reader->ReadEntryStream(
         "test_data",
         [&](const uint8_t* d, size_t len) {
             reassembled.insert(reassembled.end(), d, d + len);
-            callback_count++;
+            chunk_count++;
         },
         1 * 1024 * 1024);  // 1MB chunks
 
     ASSERT_EQ(reassembled.size(), entry_size);
     VerifyPattern(reassembled, entry_size);
-    ASSERT_EQ(callback_count, 4);  // 4MB / 1MB = 4 chunks
+    ASSERT_EQ(chunk_count, 4);  // 4MB / 1MB = 4 chunks
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
@@ -1032,15 +1032,15 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     std::vector<uint8_t> reassembled;
-    size_t callback_count = 0;
+    size_t chunk_count = 0;
     reader->ReadEntryStream("small_data", [&](const uint8_t* d, size_t len) {
         reassembled.insert(reassembled.end(), d, d + len);
-        callback_count++;
+        chunk_count++;
     });
 
     ASSERT_EQ(reassembled.size(), entry_size);
     VerifyPattern(reassembled, entry_size);
-    ASSERT_EQ(callback_count, 1);  // single chunk (1KB < 2MB default)
+    ASSERT_EQ(chunk_count, 1);  // single chunk (1KB < 2MB default)
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
@@ -1075,8 +1075,8 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
     EXPECT_EQ(entry.data, streamed);
 }
 
-TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCallbackExceptionDoesNotLeak) {
-    const std::string file_path = kV3FilePath + "_stream_callback_throw";
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
+    const std::string file_path = kV3FilePath + "_stream_consumer_throw";
     const size_t chunk_size = 64 * 1024;
     const size_t entry_size = 4 * chunk_size;
     auto data = GeneratePattern(entry_size);
@@ -1092,16 +1092,16 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCallbackExceptionDoesNotLeak) {
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
 
-    size_t callback_count = 0;
+    size_t chunk_count = 0;
     EXPECT_THROW(reader->ReadEntryStream(
                      "data",
                      [&](const uint8_t*, size_t) {
-                         callback_count++;
+                         chunk_count++;
                          throw std::runtime_error("stop stream");
                      },
                      chunk_size),
                  std::runtime_error);
-    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(chunk_count, 1);
 
     std::vector<uint8_t> streamed;
     reader->ReadEntryStream(
@@ -1138,13 +1138,12 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsReorderBufferAfterError) {
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
 
-    size_t callback_count = 0;
-    EXPECT_THROW(reader->ReadEntryStream(
-                     "data",
-                     [&](const uint8_t*, size_t) { callback_count++; },
-                     chunk_size),
-                 milvus::SegcoreError);
-    EXPECT_LE(callback_count, 1);
+    size_t chunk_count = 0;
+    EXPECT_THROW(
+        reader->ReadEntryStream(
+            "data", [&](const uint8_t*, size_t) { chunk_count++; }, chunk_size),
+        milvus::SegcoreError);
+    EXPECT_LE(chunk_count, 1);
 
     auto clean_input = CreateInputStream(file_path);
     auto clean_reader = IndexEntryReader::Open(clean_input, file_size);

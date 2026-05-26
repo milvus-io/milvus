@@ -68,7 +68,7 @@ ReadOrderedEntryStream(
     uint32_t expected_crc,
     const std::string& crc_error_message,
     ThreadPoolPriority priority,
-    const std::function<void(const uint8_t* data, size_t len)>& callback,
+    const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
     const ChunkBudgetBytes& chunk_budget_bytes,
     const ChunkLoader& load_chunk) {
     if (num_chunks == 0) {
@@ -141,7 +141,7 @@ ReadOrderedEntryStream(
                 first ? chunk_crc
                       : Crc32cCombine(running_crc, chunk_crc, c->data.size());
             first = false;
-            callback(c->data.data(), c->data.size());
+            chunk_consumer(c->data.data(), c->data.size());
         } catch (...) {
             if (!first_error) {
                 first_error = std::current_exception();
@@ -767,23 +767,23 @@ IndexEntryReader::GetEntrySize(const std::string& name) const {
 void
 IndexEntryReader::ReadEntryStream(
     const std::string& name,
-    std::function<void(const uint8_t* data, size_t len)> callback,
+    std::function<void(const uint8_t* data, size_t len)> chunk_consumer,
     size_t chunk_size) {
     auto it = entry_index_.find(name);
     AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
     const auto& meta = it->second;
 
     if (meta.encrypted) {
-        ReadEncryptedEntryStream(meta.enc, callback);
+        ReadEncryptedEntryStream(meta.enc, chunk_consumer);
     } else {
-        ReadPlainEntryStream(meta.plain, callback, chunk_size);
+        ReadPlainEntryStream(meta.plain, chunk_consumer, chunk_size);
     }
 }
 
 void
 IndexEntryReader::ReadPlainEntryStream(
     const PlainEntryMeta& pm,
-    const std::function<void(const uint8_t* data, size_t len)>& callback,
+    const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
     size_t chunk_size) {
     size_t num_chunks = (pm.size + chunk_size - 1) / chunk_size;
     auto chunkBytes = [pm, chunk_size](size_t seq) {
@@ -807,7 +807,7 @@ IndexEntryReader::ReadPlainEntryStream(
         fmt::format("CRC-32C mismatch in stream read: expected {}",
                     Crc32cToHex(pm.crc32)),
         priority_,
-        callback,
+        chunk_consumer,
         chunkBytes,
         load_chunk);
 }
@@ -815,7 +815,8 @@ IndexEntryReader::ReadPlainEntryStream(
 void
 IndexEntryReader::ReadEncryptedEntryStream(
     const EncryptedEntryMeta& em,
-    const std::function<void(const uint8_t* data, size_t len)>& callback) {
+    const std::function<void(const uint8_t* data, size_t len)>&
+        chunk_consumer) {
     size_t num_slices = em.slices.size();
     auto sliceBudgetBytes = [&](size_t seq) { return em.slices[seq].size; };
     auto input = input_;
@@ -842,7 +843,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            em.crc32,
                            "CRC-32C mismatch in encrypted stream read",
                            priority_,
-                           callback,
+                           chunk_consumer,
                            sliceBudgetBytes,
                            load_chunk);
 }

@@ -61,14 +61,15 @@ class IndexEntryReader {
                            name_path_pairs);
 
     /// Stream entry data via transient memory budget.
-    /// Downloads are concurrent (full bandwidth). Chunks delivered in order
-    /// to the callback. Global TransientMemoryBudget controls total inflight
-    /// chunk bytes across all concurrent scalar index loads.
+    /// Downloads are concurrent (full bandwidth). Chunks are delivered in entry
+    /// order to `chunk_consumer`; the data pointer is valid only for the
+    /// duration of that call. Global TransientMemoryBudget controls total
+    /// inflight chunk bytes across all concurrent scalar index loads.
     /// CRC32c is verified incrementally.
     void
     ReadEntryStream(
         const std::string& name,
-        std::function<void(const uint8_t* data, size_t len)> callback,
+        std::function<void(const uint8_t* data, size_t len)> chunk_consumer,
         size_t chunk_size = kDefaultStreamChunkSize);
 
     /// Return the uncompressed data size of an entry without reading it.
@@ -138,15 +139,16 @@ class IndexEntryReader {
     ReadEncryptedEntry(const EntryMeta& meta);
 
     void
-    ReadPlainEntryStream(
-        const PlainEntryMeta& pm,
-        const std::function<void(const uint8_t* data, size_t len)>& callback,
-        size_t chunk_size);
+    ReadPlainEntryStream(const PlainEntryMeta& pm,
+                         const std::function<void(const uint8_t* data,
+                                                  size_t len)>& chunk_consumer,
+                         size_t chunk_size);
 
     void
     ReadEncryptedEntryStream(
         const EncryptedEntryMeta& em,
-        const std::function<void(const uint8_t* data, size_t len)>& callback);
+        const std::function<void(const uint8_t* data, size_t len)>&
+            chunk_consumer);
 
     void
     VerifyCrc32c(uint32_t expected,
