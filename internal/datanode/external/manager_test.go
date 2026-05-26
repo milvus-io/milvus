@@ -248,9 +248,13 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 
-	info := manager.Get(clusterID, taskID)
+	var info *TaskInfo
+	require.Eventually(t, func() bool {
+		info = manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
+
 	require.NotNil(t, info)
-	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
 	assert.Contains(t, info.FailReason, "context canceled")
 }
 
