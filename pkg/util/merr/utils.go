@@ -1314,6 +1314,13 @@ func WrapErrSegcore(code int32, msg ...string) error {
 	return err
 }
 
+// WrapErrSegcoreMsg creates a new ErrSegcore (2000) with a Sprintf-formatted
+// message. Use for Go-side segcore invariants where there's no C++ errorCode
+// available (otherwise use WrapErrSegcore(code int32, msg ...string)).
+func WrapErrSegcoreMsg(format string, args ...any) error {
+	return errors.Wrap(ErrSegcore, fmt.Sprintf(format, args...))
+}
+
 func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
 	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
 	if len(msg) > 0 {

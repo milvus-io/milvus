@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -88,7 +89,7 @@ func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, metricType s
 }
 
 func errOutOfRange(x interface{}, lb interface{}, ub interface{}) error {
-	return fmt.Errorf("%v out of range: [%v, %v]", x, lb, ub)
+	return merr.WrapErrParameterInvalidMsg("%v out of range: [%v, %v]", x, lb, ub)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

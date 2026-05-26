@@ -11,7 +11,7 @@
 
 package metricsinfo
 
-import "github.com/cockroachdb/errors"
+import "github.com/milvus-io/milvus/pkg/v3/util/merr"
 
 const (
 	// MsgUnimplementedMetric represents that user requests an unimplemented metric type
@@ -19,4 +19,4 @@ const (
 	msgInvalidSystemInfosMetricCache = "system infos metric is invalid"
 )
 
-var errInvalidSystemInfosMetricCache = errors.New(msgInvalidSystemInfosMetricCache)
+var errInvalidSystemInfosMetricCache = merr.WrapErrParameterInvalidMsg(msgInvalidSystemInfosMetricCache)
