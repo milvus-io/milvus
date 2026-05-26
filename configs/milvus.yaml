@@ -960,7 +960,7 @@ common:
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
   indexEntryStream:
-    scalarIndexBudgetRatio: 3.0 # Multiplier for scalar index stream transient memory budget, relative to CPU core count
+    scalarIndexBudgetRatio: 3 # Multiplier for scalar index stream transient memory budget, relative to CPU core count
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
