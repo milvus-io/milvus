@@ -3516,6 +3516,8 @@ LoadElementHnswIndex(SegmentSealed* segment,
 inline std::unique_ptr<SegmentSealed>
 CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
     auto segment = CreateSealedSegment(f.schema);
+    LoadGeneratedDataIntoSegment(
+        f.raw_data, segment.get(), false, GetExcludedFieldIds(f.schema, {}));
 
     auto vec_array_values = f.raw_data.get_col<VectorFieldProto>(f.vec_fid);
     std::vector<milvus::VectorArray> vector_arrays;

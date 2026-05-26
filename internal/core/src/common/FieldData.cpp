@@ -128,7 +128,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    if (!(data_type_ == DataType::VECTOR_ARRAY && nullable_)) {
+    if (!(nullable_ && IsVectorDataType(data_type_))) {
         null_count_ += array->null_count();
     }
     switch (data_type_) {
