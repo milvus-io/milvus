@@ -1390,10 +1390,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, default_new_field_name
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"not support to add vector field, field name = {field_name}: invalid parameter",
-        }
+        error = {ct.err_code: 999, ct.err_msg: "Adding vector field to existing collection requires nullable=True"}
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
