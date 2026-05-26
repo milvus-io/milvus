@@ -1642,7 +1642,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // use single column group policy (all columns in one group)
         writer_config.properties[PROPERTY_WRITER_POLICY] =
             std::string(LOON_COLUMN_GROUP_POLICY_SINGLE);
-        writer_config.properties[PROPERTY_FORMAT] =
+        writer_config.properties[PROPERTY_WRITER_FORMAT] =
             std::string(LOON_FORMAT_PARQUET);
 
         // add TEXT column configs
