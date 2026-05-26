@@ -392,7 +392,34 @@ protected:
 3. Create `IndexEntryReader::Open(input, file_size, collection_id)`.
 4. Call `LoadEntries(*reader, config)`.
 
-### 5.2 Meta Packing
+### 5.2 Streaming Read
+
+Large scalar data entries should use `IndexEntryReader::ReadEntryStream()` instead of `ReadEntry()` when the index implementation can consume bytes incrementally.
+
+Streaming read behavior:
+
+- Chunks are delivered to the consumer in entry order.
+- CRC-32C is verified incrementally as chunks are consumed.
+- Consumers may receive partial data before a later chunk error is reported.
+- Slow consumers keep their chunk budget until the callback returns, which can block other streams.
+- For plain entries, `chunk_size` controls range splitting. The default is 16MB, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit values below 64KB are rejected.
+- For encrypted entries, streaming follows encryption slice boundaries and ignores `chunk_size`.
+
+Streaming load configuration:
+
+| Parameter | Key | Default | Description |
+|-----------|-----|---------|-------------|
+| `ScalarIndexEntryStreamBudgetRatio` | `common.indexEntryStream.scalarIndexBudgetRatio` | `3.0` | Scalar index stream transient memory budget multiplier, relative to CPU core count. |
+
+The default scalar stream budget is:
+
+```
+CPU cores × common.indexEntryStream.scalarIndexBudgetRatio × 16MB
+```
+
+With default values, an 8-core node gets `8 × 3.0 × 16MB = 384MB` of transient scalar stream budget. This admits about 8 encrypted slices concurrently because each encrypted slice budgets ciphertext + decrypted plaintext + returned chunk. Oversized chunks are allowed to run exclusively to guarantee progress.
+
+### 5.3 Meta Packing
 
 Each index packs all O(1) metadata into a **single meta entry**, eliminating multiple small IOs by design.
 
@@ -420,7 +447,7 @@ Meta structure definitions:
 // Hybrid:           {"index_type": uint8}
 ```
 
-### 5.3 Inheritance Patterns
+### 5.4 Inheritance Patterns
 
 **InvertedIndexTantivy** provides `BuildTantivyMeta()` as a virtual hook. Subclasses extend by:
 
@@ -507,6 +534,8 @@ Main thread (after all tasks complete, combine in sequential order):
 | Upload, encrypted, disk entry | W × `slice_size` × 2 |
 | Download, to memory | N × `range_size` + `original_size` |
 | Download, to file | N × `range_size` (reusable) |
+| Streaming load, unencrypted | bounded by scalar stream budget |
+| Streaming load, encrypted | bounded by scalar stream budget; each active slice budgets ciphertext + decrypted plaintext + returned chunk |
 
 Consistent with V2: peak determined by concurrency × slice size, does not grow with entry size.
 

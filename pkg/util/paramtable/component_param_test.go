@@ -55,11 +55,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
-		assert.Equal(t, int64(DefaultIndexEntryStreamChunkSize), Params.IndexEntryStreamChunkSize.GetAsInt64())
 		assert.InDelta(t, DefaultScalarIndexEntryStreamBudgetRatio, Params.ScalarIndexEntryStreamBudgetRatio.GetAsFloat(), 0.0001)
-		params.Save(Params.IndexEntryStreamChunkSize.Key, "4194304")
 		params.Save(Params.ScalarIndexEntryStreamBudgetRatio.Key, "2.5")
-		assert.Equal(t, int64(4194304), Params.IndexEntryStreamChunkSize.GetAsInt64())
 		assert.InDelta(t, 2.5, Params.ScalarIndexEntryStreamBudgetRatio.GetAsFloat(), 0.0001)
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())

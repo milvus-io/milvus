@@ -28,12 +28,14 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
-#include "storage/ChunkStreamUtils.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
 
 namespace milvus::storage {
+
+size_t
+DefaultEntryStreamChunkSize();
 
 struct Entry {
     std::vector<uint8_t> data;
@@ -65,12 +67,16 @@ class IndexEntryReader {
     /// order to `chunk_consumer`; the data pointer is valid only for the
     /// duration of that call. Global TransientMemoryBudget controls total
     /// inflight chunk bytes across all concurrent scalar index loads.
-    /// CRC32c is verified incrementally.
+    /// CRC32c is verified incrementally. Consumers may receive partial data
+    /// before a later chunk error is reported. Slow consumers keep their chunk
+    /// budget until the callback returns, which can block other streams.
+    /// `chunk_size` applies only to plain entries; encrypted entries stream by
+    /// encryption slice boundaries.
     void
     ReadEntryStream(
         const std::string& name,
         std::function<void(const uint8_t* data, size_t len)> chunk_consumer,
-        size_t chunk_size = DefaultStreamChunkSize());
+        size_t chunk_size = DefaultEntryStreamChunkSize());
 
     /// Return the uncompressed data size of an entry without reading it.
     size_t

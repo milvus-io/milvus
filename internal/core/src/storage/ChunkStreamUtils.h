@@ -26,13 +26,15 @@
 #include <vector>
 
 #include "common/Common.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::storage {
 
+constexpr size_t kMinStreamChunkSize = 64 * 1024;
+
 inline size_t
 DefaultStreamChunkSize() {
-    auto chunk_size = milvus::INDEX_ENTRY_STREAM_CHUNK_SIZE.load();
-    return chunk_size > 0 ? static_cast<size_t>(chunk_size) : 1;
+    return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 
 inline double
@@ -41,11 +43,9 @@ ScalarIndexChunkBudgetRatio() {
     return ratio > 0 ? ratio : 1.0;
 }
 
-/// A chunk downloaded from a V3 entry, carrying a sequence number for
-/// reordering on the consumer side. `error` carries an exception captured in
-/// the producer task so the consumer can rethrow instead of hanging on pop.
+/// A chunk downloaded from a V3 entry. `error` carries an exception captured in
+/// the producer task so the consumer can rethrow instead of hanging.
 struct ChunkResult {
-    size_t seq{0};
     size_t budget_bytes{0};
     std::vector<uint8_t> data;
     std::exception_ptr error = nullptr;
@@ -93,11 +93,12 @@ class TransientMemoryBudget {
     Release(size_t bytes) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            if (bytes >= inflight_bytes_) {
-                inflight_bytes_ = 0;
-            } else {
-                inflight_bytes_ -= bytes;
-            }
+            AssertInfo(bytes <= inflight_bytes_,
+                       "Transient memory budget over-release: release {}, "
+                       "inflight {}",
+                       bytes,
+                       inflight_bytes_);
+            inflight_bytes_ -= bytes;
         }
         cv_.notify_all();
     }

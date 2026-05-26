@@ -23,15 +23,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <future>
-#include <map>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "common/Channel.h"
 #include "common/EasyAssert.h"
 #include "nlohmann/json.hpp"
 #include "storage/ChunkStreamUtils.h"
@@ -44,97 +44,118 @@ namespace {
 using ChunkLoader = std::function<std::vector<uint8_t>(size_t seq)>;
 using ChunkBudgetBytes = std::function<size_t(size_t seq)>;
 
-class FutureWaiter {
- public:
-    explicit FutureWaiter(std::vector<std::future<void>>& futures)
-        : futures_(futures) {
-    }
-
-    ~FutureWaiter() {
-        for (auto& future : futures_) {
-            if (future.valid()) {
-                future.wait();
-            }
-        }
-    }
-
- private:
-    std::vector<std::future<void>>& futures_;
+struct ActiveChunkTask {
+    size_t budget_bytes{0};
+    std::shared_ptr<ChunkResult> result;
+    std::future<void> future;
 };
 
 void
 ReadOrderedEntryStream(
     size_t num_chunks,
     uint32_t expected_crc,
-    const std::string& crc_error_message,
+    const std::string& crc_error_context,
     ThreadPoolPriority priority,
     const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
     const ChunkBudgetBytes& chunk_budget_bytes,
     const ChunkLoader& load_chunk) {
     if (num_chunks == 0) {
+        auto actual_crc = Crc32cValue(nullptr, 0);
+        AssertInfo(actual_crc == expected_crc,
+                   "{}: expected {}, actual {}",
+                   crc_error_context,
+                   Crc32cToHex(expected_crc),
+                   Crc32cToHex(actual_crc));
         return;
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
     auto& budget = TransientMemoryBudget::GetScalarIndexChunkBudget();
-    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>();
-
-    std::vector<std::future<void>> futures;
-    futures.reserve(num_chunks);
-    FutureWaiter wait_on_exit(futures);
+    size_t max_active_tasks =
+        std::min(num_chunks, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
     size_t next_submit = 0;
-    size_t next_consume = 0;
-    size_t local_inflight = 0;
     uint32_t running_crc = 0;
     bool first = true;
-    std::map<size_t, std::shared_ptr<ChunkResult>> reorder_buf;
+    std::deque<ActiveChunkTask> active_tasks;
     std::exception_ptr first_error = nullptr;
-
-    auto releaseBuffered = [&]() {
-        for (const auto& [_, chunk] : reorder_buf) {
-            budget.Release(chunk->budget_bytes);
-            local_inflight--;
-        }
-        reorder_buf.clear();
-    };
 
     auto rememberError = [&](std::exception_ptr error) {
         if (!first_error) {
             first_error = std::move(error);
         }
-        releaseBuffered();
     };
 
-    auto submitOne = [&]() -> bool {
+    auto drainActiveTasks = [&]() {
+        while (!active_tasks.empty()) {
+            auto task = std::move(active_tasks.front());
+            active_tasks.pop_front();
+            if (task.future.valid()) {
+                try {
+                    task.future.get();
+                } catch (...) {
+                    rememberError(std::current_exception());
+                }
+            }
+            budget.Release(task.budget_bytes);
+        }
+    };
+
+    auto submitOne = [&](bool block_for_budget) -> bool {
         size_t seq = next_submit;
-        size_t budget_bytes = chunk_budget_bytes(seq);
+        size_t budget_bytes = 0;
+        std::shared_ptr<ChunkResult> result;
         try {
-            auto future =
-                pool.Submit([channel, load_chunk, seq, budget_bytes]() {
-                    auto r = std::make_shared<ChunkResult>();
-                    r->seq = seq;
-                    r->budget_bytes = budget_bytes;
-                    try {
-                        r->data = load_chunk(seq);
-                    } catch (...) {
-                        r->error = std::current_exception();
-                    }
-                    channel->push(std::move(r));
-                });
-            futures.push_back(std::move(future));
+            budget_bytes = chunk_budget_bytes(seq);
+            result = std::make_shared<ChunkResult>();
+            result->budget_bytes = budget_bytes;
         } catch (...) {
+            rememberError(std::current_exception());
+            return false;
+        }
+
+        if (block_for_budget) {
+            budget.Acquire(budget_bytes);
+        } else if (!budget.TryAcquire(budget_bytes)) {
+            return false;
+        }
+
+        try {
+            active_tasks.push_back(
+                ActiveChunkTask{budget_bytes, result, std::future<void>()});
+            active_tasks.back().future =
+                pool.Submit([result, load_chunk, seq]() {
+                    try {
+                        result->data = load_chunk(seq);
+                    } catch (...) {
+                        result->error = std::current_exception();
+                    }
+                });
+        } catch (...) {
+            if (!active_tasks.empty() && active_tasks.back().result == result &&
+                !active_tasks.back().future.valid()) {
+                active_tasks.pop_back();
+            }
             budget.Release(budget_bytes);
             rememberError(std::current_exception());
             return false;
         }
 
         next_submit++;
-        local_inflight++;
         return true;
     };
 
-    auto deliverChunk = [&](const std::shared_ptr<ChunkResult>& c) -> bool {
+    auto refill = [&]() {
+        while (!first_error && next_submit < num_chunks &&
+               active_tasks.size() < max_active_tasks) {
+            bool block_for_budget = active_tasks.empty();
+            if (!submitOne(block_for_budget)) {
+                break;
+            }
+        }
+    };
+
+    auto deliverChunk = [&](const std::shared_ptr<ChunkResult>& c) {
         try {
             uint32_t chunk_crc = Crc32cValue(c->data.data(), c->data.size());
             running_crc =
@@ -143,102 +164,57 @@ ReadOrderedEntryStream(
             first = false;
             chunk_consumer(c->data.data(), c->data.size());
         } catch (...) {
-            if (!first_error) {
-                first_error = std::current_exception();
-            }
+            rememberError(std::current_exception());
         }
-
-        budget.Release(c->budget_bytes);
-        next_consume++;
-        local_inflight--;
-
-        if (first_error) {
-            releaseBuffered();
-            return false;
-        }
-        return true;
     };
 
-    if (next_submit < num_chunks) {
-        budget.Acquire(chunk_budget_bytes(next_submit));
-        submitOne();
-    }
-    while (!first_error && next_submit < num_chunks &&
-           budget.TryAcquire(chunk_budget_bytes(next_submit))) {
-        submitOne();
-    }
+    refill();
 
-    while (local_inflight > 0) {
-        std::shared_ptr<ChunkResult> chunk;
+    while (!active_tasks.empty()) {
+        auto task = std::move(active_tasks.front());
+        active_tasks.pop_front();
+
         try {
-            bool ok = channel->pop(chunk);
-            AssertInfo(ok, "Channel closed unexpectedly");
+            task.future.get();
         } catch (...) {
             rememberError(std::current_exception());
+        }
+
+        if (!first_error && task.result->error) {
+            rememberError(task.result->error);
+        }
+
+        if (!first_error) {
+            deliverChunk(task.result);
+        }
+
+        budget.Release(task.budget_bytes);
+
+        if (first_error) {
+            drainActiveTasks();
             break;
         }
 
-        if (chunk->error) {
-            rememberError(chunk->error);
-            budget.Release(chunk->budget_bytes);
-            local_inflight--;
-            continue;
-        }
-
-        if (first_error) {
-            budget.Release(chunk->budget_bytes);
-            local_inflight--;
-            continue;
-        }
-
-        if (chunk->seq == next_consume) {
-            if (!deliverChunk(chunk)) {
-                continue;
-            }
-        } else {
-            reorder_buf[chunk->seq] = std::move(chunk);
-        }
-
-        while (!first_error && reorder_buf.count(next_consume)) {
-            auto node = reorder_buf.extract(next_consume);
-            if (!deliverChunk(node.mapped())) {
-                break;
-            }
-        }
-
-        while (!first_error && next_submit < num_chunks &&
-               budget.TryAcquire(chunk_budget_bytes(next_submit))) {
-            submitOne();
-        }
-
-        if (!first_error && local_inflight == 0 && next_submit < num_chunks) {
-            budget.Acquire(chunk_budget_bytes(next_submit));
-            submitOne();
-        }
-    }
-
-    releaseBuffered();
-
-    for (auto& future : futures) {
-        if (future.valid()) {
-            try {
-                future.get();
-            } catch (...) {
-                if (!first_error) {
-                    first_error = std::current_exception();
-                }
-            }
-        }
+        refill();
     }
 
     if (first_error) {
         std::rethrow_exception(first_error);
     }
 
-    AssertInfo(running_crc == expected_crc, crc_error_message);
+    AssertInfo(running_crc == expected_crc,
+               "{}: expected {}, actual {}",
+               crc_error_context,
+               Crc32cToHex(expected_crc),
+               Crc32cToHex(running_crc));
 }
 
 }  // namespace
+
+size_t
+DefaultEntryStreamChunkSize() {
+    return DefaultStreamChunkSize();
+}
 
 std::unique_ptr<IndexEntryReader>
 IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
@@ -785,7 +761,12 @@ IndexEntryReader::ReadPlainEntryStream(
     const PlainEntryMeta& pm,
     const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
     size_t chunk_size) {
-    size_t num_chunks = (pm.size + chunk_size - 1) / chunk_size;
+    AssertInfo(chunk_size >= kMinStreamChunkSize,
+               "ReadEntryStream chunk_size must be at least {} bytes, got {}",
+               kMinStreamChunkSize,
+               chunk_size);
+    size_t num_chunks =
+        pm.size == 0 ? 0 : 1 + (static_cast<size_t>(pm.size) - 1) / chunk_size;
     auto chunkBytes = [pm, chunk_size](size_t seq) {
         size_t off = seq * chunk_size;
         return std::min<size_t>(chunk_size, pm.size - off);
@@ -801,15 +782,13 @@ IndexEntryReader::ReadPlainEntryStream(
         return data;
     };
 
-    ReadOrderedEntryStream(
-        num_chunks,
-        pm.crc32,
-        fmt::format("CRC-32C mismatch in stream read: expected {}",
-                    Crc32cToHex(pm.crc32)),
-        priority_,
-        chunk_consumer,
-        chunkBytes,
-        load_chunk);
+    ReadOrderedEntryStream(num_chunks,
+                           pm.crc32,
+                           "CRC-32C mismatch in stream read",
+                           priority_,
+                           chunk_consumer,
+                           chunkBytes,
+                           load_chunk);
 }
 
 void
@@ -818,26 +797,57 @@ IndexEntryReader::ReadEncryptedEntryStream(
     const std::function<void(const uint8_t* data, size_t len)>&
         chunk_consumer) {
     size_t num_slices = em.slices.size();
-    auto sliceBudgetBytes = [&](size_t seq) { return em.slices[seq].size; };
+    auto slicePlainBytes = [this, &em](size_t seq) {
+        size_t output_offset = seq * slice_size_;
+        AssertInfo(output_offset < em.original_size,
+                   "Encrypted slice {} exceeds original entry size {}",
+                   seq,
+                   em.original_size);
+        size_t remaining = em.original_size - output_offset;
+        return std::min(remaining, slice_size_);
+    };
+    auto sliceBudgetBytes = [&](size_t seq) {
+        auto plain_len = slicePlainBytes(seq);
+        auto cipher_len = em.slices[seq].size;
+        AssertInfo(plain_len <= (std::numeric_limits<size_t>::max() / 2) &&
+                       cipher_len <=
+                           std::numeric_limits<size_t>::max() - 2 * plain_len,
+                   "Encrypted stream budget size overflow");
+        return cipher_len + 2 * plain_len;
+    };
     auto input = input_;
     auto cipher_plugin = cipher_plugin_;
     int64_t ez_id = ez_id_;
     int64_t collection_id = collection_id_;
     auto edek = edek_;
-    auto load_chunk =
-        [input, cipher_plugin, ez_id, collection_id, edek, &em](size_t seq) {
-            const auto& slice = em.slices[seq];
+    auto load_chunk = [input,
+                       cipher_plugin,
+                       ez_id,
+                       collection_id,
+                       edek,
+                       &em,
+                       slicePlainBytes](size_t seq) {
+        const auto& slice = em.slices[seq];
+        auto expected_plain_len = slicePlainBytes(seq);
+
+        std::string plain;
+        {
             std::vector<uint8_t> cipher(slice.size);
             size_t n = input->ReadAt(
                 cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
             AssertInfo(n == slice.size, "Failed to read encrypted slice");
 
             auto dec = cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
-            auto plain = dec->Decrypt(cipher.data(), cipher.size());
-            return std::vector<uint8_t>(
-                reinterpret_cast<const uint8_t*>(plain.data()),
-                reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
-        };
+            plain = dec->Decrypt(cipher.data(), cipher.size());
+        }
+        AssertInfo(plain.size() == expected_plain_len,
+                   "Decrypted size mismatch: expected {}, got {}",
+                   expected_plain_len,
+                   plain.size());
+        return std::vector<uint8_t>(
+            reinterpret_cast<const uint8_t*>(plain.data()),
+            reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
+    };
 
     ReadOrderedEntryStream(num_slices,
                            em.crc32,

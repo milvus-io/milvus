@@ -33,6 +33,7 @@
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
+#include "storage/ChunkStreamUtils.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
@@ -44,17 +45,14 @@ namespace {
 class IndexEntryStreamConfigGuard {
  public:
     IndexEntryStreamConfigGuard()
-        : chunk_size_(milvus::INDEX_ENTRY_STREAM_CHUNK_SIZE.load()),
-          budget_ratio_(milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load()) {
+        : budget_ratio_(milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load()) {
     }
 
     ~IndexEntryStreamConfigGuard() {
-        milvus::SetIndexEntryStreamChunkSize(chunk_size_);
         milvus::SetScalarIndexEntryStreamBudgetRatio(budget_ratio_);
     }
 
  private:
-    int64_t chunk_size_;
     double budget_ratio_;
 };
 
@@ -1058,18 +1056,43 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
 
     ASSERT_EQ(reassembled.size(), entry_size);
     VerifyPattern(reassembled, entry_size);
-    ASSERT_EQ(chunk_count, 1);  // single chunk (1KB < 2MB default)
+    ASSERT_EQ(chunk_count, 1);  // single chunk (1KB < default chunk size)
 }
 
-TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesConfiguredDefaultChunkSize) {
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidChunkSize) {
+    const std::string file_path = kV3FilePath + "_stream_invalid_chunk";
+    const size_t entry_size = kMinStreamChunkSize;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    EXPECT_THROW(reader->ReadEntryStream(
+                     "data", [](const uint8_t*, size_t) {}, 0),
+                 milvus::SegcoreError);
+    EXPECT_THROW(
+        reader->ReadEntryStream(
+            "data", [](const uint8_t*, size_t) {}, kMinStreamChunkSize - 1),
+        milvus::SegcoreError);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultChunkSize) {
     IndexEntryStreamConfigGuard guard;
-    milvus::SetIndexEntryStreamChunkSize(7);
     milvus::SetScalarIndexEntryStreamBudgetRatio(2.5);
-    ASSERT_EQ(DefaultStreamChunkSize(), 7);
+    const size_t chunk_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
+    ASSERT_EQ(DefaultStreamChunkSize(), chunk_size);
     ASSERT_DOUBLE_EQ(ScalarIndexChunkBudgetRatio(), 2.5);
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
-    const size_t entry_size = 20;
+    const size_t entry_size = 2 * chunk_size + 17;
     auto data = GeneratePattern(entry_size);
 
     {
@@ -1091,7 +1114,28 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesConfiguredDefaultChunkSize) {
     });
 
     ASSERT_EQ(reassembled, data);
-    ASSERT_EQ(chunk_sizes, (std::vector<size_t>{7, 7, 6}));
+    ASSERT_EQ(chunk_sizes, (std::vector<size_t>{chunk_size, chunk_size, 17}));
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamEmptyEntryVerifiesCrc) {
+    const std::string file_path = kV3FilePath + "_stream_empty";
+    std::vector<uint8_t> data;
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("empty", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    size_t chunk_count = 0;
+    reader->ReadEntryStream("empty",
+                            [&](const uint8_t*, size_t) { chunk_count++; });
+    ASSERT_EQ(chunk_count, 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
@@ -1164,8 +1208,8 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
     EXPECT_EQ(streamed, data);
 }
 
-TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsReorderBufferAfterError) {
-    const std::string file_path = kV3FilePath + "_stream_reorder_error";
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsActiveTasksAfterError) {
+    const std::string file_path = kV3FilePath + "_stream_active_task_error";
     const size_t chunk_size = 64 * 1024;
     const size_t entry_size = 3 * chunk_size;
     auto data = GeneratePattern(entry_size);
@@ -1194,7 +1238,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsReorderBufferAfterError) {
         reader->ReadEntryStream(
             "data", [&](const uint8_t*, size_t) { chunk_count++; }, chunk_size),
         milvus::SegcoreError);
-    EXPECT_LE(chunk_count, 1);
+    EXPECT_EQ(chunk_count, 1);
 
     auto clean_input = CreateInputStream(file_path);
     auto clean_reader = IndexEntryReader::Open(clean_input, file_size);

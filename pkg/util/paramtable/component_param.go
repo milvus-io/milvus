@@ -41,7 +41,6 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
-	DefaultIndexEntryStreamChunkSize           = 2 * 1024 * 1024
 	DefaultScalarIndexEntryStreamBudgetRatio   = 3.0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
@@ -229,7 +228,6 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	IndexEntryStreamChunkSize           ParamItem `refreshable:"false"`
 	ScalarIndexEntryStreamBudgetRatio   ParamItem `refreshable:"false"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
@@ -553,15 +551,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
-
-	p.IndexEntryStreamChunkSize = ParamItem{
-		Key:          "common.indexEntryStream.chunkSize",
-		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultIndexEntryStreamChunkSize),
-		Doc:          "Default chunk size in bytes for streaming V3 index entry reads",
-		Export:       true,
-	}
-	p.IndexEntryStreamChunkSize.Init(base.mgr)
 
 	p.ScalarIndexEntryStreamBudgetRatio = ParamItem{
 		Key:          "common.indexEntryStream.scalarIndexBudgetRatio",

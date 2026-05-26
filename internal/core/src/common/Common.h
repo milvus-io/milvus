@@ -26,7 +26,6 @@
 namespace milvus {
 
 extern std::atomic<int64_t> FILE_SLICE_SIZE;
-extern std::atomic<int64_t> INDEX_ENTRY_STREAM_CHUNK_SIZE;
 extern std::atomic<double> SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO;
 extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
 extern std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE;
@@ -39,9 +38,6 @@ extern std::atomic<bool> ENABLE_PARQUET_STATS_SKIP_INDEX;
 
 void
 SetIndexSliceSize(const int64_t size);
-
-void
-SetIndexEntryStreamChunkSize(const int64_t size);
 
 void
 SetScalarIndexEntryStreamBudgetRatio(const double ratio);

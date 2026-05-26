@@ -105,8 +105,6 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
-	cIndexEntryStreamChunkSize := C.int64_t(paramtable.Get().CommonCfg.IndexEntryStreamChunkSize.GetAsInt64())
-	C.SetIndexEntryStreamChunkSize(cIndexEntryStreamChunkSize)
 	cScalarIndexEntryStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.ScalarIndexEntryStreamBudgetRatio.GetAsFloat())
 	C.SetScalarIndexEntryStreamBudgetRatio(cScalarIndexEntryStreamBudgetRatio)
 

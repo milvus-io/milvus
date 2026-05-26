@@ -27,7 +27,6 @@
 namespace milvus {
 
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
-std::atomic<int64_t> INDEX_ENTRY_STREAM_CHUNK_SIZE(2 * 1024 * 1024);
 std::atomic<double> SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO(3.0);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
@@ -49,17 +48,6 @@ void
 SetIndexSliceSize(const int64_t size) {
     FILE_SLICE_SIZE.store(size << 20);
     LOG_INFO("set config index slice size (byte): {}", FILE_SLICE_SIZE.load());
-}
-
-void
-SetIndexEntryStreamChunkSize(const int64_t size) {
-    if (size <= 0) {
-        LOG_WARN("ignore invalid index entry stream chunk size: {}", size);
-        return;
-    }
-    INDEX_ENTRY_STREAM_CHUNK_SIZE.store(size);
-    LOG_INFO("set index entry stream chunk size (byte): {}",
-             INDEX_ENTRY_STREAM_CHUNK_SIZE.load());
 }
 
 void
