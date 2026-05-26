@@ -296,12 +296,12 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		if err := resource.Resource().WriteBufferManager().
 			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
 			if errors.Is(err, merr.ErrChannelNotFound) {
-				impl.logger.Info("CommitImport targets stale vchannel, skip local flush",
+				impl.logger.Info("CommitImport targets stale vchannel, skip local flush and continue commit ack",
 					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
-				return nil
+			} else {
+				impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
+					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
 			}
-			impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
-				zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
 		}
 
 		// Notify DataCoord that this vchannel has committed.

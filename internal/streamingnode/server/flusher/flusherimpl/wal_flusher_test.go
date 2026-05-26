@@ -329,7 +329,7 @@ func TestDispatch_CommitImportMessage(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestDispatch_CommitImportMessage_ChannelNotFoundIsStaleNoPanic(t *testing.T) {
+func TestDispatch_CommitImportMessage_ChannelNotFoundStillCommitsVchannelNoPanic(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
@@ -357,10 +357,21 @@ func TestDispatch_CommitImportMessage_ChannelNotFoundIsStaleNoPanic(t *testing.T
 		Return(merr.WrapErrChannelNotFound(vchannel)).
 		Once()
 
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 
-	resource.InitForTest(t, resource.OptWriteBufferManager(mockWBMgr))
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
 
 	impl := &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
