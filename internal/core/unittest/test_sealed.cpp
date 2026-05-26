@@ -2765,6 +2765,75 @@ TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromIndex) {
     }
 }
 
+TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t dim = 8;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField("array_vec",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::MAX_SIM,
+                                                      true);
+    schema->set_primary_field_id(int64_field);
+
+    VectorFieldProto empty_row;
+    empty_row.set_dim(dim);
+    empty_row.mutable_float_vector();
+
+    VectorFieldProto single_row;
+    single_row.set_dim(dim);
+    for (int64_t i = 0; i < dim; ++i) {
+        single_row.mutable_float_vector()->add_data(static_cast<float>(i + 1));
+    }
+
+    std::vector<milvus::VectorArray> vector_arrays;
+    vector_arrays.emplace_back(empty_row);
+    vector_arrays.emplace_back(single_row);
+
+    constexpr int64_t row_count = 2;
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    valid_bitmap[0] = 0b00000011;
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+    field_data->FillFieldData(
+        vector_arrays.data(), valid_bitmap.data(), row_count, 0);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::vector<int64_t> offsets = {0, 1};
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, offsets.data(), offsets.size());
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), row_count);
+    EXPECT_TRUE(result->valid_data(0));
+    EXPECT_TRUE(result->valid_data(1));
+
+    const auto& rows = result->vectors().vector_array().data();
+    ASSERT_EQ(rows.size(), row_count);
+    EXPECT_EQ(rows.Get(0).float_vector().data_size(), 0);
+    ASSERT_EQ(rows.Get(1).float_vector().data_size(), dim);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(dim - 1),
+                    static_cast<float>(dim));
+}
+
 TEST(SealedVectorArrayNullable,
      BulkSubscriptVectorArrayFromIndexKeepsLogicalRows) {
     int64_t collection_id = 1;

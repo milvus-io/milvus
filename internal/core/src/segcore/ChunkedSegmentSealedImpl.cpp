@@ -4314,7 +4314,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     if (column->IsNullable() && IsVectorDataType(data_type)) {
         bool lazy_inited = false;
-        if (statistics.has_value() && !statistics.value().empty()) {
+        // For VECTOR_ARRAY, Parquet num_values is the child vector count, not
+        // the outer row count. Empty non-null rows would corrupt physical row
+        // mapping if we derived valid counts from those statistics.
+        if (data_type != DataType::VECTOR_ARRAY && statistics.has_value() &&
+            !statistics.value().empty()) {
             const auto& stats = statistics.value();
             bool any_null = false;
             for (const auto& s : stats) {
