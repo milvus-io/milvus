@@ -96,9 +96,10 @@ SearchOnSealedIndex(const Schema& schema,
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
     const auto& offset_mapping = vec_index->GetOffsetMapping();
+    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    if (offset_mapping.IsEnabled()) {
+    if (offset_mapping.IsEnabled() && !is_element_level_search) {
         if (offset_mapping.GetValidCount() == 0) {
             auto total_num = num_queries * topK;
             search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
@@ -184,33 +185,39 @@ SearchOnSealedColumn(const Schema& schema,
 
     // Check for nullable vector field with all null values - must be done before creating iterators
     const auto& offset_mapping = column->GetOffsetMapping();
+    // Element-level VECTOR_ARRAY search has already expanded the row bitset
+    // to element IDs. OffsetMapping is row-level, so only use it for row-level
+    // vector searches.
+    bool is_element_level_search =
+        field.get_data_type() == DataType::VECTOR_ARRAY &&
+        search_info.array_offsets_ != nullptr;
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     if (offset_mapping.IsEnabled()) {
         for (int64_t c = 0; c < column->num_chunks(); ++c) {
             column->EnsureChunkOffsetMapping(c, op_context);
         }
-        if (offset_mapping.GetValidCount() == 0) {
-            // All vectors are null, return empty result
-            auto total_num = num_queries * search_info.topk_;
-            result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            result.distances_.resize(total_num, 0.0f);
-            result.total_nq_ = num_queries;
-            result.unity_topK_ = search_info.topk_;
-            return;
-        }
-        if (!bitview.empty()) {
-            transformed_bitset = TransformBitset(bitview, offset_mapping);
-            search_bitview = result.PinBitset(std::move(transformed_bitset));
+        if (!is_element_level_search) {
+            if (offset_mapping.GetValidCount() == 0) {
+                // All vectors are null, return empty result
+                auto total_num = num_queries * search_info.topk_;
+                result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+                result.distances_.resize(total_num, 0.0f);
+                result.total_nq_ = num_queries;
+                result.unity_topK_ = search_info.topk_;
+                return;
+            }
+            if (!bitview.empty()) {
+                transformed_bitset = TransformBitset(bitview, offset_mapping);
+                search_bitview =
+                    result.PinBitset(std::move(transformed_bitset));
+            }
         }
     }
 
     // For element-level search (embedding-search-embedding), the underlying
     // knowhere search is keyed by the scalar element type rather than
     // VECTOR_ARRAY, and per-chunk sizes must be counted in elements.
-    bool is_element_level_search =
-        field.get_data_type() == DataType::VECTOR_ARRAY &&
-        query_offsets == nullptr;
     if (is_element_level_search) {
         data_type = element_type;
     }
