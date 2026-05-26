@@ -328,7 +328,7 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
 const TargetBitmap
 StringIndexMarisa::In(size_t n, const std::string* values) {
     tracer::AutoSpan span("StringIndexMarisa::In", tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
     for (size_t i = 0; i < n; i++) {
         const auto& str = values[i];
         auto str_id = lookup(str);
@@ -347,7 +347,7 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
 const TargetBitmap
 StringIndexMarisa::NotIn(size_t n, const std::string* values) {
     tracer::AutoSpan span("StringIndexMarisa::NotIn", tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size(), true);
+    TargetBitmap bitset(str_ids_size_, true);
     for (size_t i = 0; i < n; i++) {
         const auto& str = values[i];
         auto str_id = lookup(str);
@@ -368,7 +368,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
 const TargetBitmap
 StringIndexMarisa::IsNull() {
     tracer::AutoSpan span("StringIndexMarisa::IsNull", tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
     SetNull(bitset);
     return bitset;
 }
@@ -588,7 +588,7 @@ const TargetBitmap
 StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     tracer::AutoSpan span("StringIndexMarisa::PrefixMatch",
                           tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
         for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
@@ -618,9 +618,9 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
             static_cast<int>(op));
     }
 
-    // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys
+    // For Match/PostfixMatch/InnerMatch/RegexMatch, iterate over unique trie keys
     // instead of all rows to avoid redundant matching on duplicate values.
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
 
     auto match_fn = [&](const std::string& val) -> bool {
         switch (op) {
@@ -635,11 +635,15 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
 
     if (op == proto::plan::OpType::RegexMatch) {
         PartialRegexMatcher matcher(pattern);
-        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
-            auto val = Reverse_Lookup(offsets[0]);
+        for (size_t kid = 0; kid < csr_num_keys_; kid++) {
+            auto start = csr_index_ptr_[kid];
+            auto end = csr_index_ptr_[kid + 1];
+            if (start == end)
+                continue;
+            auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && matcher(val.value())) {
-                for (auto offset : offsets) {
-                    bitset[offset] = true;
+                for (size_t j = start; j < end; j++) {
+                    bitset[csr_offsets_ptr_[j]] = true;
                 }
             }
         }
