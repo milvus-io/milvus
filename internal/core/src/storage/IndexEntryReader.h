@@ -35,7 +35,7 @@
 namespace milvus::storage {
 
 size_t
-DefaultEntryStreamChunkSize();
+DefaultEntryStreamSliceSize();
 
 struct Entry {
     std::vector<uint8_t> data;
@@ -63,21 +63,20 @@ class IndexEntryReader {
                            name_path_pairs);
 
     /// Stream entry data via transient memory budget.
-    /// Downloads are concurrent (full bandwidth). Chunks are delivered in entry
-    /// order to `chunk_consumer`; the data pointer is valid only for the
+    /// Downloads are concurrent (full bandwidth). Slices are delivered in entry
+    /// order to `slice_consumer`; the data pointer is valid only for the
     /// duration of that call. Global TransientMemoryBudget controls total
-    /// inflight chunk bytes across all concurrent scalar index loads.
+    /// inflight slice bytes across all concurrent scalar index loads.
     /// CRC32c is verified incrementally. Consumers may receive partial data
-    /// before a later chunk error is reported. Slow consumers keep their chunk
+    /// before a later slice error is reported. Slow consumers keep their slice
     /// budget until the callback returns, which can block other streams.
-    /// Streaming uses slice-sized chunks. Plain entries are split by
-    /// `chunk_size`; encrypted entries use the slice boundaries stored in the
-    /// V3 directory.
+    /// Plain entries are split into `slice_size` byte slices; encrypted entries
+    /// use the slice boundaries stored in the V3 directory.
     void
     ReadEntryStream(
         const std::string& name,
-        std::function<void(const uint8_t* data, size_t len)> chunk_consumer,
-        size_t chunk_size = DefaultEntryStreamChunkSize());
+        std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+        size_t slice_size = DefaultEntryStreamSliceSize());
 
     /// Return the uncompressed data size of an entry without reading it.
     size_t
@@ -148,14 +147,14 @@ class IndexEntryReader {
     void
     ReadPlainEntryStream(const PlainEntryMeta& pm,
                          const std::function<void(const uint8_t* data,
-                                                  size_t len)>& chunk_consumer,
-                         size_t chunk_size);
+                                                  size_t len)>& slice_consumer,
+                         size_t slice_size);
 
     void
     ReadEncryptedEntryStream(
         const EncryptedEntryMeta& em,
         const std::function<void(const uint8_t* data, size_t len)>&
-            chunk_consumer);
+            slice_consumer);
 
     void
     VerifyCrc32c(uint32_t expected,

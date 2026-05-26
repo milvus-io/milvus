@@ -34,32 +34,32 @@
 
 #include "common/EasyAssert.h"
 #include "nlohmann/json.hpp"
-#include "storage/ChunkStreamUtils.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
 
 namespace milvus::storage {
 namespace {
 
-using ChunkLoader = std::function<std::vector<uint8_t>(size_t seq)>;
-using ChunkBudgetBytes = std::function<size_t(size_t seq)>;
+using SliceLoader = std::function<std::vector<uint8_t>(size_t seq)>;
+using SliceBudgetBytes = std::function<size_t(size_t seq)>;
 
-struct ActiveChunkTask {
+struct ActiveSliceTask {
     size_t budget_bytes{0};
-    std::shared_ptr<ChunkResult> result;
+    std::shared_ptr<StreamSliceResult> result;
     std::future<void> future;
 };
 
 void
 ReadOrderedEntryStream(
-    size_t num_chunks,
+    size_t num_slices,
     uint32_t expected_crc,
     const std::string& crc_error_context,
     ThreadPoolPriority priority,
-    const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
-    const ChunkBudgetBytes& chunk_budget_bytes,
-    const ChunkLoader& load_chunk) {
-    if (num_chunks == 0) {
+    const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
+    const SliceBudgetBytes& slice_budget_bytes,
+    const SliceLoader& load_slice) {
+    if (num_slices == 0) {
         auto actual_crc = Crc32cValue(nullptr, 0);
         AssertInfo(actual_crc == expected_crc,
                    "{}: expected {}, actual {}",
@@ -70,14 +70,14 @@ ReadOrderedEntryStream(
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = TransientMemoryBudget::GetScalarIndexChunkBudget();
+    auto& budget = TransientMemoryBudget::GetScalarIndexStreamBudget();
     size_t max_active_tasks =
-        std::min(num_chunks, std::max<size_t>(1, pool.GetMaxThreadNum()));
+        std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 
     size_t next_submit = 0;
     uint32_t running_crc = 0;
     bool first = true;
-    std::deque<ActiveChunkTask> active_tasks;
+    std::deque<ActiveSliceTask> active_tasks;
     std::exception_ptr first_error = nullptr;
 
     auto rememberError = [&](std::exception_ptr error) {
@@ -104,10 +104,10 @@ ReadOrderedEntryStream(
     auto submitOne = [&](bool block_for_budget) -> bool {
         size_t seq = next_submit;
         size_t budget_bytes = 0;
-        std::shared_ptr<ChunkResult> result;
+        std::shared_ptr<StreamSliceResult> result;
         try {
-            budget_bytes = chunk_budget_bytes(seq);
-            result = std::make_shared<ChunkResult>();
+            budget_bytes = slice_budget_bytes(seq);
+            result = std::make_shared<StreamSliceResult>();
             result->budget_bytes = budget_bytes;
         } catch (...) {
             rememberError(std::current_exception());
@@ -122,11 +122,11 @@ ReadOrderedEntryStream(
 
         try {
             active_tasks.push_back(
-                ActiveChunkTask{budget_bytes, result, std::future<void>()});
+                ActiveSliceTask{budget_bytes, result, std::future<void>()});
             active_tasks.back().future =
-                pool.Submit([result, load_chunk, seq]() {
+                pool.Submit([result, load_slice, seq]() {
                     try {
-                        result->data = load_chunk(seq);
+                        result->data = load_slice(seq);
                     } catch (...) {
                         result->error = std::current_exception();
                     }
@@ -146,7 +146,7 @@ ReadOrderedEntryStream(
     };
 
     auto refill = [&]() {
-        while (!first_error && next_submit < num_chunks &&
+        while (!first_error && next_submit < num_slices &&
                active_tasks.size() < max_active_tasks) {
             bool block_for_budget = active_tasks.empty();
             if (!submitOne(block_for_budget)) {
@@ -155,14 +155,14 @@ ReadOrderedEntryStream(
         }
     };
 
-    auto deliverChunk = [&](const std::shared_ptr<ChunkResult>& c) {
+    auto deliverSlice = [&](const std::shared_ptr<StreamSliceResult>& c) {
         try {
-            uint32_t chunk_crc = Crc32cValue(c->data.data(), c->data.size());
+            uint32_t slice_crc = Crc32cValue(c->data.data(), c->data.size());
             running_crc =
-                first ? chunk_crc
-                      : Crc32cCombine(running_crc, chunk_crc, c->data.size());
+                first ? slice_crc
+                      : Crc32cCombine(running_crc, slice_crc, c->data.size());
             first = false;
-            chunk_consumer(c->data.data(), c->data.size());
+            slice_consumer(c->data.data(), c->data.size());
         } catch (...) {
             rememberError(std::current_exception());
         }
@@ -185,7 +185,7 @@ ReadOrderedEntryStream(
         }
 
         if (!first_error) {
-            deliverChunk(task.result);
+            deliverSlice(task.result);
         }
 
         budget.Release(task.budget_bytes);
@@ -212,8 +212,8 @@ ReadOrderedEntryStream(
 }  // namespace
 
 size_t
-DefaultEntryStreamChunkSize() {
-    return DefaultStreamChunkSize();
+DefaultEntryStreamSliceSize() {
+    return DefaultStreamSliceSize();
 }
 
 std::unique_ptr<IndexEntryReader>
@@ -743,59 +743,59 @@ IndexEntryReader::GetEntrySize(const std::string& name) const {
 void
 IndexEntryReader::ReadEntryStream(
     const std::string& name,
-    std::function<void(const uint8_t* data, size_t len)> chunk_consumer,
-    size_t chunk_size) {
+    std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+    size_t slice_size) {
     auto it = entry_index_.find(name);
     AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
     const auto& meta = it->second;
 
     if (meta.encrypted) {
-        ReadEncryptedEntryStream(meta.enc, chunk_consumer);
+        ReadEncryptedEntryStream(meta.enc, slice_consumer);
     } else {
-        ReadPlainEntryStream(meta.plain, chunk_consumer, chunk_size);
+        ReadPlainEntryStream(meta.plain, slice_consumer, slice_size);
     }
 }
 
 void
 IndexEntryReader::ReadPlainEntryStream(
     const PlainEntryMeta& pm,
-    const std::function<void(const uint8_t* data, size_t len)>& chunk_consumer,
-    size_t chunk_size) {
-    AssertInfo(chunk_size >= kMinStreamChunkSize,
-               "ReadEntryStream chunk_size must be at least {} bytes, got {}",
-               kMinStreamChunkSize,
-               chunk_size);
-    size_t num_chunks =
-        pm.size == 0 ? 0 : 1 + (static_cast<size_t>(pm.size) - 1) / chunk_size;
-    auto chunkBytes = [pm, chunk_size](size_t seq) {
-        size_t off = seq * chunk_size;
-        return std::min<size_t>(chunk_size, pm.size - off);
+    const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
+    size_t slice_size) {
+    AssertInfo(slice_size >= kMinStreamSliceSize,
+               "ReadEntryStream slice_size must be at least {} bytes, got {}",
+               kMinStreamSliceSize,
+               slice_size);
+    size_t num_slices =
+        pm.size == 0 ? 0 : 1 + (static_cast<size_t>(pm.size) - 1) / slice_size;
+    auto sliceBytes = [pm, slice_size](size_t seq) {
+        size_t off = seq * slice_size;
+        return std::min<size_t>(slice_size, pm.size - off);
     };
     auto input = input_;
-    auto load_chunk = [input, pm, chunk_size, chunkBytes](size_t seq) {
-        size_t off = seq * chunk_size;
-        size_t len = chunkBytes(seq);
+    auto load_slice = [input, pm, slice_size, sliceBytes](size_t seq) {
+        size_t off = seq * slice_size;
+        size_t len = sliceBytes(seq);
         size_t src = pm.offset + off;
         std::vector<uint8_t> data(len);
         size_t n = input->ReadAt(data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
-        AssertInfo(n == len, "Failed to read entry chunk");
+        AssertInfo(n == len, "Failed to read entry slice");
         return data;
     };
 
-    ReadOrderedEntryStream(num_chunks,
+    ReadOrderedEntryStream(num_slices,
                            pm.crc32,
                            "CRC-32C mismatch in stream read",
                            priority_,
-                           chunk_consumer,
-                           chunkBytes,
-                           load_chunk);
+                           slice_consumer,
+                           sliceBytes,
+                           load_slice);
 }
 
 void
 IndexEntryReader::ReadEncryptedEntryStream(
     const EncryptedEntryMeta& em,
     const std::function<void(const uint8_t* data, size_t len)>&
-        chunk_consumer) {
+        slice_consumer) {
     size_t num_slices = em.slices.size();
     auto slicePlainBytes = [this, &em](size_t seq) {
         size_t output_offset = seq * slice_size_;
@@ -820,7 +820,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
     int64_t ez_id = ez_id_;
     int64_t collection_id = collection_id_;
     auto edek = edek_;
-    auto load_chunk = [input,
+    auto load_slice = [input,
                        cipher_plugin,
                        ez_id,
                        collection_id,
@@ -853,9 +853,9 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            em.crc32,
                            "CRC-32C mismatch in encrypted stream read",
                            priority_,
-                           chunk_consumer,
+                           slice_consumer,
                            sliceBudgetBytes,
-                           load_chunk);
+                           load_slice);
 }
 
 }  // namespace milvus::storage

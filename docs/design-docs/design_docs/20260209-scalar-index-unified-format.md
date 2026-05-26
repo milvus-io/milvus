@@ -220,7 +220,7 @@ class IndexEntryDirectStreamWriter : public IndexEntryWriter {
 };
 ```
 
-Constructor writes Magic. `WriteEntry()` computes CRC-32C incrementally (`crc32c_update` per chunk as data streams through) and records the final checksum in the directory entry. For fd-based entries, CRC is updated per 16MB read chunk — no extra memory. `Finish()` writes the Meta Entry (as the last regular entry), then Directory Table JSON, then 32-byte Footer (`version` + `meta_entry_size` + `directory_table_size`), computes `total_bytes_written_`, closes stream.
+Constructor writes Magic. `WriteEntry()` computes CRC-32C incrementally (`crc32c_update` as data streams through) and records the final checksum in the directory entry. For fd-based entries, CRC is updated per 16MB read buffer — no extra memory. `Finish()` writes the Meta Entry (as the last regular entry), then Directory Table JSON, then 32-byte Footer (`version` + `meta_entry_size` + `directory_table_size`), computes `total_bytes_written_`, closes stream.
 
 ### 3.4 IndexEntryEncryptedLocalWriter (Encrypted)
 
@@ -398,11 +398,11 @@ Large scalar data entries should use `IndexEntryReader::ReadEntryStream()` inste
 
 Streaming read behavior:
 
-- Chunks are delivered to the consumer in entry order.
-- CRC-32C is verified incrementally as chunks are consumed.
-- Consumers may receive partial data before a later chunk error is reported.
-- Slow consumers keep their chunk budget until the callback returns, which can block other streams.
-- Streaming uses slice-sized chunks. For plain entries, the reader self-splits by `chunk_size`; the default is 16MB, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit values below 64KB are rejected.
+- Slices are delivered to the consumer in entry order.
+- CRC-32C is verified incrementally as slices are consumed.
+- Consumers may receive partial data before a later slice error is reported.
+- Slow consumers keep their slice budget until the callback returns, which can block other streams.
+- Plain entries are read as 16MB slices by default, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit `slice_size` values below 64KB are rejected.
 - For encrypted entries, the reader uses the plaintext slice boundaries stored in the V3 directory. With the default writer settings, this is also 16MB.
 
 Streaming load configuration:
@@ -417,7 +417,7 @@ The default scalar stream budget is:
 CPU cores × common.indexEntryStream.scalarIndexBudgetRatio × 16MB
 ```
 
-With default values, an 8-core node gets `8 × 3.0 × 16MB = 384MB` of transient scalar stream budget. This admits about 8 encrypted slices concurrently because each encrypted slice budgets ciphertext + decrypted plaintext + returned chunk. Oversized chunks are allowed to run exclusively to guarantee progress.
+With default values, an 8-core node gets `8 × 3.0 × 16MB = 384MB` of transient scalar stream budget. This admits about 8 encrypted slices concurrently because each encrypted slice budgets ciphertext + decrypted plaintext + returned slice. Oversized slices are allowed to run exclusively to guarantee progress.
 
 ### 5.3 Meta Packing
 
@@ -473,7 +473,7 @@ All thread pools reuse V2 `ThreadPools::GetThreadPool(priority)`, no custom pool
 ### Upload — Unencrypted
 
 ```
-Main thread: [read chunk → crc32c_update → Write to RemoteOutputStream] ──→ sequential fill
+Main thread: [read buffer → crc32c_update → Write to RemoteOutputStream] ──→ sequential fill
 RemoteOutputStream:  background_writes parallel upload Part 0, 1, 2...  ──→ S3
 ```
 
@@ -535,7 +535,7 @@ Main thread (after all tasks complete, combine in sequential order):
 | Download, to memory | N × `range_size` + `original_size` |
 | Download, to file | N × `range_size` (reusable) |
 | Streaming load, unencrypted | bounded by scalar stream budget |
-| Streaming load, encrypted | bounded by scalar stream budget; each active slice budgets ciphertext + decrypted plaintext + returned chunk |
+| Streaming load, encrypted | bounded by scalar stream budget; each active slice budgets ciphertext + decrypted plaintext + returned slice |
 
 Consistent with V2: peak determined by concurrency × slice size, does not grow with entry size.
 

@@ -30,22 +30,22 @@
 
 namespace milvus::storage {
 
-constexpr size_t kMinStreamChunkSize = 64 * 1024;
+constexpr size_t kMinStreamSliceSize = 64 * 1024;
 
 inline size_t
-DefaultStreamChunkSize() {
+DefaultStreamSliceSize() {
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 
 inline double
-ScalarIndexChunkBudgetRatio() {
+ScalarIndexStreamBudgetRatio() {
     auto ratio = milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load();
     return ratio > 0 ? ratio : 1.0;
 }
 
-/// A chunk downloaded from a V3 entry. `error` carries an exception captured in
+/// A slice read from a V3 entry. `error` carries an exception captured in
 /// the producer task so the consumer can rethrow instead of hanging.
-struct ChunkResult {
+struct StreamSliceResult {
     size_t budget_bytes{0};
     std::vector<uint8_t> data;
     std::exception_ptr error = nullptr;
@@ -56,15 +56,15 @@ struct ChunkResult {
 ///
 /// Usage:
 ///   - Call Acquire(bytes) to block until budget is available.
-///   - Call TryAcquire(bytes) for non-blocking replenish in slide loops.
+///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
 class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
-    GetScalarIndexChunkBudget() {
+    GetScalarIndexStreamBudget() {
         static TransientMemoryBudget instance(
-            DefaultScalarIndexChunkBudgetBytes());
+            DefaultScalarIndexSliceBudgetBytes());
         return instance;
     }
 
@@ -78,7 +78,7 @@ class TransientMemoryBudget {
     }
 
     /// Try to claim budget. Returns true if under budget.
-    /// Used in the slide loop where blocking could cause deadlock.
+    /// Used in the refill loop where blocking could cause deadlock.
     bool
     TryAcquire(size_t bytes) {
         std::lock_guard<std::mutex> lock(mu_);
@@ -114,12 +114,12 @@ class TransientMemoryBudget {
     }
 
     static size_t
-    DefaultScalarIndexChunkBudgetBytes() {
+    DefaultScalarIndexSliceBudgetBytes() {
         auto core_num = std::max(1, milvus::CPU_NUM);
         auto capacity =
-            static_cast<size_t>(core_num * ScalarIndexChunkBudgetRatio()) *
-            DefaultStreamChunkSize();
-        return std::max<size_t>(capacity, DefaultStreamChunkSize());
+            static_cast<size_t>(core_num * ScalarIndexStreamBudgetRatio()) *
+            DefaultStreamSliceSize();
+        return std::max<size_t>(capacity, DefaultStreamSliceSize());
     }
 
     bool
