@@ -1489,6 +1489,14 @@ func (s *DelegatorSuite) ResetDelegator() {
 	s.Require().NoError(err)
 }
 
+func (s *DelegatorSuite) nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
+	version := uint64(1)
+	if collection := s.manager.Collection.Get(s.collectionID); collection != nil {
+		version = collection.SchemaVersion() + 1
+	}
+	return &querypb.LoadMetaInfo{SchemaVersion: version}
+}
+
 func (s *DelegatorSuite) TestRunAnalyzer() {
 	ctx := context.Background()
 	s.TestCreateDelegatorWithFunction()
@@ -1500,13 +1508,23 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("normal analyer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1521,7 +1539,8 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1533,18 +1552,28 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1552,9 +1581,10 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1564,7 +1594,8 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1578,18 +1609,28 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("error multi analyzer but no analyzer name", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1597,9 +1638,10 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1609,10 +1651,11 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
-		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId:     100,
 			Placeholder: [][]byte{[]byte("test doc")},
 		})
@@ -1637,13 +1680,23 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("normal highlight with single analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1658,7 +1711,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1680,19 +1734,29 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("highlight with multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"standard": {},
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1700,9 +1764,10 @@ func (s *DelegatorSuite) TestGetHighlight() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1712,7 +1777,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		// two target with two analyzer
@@ -1733,13 +1799,23 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("empty target texts", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1754,7 +1830,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{

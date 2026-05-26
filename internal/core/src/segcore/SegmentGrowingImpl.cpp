@@ -2095,7 +2095,8 @@ SegmentGrowingImpl::BulkGetJsonData(
 }
 
 void
-SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
+SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) {
+    (void)op_ctx;
     if (sch->get_schema_version() > schema_->get_schema_version()) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
@@ -2135,6 +2136,16 @@ void
 SegmentGrowingImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
+    ThrowInfo(milvus::UnexpectedError,
+              "Unexpected reopening growing segment {} with load info",
+              id_);
+}
+
+void
+SegmentGrowingImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SchemaPtr new_schema) {
     ThrowInfo(milvus::UnexpectedError,
               "Unexpected reopening growing segment {} with load info",
               id_);

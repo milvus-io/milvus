@@ -17,6 +17,8 @@
 package segments
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -59,6 +61,19 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
+	})
+
+	s.Run("stale_version", func() {
+		currentSchema, currentVersion := s.cm.Get(1).SchemaAndVersion()
+		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
+
+		err := s.cm.UpdateSchema(1, staleSchema, currentVersion-1)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		s.Equal(currentVersion, updatedVersion)
+		s.Same(currentSchema, updatedSchema)
 	})
 
 	s.Run("not_exist_collection", func() {
@@ -76,10 +91,58 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil, 100)
+			err := s.cm.UpdateSchema(1, nil, 101)
 			s.Error(err)
 		})
 	})
+}
+
+func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
+	coll := s.cm.Get(1)
+	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
+	coll.setSchema(schema, 0)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			schema, version := coll.SchemaAndVersion()
+			if schema.GetName() != fmt.Sprintf("collection_%d", version) {
+				select {
+				case errCh <- fmt.Sprintf("schema %s does not match version %d", schema.GetName(), version):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	for i := 1; i <= 1000; i++ {
+		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
+		coll.setSchema(schema, uint64(i))
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case msg := <-errCh:
+		s.Fail(msg)
+	default:
+	}
+
+	schema, version := coll.SchemaAndVersion()
+	s.Equal(uint64(1000), version)
+	s.Equal("collection_1000", schema.GetName())
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
@@ -120,8 +183,13 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
 
+	updatedCollection := s.cm.Get(1)
+	updatedSchema, updatedVersion := updatedCollection.SchemaAndVersion()
+	s.Equal(uint64(100), updatedVersion)
+	s.Len(updatedSchema.GetFields(), len(schema.GetFields()))
+
 	// Verify IndexMeta now contains the new field.
-	updatedIndexMeta := s.cm.Get(1).GetCCollection().IndexMeta()
+	updatedIndexMeta := updatedCollection.GetCCollection().IndexMeta()
 	found := false
 	for _, meta := range updatedIndexMeta.GetIndexMetas() {
 		if meta.GetFieldID() == newVecFieldID {

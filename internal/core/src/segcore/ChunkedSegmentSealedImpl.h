@@ -280,7 +280,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) override;
+
+    void
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
@@ -1312,6 +1317,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplyLoadDiff(milvus::OpContext* op_ctx,
                   SegmentLoadInfo& segment_load_info,
                   LoadDiff& load_diff);
+
+    void
+    Reopen(milvus::OpContext* op_ctx, SchemaPtr sch);
+
+    void
+    ApplySchemaForReopen(SchemaPtr sch);
+
+    void
+    RecordDefaultFieldsFilled(const std::vector<FieldId>& field_ids);
 
     // Atomically records that a text index has been created for `field_id` in
     // the published segment_load_info_. Uses a CAS loop so it is safe whether

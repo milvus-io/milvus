@@ -150,7 +150,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) override;
+
+    void
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
