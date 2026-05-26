@@ -158,13 +158,44 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         const auto& vector_array = field_data.vectors().vector_array();
         int64_t dim = field_meta.get_dim();
         auto element_type = field_meta.get_element_type();
-        bool compact_nullable = field_meta.is_nullable() &&
-                                field_data.valid_data_size() == num_rows &&
-                                vector_array.data_size() != num_rows;
+        bool compact_nullable = false;
+        if (field_meta.is_nullable()) {
+            int64_t valid_count = 0;
+            if (field_data.valid_data_size() == num_rows) {
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    if (field_data.valid_data(i)) {
+                        ++valid_count;
+                    }
+                }
+            }
+            auto dense_aligned = vector_array.data_size() == num_rows;
+            compact_nullable = field_data.valid_data_size() == num_rows &&
+                               vector_array.data_size() == valid_count;
+            AssertInfo(
+                dense_aligned || compact_nullable,
+                "nullable VECTOR_ARRAY supports only dense-aligned data "
+                "(data_size == num_rows) or compact data "
+                "(valid_data_size == num_rows and data_size == valid_count), "
+                "got data_size {}, valid_data_size {}, num_rows {}, "
+                "valid_count {}",
+                vector_array.data_size(),
+                field_data.valid_data_size(),
+                num_rows,
+                valid_count);
+            compact_nullable = compact_nullable && !dense_aligned;
+        } else {
+            AssertInfo(vector_array.data_size() == num_rows,
+                       "non-nullable VECTOR_ARRAY data_size {} must match "
+                       "num_rows {}",
+                       vector_array.data_size(),
+                       num_rows);
+        }
         int64_t physical_row = 0;
+        auto has_valid_data = field_data.valid_data_size() == num_rows;
 
         for (int i = 0; i < num_rows; ++i) {
-            if (compact_nullable && !field_data.valid_data(i)) {
+            if (field_meta.is_nullable() && has_valid_data &&
+                !field_data.valid_data(i)) {
                 array_lengths[i] = 0;
                 continue;
             }

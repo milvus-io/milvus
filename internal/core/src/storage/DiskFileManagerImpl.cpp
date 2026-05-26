@@ -582,27 +582,34 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
         AssertInfo(
-            offsets.size() >= 2 && offsets.front() == 0,
+            !offsets.empty() && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",
             offsets.size(),
             offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
-        // Get offsets path from config if provided, otherwise use default
-        auto offsets_path = index::GetValueFromConfig<std::string>(
-                                config, index::EMB_LIST_OFFSETS_PATH)
-                                .value();
-        local_chunk_manager->CreateFile(offsets_path);
+        if (offsets.size() == 1) {
+            AssertInfo(nullable || total_num_rows == 0,
+                       "non-nullable emb_list offsets must include rows");
+            AssertInfo(num_rows == 0,
+                       "empty emb_list offsets cannot reference raw vectors");
+        } else {
+            // Get offsets path from config if provided, otherwise use default
+            auto offsets_path = index::GetValueFromConfig<std::string>(
+                                    config, index::EMB_LIST_OFFSETS_PATH)
+                                    .value();
+            local_chunk_manager->CreateFile(offsets_path);
 
-        size_t num_offsets = offsets.size();
-        int64_t offsets_write_pos = 0;
+            size_t num_offsets = offsets.size();
+            int64_t offsets_write_pos = 0;
 
-        local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
-        offsets_write_pos += sizeof(size_t);
+            local_chunk_manager->Write(
+                offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+            offsets_write_pos += sizeof(size_t);
 
-        local_chunk_manager->Write(offsets_path,
-                                   offsets_write_pos,
-                                   offsets.data(),
-                                   offsets.size() * sizeof(size_t));
+            local_chunk_manager->Write(offsets_path,
+                                       offsets_write_pos,
+                                       offsets.data(),
+                                       offsets.size() * sizeof(size_t));
+        }
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
@@ -862,28 +869,35 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
         AssertInfo(
-            offsets.size() >= 2 && offsets.front() == 0,
+            !offsets.empty() && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",
             offsets.size(),
             offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
-        // Get offsets path from config if provided, otherwise use default
-        auto offsets_path = index::GetValueFromConfig<std::string>(
-                                config, index::EMB_LIST_OFFSETS_PATH)
-                                .value();
+        if (offsets.size() == 1) {
+            AssertInfo(nullable || total_num_rows == 0,
+                       "non-nullable emb_list offsets must include rows");
+            AssertInfo(num_rows == 0,
+                       "empty emb_list offsets cannot reference raw vectors");
+        } else {
+            // Get offsets path from config if provided, otherwise use default
+            auto offsets_path = index::GetValueFromConfig<std::string>(
+                                    config, index::EMB_LIST_OFFSETS_PATH)
+                                    .value();
 
-        local_chunk_manager->CreateFile(offsets_path);
+            local_chunk_manager->CreateFile(offsets_path);
 
-        size_t num_offsets = offsets.size();
-        int64_t offsets_write_pos = 0;
+            size_t num_offsets = offsets.size();
+            int64_t offsets_write_pos = 0;
 
-        local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
-        offsets_write_pos += sizeof(size_t);
+            local_chunk_manager->Write(
+                offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+            offsets_write_pos += sizeof(size_t);
 
-        local_chunk_manager->Write(offsets_path,
-                                   offsets_write_pos,
-                                   offsets.data(),
-                                   offsets.size() * sizeof(size_t));
+            local_chunk_manager->Write(offsets_path,
+                                       offsets_write_pos,
+                                       offsets.data(),
+                                       offsets.size() * sizeof(size_t));
+        }
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
