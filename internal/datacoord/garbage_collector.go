@@ -868,7 +868,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			return
 		}
 
-		gc.ackSignal(signal)
+		// Early-break on global pause: stop spawning new recycleDroppedSegment
+		// goroutines as soon as a pause is in effect. Already-spawned goroutines
+		// are awaited by the deferred waitDroppedSegmentTasks before the pause
+		// signal is acked, so the caller does not observe a successful pause
+		// while in-flight deletions are still progressing.
+		if time.Now().Before(gc.pauseUntil.PauseUntil()) {
+			return
+		}
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
@@ -931,29 +938,37 @@ func (gc *garbageCollector) acquireDroppedSegmentSlot(ctx context.Context, signa
 }
 
 func (gc *garbageCollector) waitDroppedSegmentTasks(signal <-chan gcCmd, wg *sync.WaitGroup) {
-	// Ensure a final drain runs even if wg.Wait() returns before the first
-	// ticker fire (e.g. no goroutines were ever spawned, or all finished
-	// before this function starts).
-	defer gc.ackSignal(signal)
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			gc.ackSignal(signal)
-		}
-	}
+	// Wait for all in-flight recycleDroppedSegment goroutines to finish before
+	// acking any pending pause signal. This is the synchronization point that
+	// makes pause(): "after Pause() returns, no recycleDroppedSegment goroutine
+	// is still mutating object storage or segment / segment-index meta".
+	// If the pause caller's cmd.timeout fires first, its sender goroutine in
+	// pauseWorkers gives up and reports failure; runRecycleTaskWithPauser's
+	// outer loop picks up any subsequent stale signal.
+	wg.Wait()
+	gc.ackSignal(signal)
 }
 
+// recycleDroppedSegment deletes a single dropped segment's object files,
+// segment-index meta, and segment meta in that order.
+//
+// This path can race with recycleUnusedSegIndexes on the same BuildID
+// whenever a dropped segment's parent field index has also been marked
+// IsDeleted — both paths call removeObjectFiles for the same index files
+// and call indexMeta.RemoveSegmentIndex(buildID). The races are safe today
+// only because two invariants hold elsewhere:
+//
+//  1. removeObjectFiles swallows merr.ErrIoKeyNotFound (see the loop in
+//     removeObjectFiles below), so a double file delete is a no-op for the
+//     loser.
+//  2. indexMeta.RemoveSegmentIndex acquires a per-buildID keyLock and
+//     returns nil when segmentBuildInfo.Get(buildID) is !ok (see
+//     index_meta.go), so a double catalog delete is a no-op for the loser.
+//
+// Any future refactor on either side — tightening removeObjectFiles to
+// surface NotFound, or batching RemoveSegmentIndex past the per-buildID
+// keyLock — must preserve these invariants, otherwise dropped-segment GC
+// will silently break under load.
 func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
 	log := log.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
 
@@ -1015,6 +1030,11 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*mod
 	return segIndexes, indexFiles, false
 }
 
+// getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
+// with a defensive nil guard. Production newMeta always wires indexMeta, but
+// the guard is cheap and turns any unexpected nil into "no index records"
+// instead of a panic during a GC sweep — keeping a single misbuilt gc
+// instance from taking the whole datacoord down.
 func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
 	if gc.meta == nil || gc.meta.indexMeta == nil {
 		return nil

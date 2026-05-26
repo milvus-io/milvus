@@ -2143,7 +2143,12 @@ func TestGarbageCollector_DroppedSegmentWorkerSignals(t *testing.T) {
 		}
 	})
 
-	t.Run("wait acks pause signal", func(t *testing.T) {
+	t.Run("wait defers pause ack until wg done", func(t *testing.T) {
+		// New pause semantics: the ack must NOT fire while in-flight
+		// recycleDroppedSegment goroutines are still running, otherwise the
+		// caller observes a successful pause while object storage or meta
+		// mutations continue. The ack must arrive only after wg.Wait()
+		// returns. addresses #49728 review comments r3299143531 / r3299562...
 		var wg sync.WaitGroup
 		wg.Add(1)
 		signal := make(chan gcCmd)
@@ -2154,16 +2159,33 @@ func TestGarbageCollector_DroppedSegmentWorkerSignals(t *testing.T) {
 		}()
 
 		cmdDone := make(chan error)
+		senderDone := make(chan struct{})
 		go func() {
 			signal <- gcCmd{done: cmdDone}
+			close(senderDone)
 		}()
 
+		// While the in-flight wg counter is > 0, pause must stay un-acked.
+		select {
+		case <-cmdDone:
+			t.Fatal("pause signal was acked before wg.Done()")
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		wg.Done()
+
+		// After wg.Done(), wg.Wait() returns and ackSignal drains the pending
+		// pause and unblocks the sender.
 		select {
 		case <-cmdDone:
 		case <-time.After(time.Second):
-			t.Fatal("pause signal was not acked")
+			t.Fatal("pause signal was not acked after wg.Done()")
 		}
-		wg.Done()
+		select {
+		case <-senderDone:
+		case <-time.After(time.Second):
+			t.Fatal("sender did not unblock after pause ack")
+		}
 		select {
 		case <-waitDone:
 		case <-time.After(time.Second):
@@ -2819,6 +2841,32 @@ func TestGarbageCollector_recycleDroppedSegments_ConcurrentFanOut(t *testing.T) 
 	assert.Equal(t, int32(2), processed.Load(), "both segments should be processed")
 	assert.Equal(t, int32(expectedConcurrent), maxInFlight.Load(),
 		"recycleDroppedSegment must run for both segments concurrently when GCRemoveConcurrent>=2")
+}
+
+// Covers the pauseUntil early-break added in the recycleDroppedSegments
+// dispatcher: once a global pause is in effect (i.e. pauseUntil is in the
+// future) the loop must stop submitting new recycleDroppedSegment work
+// instead of continuing to fan out goroutines.
+func TestGarbageCollector_recycleDroppedSegments_GlobalPauseEarlyBreak(t *testing.T) {
+	ctx := context.Background()
+	m, _, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-pause-break")),
+		dropTolerance: 0,
+	})
+	require.NoError(t, gc.pauseUntil.Insert("ticket", time.Now().Add(time.Hour)))
+
+	dispatched := atomic.NewInt32(0)
+	mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).To(
+		func(gc *garbageCollector, ctx context.Context, segmentID int64, segment *SegmentInfo) {
+			dispatched.Inc()
+		}).Build()
+	defer mockRecycle.UnPatch()
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Equal(t, int32(0), dispatched.Load(),
+		"recycleDroppedSegment must not be dispatched while pauseUntil is in the future")
 }
 
 func TestGarbageCollector_recycleDroppedSegments_ConcurrentEndToEnd(t *testing.T) {

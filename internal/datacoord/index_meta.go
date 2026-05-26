@@ -866,6 +866,16 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.getSegmentIndexes(collectionID, segID)
 }
 
+// GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
+// for segID, including ones whose parent field index has been marked
+// IsDeleted — that is the case dropped-segment GC needs to clean up.
+//
+// Intentionally does NOT acquire fieldIndexLock: this method only reads
+// m.segmentIndexes (a ConcurrentMap, self-synchronized) and never touches
+// m.indexes (which fieldIndexLock protects). Do not add an IsDeleted
+// filter here without first taking fieldIndexLock — that change would
+// silently start requiring the lock, unlike GetSegmentIndexes above which
+// already holds it.
 func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	if m.segmentIndexes == nil {
 		return nil
