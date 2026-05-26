@@ -280,7 +280,7 @@ def setup_struct_array_regex_collection(client, collection_name, create_scalar_i
 
 
 class TestRegexFilterBasicSemantic(TestMilvusClientV2Base):
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_substring_match(self):
         """
         target: verify default regex behavior is substring matching
@@ -1689,7 +1689,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_scalar_index_paths_with_sealed_data(self):
         """
         target: scalar index regex paths match expected ids on sealed data with non-trivial value distribution
@@ -1764,7 +1764,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_growing_and_sealed_segments(self):
         """
         target: regex and negated regex cover both sealed and growing segments
@@ -2483,7 +2483,7 @@ class TestRegexFilterQuerySearch(TestMilvusClientV2Base):
 
 
 class TestRegexFilterStructArray(TestMilvusClientV2Base):
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0, CaseLabel.L1)
     def test_regex_struct_array_scalar_field_query(self):
         """
         target: regex filtering on scalar fields inside StructArray elements
