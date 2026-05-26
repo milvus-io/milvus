@@ -13,16 +13,20 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "filemanager/InputStream.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
@@ -127,6 +131,68 @@ class MockCipherPlugin : public plugin::ICipherPlugin {
     GetDecryptor(int64_t, int64_t, const std::string&) const override {
         return std::make_shared<MockDecryptor>();
     }
+};
+
+class DelayedFailingInputStream : public milvus::InputStream {
+ public:
+    struct Rule {
+        size_t offset;
+        std::chrono::milliseconds delay;
+        bool fail;
+    };
+
+    DelayedFailingInputStream(std::shared_ptr<milvus::InputStream> base,
+                              std::vector<Rule> rules)
+        : base_(std::move(base)), rules_(std::move(rules)) {
+    }
+
+    size_t
+    Size() const override {
+        return base_->Size();
+    }
+
+    bool
+    Seek(int64_t offset) override {
+        return base_->Seek(offset);
+    }
+
+    size_t
+    Tell() const override {
+        return base_->Tell();
+    }
+
+    bool
+    Eof() const override {
+        return base_->Eof();
+    }
+
+    size_t
+    Read(void* ptr, size_t size) override {
+        return base_->Read(ptr, size);
+    }
+
+    size_t
+    ReadAt(void* ptr, size_t offset, size_t size) override {
+        for (const auto& rule : rules_) {
+            if (rule.offset == offset) {
+                std::this_thread::sleep_for(rule.delay);
+                if (rule.fail) {
+                    return 0;
+                }
+                break;
+            }
+        }
+        return base_->ReadAt(ptr, offset, size);
+    }
+
+    size_t
+    Read(int fd, size_t size) override {
+        return base_->Read(fd, size);
+    }
+
+ private:
+    std::shared_ptr<milvus::InputStream> base_;
+    std::vector<Rule> rules_;
 };
 
 }  // namespace
@@ -1007,6 +1073,89 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
 
     ASSERT_EQ(entry.data.size(), streamed.size());
     EXPECT_EQ(entry.data, streamed);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCallbackExceptionDoesNotLeak) {
+    const std::string file_path = kV3FilePath + "_stream_callback_throw";
+    const size_t chunk_size = 64 * 1024;
+    const size_t entry_size = 4 * chunk_size;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    size_t callback_count = 0;
+    EXPECT_THROW(reader->ReadEntryStream(
+                     "data",
+                     [&](const uint8_t*, size_t) {
+                         callback_count++;
+                         throw std::runtime_error("stop stream");
+                     },
+                     chunk_size),
+                 std::runtime_error);
+    EXPECT_EQ(callback_count, 1);
+
+    std::vector<uint8_t> streamed;
+    reader->ReadEntryStream(
+        "data",
+        [&](const uint8_t* d, size_t len) {
+            streamed.insert(streamed.end(), d, d + len);
+        },
+        chunk_size);
+    EXPECT_EQ(streamed, data);
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamDrainsReorderBufferAfterError) {
+    const std::string file_path = kV3FilePath + "_stream_reorder_error";
+    const size_t chunk_size = 64 * 1024;
+    const size_t entry_size = 3 * chunk_size;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto base_input = CreateInputStream(file_path);
+    auto input = std::make_shared<DelayedFailingInputStream>(
+        base_input,
+        std::vector<DelayedFailingInputStream::Rule>{
+            {MILVUS_V3_MAGIC_SIZE, std::chrono::milliseconds(80), false},
+            {MILVUS_V3_MAGIC_SIZE + chunk_size,
+             std::chrono::milliseconds(40),
+             true},
+        });
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    size_t callback_count = 0;
+    EXPECT_THROW(reader->ReadEntryStream(
+                     "data",
+                     [&](const uint8_t*, size_t) { callback_count++; },
+                     chunk_size),
+                 milvus::SegcoreError);
+    EXPECT_LE(callback_count, 1);
+
+    auto clean_input = CreateInputStream(file_path);
+    auto clean_reader = IndexEntryReader::Open(clean_input, file_size);
+    std::vector<uint8_t> streamed;
+    clean_reader->ReadEntryStream(
+        "data",
+        [&](const uint8_t* d, size_t len) {
+            streamed.insert(streamed.end(), d, d + len);
+        },
+        chunk_size);
+    EXPECT_EQ(streamed, data);
 }
 
 TEST_F(IndexEntryWriterV3Test, GetEntrySize) {
