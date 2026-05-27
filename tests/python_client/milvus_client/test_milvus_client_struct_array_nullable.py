@@ -56,12 +56,6 @@ class StructArrayNullableSchemaSpec:
     vector_subfield_dim: int
     tag_max_length: int
     struct_max_capacity: int
-    normal_vector_index_type: str
-    normal_vector_metric_type: str
-    struct_vector_index_type: str
-    struct_vector_metric_type: str
-    struct_vector_hnsw_m: int
-    struct_vector_hnsw_ef_construction: int
 
     @property
     def scalar_subfields(self) -> tuple[str, str]:
@@ -87,13 +81,15 @@ class StructArrayNullableSchemaSpec:
     def all_rows_filter(self) -> str:
         return f"{self.pk_field} >= 0"
 
-    @property
-    def normal_vector_search_params(self) -> dict[str, Any]:
-        return {"metric_type": self.normal_vector_metric_type, "params": {}}
 
-    @property
-    def struct_vector_search_params(self) -> dict[str, Any]:
-        return {"metric_type": self.struct_vector_metric_type}
+@dataclass(frozen=True)
+class StructArrayNullableIndexSpec:
+    normal_vector_index_type: str
+    normal_vector_metric_type: str
+    struct_vector_index_type: str
+    struct_vector_metric_type: str
+    struct_vector_hnsw_m: int
+    struct_vector_hnsw_ef_construction: int
 
     @property
     def struct_vector_index_params(self) -> dict[str, int]:
@@ -101,6 +97,20 @@ class StructArrayNullableSchemaSpec:
             "M": self.struct_vector_hnsw_m,
             "efConstruction": self.struct_vector_hnsw_ef_construction,
         }
+
+
+@dataclass(frozen=True)
+class StructArrayNullableSearchSpec:
+    normal_vector_metric_type: str
+    struct_vector_metric_type: str
+
+    @property
+    def normal_vector_search_params(self) -> dict[str, Any]:
+        return {"metric_type": self.normal_vector_metric_type, "params": {}}
+
+    @property
+    def struct_vector_search_params(self) -> dict[str, Any]:
+        return {"metric_type": self.struct_vector_metric_type}
 
 
 DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
@@ -123,6 +133,8 @@ DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
     vector_subfield_dim=128,
     tag_max_length=128,
     struct_max_capacity=4,
+)
+DEFAULT_INDEX_SPEC = StructArrayNullableIndexSpec(
     normal_vector_index_type="FLAT",
     normal_vector_metric_type="L2",
     struct_vector_index_type="HNSW",
@@ -130,8 +142,12 @@ DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
     struct_vector_hnsw_m=16,
     struct_vector_hnsw_ef_construction=200,
 )
+DEFAULT_SEARCH_SPEC = StructArrayNullableSearchSpec(
+    normal_vector_metric_type="L2",
+    struct_vector_metric_type="MAX_SIM_COSINE",
+)
 default_dim = DEFAULT_SCHEMA_SPEC.vector_dim
-INDEX_PARAMS = DEFAULT_SCHEMA_SPEC.struct_vector_index_params
+INDEX_PARAMS = DEFAULT_INDEX_SPEC.struct_vector_index_params
 PK_FIELD = DEFAULT_SCHEMA_SPEC.pk_field
 VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.vector_field
 TAG_FIELD = DEFAULT_SCHEMA_SPEC.tag_field
@@ -151,16 +167,16 @@ VECTOR_DIM = DEFAULT_SCHEMA_SPEC.vector_dim
 VECTOR_SUBFIELD_DIM = DEFAULT_SCHEMA_SPEC.vector_subfield_dim
 TAG_MAX_LENGTH = DEFAULT_SCHEMA_SPEC.tag_max_length
 STRUCT_MAX_CAPACITY = DEFAULT_SCHEMA_SPEC.struct_max_capacity
-NORMAL_VECTOR_INDEX_TYPE = DEFAULT_SCHEMA_SPEC.normal_vector_index_type
-NORMAL_VECTOR_METRIC_TYPE = DEFAULT_SCHEMA_SPEC.normal_vector_metric_type
-STRUCT_VECTOR_INDEX_TYPE = DEFAULT_SCHEMA_SPEC.struct_vector_index_type
-STRUCT_VECTOR_METRIC_TYPE = DEFAULT_SCHEMA_SPEC.struct_vector_metric_type
+NORMAL_VECTOR_INDEX_TYPE = DEFAULT_INDEX_SPEC.normal_vector_index_type
+NORMAL_VECTOR_METRIC_TYPE = DEFAULT_INDEX_SPEC.normal_vector_metric_type
+STRUCT_VECTOR_INDEX_TYPE = DEFAULT_INDEX_SPEC.struct_vector_index_type
+STRUCT_VECTOR_METRIC_TYPE = DEFAULT_INDEX_SPEC.struct_vector_metric_type
 STRUCT_INT_FIELD = DEFAULT_SCHEMA_SPEC.struct_int_field
 STRUCT_TAG_FIELD = DEFAULT_SCHEMA_SPEC.struct_tag_field
 STRUCT_VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.struct_vector_field
 ALL_ROWS_FILTER = DEFAULT_SCHEMA_SPEC.all_rows_filter
-NORMAL_VECTOR_SEARCH_PARAMS = DEFAULT_SCHEMA_SPEC.normal_vector_search_params
-STRUCT_VECTOR_SEARCH_PARAMS = DEFAULT_SCHEMA_SPEC.struct_vector_search_params
+NORMAL_VECTOR_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.normal_vector_search_params
+STRUCT_VECTOR_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.struct_vector_search_params
 OMITTED_FIELD = object()
 
 
@@ -334,6 +350,7 @@ class StructArrayNullableTestMixin:
         collection_name: str,
         *,
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
         include_vector_subfield: bool = False,
         normal_vector_dim: int | None = None,
         struct_vector_type: DataType | None = None,
@@ -350,8 +367,8 @@ class StructArrayNullableTestMixin:
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=spec.vector_field,
-            index_type=spec.normal_vector_index_type,
-            metric_type=spec.normal_vector_metric_type,
+            index_type=index_spec.normal_vector_index_type,
+            metric_type=index_spec.normal_vector_metric_type,
         )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -833,6 +850,7 @@ class StructArrayNullableTestMixin:
         collection_name,
         *,
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
     ):
         schema = self._create_nullable_struct_array_schema(client, spec=spec, include_vector_subfield=False)
 
@@ -902,8 +920,8 @@ class StructArrayNullableTestMixin:
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=spec.vector_field,
-            index_type=spec.normal_vector_index_type,
-            metric_type=spec.normal_vector_metric_type,
+            index_type=index_spec.normal_vector_index_type,
+            metric_type=index_spec.normal_vector_metric_type,
         )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
