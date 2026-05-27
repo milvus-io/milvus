@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -36,51 +37,452 @@ INDEX_PARAMS = {"M": 16, "efConstruction": 200}
 EMB_LIST_DIM = 32
 
 
-class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
-    """Test cases for struct array schema evolution"""
+@dataclass(frozen=True)
+class StructArrayNullableSchemaSpec:
+    pk_field: str = "id"
+    vector_field: str = "normal_vector"
+    tag_field: str = "doc_tag"
+    struct_field: str = "profile"
+    int_subfield: str = "p_int"
+    tag_subfield: str = "p_tag"
+    vector_subfield: str = "p_vec"
+    vector_dim: int = default_dim
+    struct_max_capacity: int = 4
+    tag_max_length: int = 128
 
-    min_index_sealed_rows = 3000
+    @property
+    def scalar_subfields(self) -> tuple[str, str]:
+        return (self.int_subfield, self.tag_subfield)
 
+    @property
+    def vector_subfields(self) -> tuple[str, str, str]:
+        return (self.int_subfield, self.tag_subfield, self.vector_subfield)
+
+
+DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec()
+OMITTED_FIELD = object()
+
+
+class StructArrayNullableTestMixin:
     @staticmethod
     def _vector(seed: int, dim: int = default_dim) -> list[float]:
         return [float(seed) + float(i) / 1000 for i in range(dim)]
 
-    @classmethod
-    def _index_filler_rows(cls, start_id: int, count: int, tag_prefix: str) -> list[dict[str, Any]]:
-        return [
-            {"id": start_id + i, "normal_vector": cls._vector(start_id + i), "doc_tag": f"{tag_prefix}_{i}"}
-            for i in range(count)
-        ]
+    @staticmethod
+    def _schema_as_dict(schema) -> dict[str, Any]:
+        if isinstance(schema, dict):
+            return schema
+        return schema.to_dict()
 
     @classmethod
-    def _scalar_struct_index_filler_rows(cls, start_id: int, count: int, tag_prefix: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": start_id + i,
-                "normal_vector": cls._vector(start_id + i),
-                "doc_tag": f"{tag_prefix}_{i}",
-                "profile": [{"p_int": -(start_id + i), "p_tag": f"{tag_prefix}_profile_{i}"}],
-            }
-            for i in range(count)
-        ]
+    def _schema_field_names(cls, schema) -> set[str]:
+        schema_dict = cls._schema_as_dict(schema)
+        field_names = {field.get("name") for field in schema_dict.get("fields", [])}
+        field_names.update(field.get("name") for field in schema_dict.get("struct_fields", []))
+        return field_names
 
     @classmethod
-    def _vector_struct_index_filler_rows(cls, start_id: int, count: int, tag_prefix: str) -> list[dict[str, Any]]:
-        return [
+    def _schema_field_dim(cls, schema, field_name: str, default: int) -> int:
+        schema_dict = cls._schema_as_dict(schema)
+        for field in schema_dict.get("fields", []):
+            if field.get("name") != field_name:
+                continue
+            return int((field.get("params") or {}).get("dim", default))
+        return default
+
+    @classmethod
+    def _default_struct_array_schema_dict(
+        cls,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        include_struct: bool = False,
+        include_vector_subfield: bool = False,
+        normal_vector_dim: int | None = None,
+        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        struct_vector_dim: int | None = None,
+        struct_nullable: bool = True,
+    ) -> dict[str, Any]:
+        normal_vector_dim = normal_vector_dim or spec.vector_dim
+        struct_vector_dim = struct_vector_dim or normal_vector_dim
+        fields = [
             {
-                "id": start_id + i,
-                "normal_vector": cls._vector(start_id + i),
-                "doc_tag": f"{tag_prefix}_{i}",
-                "profile": [
+                "name": spec.pk_field,
+                "type": DataType.INT64,
+                "is_primary": True,
+                "auto_id": False,
+            },
+            {
+                "name": spec.vector_field,
+                "type": DataType.FLOAT_VECTOR,
+                "params": {"dim": normal_vector_dim},
+            },
+            {
+                "name": spec.tag_field,
+                "type": DataType.VARCHAR,
+                "params": {"max_length": spec.tag_max_length},
+            },
+        ]
+        schema = {
+            "auto_id": False,
+            "enable_dynamic_field": False,
+            "fields": fields,
+            "functions": [],
+        }
+        if include_struct:
+            struct_subfields = [
+                {"name": spec.int_subfield, "type": DataType.INT64, "nullable": True},
+                {
+                    "name": spec.tag_subfield,
+                    "type": DataType.VARCHAR,
+                    "params": {"max_length": spec.tag_max_length},
+                    "nullable": True,
+                },
+            ]
+            if include_vector_subfield:
+                struct_subfields.append(
                     {
-                        "p_int": -(start_id + i),
-                        "p_tag": f"{tag_prefix}_profile_{i}",
-                        "p_vec": cls._vector(start_id + i),
+                        "name": spec.vector_subfield,
+                        "type": struct_vector_type,
+                        "params": {"dim": struct_vector_dim},
+                        "nullable": True,
                     }
-                ],
+                )
+            fields.append(
+                {
+                    "name": spec.struct_field,
+                    "type": DataType.ARRAY,
+                    "element_type": DataType.STRUCT,
+                    "params": {"max_capacity": spec.struct_max_capacity},
+                    "nullable": struct_nullable,
+                    "struct_fields": struct_subfields,
+                }
+            )
+            schema["struct_fields"] = [
+                {
+                    "name": spec.struct_field,
+                    "max_capacity": spec.struct_max_capacity,
+                    "nullable": struct_nullable,
+                    "fields": struct_subfields,
+                }
+            ]
+        return schema
+
+    @staticmethod
+    def _create_struct_field_schema(
+        client,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        include_vector_subfield: bool = False,
+        vector_type: DataType = DataType.FLOAT_VECTOR,
+        vector_dim: int = default_dim,
+    ):
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(spec.int_subfield, DataType.INT64)
+        struct_schema.add_field(spec.tag_subfield, DataType.VARCHAR, max_length=spec.tag_max_length)
+        if include_vector_subfield:
+            struct_schema.add_field(spec.vector_subfield, vector_type, dim=vector_dim)
+        return struct_schema
+
+    @classmethod
+    def _create_nullable_struct_array_schema(
+        cls,
+        client,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        include_struct: bool = True,
+        include_vector_subfield: bool = False,
+        normal_vector_dim: int = default_dim,
+        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        struct_vector_dim: int | None = None,
+        include_tag_field: bool = True,
+        enable_dynamic_field: bool = False,
+    ):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=enable_dynamic_field)
+        schema.add_field(field_name=spec.pk_field, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=spec.vector_field, datatype=DataType.FLOAT_VECTOR, dim=normal_vector_dim)
+        if include_tag_field:
+            schema.add_field(field_name=spec.tag_field, datatype=DataType.VARCHAR, max_length=spec.tag_max_length)
+        if include_struct:
+            struct_vector_dim = struct_vector_dim or normal_vector_dim
+            struct_schema = cls._create_struct_field_schema(
+                client,
+                spec=spec,
+                include_vector_subfield=include_vector_subfield,
+                vector_type=struct_vector_type,
+                vector_dim=struct_vector_dim,
+            )
+            schema.add_field(
+                spec.struct_field,
+                datatype=DataType.ARRAY,
+                element_type=DataType.STRUCT,
+                struct_schema=struct_schema,
+                max_capacity=spec.struct_max_capacity,
+                nullable=True,
+            )
+        return schema
+
+    def _create_indexed_nullable_struct_array_collection(
+        self,
+        client,
+        collection_name: str,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        include_vector_subfield: bool = False,
+        normal_vector_dim: int = default_dim,
+        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        struct_vector_dim: int | None = None,
+    ):
+        schema = self._create_nullable_struct_array_schema(
+            client,
+            spec=spec,
+            include_vector_subfield=include_vector_subfield,
+            normal_vector_dim=normal_vector_dim,
+            struct_vector_type=struct_vector_type,
+            struct_vector_dim=struct_vector_dim,
+        )
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name=spec.vector_field, index_type="FLAT", metric_type="L2")
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
+        return schema
+
+    @classmethod
+    def _generated_rows_by_schema(
+        cls,
+        schema,
+        count: int,
+        *,
+        start_id: int = 0,
+        tag_prefix: str = "row",
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        profiles: list[Any] | None = None,
+        default_values: dict[str, Any] | None = None,
+        vector_dim: int | None = None,
+    ) -> list[dict[str, Any]]:
+        field_names = cls._schema_field_names(schema)
+        row_ids = list(range(start_id, start_id + count))
+        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+        overrides = {
+            spec.pk_field: row_ids,
+            spec.vector_field: [cls._vector(row_id, vector_dim) for row_id in row_ids],
+            spec.tag_field: [f"{tag_prefix}_{i}" for i in range(count)],
+        }
+        if profiles is not None:
+            overrides[spec.struct_field] = profiles
+        if default_values:
+            overrides.update(default_values)
+        overrides = {field_name: value for field_name, value in overrides.items() if field_name in field_names}
+        return cf.gen_row_data_by_schema_with_defaults(
+            nb=count,
+            schema=schema,
+            start=start_id,
+            default_values=overrides,
+        )
+
+    @classmethod
+    def _generated_row_by_schema(
+        cls,
+        schema,
+        row_id: int,
+        tag: str,
+        *,
+        profile=OMITTED_FIELD,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        vector_dim: int | None = None,
+    ) -> dict[str, Any]:
+        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+        default_values = {
+            spec.pk_field: [row_id],
+            spec.vector_field: [cls._vector(row_id, vector_dim)],
+            spec.tag_field: [tag],
+        }
+        if profile is not OMITTED_FIELD:
+            default_values[spec.struct_field] = [profile]
+        row = cls._generated_rows_by_schema(
+            schema,
+            1,
+            start_id=row_id,
+            tag_prefix=tag,
+            spec=spec,
+            default_values=default_values,
+            vector_dim=vector_dim,
+        )[0]
+        if profile is OMITTED_FIELD:
+            row.pop(spec.struct_field, None)
+        return row
+
+    @classmethod
+    def _default_nullable_scalar_profile(
+        cls,
+        row_id: int,
+        offset: int,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        if offset % 3 == 0:
+            return None
+        if offset % 3 == 1:
+            return []
+        return cls._scalar_profile(row_id, spec=spec)
+
+    @classmethod
+    def _nullable_scalar_struct_rows_by_schema(
+        cls,
+        schema,
+        count: int,
+        *,
+        start_id: int = 0,
+        tag_prefix: str = "row",
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        profile_factory=None,
+        tag_factory=None,
+        vector_factory=None,
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+        row_ids = list(range(start_id, start_id + count))
+        profile_factory = profile_factory or cls._default_nullable_scalar_profile
+        tag_factory = tag_factory or (lambda row_id, _offset: f"{tag_prefix}_{row_id}")
+        vector_dim = cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+        vector_factory = vector_factory or (lambda row_id, _offset: cls._vector(row_id, vector_dim))
+        profiles = [profile_factory(row_id, offset, spec=spec) for offset, row_id in enumerate(row_ids)]
+        default_values = {
+            spec.vector_field: [vector_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
+            spec.tag_field: [tag_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
+        }
+        rows = cls._generated_rows_by_schema(
+            schema,
+            count,
+            start_id=start_id,
+            tag_prefix=tag_prefix,
+            spec=spec,
+            profiles=profiles,
+            default_values=default_values,
+            vector_dim=vector_dim,
+        )
+        return rows, {row[spec.pk_field]: row for row in rows}
+
+    @staticmethod
+    def _scalar_struct_profile_arrow_type(
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        return pa.list_(
+            pa.struct(
+                [
+                    pa.field(spec.int_subfield, pa.int64()),
+                    pa.field(spec.tag_subfield, pa.string()),
+                ]
+            )
+        )
+
+    @classmethod
+    def _write_scalar_struct_rows_parquet(
+        cls,
+        rows: list[dict[str, Any]],
+        local_file_path: str,
+        *,
+        row_group_size: int,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        table = pa.table(
+            {
+                spec.pk_field: pa.array([row[spec.pk_field] for row in rows], type=pa.int64()),
+                spec.vector_field: pa.array([row[spec.vector_field] for row in rows], type=pa.list_(pa.float32())),
+                spec.tag_field: pa.array([row[spec.tag_field] for row in rows], type=pa.string()),
+                spec.struct_field: pa.array(
+                    [row[spec.struct_field] for row in rows],
+                    type=cls._scalar_struct_profile_arrow_type(spec=spec),
+                ),
             }
+        )
+        pq.write_table(table, local_file_path, row_group_size=row_group_size)
+
+    @classmethod
+    def _index_filler_rows(
+        cls,
+        start_id: int,
+        count: int,
+        tag_prefix: str,
+        *,
+        schema=None,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        vector_dim: int | None = None,
+    ) -> list[dict[str, Any]]:
+        schema = schema or cls._default_struct_array_schema_dict(spec=spec, normal_vector_dim=vector_dim)
+        return cls._generated_rows_by_schema(
+            schema,
+            count,
+            start_id=start_id,
+            tag_prefix=tag_prefix,
+            spec=spec,
+            vector_dim=vector_dim,
+        )
+
+    @classmethod
+    def _scalar_struct_index_filler_rows(
+        cls,
+        start_id: int,
+        count: int,
+        tag_prefix: str,
+        *,
+        schema=None,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        vector_dim: int | None = None,
+    ) -> list[dict[str, Any]]:
+        schema = schema or cls._default_struct_array_schema_dict(
+            spec=spec,
+            include_struct=True,
+            normal_vector_dim=vector_dim,
+        )
+        profiles = [
+            [{spec.int_subfield: -(start_id + i), spec.tag_subfield: f"{tag_prefix}_profile_{i}"}] for i in range(count)
+        ]
+        return cls._generated_rows_by_schema(
+            schema,
+            count,
+            start_id=start_id,
+            tag_prefix=tag_prefix,
+            spec=spec,
+            profiles=profiles,
+            vector_dim=vector_dim,
+        )
+
+    @classmethod
+    def _vector_struct_index_filler_rows(
+        cls,
+        start_id: int,
+        count: int,
+        tag_prefix: str,
+        *,
+        schema=None,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        vector_dim: int | None = None,
+    ) -> list[dict[str, Any]]:
+        schema = schema or cls._default_struct_array_schema_dict(
+            spec=spec,
+            include_struct=True,
+            include_vector_subfield=True,
+            normal_vector_dim=vector_dim,
+        )
+        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+        profiles = [
+            [
+                {
+                    spec.int_subfield: -(start_id + i),
+                    spec.tag_subfield: f"{tag_prefix}_profile_{i}",
+                    spec.vector_subfield: cls._vector(start_id + i, vector_dim),
+                }
+            ]
             for i in range(count)
         ]
+        return cls._generated_rows_by_schema(
+            schema,
+            count,
+            start_id=start_id,
+            tag_prefix=tag_prefix,
+            spec=spec,
+            profiles=profiles,
+            vector_dim=vector_dim,
+        )
 
     @staticmethod
     def _unit_vector(axis: int, dim: int = default_dim) -> list[float]:
@@ -88,17 +490,22 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         vector[axis % dim] = 1.0
         return vector
 
-    def _profile(self, row_id: int) -> list[dict[str, Any]]:
+    def _profile(
+        self,
+        row_id: int,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ) -> list[dict[str, Any]]:
         return [
             {
-                "p_int": row_id * 10,
-                "p_tag": f"profile_{row_id}_0",
-                "p_vec": self._vector(row_id * 10),
+                spec.int_subfield: row_id * 10,
+                spec.tag_subfield: f"profile_{row_id}_0",
+                spec.vector_subfield: self._vector(row_id * 10),
             },
             {
-                "p_int": row_id * 10 + 1,
-                "p_tag": f"profile_{row_id}_1",
-                "p_vec": self._vector(row_id * 10 + 1),
+                spec.int_subfield: row_id * 10 + 1,
+                spec.tag_subfield: f"profile_{row_id}_1",
+                spec.vector_subfield: self._vector(row_id * 10 + 1),
             },
         ]
 
@@ -115,21 +522,37 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             return bytes(np.packbits(bits, axis=-1).tolist())
         return [float(seed) + float(i) / 1000 for i in range(dim)]
 
-    def _typed_profile(self, row_id: int, vector_type: DataType, dim: int = EMB_LIST_DIM) -> list[dict[str, Any]]:
+    def _typed_profile(
+        self,
+        row_id: int,
+        vector_type: DataType,
+        dim: int = EMB_LIST_DIM,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ) -> list[dict[str, Any]]:
         return [
             {
-                "p_int": row_id * 10,
-                "p_tag": f"profile_{row_id}_0",
-                "p_vec": self._typed_vector(vector_type, row_id * 10, dim),
+                spec.int_subfield: row_id * 10,
+                spec.tag_subfield: f"profile_{row_id}_0",
+                spec.vector_subfield: self._typed_vector(vector_type, row_id * 10, dim),
             },
             {
-                "p_int": row_id * 10 + 1,
-                "p_tag": f"profile_{row_id}_1",
-                "p_vec": self._typed_vector(vector_type, row_id * 10 + 1, dim),
+                spec.int_subfield: row_id * 10 + 1,
+                spec.tag_subfield: f"profile_{row_id}_1",
+                spec.vector_subfield: self._typed_vector(vector_type, row_id * 10 + 1, dim),
             },
         ]
 
-    def _assert_profile_equal(self, actual, expected):
+    def _assert_struct_array_equal(
+        self,
+        actual,
+        expected,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+        expected_keys=None,
+        vector_type: DataType = DataType.FLOAT_VECTOR,
+        exact_keys: bool = False,
+    ):
         if expected is None:
             assert actual is None
             return
@@ -137,21 +560,38 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert isinstance(actual, list)
         assert len(actual) == len(expected)
         for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-            assert actual_item["p_vec"] == pytest.approx(expected_item["p_vec"])
+            keys = tuple(expected_keys or expected_item.keys())
+            if exact_keys:
+                assert set(actual_item) == set(keys)
+            for key in keys:
+                if key == spec.vector_subfield:
+                    self._assert_typed_vector_equal(actual_item[key], expected_item[key], vector_type)
+                else:
+                    assert actual_item[key] == expected_item[key]
 
-    @staticmethod
-    def _assert_profile_vector_subfield_equal(actual, expected):
-        if expected is None:
-            assert actual is None
-            return
+    def _assert_profile_equal(
+        self,
+        actual,
+        expected,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.vector_subfields)
 
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert set(actual_item) == {"p_vec"}
-            assert actual_item["p_vec"] == pytest.approx(expected_item["p_vec"])
+    def _assert_profile_vector_subfield_equal(
+        self,
+        actual,
+        expected,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(
+            actual,
+            expected,
+            spec=spec,
+            expected_keys=(spec.vector_subfield,),
+            exact_keys=True,
+        )
 
     @staticmethod
     def _binary_vector_bytes(value) -> bytes:
@@ -183,28 +623,38 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             abs=epsilon,
         )
 
-    def _assert_typed_profile_equal(self, actual, expected, vector_type: DataType):
-        if expected is None:
-            assert actual is None
-            return
+    def _assert_typed_profile_equal(
+        self,
+        actual,
+        expected,
+        vector_type: DataType,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(
+            actual,
+            expected,
+            spec=spec,
+            expected_keys=spec.vector_subfields,
+            vector_type=vector_type,
+        )
 
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-            self._assert_typed_vector_equal(actual_item["p_vec"], expected_item["p_vec"], vector_type)
-
-    def _assert_typed_profile_vector_subfield_equal(self, actual, expected, vector_type: DataType):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert set(actual_item) == {"p_vec"}
-            self._assert_typed_vector_equal(actual_item["p_vec"], expected_item["p_vec"], vector_type)
+    def _assert_typed_profile_vector_subfield_equal(
+        self,
+        actual,
+        expected,
+        vector_type: DataType,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(
+            actual,
+            expected,
+            spec=spec,
+            expected_keys=(spec.vector_subfield,),
+            vector_type=vector_type,
+            exact_keys=True,
+        )
 
     @staticmethod
     def _search_entity(hit):
@@ -223,95 +673,96 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         return rows
 
     @staticmethod
-    def _scalar_profile(row_id: int) -> list[dict[str, Any]]:
+    def _scalar_profile(
+        row_id: int,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ) -> list[dict[str, Any]]:
         return [
             {
-                "p_int": row_id * 10,
-                "p_tag": f"profile_{row_id}_0",
+                spec.int_subfield: row_id * 10,
+                spec.tag_subfield: f"profile_{row_id}_0",
             },
             {
-                "p_int": row_id * 10 + 1,
-                "p_tag": f"profile_{row_id}_1",
+                spec.int_subfield: row_id * 10 + 1,
+                spec.tag_subfield: f"profile_{row_id}_1",
             },
         ]
 
-    @staticmethod
-    def _assert_scalar_profile_equal(actual, expected):
-        if expected is None:
-            assert actual is None
-            return
+    def _assert_scalar_profile_equal(
+        self,
+        actual,
+        expected,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.scalar_subfields)
 
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-
-    def _setup_nullable_scalar_struct_expression_collection(self, client, collection_name):
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name="doc_tag", datatype=DataType.VARCHAR, max_length=128)
-
-        profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field("p_int", DataType.INT64)
-        profile_schema.add_field("p_tag", DataType.VARCHAR, max_length=128)
-        schema.add_field(
-            "profile",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=profile_schema,
-            max_capacity=4,
-            nullable=True,
+    def _assert_nullable_scalar_profile_equal(
+        self,
+        actual,
+        expected,
+        expected_keys=None,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        self._assert_struct_array_equal(
+            actual,
+            expected,
+            spec=spec,
+            expected_keys=expected_keys,
+            exact_keys=True,
         )
+
+    def _setup_nullable_scalar_struct_expression_collection(
+        self,
+        client,
+        collection_name,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
+        schema = self._create_nullable_struct_array_schema(client, spec=spec, include_vector_subfield=False)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        sealed_explicit_null_profile_row = {
-            "id": 0,
-            "normal_vector": self._vector(0),
-            "doc_tag": "sealed_explicit_null_profile",
-            "profile": None,
-        }
-        sealed_omitted_profile_row = {
-            "id": 1,
-            "normal_vector": self._vector(1),
-            "doc_tag": "sealed_omit_profile",
-        }
-        sealed_empty_profile_row = {
-            "id": 2,
-            "normal_vector": self._vector(2),
-            "doc_tag": "sealed_empty_profile",
-            "profile": [],
-        }
-        sealed_one_match_profile_row = {
-            "id": 3,
-            "normal_vector": self._vector(3),
-            "doc_tag": "sealed_one_match_profile",
-            "profile": [
-                {"p_int": 9100, "p_tag": "match_9100"},
-                {"p_int": 100, "p_tag": "low_100"},
+        sealed_explicit_null_profile_row = self._generated_row_by_schema(
+            schema, 0, "sealed_explicit_null_profile", profile=None, spec=spec
+        )
+        sealed_omitted_profile_row = self._generated_row_by_schema(schema, 1, "sealed_omit_profile", spec=spec)
+        sealed_empty_profile_row = self._generated_row_by_schema(
+            schema, 2, "sealed_empty_profile", profile=[], spec=spec
+        )
+        sealed_one_match_profile_row = self._generated_row_by_schema(
+            schema,
+            3,
+            "sealed_one_match_profile",
+            profile=[
+                {spec.int_subfield: 9100, spec.tag_subfield: "match_9100"},
+                {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
             ],
-        }
-        sealed_two_match_profile_row = {
-            "id": 4,
-            "normal_vector": self._vector(4),
-            "doc_tag": "sealed_two_match_profile",
-            "profile": [
-                {"p_int": 9200, "p_tag": "match_9200"},
-                {"p_int": 9300, "p_tag": "match_9300"},
+            spec=spec,
+        )
+        sealed_two_match_profile_row = self._generated_row_by_schema(
+            schema,
+            4,
+            "sealed_two_match_profile",
+            profile=[
+                {spec.int_subfield: 9200, spec.tag_subfield: "match_9200"},
+                {spec.int_subfield: 9300, spec.tag_subfield: "match_9300"},
             ],
-        }
-        sealed_zero_match_profile_row = {
-            "id": 5,
-            "normal_vector": self._vector(5),
-            "doc_tag": "sealed_zero_match_profile",
-            "profile": [
-                {"p_int": 100, "p_tag": "low_100"},
-                {"p_int": 200, "p_tag": "low_200"},
+            spec=spec,
+        )
+        sealed_zero_match_profile_row = self._generated_row_by_schema(
+            schema,
+            5,
+            "sealed_zero_match_profile",
+            profile=[
+                {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
+                {spec.int_subfield: 200, spec.tag_subfield: "low_200"},
             ],
-        }
+            spec=spec,
+        )
         sealed_control_rows = [
             sealed_explicit_null_profile_row,
             sealed_omitted_profile_row,
@@ -324,6 +775,8 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             50000,
             self.min_index_sealed_rows - len(sealed_control_rows),
             "sealed_expr_index_filler",
+            schema=schema,
+            spec=spec,
         )
         sealed_rows = sealed_control_rows + sealed_index_filler_rows
         res, check = self.insert(client, collection_name, sealed_rows)
@@ -334,58 +787,51 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
+        index_params.add_index(field_name=spec.vector_field, index_type="FLAT", metric_type="L2")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
-        assert self.wait_for_index_ready(client, collection_name, "normal_vector", timeout=300)
+        assert self.wait_for_index_ready(client, collection_name, spec.vector_field, timeout=300)
 
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        growing_explicit_null_profile_row = {
-            "id": 7000,
-            "normal_vector": self._vector(7000),
-            "doc_tag": "growing_explicit_null_profile",
-            "profile": None,
-        }
-        growing_omitted_profile_row = {
-            "id": 7001,
-            "normal_vector": self._vector(7001),
-            "doc_tag": "growing_omit_profile",
-        }
-        growing_empty_profile_row = {
-            "id": 7002,
-            "normal_vector": self._vector(7002),
-            "doc_tag": "growing_empty_profile",
-            "profile": [],
-        }
-        growing_one_match_profile_row = {
-            "id": 7003,
-            "normal_vector": self._vector(7003),
-            "doc_tag": "growing_one_match_profile",
-            "profile": [
-                {"p_int": 9600, "p_tag": "match_9600"},
-                {"p_int": 600, "p_tag": "low_600"},
+        growing_explicit_null_profile_row = self._generated_row_by_schema(
+            schema, 7000, "growing_explicit_null_profile", profile=None, spec=spec
+        )
+        growing_omitted_profile_row = self._generated_row_by_schema(schema, 7001, "growing_omit_profile", spec=spec)
+        growing_empty_profile_row = self._generated_row_by_schema(
+            schema, 7002, "growing_empty_profile", profile=[], spec=spec
+        )
+        growing_one_match_profile_row = self._generated_row_by_schema(
+            schema,
+            7003,
+            "growing_one_match_profile",
+            profile=[
+                {spec.int_subfield: 9600, spec.tag_subfield: "match_9600"},
+                {spec.int_subfield: 600, spec.tag_subfield: "low_600"},
             ],
-        }
-        growing_two_match_profile_row = {
-            "id": 7004,
-            "normal_vector": self._vector(7004),
-            "doc_tag": "growing_two_match_profile",
-            "profile": [
-                {"p_int": 9700, "p_tag": "match_9700"},
-                {"p_int": 9800, "p_tag": "match_9800"},
+            spec=spec,
+        )
+        growing_two_match_profile_row = self._generated_row_by_schema(
+            schema,
+            7004,
+            "growing_two_match_profile",
+            profile=[
+                {spec.int_subfield: 9700, spec.tag_subfield: "match_9700"},
+                {spec.int_subfield: 9800, spec.tag_subfield: "match_9800"},
             ],
-        }
-        growing_zero_match_profile_row = {
-            "id": 7005,
-            "normal_vector": self._vector(7005),
-            "doc_tag": "growing_zero_match_profile",
-            "profile": [
-                {"p_int": 700, "p_tag": "low_700"},
-                {"p_int": 800, "p_tag": "low_800"},
+            spec=spec,
+        )
+        growing_zero_match_profile_row = self._generated_row_by_schema(
+            schema,
+            7005,
+            "growing_zero_match_profile",
+            profile=[
+                {spec.int_subfield: 700, spec.tag_subfield: "low_700"},
+                {spec.int_subfield: 800, spec.tag_subfield: "low_800"},
             ],
-        }
+            spec=spec,
+        )
         growing_rows = [
             growing_explicit_null_profile_row,
             growing_omitted_profile_row,
@@ -399,32 +845,45 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert res["insert_count"] == len(growing_rows)
 
         source_by_id = {}
-        source_by_id[sealed_explicit_null_profile_row["id"]] = sealed_explicit_null_profile_row
-        source_by_id[sealed_omitted_profile_row["id"]] = {**sealed_omitted_profile_row, "profile": None}
-        source_by_id[sealed_empty_profile_row["id"]] = sealed_empty_profile_row
-        source_by_id[sealed_one_match_profile_row["id"]] = sealed_one_match_profile_row
-        source_by_id[sealed_two_match_profile_row["id"]] = sealed_two_match_profile_row
-        source_by_id[sealed_zero_match_profile_row["id"]] = sealed_zero_match_profile_row
-        source_by_id.update({row["id"]: row for row in sealed_index_filler_rows})
-        source_by_id[growing_explicit_null_profile_row["id"]] = growing_explicit_null_profile_row
-        source_by_id[growing_omitted_profile_row["id"]] = {**growing_omitted_profile_row, "profile": None}
-        source_by_id[growing_empty_profile_row["id"]] = growing_empty_profile_row
-        source_by_id[growing_one_match_profile_row["id"]] = growing_one_match_profile_row
-        source_by_id[growing_two_match_profile_row["id"]] = growing_two_match_profile_row
-        source_by_id[growing_zero_match_profile_row["id"]] = growing_zero_match_profile_row
+        source_by_id[sealed_explicit_null_profile_row[spec.pk_field]] = sealed_explicit_null_profile_row
+        source_by_id[sealed_omitted_profile_row[spec.pk_field]] = {
+            **sealed_omitted_profile_row,
+            spec.struct_field: None,
+        }
+        source_by_id[sealed_empty_profile_row[spec.pk_field]] = sealed_empty_profile_row
+        source_by_id[sealed_one_match_profile_row[spec.pk_field]] = sealed_one_match_profile_row
+        source_by_id[sealed_two_match_profile_row[spec.pk_field]] = sealed_two_match_profile_row
+        source_by_id[sealed_zero_match_profile_row[spec.pk_field]] = sealed_zero_match_profile_row
+        source_by_id.update({row[spec.pk_field]: row for row in sealed_index_filler_rows})
+        source_by_id[growing_explicit_null_profile_row[spec.pk_field]] = growing_explicit_null_profile_row
+        source_by_id[growing_omitted_profile_row[spec.pk_field]] = {
+            **growing_omitted_profile_row,
+            spec.struct_field: None,
+        }
+        source_by_id[growing_empty_profile_row[spec.pk_field]] = growing_empty_profile_row
+        source_by_id[growing_one_match_profile_row[spec.pk_field]] = growing_one_match_profile_row
+        source_by_id[growing_two_match_profile_row[spec.pk_field]] = growing_two_match_profile_row
+        source_by_id[growing_zero_match_profile_row[spec.pk_field]] = growing_zero_match_profile_row
 
-        controlled_ids = {row["id"] for row in sealed_control_rows + growing_rows}
+        controlled_ids = {row[spec.pk_field] for row in sealed_control_rows + growing_rows}
         return {
             "source_by_id": source_by_id,
             "source_rows": list(source_by_id.values()),
             "controlled_ids": controlled_ids,
+            "schema_spec": spec,
         }
 
-    def _assert_expression_rows_match_source(self, rows, source_by_id):
+    def _assert_expression_rows_match_source(
+        self,
+        rows,
+        source_by_id,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ):
         for row in rows:
-            expected = source_by_id[row["id"]]
-            assert row["doc_tag"] == expected["doc_tag"]
-            self._assert_scalar_profile_equal(row["profile"], expected["profile"])
+            expected = source_by_id[row[spec.pk_field]]
+            assert row[spec.tag_field] == expected[spec.tag_field]
+            self._assert_scalar_profile_equal(row[spec.struct_field], expected[spec.struct_field], spec=spec)
 
     @staticmethod
     def _parse_expression_value(raw_value: str):
@@ -483,65 +942,76 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         raise AssertionError(f"unsupported element condition: {condition}")
 
     @staticmethod
-    def _strip_id_scope(rows: list[dict[str, Any]], expression: str) -> tuple[list[dict[str, Any]], str]:
+    def _strip_id_scope(
+        rows: list[dict[str, Any]],
+        expression: str,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ) -> tuple[list[dict[str, Any]], str]:
         expression = expression.strip()
-        match = re.match(r"^id\s+in\s+\[([^\]]*)\]\s*&&\s*(.+)$", expression)
+        match = re.match(rf"^{re.escape(spec.pk_field)}\s+in\s+\[([^\]]*)\]\s*&&\s*(.+)$", expression)
         if match is None:
             return rows, expression
         id_values = {int(value.strip()) for value in match.group(1).split(",") if value.strip()}
-        return [row for row in rows if row["id"] in id_values], match.group(2).strip()
+        return [row for row in rows if row[spec.pk_field] in id_values], match.group(2).strip()
 
     @classmethod
-    def _expected_nullable_scalar_struct_expression_rows(
+    def _expected_struct_array_expression_rows(
         cls,
         rows: list[dict[str, Any]],
         expression: str,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
     ) -> list[dict[str, Any]]:
-        scoped_rows, expression = cls._strip_id_scope(rows, expression)
+        scoped_rows, expression = cls._strip_id_scope(rows, expression, spec=spec)
+        struct_field_pattern = re.escape(spec.struct_field)
 
         def output_row(row, offset=None):
             result = {
-                "id": row["id"],
-                "doc_tag": row["doc_tag"],
-                "profile": row.get("profile"),
+                spec.pk_field: row[spec.pk_field],
+                spec.tag_field: row[spec.tag_field],
+                spec.struct_field: row.get(spec.struct_field),
             }
             if offset is not None:
                 result["offset"] = offset
             return result
 
-        if expression == "profile is null":
-            return [output_row(row) for row in scoped_rows if row.get("profile") is None]
-        if expression == "profile is not null":
-            return [output_row(row) for row in scoped_rows if row.get("profile") is not None]
+        if expression == f"{spec.struct_field} is null":
+            return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is None]
+        if expression == f"{spec.struct_field} is not null":
+            return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is not None]
 
-        length_match = re.match(r"^array_length\(profile(?:\[\w+\])?\)\s*(==|!=|>=|<=|>|<)\s*(\d+)$", expression)
+        length_match = re.match(
+            rf"^array_length\({struct_field_pattern}(?:\[[^\]]+\])?\)\s*(==|!=|>=|<=|>|<)\s*(\d+)$",
+            expression,
+        )
         if length_match is not None:
             op, raw_expected = length_match.groups()
             expected = int(raw_expected)
             return [
                 output_row(row)
                 for row in scoped_rows
-                if row.get("profile") is not None and cls._compare_expression_values(len(row["profile"]), op, expected)
+                if row.get(spec.struct_field) is not None
+                and cls._compare_expression_values(len(row[spec.struct_field]), op, expected)
             ]
 
         array_contains_match = re.match(
-            r"^array_contains(?:_(all|any))?\(profile\[\w+\],\s*(.+)\)$",
+            rf"^array_contains(?:_(all|any))?\({struct_field_pattern}\[([^\]]+)\],\s*(.+)\)$",
             expression,
         )
         if array_contains_match is not None:
-            mode, raw_expected = array_contains_match.groups()
+            mode, field_name, raw_expected = array_contains_match.groups()
             expected_values = (
                 cls._parse_expression_list(raw_expected)
                 if mode in {"all", "any"}
                 else [cls._parse_expression_value(raw_expected)]
             )
-            field_name = re.match(r"^array_contains(?:_(?:all|any))?\(profile\[(\w+)\],", expression).group(1)
             results = []
             for row in scoped_rows:
-                profile = row.get("profile")
-                if profile is None:
+                struct_array = row.get(spec.struct_field)
+                if struct_array is None:
                     continue
-                actual_values = [element.get(field_name) for element in profile]
+                actual_values = [element.get(field_name) for element in struct_array]
                 if (
                     (mode == "all" and all(value in actual_values for value in expected_values))
                     or (mode == "any" and any(value in actual_values for value in expected_values))
@@ -550,33 +1020,36 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                     results.append(output_row(row))
             return results
 
-        index_access_match = re.match(r"^profile\[(\d+)\]\[(\w+)\]\s*(==|!=|>=|<=|>|<)\s*(.+)$", expression)
+        index_access_match = re.match(
+            rf"^{struct_field_pattern}\[(\d+)\]\[([^\]]+)\]\s*(==|!=|>=|<=|>|<)\s*(.+)$",
+            expression,
+        )
         if index_access_match is not None:
             raw_offset, field_name, op, raw_expected = index_access_match.groups()
             offset = int(raw_offset)
             expected = cls._parse_expression_value(raw_expected)
             results = []
             for row in scoped_rows:
-                profile = row.get("profile") or []
-                if len(profile) <= offset:
+                struct_array = row.get(spec.struct_field) or []
+                if len(struct_array) <= offset:
                     continue
-                if cls._compare_expression_values(profile[offset].get(field_name), op, expected):
+                if cls._compare_expression_values(struct_array[offset].get(field_name), op, expected):
                     results.append(output_row(row))
             return results
 
-        element_filter_match = re.match(r"^element_filter\(profile,\s*(.+)\)$", expression)
+        element_filter_match = re.match(rf"^element_filter\({struct_field_pattern},\s*(.+)\)$", expression)
         if element_filter_match is not None:
             condition = element_filter_match.group(1)
             results = []
             for row in scoped_rows:
-                profile = row.get("profile") or []
-                for offset, element in enumerate(profile):
+                struct_array = row.get(spec.struct_field) or []
+                for offset, element in enumerate(struct_array):
                     if cls._eval_struct_element_condition(element, condition):
                         results.append(output_row(row, offset=offset))
             return results
 
         match_family_match = re.match(
-            r"^MATCH_(ALL|ANY|LEAST|MOST|EXACT)\(profile,\s*(.+?)(?:,\s*threshold=(\d+))?\)$",
+            rf"^MATCH_(ALL|ANY|LEAST|MOST|EXACT)\({struct_field_pattern},\s*(.+?)(?:,\s*threshold=(\d+))?\)$",
             expression,
         )
         if match_family_match is not None:
@@ -584,9 +1057,11 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             threshold = int(raw_threshold) if raw_threshold is not None else None
             results = []
             for row in scoped_rows:
-                profile = row.get("profile") or []
-                match_count = sum(1 for element in profile if cls._eval_struct_element_condition(element, condition))
-                total_count = len(profile)
+                struct_array = row.get(spec.struct_field) or []
+                match_count = sum(
+                    1 for element in struct_array if cls._eval_struct_element_condition(element, condition)
+                )
+                total_count = len(struct_array)
                 matched = (
                     (match_type == "ALL" and match_count == total_count)
                     or (match_type == "ANY" and match_count >= 1)
@@ -601,8 +1076,23 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         raise AssertionError(f"unsupported expression: {expression}")
 
     @staticmethod
-    def _expression_result_keys(rows):
-        return sorted((row["id"], row.get("offset")) for row in rows)
+    def _expected_nullable_scalar_struct_expression_rows(
+        rows: list[dict[str, Any]],
+        expression: str,
+        *,
+        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    ) -> list[dict[str, Any]]:
+        return StructArrayNullableTestMixin._expected_struct_array_expression_rows(rows, expression, spec=spec)
+
+    @staticmethod
+    def _expression_result_keys(rows, *, spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC):
+        return sorted((row[spec.pk_field], row.get("offset")) for row in rows)
+
+
+class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, TestMilvusClientV2Base):
+    """Test cases for struct array schema evolution"""
+
+    min_index_sealed_rows = 3000
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_schema_nullable_propagation(self):
@@ -10684,7 +11174,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_profile_equal(entity["profile"], expected["profile"])
 
 
-class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, TestMilvusClientV2Base):
     """Nullable struct array bulk import coverage."""
 
     # MinIO configuration constants
@@ -10800,73 +11290,6 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         log.info("Bulk import finished")
 
-    @staticmethod
-    def _scalar_profile(row_id: int) -> list[dict[str, Any]]:
-        return [
-            {"p_int": row_id * 10, "p_tag": f"profile_{row_id}_0"},
-            {"p_int": row_id * 10 + 1, "p_tag": f"profile_{row_id}_1"},
-        ]
-
-    def _profile(self, row_id: int) -> list[dict[str, Any]]:
-        return [
-            {
-                "p_int": row_id * 10,
-                "p_tag": f"profile_{row_id}_0",
-                "p_vec": self._vector(row_id * 10),
-            },
-            {
-                "p_int": row_id * 10 + 1,
-                "p_tag": f"profile_{row_id}_1",
-                "p_vec": self._vector(row_id * 10 + 1),
-            },
-        ]
-
-    @staticmethod
-    def _assert_scalar_profile_equal(actual, expected):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-
-    @staticmethod
-    def _assert_nullable_scalar_profile_equal(actual, expected, expected_keys=None):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            keys = expected_keys or expected_item.keys()
-            assert set(actual_item) == set(keys)
-            for key in keys:
-                assert actual_item.get(key) == expected_item.get(key)
-
-    def _assert_profile_equal(self, actual, expected):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-            assert actual_item["p_vec"] == pytest.approx(expected_item["p_vec"])
-
-    @staticmethod
-    def _search_entity(hit):
-        return hit.get("entity", hit)
-
-    @staticmethod
-    def _vector(seed: int, dim: int = default_dim) -> list[float]:
-        return [float(seed) + float(i) / 1000 for i in range(dim)]
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_nullable_scalar_struct_array_with_json(self):
         """
@@ -10879,45 +11302,12 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name="doc_tag", datatype=DataType.VARCHAR, max_length=128)
-
-        profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field("p_int", DataType.INT64)
-        profile_schema.add_field("p_tag", DataType.VARCHAR, max_length=128)
-        schema.add_field(
-            "profile",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=profile_schema,
-            max_capacity=4,
-            nullable=True,
+        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
+        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+            schema,
+            entities,
+            tag_prefix="import_row",
         )
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-
-        rows = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = self._scalar_profile(row_id)
-            row = {
-                "id": row_id,
-                "normal_vector": self._vector(row_id),
-                "doc_tag": f"import_row_{row_id}",
-                "profile": profile,
-            }
-            rows.append(row)
-            source_by_id[row_id] = row
 
         local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
         with open(local_file_path, "w") as f:
@@ -10978,27 +11368,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         entities = 3000
         other_entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name="doc_tag", datatype=DataType.VARCHAR, max_length=128)
-
-        profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field("p_int", DataType.INT64)
-        profile_schema.add_field("p_tag", DataType.VARCHAR, max_length=128)
-        schema.add_field(
-            "profile",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=profile_schema,
-            max_capacity=4,
-            nullable=True,
-        )
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
+        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11038,23 +11408,11 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         res, check = self.flush(client, collection_name)
         assert check
 
-        rows = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = self._scalar_profile(row_id)
-            row = {
-                "id": row_id,
-                "normal_vector": self._vector(row_id),
-                "doc_tag": f"target_partition_row_{row_id}",
-                "profile": profile,
-            }
-            rows.append(row)
-            source_by_id[row_id] = row
+        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+            schema,
+            entities,
+            tag_prefix="target_partition_row",
+        )
 
         local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.json")
         with open(local_file_path, "w") as f:
@@ -11139,27 +11497,7 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         entities = 3000
         other_entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name="doc_tag", datatype=DataType.VARCHAR, max_length=128)
-
-        profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field("p_int", DataType.INT64)
-        profile_schema.add_field("p_tag", DataType.VARCHAR, max_length=128)
-        schema.add_field(
-            "profile",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=profile_schema,
-            max_capacity=4,
-            nullable=True,
-        )
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
+        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11199,48 +11537,13 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         res, check = self.flush(client, collection_name)
         assert check
 
-        ids = []
-        vectors = []
-        doc_tags = []
-        profiles = []
-        source_by_id = {}
-        for row_id in range(entities):
-            if row_id % 3 == 0:
-                profile = None
-            elif row_id % 3 == 1:
-                profile = []
-            else:
-                profile = self._scalar_profile(row_id)
-            row = {
-                "id": row_id,
-                "normal_vector": self._vector(row_id),
-                "doc_tag": f"target_partition_row_{row_id}",
-                "profile": profile,
-            }
-            ids.append(row["id"])
-            vectors.append(row["normal_vector"])
-            doc_tags.append(row["doc_tag"])
-            profiles.append(row["profile"])
-            source_by_id[row_id] = row
-
-        profile_type = pa.list_(
-            pa.struct(
-                [
-                    pa.field("p_int", pa.int64()),
-                    pa.field("p_tag", pa.string()),
-                ]
-            )
-        )
-        table = pa.table(
-            {
-                "id": pa.array(ids, type=pa.int64()),
-                "normal_vector": pa.array(vectors, type=pa.list_(pa.float32())),
-                "doc_tag": pa.array(doc_tags, type=pa.string()),
-                "profile": pa.array(profiles, type=profile_type),
-            }
+        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+            schema,
+            entities,
+            tag_prefix="target_partition_row",
         )
         local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        pq.write_table(table, local_file_path, row_group_size=entities)
+        self._write_scalar_struct_rows_parquet(rows, local_file_path, row_group_size=entities)
 
         remote_files = self.upload_to_minio(local_file_path)
         self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
