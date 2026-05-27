@@ -405,20 +405,6 @@ Streaming read behavior:
 - Plain entries are read as 16MB slices by default, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit `slice_size` values below 64KB are rejected.
 - For encrypted entries, the reader uses the plaintext slice boundaries stored in the V3 directory. With the default writer settings, this is also 16MB.
 
-Streaming load configuration:
-
-| Parameter | Key | Default | Description |
-|-----------|-----|---------|-------------|
-| `StreamBudgetRatio` | `common.entryStream.streamBudgetRatio` | `3.0` | Dynamic entry stream transient memory budget multiplier, relative to CPU core count. |
-
-The default entry stream budget is:
-
-```
-CPU cores × common.entryStream.streamBudgetRatio × 16MB
-```
-
-With default values, an 8-core node gets `8 × 3.0 × 16MB = 384MB` of transient entry stream budget. This admits about 8 encrypted slices concurrently because each encrypted slice budgets ciphertext + decrypted plaintext + returned slice. Oversized slices are allowed to run exclusively to guarantee progress.
-
 ### 5.3 Meta Packing
 
 Each index packs all O(1) metadata into a **single meta entry**, eliminating multiple small IOs by design.
