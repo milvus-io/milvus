@@ -10,6 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -443,9 +444,27 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
-		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+
+		// Hybrid search supports plain top-K on ArrayOfVector fields. Advanced
+		// element-level features are intentionally not enabled in this 2.6 path.
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if t.rankParams.GetGroupByFieldId() > 0 {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if subIsIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
 		}
 
 		ignoreGrowing := t.IgnoreGrowing
