@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -96,7 +95,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 	for _, inputFieldId := range inputFieldIds {
 		data, ok := data.Data[inputFieldId]
 		if !ok {
-			return errors.New("BM25 embedding failed: input field data not varchar/text")
+			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: input field data not varchar/text")
 		}
 
 		datas = append(datas, data.GetDataRows())
@@ -109,7 +108,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return errors.New("BM25 embedding failed: BM25 runner output not sparse map")
+		return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: BM25 runner output not sparse map")
 	}
 
 	meta[outputFieldId].AppendBytes(sparseArray.GetContents()...)
@@ -127,7 +126,7 @@ func (eNode *embeddingNode) minhashEmbedding(
 	for _, inputField := range inputFields {
 		fieldData, ok := data.Data[inputField.GetFieldID()]
 		if !ok {
-			return errors.New("MinHash embedding failed: input field data not varchar/text")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: input field data not varchar/text")
 		}
 
 		datas = append(datas, fieldData.GetDataRows())
@@ -140,17 +139,17 @@ func (eNode *embeddingNode) minhashEmbedding(
 	// MinHash function has only one output field
 	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash runner output not FieldData")
 	}
 
 	vectorField := fieldData.GetVectors()
 	if vectorField == nil {
-		return errors.New("MinHash embedding failed: output is not a vector field")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 	}
 
 	binaryVector := vectorField.GetBinaryVector()
 	if binaryVector == nil {
-		return errors.New("MinHash embedding failed: output is not a binary vector")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 	}
 
 	outputFieldId := runner.GetOutputFields()[0].GetFieldID()

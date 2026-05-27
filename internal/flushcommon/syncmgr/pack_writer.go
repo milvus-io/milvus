@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"path"
 
 	"go.uber.org/zap"
@@ -288,7 +287,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(bw.schema)
 	if err != nil {
-		return nil, fmt.Errorf("primary key field not found: %w", err)
+		return nil, merr.Wrap(err, "primary key field not found")
 	}
 
 	logID, err := bw.allocator.AllocOne()

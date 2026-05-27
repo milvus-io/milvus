@@ -27,7 +27,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -181,17 +180,17 @@ func (t *backfillCompactionTask) preCompact() error {
 
 	// Check segment binlogs: must have exactly one segment
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return errors.Newf("backfill compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
+		return merr.WrapErrParameterInvalidMsg("backfill compaction plan is illegal, must have exactly one segment, but got %d segments, planID = %d", len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 
 	segment := t.plan.GetSegmentBinlogs()[0]
 	if segment.GetManifest() == "" && len(segment.GetFieldBinlogs()) == 0 {
-		return errors.Newf("compaction plan is illegal, segment's field binlogs are empty, planID = %d, segmentID = %d", t.GetPlanID(), segment.GetSegmentID())
+		return merr.WrapErrParameterInvalidMsg("compaction plan is illegal, segment's field binlogs are empty, planID = %d, segmentID = %d", t.GetPlanID(), segment.GetSegmentID())
 	}
 
 	backfillFunctions := t.plan.GetFunctions()
 	if len(backfillFunctions) != 1 {
-		return errors.New("backfill functions should be exactly one")
+		return merr.WrapErrParameterInvalidMsg("backfill functions should be exactly one")
 	}
 	backfillFunction := backfillFunctions[0]
 
@@ -200,7 +199,7 @@ func (t *backfillCompactionTask) preCompact() error {
 		return err
 	}
 	if functionRunner == nil {
-		return errors.New("failed to set up backfill function runner")
+		return merr.WrapErrParameterInvalidMsg("failed to set up backfill function runner")
 	}
 
 	// Validate function runner
@@ -221,34 +220,34 @@ func (t *backfillCompactionTask) checkFunctionRunner(functionRunner function.Fun
 		// 1. Check inputFieldIDs: must have exactly one, and type must be varchar
 		inputFieldIDs := functionSchema.GetInputFieldIds()
 		if len(inputFieldIDs) != 1 {
-			return errors.New("bm25 function should have exactly one input field")
+			return merr.WrapErrParameterInvalidMsg("bm25 function should have exactly one input field")
 		}
 		inputFieldID := inputFieldIDs[0]
 		inputField := typeutil.GetField(t.plan.GetSchema(), inputFieldID)
 		if inputField == nil {
-			return errors.New("input field not found in schema")
+			return merr.WrapErrParameterInvalidMsg("input field not found in schema")
 		}
 		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
-			return errors.New("input field data type must be varchar or text for bm25 function backfill")
+			return merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 function backfill")
 		}
 
 		// 2. Check outputFieldIDs: must have exactly one, and type must be SparseFloatVector
 		outputFieldIDs := functionSchema.GetOutputFieldIds()
 		if len(outputFieldIDs) != 1 {
-			return errors.New("bm25 function should have exactly one output field")
+			return merr.WrapErrParameterInvalidMsg("bm25 function should have exactly one output field")
 		}
 		outputFieldID := outputFieldIDs[0]
 		outputField := typeutil.GetField(t.plan.GetSchema(), outputFieldID)
 		if outputField == nil {
-			return errors.New("output field not found in schema")
+			return merr.WrapErrParameterInvalidMsg("output field not found in schema")
 		}
 		if outputField.GetDataType() != schemapb.DataType_SparseFloatVector {
-			return errors.New("output field data type must be sparse float vector for bm25 function backfill")
+			return merr.WrapErrParameterInvalidMsg("output field data type must be sparse float vector for bm25 function backfill")
 		}
 
 		return nil
 	default:
-		return errors.New("unsupported function type")
+		return merr.WrapErrParameterInvalidMsg("unsupported function type")
 	}
 }
 
@@ -257,7 +256,7 @@ func (t *backfillCompactionTask) runBackfillFunction(ctx context.Context, functi
 	case schemapb.FunctionType_BM25:
 		return t.runBm25Function(ctx, functionRunner)
 	default:
-		return nil, errors.New("unsupported function type")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported function type")
 	}
 }
 
@@ -305,11 +304,11 @@ func (t *backfillCompactionTask) processBatch(functionRunner function.FunctionRu
 		return nil, 0, err
 	}
 	if len(output) != 1 {
-		return nil, 0, errors.New("bm25 function backfill should return exactly one output")
+		return nil, 0, merr.WrapErrFunctionFailedMsg("bm25 function backfill should return exactly one output")
 	}
 	outputSparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return nil, 0, errors.New("unexpected output type from BM25 function runner, expected SparseFloatArray")
+		return nil, 0, merr.WrapErrFunctionFailedMsg("unexpected output type from BM25 function runner, expected SparseFloatArray")
 	}
 
 	// build output field data
@@ -354,7 +353,7 @@ func (t *backfillCompactionTask) setupWriter(outputField *schemapb.FieldSchema, 
 		return nil, err
 	}
 	if segment.GetManifest() == "" && len(segment.GetFieldBinlogs()) == 0 {
-		return nil, errors.New("segment field binlogs is empty, wrong state for compaction segments")
+		return nil, merr.WrapErrParameterInvalidMsg("segment field binlogs is empty, wrong state for compaction segments")
 	}
 	newColumnGroups := []storagecommon.ColumnGroup{
 		{
@@ -636,12 +635,12 @@ func (t *backfillCompactionTask) runBm25Function(ctx context.Context, functionRu
 	functionSchema := functionRunner.GetSchema()
 	inputFieldIDs := functionSchema.GetInputFieldIds()
 	if len(inputFieldIDs) != 1 {
-		return nil, errors.Newf("bm25 backfill: expected exactly one input field, got %d (planID=%d)", len(inputFieldIDs), t.plan.GetPlanID())
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 backfill: expected exactly one input field, got %d (planID=%d)", len(inputFieldIDs), t.plan.GetPlanID())
 	}
 	inputFieldID := inputFieldIDs[0]
 	outputFieldIDs := functionSchema.GetOutputFieldIds()
 	if len(outputFieldIDs) != 1 {
-		return nil, errors.Newf("bm25 backfill: expected exactly one output field, got %d (planID=%d)", len(outputFieldIDs), t.plan.GetPlanID())
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 backfill: expected exactly one output field, got %d (planID=%d)", len(outputFieldIDs), t.plan.GetPlanID())
 	}
 	outputFieldID := outputFieldIDs[0]
 	outputField := typeutil.GetField(t.plan.GetSchema(), outputFieldID)

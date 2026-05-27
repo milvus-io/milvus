@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -118,7 +117,7 @@ func (t *sortCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return errors.Newf("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
+		return merr.WrapErrParameterInvalidMsg("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
 			len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 
@@ -572,7 +571,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrParameterInvalidMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -631,7 +630,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			if segment.GetManifest() != "" {
 				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 				if err != nil {
-					return fmt.Errorf("failed to unmarshal manifest path for text_index basePath: %w", err)
+					return merr.Wrap(err, "failed to unmarshal manifest path for text_index basePath")
 				}
 				statsBasePath = fmt.Sprintf("%s/_stats/text_index.%d", basePath, field.GetFieldID())
 			}

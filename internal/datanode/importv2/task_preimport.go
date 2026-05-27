@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -192,7 +193,7 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 	}
 	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
 	if fileSize > int64(maxSize) {
-		return errors.New(fmt.Sprintf(
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf(
 			"The import file size has reached the maximum limit allowed for importing, "+
 				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize)))
 	}

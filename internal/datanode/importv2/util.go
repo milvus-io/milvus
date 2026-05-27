@@ -24,7 +24,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -153,7 +152,7 @@ func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, parti
 	})
 
 	if len(candidates) == 0 {
-		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+		return 0, merr.WrapErrParameterInvalidMsg("no candidate segments found for channel %s and partition %d",
 			vchannel, partitionID)
 	}
 
@@ -394,7 +393,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("unexpected data type: %d, cannot be filled with default value", dataType)
+			return merr.WrapErrParameterInvalidMsg("unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {
@@ -468,7 +467,7 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 	}))
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
 	if err != nil {
-		return errors.Wrap(merr.ErrInvalidInsertData, err.Error())
+		return merr.Wrap(merr.ErrInvalidInsertData, err.Error())
 	}
 	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
 	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
@@ -537,7 +536,7 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 					},
 				}
 			default:
-				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
+				return merr.WrapErrParameterInvalidMsg("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
 			}
 		}
 	}
@@ -573,28 +572,28 @@ func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
 
 		// Sanity check: ensure BatchRun returned at least one output
 		if len(output) == 0 {
-			return errors.New("MinHash embedding failed: runner.BatchRun returned empty output")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner.BatchRun returned empty output")
 		}
 
 		// MinHash function has only one output field
 		fieldData, ok := output[0].(*schemapb.FieldData)
 		if !ok {
-			return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash runner output not FieldData")
 		}
 
 		vectorField := fieldData.GetVectors()
 		if vectorField == nil {
-			return errors.New("MinHash embedding failed: output is not a vector field")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 		}
 
 		binaryVector := vectorField.GetBinaryVector()
 		if binaryVector == nil {
-			return errors.New("MinHash embedding failed: output is not a binary vector")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 		}
 
 		outputFields := runner.GetOutputFields()
 		if len(outputFields) == 0 {
-			return errors.New("MinHash embedding failed: runner has no output fields")
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner has no output fields")
 		}
 
 		outputFieldId := outputFields[0].GetFieldID()

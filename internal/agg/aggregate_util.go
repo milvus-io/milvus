@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func NewFieldAccessor(fieldType schemapb.DataType) (FieldAccessor, error) {
@@ -28,7 +29,7 @@ func NewFieldAccessor(fieldType schemapb.DataType) (FieldAccessor, error) {
 	case schemapb.DataType_Double:
 		return newFloat64FieldAccessor(), nil
 	default:
-		return nil, fmt.Errorf("unsupported data type for hasher")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type for hasher")
 	}
 }
 
@@ -410,7 +411,7 @@ func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), "")
 		default:
-			return fmt.Errorf("unsupported DataType:%d", fieldData.GetType())
+			return merr.WrapErrParameterInvalidMsg("unsupported DataType:%d", fieldData.GetType())
 		}
 		return nil
 	}
@@ -421,47 +422,47 @@ func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
 	case schemapb.DataType_Bool:
 		boolVal, ok := val.(bool)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected bool, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected bool, got %T", val)
 		}
 		fieldData.GetScalars().GetBoolData().Data = append(fieldData.GetScalars().GetBoolData().GetData(), boolVal)
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		intVal, ok := val.(int32)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected int32, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected int32, got %T", val)
 		}
 		fieldData.GetScalars().GetIntData().Data = append(fieldData.GetScalars().GetIntData().GetData(), intVal)
 	case schemapb.DataType_Int64:
 		int64Val, ok := val.(int64)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected int64, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected int64, got %T", val)
 		}
 		fieldData.GetScalars().GetLongData().Data = append(fieldData.GetScalars().GetLongData().GetData(), int64Val)
 	case schemapb.DataType_Timestamptz:
 		timestampVal, ok := val.(int64)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected int64 for Timestamptz, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected int64 for Timestamptz, got %T", val)
 		}
 		fieldData.GetScalars().GetTimestamptzData().Data = append(fieldData.GetScalars().GetTimestamptzData().GetData(), timestampVal)
 	case schemapb.DataType_Float:
 		floatVal, ok := val.(float32)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected float32, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected float32, got %T", val)
 		}
 		fieldData.GetScalars().GetFloatData().Data = append(fieldData.GetScalars().GetFloatData().GetData(), floatVal)
 	case schemapb.DataType_Double:
 		doubleVal, ok := val.(float64)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected float64, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected float64, got %T", val)
 		}
 		fieldData.GetScalars().GetDoubleData().Data = append(fieldData.GetScalars().GetDoubleData().GetData(), doubleVal)
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		stringVal, ok := val.(string)
 		if !ok {
-			return fmt.Errorf("type assertion failed: expected string, got %T", val)
+			return merr.WrapErrServiceInternalMsg("type assertion failed: expected string, got %T", val)
 		}
 		fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), stringVal)
 	default:
-		return fmt.Errorf("unsupported DataType:%d", fieldData.GetType())
+		return merr.WrapErrParameterInvalidMsg("unsupported DataType:%d", fieldData.GetType())
 	}
 	return nil
 }
@@ -544,13 +545,13 @@ func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []s
 			// 2. Global aggregation (no GROUP BY): output_fields can only contain aggregation expressions
 			//    (e.g., "SELECT count(*), int64 FROM t" is invalid SQL — cannot mix aggregates with raw columns)
 			if numGroupingKeys > 0 {
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrParameterInvalidMsg(
 					"output field '%s' is not allowed: when using GROUP BY, output_fields can only contain "+
 						"group_by fields (%v) or aggregation expressions",
 					outputField, groupByFields,
 				)
 			}
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrParameterInvalidMsg(
 				"output field '%s' is not allowed: when using aggregation functions (e.g., count(*)), "+
 					"output_fields can only contain aggregation expressions, not regular columns",
 				outputField,
@@ -566,14 +567,14 @@ func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []s
 // and returns a new Double FieldData containing the average values.
 func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData *schemapb.FieldData) (*schemapb.FieldData, error) {
 	if sumFieldData == nil || countFieldData == nil {
-		return nil, fmt.Errorf("sumFieldData and countFieldData cannot be nil")
+		return nil, merr.WrapErrServiceInternalMsg("sumFieldData and countFieldData cannot be nil")
 	}
 
 	sumType := sumFieldData.GetType()
 	countType := countFieldData.GetType()
 
 	if countType != schemapb.DataType_Int64 {
-		return nil, fmt.Errorf("count field must be Int64 type, got %s", countType.String())
+		return nil, merr.WrapErrParameterInvalidMsg("count field must be Int64 type, got %s", countType.String())
 	}
 
 	countData := countFieldData.GetScalars().GetLongData().GetData()
@@ -598,27 +599,27 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 	case schemapb.DataType_Int64:
 		sumData := sumFieldData.GetScalars().GetLongData().GetData()
 		if len(sumData) != rowCount {
-			return nil, fmt.Errorf("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
+			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
 		}
 		for i := 0; i < rowCount; i++ {
 			if countData[i] == 0 {
-				return nil, fmt.Errorf("division by zero: count is 0 at row %d", i)
+				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
 			}
 			resultData = append(resultData, float64(sumData[i])/float64(countData[i]))
 		}
 	case schemapb.DataType_Double:
 		sumData := sumFieldData.GetScalars().GetDoubleData().GetData()
 		if len(sumData) != rowCount {
-			return nil, fmt.Errorf("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
+			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
 		}
 		for i := 0; i < rowCount; i++ {
 			if countData[i] == 0 {
-				return nil, fmt.Errorf("division by zero: count is 0 at row %d", i)
+				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
 			}
 			resultData = append(resultData, sumData[i]/float64(countData[i]))
 		}
 	default:
-		return nil, fmt.Errorf("unsupported sum field type for avg computation: %s", sumType.String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported sum field type for avg computation: %s", sumType.String())
 	}
 
 	result.GetScalars().GetDoubleData().Data = resultData
