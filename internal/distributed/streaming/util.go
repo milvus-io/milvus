@@ -27,24 +27,27 @@ func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 
 	// dispatch the messages into different vchannel.
 	dispatchedMessages, indexes := u.dispatchMessages(msgs...)
-	if u.shouldBatchAppendMessages(dispatchedMessages) {
-		return u.appendMessagesByBatch(ctx, dispatchedMessages, indexes, len(msgs))
+	type batchTask struct {
+		indexes []int
+		respCh  <-chan types.AppendResponse
 	}
-
-	// If only one vchannel, append it directly without other goroutine.
-	if len(dispatchedMessages) == 1 {
-		return u.appendToVChannel(ctx, msgs[0].VChannel(), msgs...)
-	}
-
-	// Otherwise append the messages concurrently.
-	mu := &sync.Mutex{}
+	batchTasks := make([]batchTask, 0, len(dispatchedMessages))
 	resp := types.NewAppendResponseN(len(msgs))
 
 	wg := &sync.WaitGroup{}
-	wg.Add(len(dispatchedMessages))
-	for vchannel, msgs := range dispatchedMessages {
+	mu := &sync.Mutex{}
+	for vchannel, vchannelMsgs := range dispatchedMessages {
+		if u.shouldBatchAppendVChannelMessages(vchannel, vchannelMsgs...) {
+			batchTasks = append(batchTasks, batchTask{
+				indexes: indexes[vchannel],
+				respCh:  u.getAppendBatcher(vchannel).submit(ctx, vchannelMsgs...),
+			})
+			continue
+		}
+
+		wg.Add(1)
 		vchannel := vchannel
-		msgs := msgs
+		msgs := vchannelMsgs
 		idxes := indexes[vchannel]
 		u.dispatchExecutionPool.Submit(func() (struct{}, error) {
 			defer wg.Done()
@@ -58,29 +61,7 @@ func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 		})
 	}
 	wg.Wait()
-	return resp
-}
 
-func (u *walAccesserImpl) appendMessagesByBatch(
-	ctx context.Context,
-	dispatchedMessages map[string][]message.MutableMessage,
-	indexes map[string][]int,
-	totalMessageCount int,
-) AppendResponses {
-	type batchTask struct {
-		indexes []int
-		respCh  <-chan types.AppendResponse
-	}
-
-	batchTasks := make([]batchTask, 0, len(dispatchedMessages))
-	for vchannel, vchannelMsgs := range dispatchedMessages {
-		batchTasks = append(batchTasks, batchTask{
-			indexes: indexes[vchannel],
-			respCh:  u.getAppendBatcher(vchannel).submit(ctx, vchannelMsgs...),
-		})
-	}
-
-	resp := types.NewAppendResponseN(totalMessageCount)
 	for _, task := range batchTasks {
 		var batchResp types.AppendResponse
 		select {
@@ -95,22 +76,10 @@ func (u *walAccesserImpl) appendMessagesByBatch(
 	return resp
 }
 
-func (u *walAccesserImpl) shouldBatchAppendMessages(dispatchedMessages map[string][]message.MutableMessage) bool {
+func (u *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
 	if !u.appendBatchConfig.enabled() {
 		return false
 	}
-	if len(dispatchedMessages) == 0 {
-		return false
-	}
-	for vchannel, msgs := range dispatchedMessages {
-		if !u.shouldBatchAppendVChannelMessages(vchannel, msgs...) {
-			return false
-		}
-	}
-	return true
-}
-
-func (u *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
 	if u.getAppendBatcher(vchannel).inCooldown(time.Now()) {
 		return false
 	}
@@ -160,10 +129,6 @@ func (u *walAccesserImpl) closeAppendBatchers() {
 	for _, batcher := range batchers {
 		batcher.close()
 	}
-}
-
-func (u *walAccesserImpl) appendReplicateMessageToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
-	return u.appendToWAL(ctx, msg)
 }
 
 // AppendMessagesWithOption appends messages to the wal with the given option.

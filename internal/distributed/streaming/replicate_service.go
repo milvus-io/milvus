@@ -53,7 +53,7 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
-	return s.appendReplicateMessageToWAL(ctx, msg)
+	return s.appendToWAL(ctx, msg)
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
