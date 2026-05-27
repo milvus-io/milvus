@@ -11,6 +11,16 @@ from utils.util_common import get_collections
 fake = Faker()
 
 
+def _request_options(timeout_value, consistency_level, default_consistency_level="Strong"):
+    opts = {}
+    if timeout_value:
+        opts["timeout"] = float(timeout_value)
+    level = consistency_level or default_consistency_level
+    if level:
+        opts["consistency_level"] = level
+    return opts
+
+
 class TestAllCollection:
     """ Test case of end to end"""
 
@@ -44,9 +54,19 @@ class TestAllCollection:
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_default(self, collection_name, milvus_client):
+    def test_milvus_default(
+        self,
+        collection_name,
+        milvus_client,
+        search_timeout,
+        query_timeout,
+        search_consistency_level,
+        query_consistency_level,
+    ):
         # create
         name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        search_options = _request_options(search_timeout, search_consistency_level)
+        query_options = _request_options(query_timeout, query_consistency_level)
         t0 = time.time()
 
         # Get schema from existing collection
@@ -143,7 +163,7 @@ class TestAllCollection:
             anns_field=float_vector_field_name,
             search_params=dense_search_params,
             limit=1,
-            consistency_level="Strong"
+            **search_options,
         )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
@@ -160,7 +180,7 @@ class TestAllCollection:
                 anns_field=bm25_vec_field_name_list[0],
                 search_params=bm25_search_params,
                 limit=1,
-                consistency_level="Strong"
+                **search_options,
             )
             tt = time.time() - t0
             log.info(f"assert full text search: {tt}")
@@ -173,7 +193,7 @@ class TestAllCollection:
             collection_name=name,
             filter=term_expr,
             limit=5,
-            consistency_level="Strong"
+            **query_options,
         )
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
@@ -188,7 +208,7 @@ class TestAllCollection:
                 collection_name=name,
                 filter=expr,
                 limit=5,
-                consistency_level="Strong"
+                **query_options,
             )
             tt = time.time() - t0
             log.info(f"assert text match: {tt}")
@@ -216,7 +236,7 @@ class TestAllCollection:
             anns_field=float_vector_field_name,
             search_params=dense_search_params,
             limit=topk,
-            consistency_level="Strong"
+            **search_options,
         )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
@@ -234,7 +254,7 @@ class TestAllCollection:
                 anns_field=bm25_vec_field_name_list[0],
                 search_params=bm25_search_params,
                 limit=1,
-                consistency_level="Strong"
+                **search_options,
             )
             tt = time.time() - t0
             log.info(f"assert full text search: {tt}")
@@ -247,7 +267,7 @@ class TestAllCollection:
             collection_name=name,
             filter=term_expr,
             limit=5,
-            consistency_level="Strong"
+            **query_options,
         )
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
@@ -262,7 +282,7 @@ class TestAllCollection:
                 collection_name=name,
                 filter=expr,
                 limit=5,
-                consistency_level="Strong"
+                **query_options,
             )
             tt = time.time() - t0
             log.info(f"assert text match: {tt}")

@@ -32,6 +32,7 @@ from chaos.checker import (CollectionCreateChecker,
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
 from chaos import chaos_commons as cc
+from chaos import checker
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from chaos.chaos_commons import assert_statistic
@@ -123,10 +124,24 @@ class TestOperations(TestBase):
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_operations(self, request_duration, is_check):
+    def test_operations(
+        self,
+        request_duration,
+        is_check,
+        search_timeout,
+        query_timeout,
+        search_consistency_level,
+        query_consistency_level,
+    ):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
+        checker.configure_request_options(
+            search_timeout_value=search_timeout,
+            query_timeout_value=query_timeout,
+            search_consistency_level_value=search_consistency_level,
+            query_consistency_level_value=query_consistency_level,
+        )
         event_records = EventRecords()
         c_name = None
         event_records.insert("init_health_checkers", "start")
