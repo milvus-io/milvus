@@ -538,10 +538,8 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     // 50% valid: 50 per chunk * 2 chunks = 100
     ASSERT_EQ(offset_mapping.GetValidCount(), total_valid);
 
-    const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
-    ASSERT_EQ(valid_count_per_chunk.size(), chunk_num);
     for (int i = 0; i < chunk_num; i++) {
-        ASSERT_EQ(valid_count_per_chunk[i], valid_per_chunk);
+        ASSERT_EQ(column->GetValidCountInChunk(i), valid_per_chunk);
     }
 
     SearchInfo search_info;

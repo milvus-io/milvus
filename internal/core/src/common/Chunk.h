@@ -15,6 +15,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -139,7 +142,50 @@ class Chunk {
         return true;
     };
 
+    int64_t
+    PhysicalOffsetOf(int64_t logical_offset) const {
+        AssertInfo(logical_offset >= 0 && logical_offset < row_nums_,
+                   "Logical offset {} out of range, row nums {}",
+                   logical_offset,
+                   row_nums_);
+        if (!nullable_) {
+            return logical_offset;
+        }
+        AssertInfo(valid_[logical_offset],
+                   "Logical offset {} is null",
+                   logical_offset);
+        BuildValidRankBlocks();
+        const auto block_id = logical_offset / kValidRankBlockSize;
+        int64_t physical_offset = valid_rank_blocks_[block_id];
+        const auto block_start = block_id * kValidRankBlockSize;
+        for (int64_t i = block_start; i < logical_offset; ++i) {
+            physical_offset += valid_[i] ? 1 : 0;
+        }
+        return physical_offset;
+    }
+
  protected:
+    void
+    BuildValidRankBlocks() const {
+        std::call_once(valid_rank_blocks_once_, [&]() {
+            const auto num_blocks =
+                (row_nums_ + kValidRankBlockSize - 1) / kValidRankBlockSize;
+            valid_rank_blocks_.resize(num_blocks + 1);
+            int64_t valid_count = 0;
+            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
+                valid_rank_blocks_[block_id] = valid_count;
+                const auto block_start = block_id * kValidRankBlockSize;
+                const auto block_end =
+                    std::min(block_start + kValidRankBlockSize, row_nums_);
+                for (int64_t i = block_start; i < block_end; ++i) {
+                    valid_count += valid_[i] ? 1 : 0;
+                }
+            }
+            valid_rank_blocks_[num_blocks] = valid_count;
+        });
+    }
+
+    static constexpr int64_t kValidRankBlockSize = 256;
     char* data_;
     int64_t row_nums_;
     uint64_t size_;
@@ -148,6 +194,8 @@ class Chunk {
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard_{nullptr};
+    mutable std::once_flag valid_rank_blocks_once_;
+    mutable std::vector<int64_t> valid_rank_blocks_;
 };
 
 // for fixed size data, includes fixed size array

@@ -384,12 +384,15 @@ class ChunkedColumn : public ChunkedColumnBase {
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] =
-            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
-                      : ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
-            fn(ca->get_cell_of(cids[i])->ValueAt(offsets_in_chunk[i]), i);
+            auto chunk = ca->get_cell_of(cids[i]);
+            auto offset = offsets_in_chunk[i];
+            if (nullable_ && IsVectorDataType(data_type_)) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            fn(chunk->ValueAt(offset), i);
         }
     }
 
@@ -473,14 +476,16 @@ class ChunkedColumn : public ChunkedColumnBase {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] =
-            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
-                      : ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
-            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            auto offset = offsets_in_chunk[i];
+            if (nullable_) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            auto value = chunk->ValueAt(offset);
             memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
@@ -674,10 +679,13 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
-            auto array =
-                static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]))
-                    ->View(offsets_in_chunk[i])
-                    .output_data();
+            auto chunk =
+                static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]));
+            auto offset = offsets_in_chunk[i];
+            if (nullable_) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            auto array = chunk->View(offset).output_data();
             fn(std::move(array), i);
         }
     }

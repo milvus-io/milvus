@@ -146,7 +146,8 @@ template <typename T>
 BinarySet
 VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
-    bool all_null_nullable = IsAllNullNullable(offset_mapping_);
+    const auto& offset_mapping = GetOffsetMapping();
+    bool all_null_nullable = IsAllNullNullable(offset_mapping);
     if (!all_null_nullable) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success)
@@ -155,7 +156,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
                       KnowhereStatusString(stat));
     }
 
-    AppendValidDataToBinarySet(offset_mapping_, ret);
+    AppendValidDataToBinarySet(offset_mapping, ret);
     Disassemble(ret);
 
     return ret;

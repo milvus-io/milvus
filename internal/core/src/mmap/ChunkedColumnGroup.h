@@ -415,15 +415,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] =
-            field_meta_.is_nullable()
-                ? ToChunkIdAndOffsetByPhysical(offsets, count)
-                : ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
-            fn(chunk->ValueAt(offsets_in_chunk[i]), i);
+            auto offset = offsets_in_chunk[i];
+            if (field_meta_.is_nullable() && IsVectorDataType(data_type_)) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            fn(chunk->ValueAt(offset), i);
         }
     }
 
@@ -508,16 +509,17 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] =
-            field_meta_.is_nullable()
-                ? ToChunkIdAndOffsetByPhysical(offsets, count)
-                : ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
-            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            auto offset = offsets_in_chunk[i];
+            if (field_meta_.is_nullable()) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            auto value = chunk->ValueAt(offset);
             memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
@@ -659,8 +661,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
+            auto offset = offsets_in_chunk[i];
+            if (field_meta_.is_nullable()) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
             auto array = static_cast<VectorArrayChunk*>(chunk.get())
-                             ->View(offsets_in_chunk[i])
+                             ->View(offset)
                              .output_data();
             fn(std::move(array), i);
         }
