@@ -130,6 +130,70 @@ class TestCreateIndex(TestBase):
         rsp = self.index_client.index_list(collection_name=name)
         assert rsp['data'] == []
 
+    @pytest.mark.parametrize("dim", [128])
+    def test_create_vanilla_faiss_index(self, dim):
+        """
+        target: test create vanilla Faiss index
+        method: create a float vector collection and create FAISS index with faiss_index_name
+        expected: create index success and metadata persisted
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        logger.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        c = Collection(name)
+        c.flush()
+
+        index_name = "book_intro_faiss"
+        index_params = {"faiss_index_name": "IVF64,Flat"}
+        payload = {
+            "collectionName": name,
+            "indexParams": [
+                {"fieldName": "book_intro", "indexName": index_name,
+                 "metricType": "L2",
+                 "indexType": "FAISS",
+                 "params": index_params
+                 }
+            ]
+        }
+        rsp = self.index_client.index_create(payload)
+        assert rsp['code'] == 0
+
+        time.sleep(10)
+        rsp = self.index_client.index_list(collection_name=name)
+        assert rsp['code'] == 0
+        assert index_name in rsp['data']
+
+        rsp = self.index_client.index_describe(collection_name=name, index_name=index_name)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == 1
+        actual_index = rsp['data'][0]
+        assert actual_index['fieldName'] == "book_intro"
+        assert actual_index['indexName'] == index_name
+        assert actual_index['metricType'] == "L2"
+        assert actual_index["indexType"] == "FAISS"
+
+        index_info = [index.to_dict() for index in c.indexes]
+        logger.info(f"index_info: {index_info}")
+        assert len(index_info) == 1
+        index_param = index_info[0]["index_param"]
+        assert index_param["metric_type"] == "L2"
+        assert index_param["index_type"] == "FAISS"
+        persisted_params = index_param.get("params", {})
+        assert persisted_params["faiss_index_name"] == index_params["faiss_index_name"]
+
     @pytest.mark.parametrize("index_type", ["INVERTED"])
     @pytest.mark.parametrize("dim", [128])
     def test_index_for_scalar_field(self, dim, index_type):
