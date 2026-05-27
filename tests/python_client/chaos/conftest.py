@@ -37,6 +37,21 @@ def pytest_addoption(parser):
         help="path to external ChaosMesh YAML template (overrides built-in config)",
     )
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
+    parser.addoption("--search_timeout", action="store", type=float, default=None, help="search API timeout in seconds")
+    parser.addoption("--query_timeout", action="store", type=float, default=None, help="query API timeout in seconds")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_client_timeouts(request):
+    import chaos.checker as checker
+
+    search_timeout = request.config.getoption("--search_timeout")
+    query_timeout = request.config.getoption("--query_timeout")
+
+    if search_timeout is not None:
+        checker.search_timeout = search_timeout
+    if query_timeout is not None:
+        checker.query_timeout = query_timeout
 
 
 @pytest.fixture
