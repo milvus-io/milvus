@@ -917,7 +917,7 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     load_conf["index_files"] = index_files;
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
-    load_conf[DIM_KEY] = dim;
+    load_conf[DIM_KEY] = std::to_string(dim);
     loaded_vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_TRUE(loaded_vec_index->HasValidData());
     EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);

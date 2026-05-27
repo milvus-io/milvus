@@ -270,10 +270,21 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
     TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
 
-    VectorPtr match_result;
-    inputs_[0]->Eval(eval_ctx, match_result);
     auto match_type = expr_->get_match_type();
     int64_t threshold = expr_->get_count();
+
+    VectorPtr match_result;
+    if (elem_count > 0) {
+        if (!has_offset_input_) {
+            element_offsets_storage.reserve(elem_count);
+            for (int64_t i = 0; i < elem_count; ++i) {
+                element_offsets_storage.emplace_back(
+                    static_cast<int32_t>(elem_start + i));
+            }
+            eval_ctx.set_offset_input(&element_offsets_storage);
+        }
+        inputs_[0]->Eval(eval_ctx, match_result);
+    }
     if (match_result == nullptr) {
         AssertInfo(elem_count == 0,
                    "Match child returned empty result for non-empty element "
