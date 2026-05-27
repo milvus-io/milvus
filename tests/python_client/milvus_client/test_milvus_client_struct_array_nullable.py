@@ -86,31 +86,77 @@ class StructArrayNullableSchemaSpec:
 class StructArrayNullableIndexSpec:
     normal_vector_index_type: str
     normal_vector_metric_type: str
-    struct_vector_index_type: str
-    struct_vector_metric_type: str
+    normal_vector_diskann_index_type: str
+    normal_vector_diskann_metric_type: str
+    struct_vector_hnsw_index_type: str
+    struct_vector_hnsw_metric_type: str
     struct_vector_hnsw_m: int
     struct_vector_hnsw_ef_construction: int
+    struct_vector_diskann_index_type: str
+    struct_vector_diskann_metric_type: str
 
     @property
-    def struct_vector_index_params(self) -> dict[str, int]:
+    def struct_vector_index_type(self) -> str:
+        return self.struct_vector_hnsw_index_type
+
+    @property
+    def struct_vector_metric_type(self) -> str:
+        return self.struct_vector_hnsw_metric_type
+
+    @property
+    def normal_vector_diskann_index_params(self) -> dict[str, Any]:
+        return {}
+
+    @property
+    def struct_vector_hnsw_index_params(self) -> dict[str, int]:
         return {
             "M": self.struct_vector_hnsw_m,
             "efConstruction": self.struct_vector_hnsw_ef_construction,
         }
 
+    @property
+    def struct_vector_index_params(self) -> dict[str, int]:
+        return self.struct_vector_hnsw_index_params
+
+    @property
+    def struct_vector_diskann_index_params(self) -> dict[str, Any]:
+        return {}
+
 
 @dataclass(frozen=True)
 class StructArrayNullableSearchSpec:
     normal_vector_metric_type: str
-    struct_vector_metric_type: str
+    normal_vector_diskann_metric_type: str
+    normal_vector_diskann_search_list: int
+    struct_vector_hnsw_metric_type: str
+    struct_vector_diskann_metric_type: str
+    struct_vector_diskann_search_list: int
+
+    @property
+    def struct_vector_metric_type(self) -> str:
+        return self.struct_vector_hnsw_metric_type
 
     @property
     def normal_vector_search_params(self) -> dict[str, Any]:
         return {"metric_type": self.normal_vector_metric_type, "params": {}}
 
     @property
+    def normal_vector_diskann_search_params(self) -> dict[str, Any]:
+        return {
+            "metric_type": self.normal_vector_diskann_metric_type,
+            "params": {"search_list": self.normal_vector_diskann_search_list},
+        }
+
+    @property
     def struct_vector_search_params(self) -> dict[str, Any]:
         return {"metric_type": self.struct_vector_metric_type}
+
+    @property
+    def struct_vector_diskann_search_params(self) -> dict[str, Any]:
+        return {
+            "metric_type": self.struct_vector_diskann_metric_type,
+            "params": {"search_list": self.struct_vector_diskann_search_list},
+        }
 
 
 DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
@@ -137,17 +183,28 @@ DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
 DEFAULT_INDEX_SPEC = StructArrayNullableIndexSpec(
     normal_vector_index_type="FLAT",
     normal_vector_metric_type="L2",
-    struct_vector_index_type="HNSW",
-    struct_vector_metric_type="MAX_SIM_COSINE",
+    normal_vector_diskann_index_type="DISKANN",
+    normal_vector_diskann_metric_type="L2",
+    struct_vector_hnsw_index_type="HNSW",
+    struct_vector_hnsw_metric_type="MAX_SIM_COSINE",
     struct_vector_hnsw_m=16,
     struct_vector_hnsw_ef_construction=200,
+    struct_vector_diskann_index_type="DISKANN",
+    struct_vector_diskann_metric_type="MAX_SIM_COSINE",
 )
 DEFAULT_SEARCH_SPEC = StructArrayNullableSearchSpec(
     normal_vector_metric_type="L2",
-    struct_vector_metric_type="MAX_SIM_COSINE",
+    normal_vector_diskann_metric_type="L2",
+    normal_vector_diskann_search_list=30,
+    struct_vector_hnsw_metric_type="MAX_SIM_COSINE",
+    struct_vector_diskann_metric_type="MAX_SIM_COSINE",
+    struct_vector_diskann_search_list=30,
 )
 default_dim = DEFAULT_SCHEMA_SPEC.vector_dim
-INDEX_PARAMS = DEFAULT_INDEX_SPEC.struct_vector_index_params
+HNSW_INDEX_PARAMS = DEFAULT_INDEX_SPEC.struct_vector_hnsw_index_params
+INDEX_PARAMS = HNSW_INDEX_PARAMS
+NORMAL_VECTOR_DISKANN_INDEX_PARAMS = DEFAULT_INDEX_SPEC.normal_vector_diskann_index_params
+STRUCT_VECTOR_DISKANN_INDEX_PARAMS = DEFAULT_INDEX_SPEC.struct_vector_diskann_index_params
 PK_FIELD = DEFAULT_SCHEMA_SPEC.pk_field
 VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.vector_field
 TAG_FIELD = DEFAULT_SCHEMA_SPEC.tag_field
@@ -169,14 +226,22 @@ TAG_MAX_LENGTH = DEFAULT_SCHEMA_SPEC.tag_max_length
 STRUCT_MAX_CAPACITY = DEFAULT_SCHEMA_SPEC.struct_max_capacity
 NORMAL_VECTOR_INDEX_TYPE = DEFAULT_INDEX_SPEC.normal_vector_index_type
 NORMAL_VECTOR_METRIC_TYPE = DEFAULT_INDEX_SPEC.normal_vector_metric_type
+NORMAL_VECTOR_DISKANN_INDEX_TYPE = DEFAULT_INDEX_SPEC.normal_vector_diskann_index_type
+NORMAL_VECTOR_DISKANN_METRIC_TYPE = DEFAULT_INDEX_SPEC.normal_vector_diskann_metric_type
+STRUCT_VECTOR_HNSW_INDEX_TYPE = DEFAULT_INDEX_SPEC.struct_vector_hnsw_index_type
+STRUCT_VECTOR_HNSW_METRIC_TYPE = DEFAULT_INDEX_SPEC.struct_vector_hnsw_metric_type
 STRUCT_VECTOR_INDEX_TYPE = DEFAULT_INDEX_SPEC.struct_vector_index_type
 STRUCT_VECTOR_METRIC_TYPE = DEFAULT_INDEX_SPEC.struct_vector_metric_type
+STRUCT_VECTOR_DISKANN_INDEX_TYPE = DEFAULT_INDEX_SPEC.struct_vector_diskann_index_type
+STRUCT_VECTOR_DISKANN_METRIC_TYPE = DEFAULT_INDEX_SPEC.struct_vector_diskann_metric_type
 STRUCT_INT_FIELD = DEFAULT_SCHEMA_SPEC.struct_int_field
 STRUCT_TAG_FIELD = DEFAULT_SCHEMA_SPEC.struct_tag_field
 STRUCT_VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.struct_vector_field
 ALL_ROWS_FILTER = DEFAULT_SCHEMA_SPEC.all_rows_filter
 NORMAL_VECTOR_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.normal_vector_search_params
+NORMAL_VECTOR_DISKANN_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.normal_vector_diskann_search_params
 STRUCT_VECTOR_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.struct_vector_search_params
+STRUCT_VECTOR_DISKANN_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.struct_vector_diskann_search_params
 OMITTED_FIELD = object()
 
 
