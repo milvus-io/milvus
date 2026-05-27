@@ -56,6 +56,22 @@ using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
 
+TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
+    HybridScalarIndex<int64_t> int_index(7);
+    std::vector<int64_t> int_data{1, 2, 3, 4};
+    int_index.Build(int_data.size(), int_data.data());
+    EXPECT_FALSE(int_index.ShouldUseOp(proto::plan::OpType::Match));
+    EXPECT_TRUE(int_index.ShouldUseOp(proto::plan::OpType::Equal));
+
+    HybridScalarIndex<std::string> string_index(7);
+    std::vector<std::string> string_data{"alpha", "beta", "alphabet"};
+    string_index.Build(string_data.size(), string_data.data());
+    EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::Match));
+    EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::PrefixMatch));
+    EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(string_index.ShouldUseOp(proto::plan::OpType::Equal));
+}
+
 template <typename T>
 static std::vector<T>
 GenerateData(const size_t size, const size_t cardinality) {

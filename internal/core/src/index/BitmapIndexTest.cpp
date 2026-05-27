@@ -524,6 +524,38 @@ class BitmapIndexTest : public testing::Test {
         }
     }
 
+    void
+    TestPatternMatchFunc() {
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
+            auto like_bitset =
+                index_ptr->PatternMatch("1%", proto::plan::OpType::Match);
+            auto regex_bitset = index_ptr->PatternMatch(
+                "^1.*", proto::plan::OpType::RegexMatch);
+            ASSERT_EQ(like_bitset.size(), index_ptr->Count());
+            ASSERT_EQ(regex_bitset.size(), index_ptr->Count());
+
+            size_t start = 0;
+            if (has_lack_binlog_row_) {
+                for (int i = 0; i < lack_binlog_row_; i++) {
+                    ASSERT_FALSE(like_bitset[i]);
+                    ASSERT_FALSE(regex_bitset[i]);
+                }
+                start += lack_binlog_row_;
+            }
+
+            for (size_t i = start; i < like_bitset.size(); i++) {
+                auto data_offset = i - start;
+                auto expected = data_[data_offset].rfind("1", 0) == 0;
+                if (nullable_ && !valid_data_[data_offset]) {
+                    expected = false;
+                }
+                ASSERT_EQ(like_bitset[i], expected);
+                ASSERT_EQ(regex_bitset[i], expected);
+            }
+        }
+    }
+
  public:
     IndexBasePtr index_;
     DataType type_;
@@ -569,6 +601,10 @@ TYPED_TEST_P(BitmapIndexTest, IsNotNullFuncTest) {
     this->TestIsNotNullFunc();
 }
 
+TYPED_TEST_P(BitmapIndexTest, PatternMatchFuncTest) {
+    this->TestPatternMatchFunc();
+}
+
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
@@ -578,7 +614,8 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTest,
                             NotINFuncTest,
                             CompareValFuncTest,
                             IsNullFuncTest,
-                            IsNotNullFuncTest);
+                            IsNotNullFuncTest,
+                            PatternMatchFuncTest);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapE2ECheck, BitmapIndexTest, BitmapType);
 
@@ -629,6 +666,10 @@ TYPED_TEST_P(BitmapIndexTestV2, IsNotNullFuncTest) {
     this->TestIsNotNullFunc();
 }
 
+TYPED_TEST_P(BitmapIndexTestV2, PatternMatchFuncTest) {
+    this->TestPatternMatchFunc();
+}
+
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
@@ -639,7 +680,8 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV2,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest,
                             IsNullFuncTest,
-                            IsNotNullFuncTest);
+                            IsNotNullFuncTest,
+                            PatternMatchFuncTest);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_HighCardinality,
                                BitmapIndexTestV2,
@@ -693,6 +735,10 @@ TYPED_TEST_P(BitmapIndexTestV3, IsNotNullFuncTest) {
     this->TestIsNotNullFunc();
 }
 
+TYPED_TEST_P(BitmapIndexTestV3, PatternMatchFuncTest) {
+    this->TestPatternMatchFunc();
+}
+
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
@@ -703,7 +749,8 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV3,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest,
                             IsNullFuncTest,
-                            IsNotNullFuncTest);
+                            IsNotNullFuncTest,
+                            PatternMatchFuncTest);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
                                BitmapIndexTestV3,

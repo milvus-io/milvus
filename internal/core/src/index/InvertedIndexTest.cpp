@@ -76,6 +76,25 @@ using namespace milvus::segcore;
 
 namespace milvus::test {
 
+TEST(InvertedIndex, PatternMatchPlannerPolicy) {
+    index::InvertedIndexTantivy<std::string> index;
+
+    EXPECT_TRUE(index.SupportPatternMatch());
+    EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::PrefixMatch));
+    EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::Equal));
+    EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::Match));
+    EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::InnerMatch));
+    EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::PostfixMatch));
+
+    index::InvertedIndexTantivy<int64_t> int_index;
+    EXPECT_FALSE(int_index.SupportPatternMatch());
+    EXPECT_FALSE(int_index.ShouldUseOp(proto::plan::OpType::Match));
+    EXPECT_FALSE(int_index.ShouldUseOp(proto::plan::OpType::PrefixMatch));
+    EXPECT_FALSE(int_index.ShouldUseOp(proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(int_index.ShouldUseOp(proto::plan::OpType::Equal));
+}
+
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
     }
@@ -876,9 +895,9 @@ test_string() {
         }
 
         {
-            ASSERT_TRUE(real_index->SupportPatternQuery());
             auto prefix = data[0];
-            auto bitset = real_index->PatternQuery(prefix + "%");
+            auto bitset =
+                real_index->PatternMatch(prefix + "%", proto::plan::Match);
             ASSERT_EQ(cnt, bitset.size());
             size_t start = 0;
             if (has_lack_binlog_row_) {
