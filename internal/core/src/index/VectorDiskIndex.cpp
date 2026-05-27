@@ -363,6 +363,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                       KnowhereStatusString(stat));
         span_load_engine->End();
         SetDim(index_.Dim());
+        SetMemSize(index_.Size());
     } else {
         auto dim = GetValueFromConfig<int64_t>(load_config, DIM_KEY);
         if (dim.has_value()) {
@@ -383,7 +384,6 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                  disk_valid_data.bitmap.data(),
                                  offset_mapping_options);
     }
-    SetMemSize(index_.Size());
 }
 
 template <typename T>
