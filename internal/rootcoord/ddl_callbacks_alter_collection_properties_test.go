@@ -24,18 +24,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
@@ -484,6 +484,218 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 }
 
+func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionTTLExtSpec" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Create as external collection with both source and spec atomically set.
+	// Alter is no longer permitted to mutate source/spec; the TTL alter must
+	// nevertheless preserve them when it triggers a schema snapshot rebuild.
+	testSchema := &schemapb.CollectionSchema{
+		Name:           collectionName,
+		Description:    "description",
+		AutoID:         false,
+		ExternalSource: "s3://bucket/ttl-path",
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, ExternalField: "ttl"},
+			{
+				Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		ShardsNum:        1,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+
+	// Alter TTL field only — must preserve previously persisted external source/spec.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+
+	// TTL with invalid field name still rejected.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "nonexistent_field"},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func assertExternalSource(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSource string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, expectedSource, coll.ExternalSource)
+}
+
+func assertExternalSpec(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSpec string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, expectedSpec, coll.ExternalSpec)
+}
+
+// TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec verifies
+// rootcoord accepts external_source/external_spec updates via AlterCollection.
+// User-facing rejection lives in the proxy layer (see issue #49335); rootcoord
+// trusts internal callers so the refresh-completion sync path
+// (updateExternalSchemaViaWAL) can persist a new tuple after a successful
+// override refresh.
+func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testAcceptExt" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	testSchema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+		},
+		ExternalSource: "s3://bucket/old/",
+		ExternalSpec:   `{"format":"parquet"}`,
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/old/")
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+}
+
+// Regression for #49335: refresh override path may carry source-only updates
+// (or spec-only) since the tuple is preserved by the refresh manager. A
+// partial alter must not blank the unspecified half by writing an empty
+// string into the schema snapshot.
+func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOther(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testPartialExt" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	testSchema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+		},
+		ExternalSource: "s3://bucket/old/",
+		ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-east-1"}}`,
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Source-only update; spec must be preserved verbatim.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"region":"us-east-1"}}`)
+}
+
+// Regression for #49335: alter that mixes external_source with a regular
+// property (e.g. consistency level or replica number) must update both halves
+// — the external tuple goes to the schema snapshot and the regular property
+// to the Properties map. Neither side may swallow the other.
+func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testMixedExt" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	testSchema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+		},
+		ExternalSource: "s3://bucket/old/",
+		ExternalSpec:   `{"format":"parquet"}`,
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
+			{Key: common.CollectionReplicaNumber, Value: "2"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
+	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
+}
+
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
@@ -533,7 +745,7 @@ func createCollectionAndAliasForTest(t *testing.T, ctx context.Context, core *Co
 }
 
 func assertReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, replicaNumber int64) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	replicaNum, err := common.CollectionLevelReplicaNumber(coll.Properties)
 	if replicaNumber == 0 {
@@ -545,7 +757,7 @@ func assertReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName s
 }
 
 func assertResourceGroups(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, resourceGroups []string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	rgs, err := common.CollectionLevelResourceGroups(coll.Properties)
 	if len(resourceGroups) == 0 {
@@ -557,25 +769,25 @@ func assertResourceGroups(t *testing.T, ctx context.Context, core *Core, dbName 
 }
 
 func assertConsistencyLevel(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, consistencyLevel commonpb.ConsistencyLevel) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, consistencyLevel, coll.ConsistencyLevel)
 }
 
 func assertDescription(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, description string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, description, coll.Description)
 }
 
 func assertSchemaVersion(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, schemaVersion int32) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, schemaVersion, coll.SchemaVersion)
 }
 
 func assertDynamicSchema(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, dynamicSchema bool) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, dynamicSchema, coll.EnableDynamicField)
 	if !dynamicSchema {

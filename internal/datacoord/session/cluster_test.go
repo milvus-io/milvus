@@ -24,14 +24,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func init() {
@@ -198,7 +198,7 @@ func TestCluster_Compaction(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{})
+		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{}, 100)
 		assert.NoError(t, err)
 	})
 
@@ -218,6 +218,9 @@ func TestCluster_Compaction(t *testing.T) {
 					Segments: []*datapb.CompactionSegment{
 						{
 							SegmentID: 1,
+							Deltalogs: []*datapb.FieldBinlog{{
+								Binlogs: []*datapb.Binlog{{LogID: 10, LogPath: "files/insert_log/1/2/3/_delta/not-log-id-suffix"}},
+							}},
 						},
 					},
 				},
@@ -237,6 +240,7 @@ func TestCluster_Compaction(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, int64(1), result.PlanID)
+		assert.Equal(t, "files/insert_log/1/2/3/_delta/not-log-id-suffix", result.GetSegments()[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	})
 
 	t.Run("drop compaction", func(t *testing.T) {
@@ -703,7 +707,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			PlanID:    1,
 			SlotUsage: 1,
 		}
-		err := cluster.CreateCompaction(1, req)
+		err := cluster.CreateCompaction(1, req, 100)
 		assert.NoError(t, err)
 	})
 
@@ -753,6 +757,94 @@ func TestCluster_CreateProperties(t *testing.T) {
 			Version:  1,
 		}
 		err := cluster.CreateAnalyze(1, req)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCluster_CreateProperties_CollectionID(t *testing.T) {
+	const expectedCollectionID int64 = 778899
+
+	mockNodeManager := NewMockNodeManager(t)
+	cluster := NewCluster(mockNodeManager)
+	mockClient := mocks.NewMockDataNodeClient(t)
+	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+	// The expectation is intentionally shared by all sub-tests; testify/mock
+	// allows unlimited calls unless Once/Times is specified.
+	mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+		props := taskcommon.NewProperties(req.GetProperties())
+		collectionID, err := props.GetCollectionID()
+		return assert.NoError(t, err) && assert.Equal(t, expectedCollectionID, collectionID,
+			"collection_id must be propagated into task properties")
+	})).Return(merr.Success(), nil)
+
+	t.Run("CreateCompaction", func(t *testing.T) {
+		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, expectedCollectionID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreatePreImport", func(t *testing.T) {
+		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		}, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateImport", func(t *testing.T) {
+		err := cluster.CreateImport(1, &datapb.ImportRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		}, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateIndex", func(t *testing.T) {
+		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{
+			BuildID:      1,
+			TaskSlot:     1,
+			NumRows:      1000,
+			IndexVersion: 1,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateStats", func(t *testing.T) {
+		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{
+			TaskID:       1,
+			TaskSlot:     1,
+			NumRows:      1000,
+			TaskVersion:  1,
+			SubJobType:   indexpb.StatsSubJob_Sort,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateAnalyze", func(t *testing.T) {
+		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{
+			TaskID:       1,
+			TaskSlot:     1,
+			Version:      1,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateCopySegment", func(t *testing.T) {
+		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
+			TaskID:   1,
+			TaskSlot: 1,
+		}, expectedCollectionID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateRefreshExternalCollectionTask", func(t *testing.T) {
+		err := cluster.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		})
 		assert.NoError(t, err)
 	})
 }
@@ -934,7 +1026,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req)
+		err := cluster.CreateCopySegment(1, req, 100)
 		assert.NoError(t, err)
 	})
 
@@ -950,7 +1042,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req)
+		err := cluster.CreateCopySegment(1, req, 100)
 		assert.Error(t, err)
 	})
 

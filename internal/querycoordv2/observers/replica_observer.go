@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // check replica, find read only nodes and remove it from replica if all segment/channel has been moved
@@ -139,7 +139,7 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 			}
 			removeNodes := make([]int64, 0, len(roSQNodes))
 			for _, node := range roSQNodes {
-				channels := ob.distMgr.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+				channels := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(node))
 				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
 				if len(channels) == 0 && len(segments) == 0 {
 					removeNodes = append(removeNodes, node)
@@ -155,7 +155,7 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 				zap.Int64s("roNodes", roSQNodes),
 				zap.Int64s("rwNodes", rwSQNodes),
 			)
-			if err := ob.meta.RemoveSQNode(ctx, replica.GetID(), removeNodes...); err != nil {
+			if err := ob.meta.RemoveSQNode(ctx, collectionID, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove streaming query node from replica", zap.Error(err))
 				continue
 			}
@@ -204,7 +204,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			log.RatedInfo(10, "found ro nodes in replica")
 			removeNodes := make([]int64, 0, len(roNodes))
 			for _, node := range roNodes {
-				channels := ob.distMgr.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+				channels := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(node))
 				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
 				if len(channels) == 0 && len(segments) == 0 {
 					removeNodes = append(removeNodes, node)
@@ -213,7 +213,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			if len(removeNodes) == 0 {
 				continue
 			}
-			if err := ob.meta.RemoveNode(ctx, replica.GetID(), removeNodes...); err != nil {
+			if err := ob.meta.RemoveNode(ctx, collectionID, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove node from replica",
 					zap.Int64s("removedNodes", removeNodes),
 					zap.Error(err))

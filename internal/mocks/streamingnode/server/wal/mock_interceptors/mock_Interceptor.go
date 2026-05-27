@@ -6,7 +6,7 @@ import (
 	context "context"
 
 	interceptors "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
 )

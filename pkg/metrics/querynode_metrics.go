@@ -22,7 +22,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -267,16 +267,6 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeReadTaskUnsolveLen = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "read_task_unsolved_len",
-			Help:      "number of unsolved read tasks in unsolvedQueue",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	QueryNodeReadTaskReadyLen = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -285,6 +275,40 @@ var (
 			Help:      "number of ready read tasks in readyQueue",
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskReadyNQ = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_ready_nq",
+			Help:      "total NQ of ready read tasks in scheduler queue",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskQueueDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_queue_duration",
+			Help:      "duration in milliseconds that read tasks stay in scheduler policy queue",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
+		})
+
+	QueryNodeReadTaskExecuteDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_execute_duration",
+			Help:      "duration in milliseconds that read tasks spend in scheduler execution pool",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
 		})
 
 	QueryNodeReadTaskConcurrency = prometheus.NewGaugeVec(
@@ -903,6 +927,17 @@ var (
 			reasonLabelName,
 		})
 
+	QueryNodeGlobalRefineCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "global_refine_total",
+			Help:      "total number of search requests for which global refine was applied",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
 	// Pool metric descriptors (used by PoolMetricsCollector)
 	QueryNodePoolCapacityDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_capacity"),
@@ -936,8 +971,10 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
-	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
+	registry.MustRegister(QueryNodeReadTaskReadyNQ)
+	registry.MustRegister(QueryNodeReadTaskQueueDuration)
+	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
 	registry.MustRegister(QueryNodeEstimateCPUUsage)
 	registry.MustRegister(QueryNodeSearchGroupNQ)
@@ -996,6 +1033,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeTwoStageFilterLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchFallbackCount)
+	registry.MustRegister(QueryNodeGlobalRefineCount)
 	// Pool metrics collector (pull model — collectFn set later via SetPoolCollectFn)
 	registry.MustRegister(&poolMetricsCollector{})
 	// Add cgo metrics
@@ -1029,6 +1067,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
+	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.

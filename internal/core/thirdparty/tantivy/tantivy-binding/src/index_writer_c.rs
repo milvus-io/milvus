@@ -460,6 +460,20 @@ pub extern "C" fn tantivy_index_add_json(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_index_add_json_batch(
+    ptr: *mut c_void,
+    array: *const *const c_char,
+    len: usize,
+    offset_begin: i64,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = convert_to_rust_slice!(array, len);
+        (*real).add_json_batch(arr, offset_begin).into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_index_add_array_json(
     ptr: *mut c_void,
     array: *const *const c_char,

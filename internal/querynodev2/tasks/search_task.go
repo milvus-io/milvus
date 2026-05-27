@@ -14,20 +14,20 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/resource"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -94,6 +94,10 @@ func (t *SearchTask) GetNodeID() int64 {
 
 func (t *SearchTask) IsGpuIndex() bool {
 	return t.collection.IsGpuIndex()
+}
+
+func (t *SearchTask) Context() context.Context {
+	return t.ctx
 }
 
 func (t *SearchTask) PreExecute() error {
@@ -257,6 +261,7 @@ func (t *SearchTask) Execute() error {
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
 		searchReq.Plan(),
+		searchReq.PlaceholderGroup(),
 		results,
 		int64(len(results)),
 		t.originNqs,
@@ -368,13 +373,13 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 
 	// Check mergeable
 	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
+		t.req.GetEnableExprCache() != other.req.GetEnableExprCache() ||
 		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
-		nq+otherNq > paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64() ||
-		diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat() ||
+		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
@@ -405,10 +410,6 @@ func (t *SearchTask) Done(err error) {
 	}
 }
 
-func (t *SearchTask) Canceled() error {
-	return t.ctx.Err()
-}
-
 func (t *SearchTask) Wait() error {
 	return <-t.notifier
 }
@@ -426,6 +427,19 @@ func (t *SearchTask) SearchResult() *internalpb.SearchResults {
 
 func (t *SearchTask) NQ() int64 {
 	return t.nq
+}
+
+func (t *SearchTask) MinNQ() int64 {
+	if len(t.originNqs) == 0 {
+		return t.nq
+	}
+	minNQ := t.originNqs[0]
+	for _, nq := range t.originNqs[1:] {
+		if nq < minNQ {
+			minNQ = nq
+		}
+	}
+	return minNQ
 }
 
 func (t *SearchTask) MergeWith(other scheduler.Task) bool {

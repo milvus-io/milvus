@@ -38,8 +38,13 @@ std::pair<int32_t, int32_t>
 ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
     assert(elem_id >= 0 && elem_id < GetTotalElementCount());
 
-    int32_t row_id = element_row_ids_[elem_id];
-    // Compute elem_idx: elem_idx = elem_id - start_of_this_row
+    // Binary search: find the row where elem_id belongs
+    // row_to_element_start_[row_id] <= elem_id < row_to_element_start_[row_id + 1]
+    auto it = std::upper_bound(
+        row_to_element_start_.begin(), row_to_element_start_.end(), elem_id);
+    int32_t row_id = static_cast<int32_t>(
+        std::distance(row_to_element_start_.begin(), it) - 1);
+
     int32_t elem_idx = elem_id - row_to_element_start_[row_id];
     return {row_id, elem_idx};
 }
@@ -93,12 +98,13 @@ FixedVector<int32_t>
 ArrayOffsetsSealed::RowBitsetToElementOffsets(
     const TargetBitmapView& row_bitset, int64_t row_start) const {
     int64_t row_count = row_bitset.size();
-    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+    int64_t total_rows = GetRowCount();
+    AssertInfo(row_start >= 0 && row_start + row_count <= total_rows,
                "row range out of bounds: row_start={}, row_count={}, "
                "total_rows={}",
                row_start,
                row_count,
-               GetRowCount());
+               total_rows);
 
     int64_t selected_rows = row_bitset.count();
     FixedVector<int32_t> element_offsets;
@@ -106,9 +112,7 @@ ArrayOffsetsSealed::RowBitsetToElementOffsets(
         return element_offsets;
     }
 
-    int64_t avg_elem_per_row =
-        static_cast<int64_t>(element_row_ids_.size()) /
-        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+    int64_t avg_elem_per_row = GetTotalElementCount() / total_rows;
 
     element_offsets.reserve(selected_rows * avg_elem_per_row);
 
@@ -135,10 +139,8 @@ ArrayOffsetsSealed::RowOffsetsToElementOffsets(
     }
 
     int32_t row_count = GetRowCount();
-    int64_t avg_elem_per_row =
-        (row_count > 0)
-            ? static_cast<int64_t>(element_row_ids_.size()) / row_count
-            : 1;
+    int64_t avg_elem_per_row = GetTotalElementCount() / row_count;
+
     element_offsets.reserve(row_offsets.size() * avg_elem_per_row);
     for (auto row_id : row_offsets) {
         assert(row_id >= 0 && row_id < row_count);
@@ -187,24 +189,21 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
             "ArrayOffsetsSealed::BuildFromSegment: empty segment for struct "
             "'{}'",
             field_meta.get_name().get());
-        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{},
-                                                    std::vector<int32_t>{0});
+        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0});
     }
 
     FieldId field_id = field_meta.get_id();
     auto data_type = field_meta.get_data_type();
 
-    std::vector<int32_t> element_row_ids;
     // Size is row_count + 1, last element stores total_element_count
     std::vector<int32_t> row_to_element_start(row_count + 1);
-    // Pre-reserve element_row_ids assuming average 4 elements per row
-    element_row_ids.reserve(row_count * 4);
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
 
     int64_t num_chunks = seg->num_chunk(field_id);
     int32_t current_row_id = 0;
+    int32_t total_elements = 0;
 
     if (data_type == DataType::VECTOR_ARRAY) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
@@ -218,14 +217,8 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                     array_len = vector_array_views[i].length();
                 }
 
-                // Record the start position for this row
-                row_to_element_start[current_row_id] = element_row_ids.size();
-
-                // Add row_id for each element (elem_idx computed on access)
-                for (int32_t j = 0; j < array_len; ++j) {
-                    element_row_ids.emplace_back(current_row_id);
-                }
-
+                row_to_element_start[current_row_id] = total_elements;
+                total_elements += array_len;
                 current_row_id++;
             }
         }
@@ -241,28 +234,20 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                     array_len = array_views[i].length();
                 }
 
-                // Record the start position for this row
-                row_to_element_start[current_row_id] = element_row_ids.size();
-
-                // Add row_id for each element (elem_idx computed on access)
-                for (int32_t j = 0; j < array_len; ++j) {
-                    element_row_ids.emplace_back(current_row_id);
-                }
-
+                row_to_element_start[current_row_id] = total_elements;
+                total_elements += array_len;
                 current_row_id++;
             }
         }
     }
 
     // Store total element count as the last entry
-    row_to_element_start[row_count] = element_row_ids.size();
+    row_to_element_start[row_count] = total_elements;
 
     AssertInfo(current_row_id == row_count,
                "Row count mismatch: expected {}, got {}",
                row_count,
                current_row_id);
-
-    int64_t total_elements = element_row_ids.size();
 
     LOG_INFO(
         "ArrayOffsetsSealed::BuildFromSegment: struct_name='{}', "
@@ -272,9 +257,10 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         row_count,
         total_elements);
 
-    auto result = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
-    result->resource_size_ = 4 * (row_count + 1) + 4 * total_elements;
+    auto result =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    // Memory usage: only row_to_element_start_ (4 bytes per entry)
+    result->resource_size_ = 4 * (row_count + 1);
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -283,10 +269,16 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
 std::pair<int32_t, int32_t>
 ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     std::shared_lock lock(mutex_);
-    assert(elem_id >= 0 &&
-           elem_id < static_cast<int32_t>(element_row_ids_.size()));
-    int32_t row_id = element_row_ids_[elem_id];
-    // Compute elem_idx: elem_idx = elem_id - start_of_this_row
+    int64_t total_elements =
+        row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
+    assert(elem_id >= 0 && elem_id < total_elements);
+
+    // Binary search: find the row where elem_id belongs
+    auto it = std::upper_bound(
+        row_to_element_start_.begin(), row_to_element_start_.end(), elem_id);
+    int32_t row_id = static_cast<int32_t>(
+        std::distance(row_to_element_start_.begin(), it) - 1);
+
     int32_t elem_idx = elem_id - row_to_element_start_[row_id];
     return {row_id, elem_idx};
 }
@@ -325,12 +317,15 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     TargetBitmap element_bitset(element_count);
     TargetBitmap valid_element_bitset(element_count);
 
-    for (int64_t elem_id = element_start; elem_id < element_end; ++elem_id) {
-        auto row_id = element_row_ids_[elem_id];
-        int64_t bitset_idx = row_id - row_start;
-        element_bitset[elem_id - element_start] = row_bitset[bitset_idx];
-        valid_element_bitset[elem_id - element_start] =
-            valid_row_bitset[bitset_idx];
+    // Use row-based iteration (more efficient than element-based)
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = row_to_element_start_[row_id] - element_start;
+        int64_t end = row_to_element_start_[row_id + 1] - element_start;
+        if (start < end) {
+            element_bitset.set(start, end - start, row_bitset[i]);
+            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
+        }
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
@@ -354,9 +349,9 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
     if (selected_rows == 0) {
         return element_offsets;
     }
-    int64_t avg_elem_per_row =
-        static_cast<int64_t>(element_row_ids_.size()) /
-        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+
+    int64_t total_elements = row_to_element_start_.back();
+    int64_t avg_elem_per_row = total_elements / committed_row_count_;
     element_offsets.reserve(selected_rows * avg_elem_per_row);
 
     for (int64_t i = 0; i < row_count; ++i) {
@@ -383,11 +378,8 @@ ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
         return element_offsets;
     }
 
-    int64_t avg_elem_per_row =
-        (committed_row_count_ > 0)
-            ? static_cast<int64_t>(element_row_ids_.size()) /
-                  committed_row_count_
-            : 1;
+    int64_t total_elements = row_to_element_start_.back();
+    int64_t avg_elem_per_row = total_elements / committed_row_count_;
     element_offsets.reserve(row_offsets.size() * avg_elem_per_row);
 
     for (auto row_id : row_offsets) {
@@ -436,33 +428,32 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
 
     row_to_element_start_.reserve(row_id_start + count + 1);
 
-    // Estimate total elements needed and reserve capacity
-    int64_t total_elements = 0;
-    for (int64_t i = 0; i < count; ++i) {
-        total_elements += array_lengths[i];
-    }
-    element_row_ids_.reserve(element_row_ids_.size() + total_elements);
-
-    int32_t original_committed_count = committed_row_count_;
-
     for (int64_t i = 0; i < count; ++i) {
         int32_t row_id = row_id_start + i;
         int32_t array_len = array_lengths[i];
 
         if (row_id == committed_row_count_) {
+            // Get current total element count (from sentinel or compute)
+            int32_t current_total = row_to_element_start_.empty()
+                                        ? 0
+                                        : row_to_element_start_.back();
+
             // Record the start position for this row
-            // If sentinel exists at current position, overwrite it; otherwise push_back
             if (row_to_element_start_.size() >
                 static_cast<size_t>(committed_row_count_)) {
-                row_to_element_start_[committed_row_count_] =
-                    element_row_ids_.size();
+                // Sentinel exists, overwrite it with row start
+                row_to_element_start_[committed_row_count_] = current_total;
             } else {
-                row_to_element_start_.push_back(element_row_ids_.size());
+                row_to_element_start_.push_back(current_total);
             }
 
-            // Add row_id for each element (elem_idx computed on access)
-            for (int32_t j = 0; j < array_len; ++j) {
-                element_row_ids_.emplace_back(row_id);
+            // Update sentinel (new total after this row)
+            int32_t new_total = current_total + array_len;
+            if (row_to_element_start_.size() >
+                static_cast<size_t>(committed_row_count_ + 1)) {
+                row_to_element_start_[committed_row_count_ + 1] = new_total;
+            } else {
+                row_to_element_start_.push_back(new_total);
             }
 
             committed_row_count_++;
@@ -472,17 +463,6 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
     }
 
     DrainPendingRows();
-
-    // Update the sentinel (total element count) only if we committed new rows
-    if (committed_row_count_ > original_committed_count) {
-        if (row_to_element_start_.size() ==
-            static_cast<size_t>(committed_row_count_)) {
-            row_to_element_start_.push_back(element_row_ids_.size());
-        } else {
-            row_to_element_start_[committed_row_count_] =
-                element_row_ids_.size();
-        }
-    }
 }
 
 void
@@ -495,17 +475,27 @@ ArrayOffsetsGrowing::DrainPendingRows() {
 
         const auto& pending = it->second;
 
+        // Get current total element count
+        int32_t current_total =
+            (committed_row_count_ > 0)
+                ? row_to_element_start_[committed_row_count_]
+                : 0;
+
         // If sentinel exists at current position, overwrite it; otherwise push_back
         if (row_to_element_start_.size() >
             static_cast<size_t>(committed_row_count_)) {
-            row_to_element_start_[committed_row_count_] =
-                element_row_ids_.size();
+            row_to_element_start_[committed_row_count_] = current_total;
         } else {
-            row_to_element_start_.push_back(element_row_ids_.size());
+            row_to_element_start_.push_back(current_total);
         }
 
-        for (int32_t j = 0; j < pending.array_len; ++j) {
-            element_row_ids_.emplace_back(static_cast<int32_t>(pending.row_id));
+        // Update sentinel for next row
+        int32_t new_total = current_total + pending.array_len;
+        if (row_to_element_start_.size() >
+            static_cast<size_t>(committed_row_count_ + 1)) {
+            row_to_element_start_[committed_row_count_ + 1] = new_total;
+        } else {
+            row_to_element_start_.push_back(new_total);
         }
 
         committed_row_count_++;

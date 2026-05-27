@@ -27,18 +27,18 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Not concurrent safe.
@@ -115,17 +115,21 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 
 func (w *MultiSegmentWriter) closeWriter() error {
 	if w.writer != nil {
-		if err := w.writer.Close(); err != nil {
+		writer := w.writer
+		w.writer = nil
+		if err := writer.Close(); err != nil {
 			return err
 		}
 
-		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := w.writer.GetLogs()
+		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := writer.GetLogs()
+		rowNum := writer.GetRowNum()
+		writtenUncompressed := writer.GetWrittenUncompressed()
 
 		result := &datapb.CompactionSegment{
 			SegmentID:           w.currentSegmentID,
 			InsertLogs:          storage.SortFieldBinlogs(fieldBinlogs),
 			Field2StatslogPaths: []*datapb.FieldBinlog{statsLog},
-			NumOfRows:           w.writer.GetRowNum(),
+			NumOfRows:           rowNum,
 			Channel:             w.channel,
 			Bm25Logs:            lo.Values(bm25Logs),
 			StorageVersion:      w.storageVersion,
@@ -138,8 +142,8 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		log.Info("created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
-			zap.Int64("totalRows", w.writer.GetRowNum()),
-			zap.Uint64("totalSize", w.writer.GetWrittenUncompressed()),
+			zap.Int64("totalRows", rowNum),
+			zap.Uint64("totalSize", writtenUncompressed),
 			zap.Int64("expected segment size", w.segmentSize),
 			zap.Int64("storageVersion", w.storageVersion))
 	}

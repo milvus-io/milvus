@@ -21,11 +21,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDDLCallbacksAlterCollectionName(t *testing.T) {
@@ -80,10 +80,10 @@ func TestDDLCallbacksAlterCollectionName(t *testing.T) {
 		NewName: newCollectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	require.Nil(t, coll)
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.NotNil(t, coll)
 	require.Equal(t, coll.Name, newCollectionName)
@@ -100,10 +100,10 @@ func TestDDLCallbacksAlterCollectionName(t *testing.T) {
 		NewName:   newCollectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	require.Nil(t, coll)
-	coll, err = core.meta.GetCollectionByName(ctx, newDbName, newCollectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, newDbName, newCollectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.NotNil(t, coll)
 	require.Equal(t, coll.Name, newCollectionName)
@@ -117,16 +117,16 @@ func TestDDLCallbacksAlterCollectionName(t *testing.T) {
 		NewName:   collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	coll, err = core.meta.GetCollectionByName(ctx, newDbName, newCollectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, newDbName, newCollectionName, typeutil.MaxTimestamp, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	require.Nil(t, coll)
-	coll, err = core.meta.GetCollectionByName(ctx, newDbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, newDbName, collectionName, typeutil.MaxTimestamp, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	require.Nil(t, coll)
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, newCollectionName, typeutil.MaxTimestamp, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	require.Nil(t, coll)
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.NotNil(t, coll)
 	require.Equal(t, coll.Name, collectionName)

@@ -34,6 +34,8 @@ std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
     DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
 
+std::atomic<bool> JSON_KEY_STATS_ENABLED(DEFAULT_JSON_KEY_STATS_ENABLED);
+
 std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
     DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
 std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
@@ -66,6 +68,13 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
+}
+
+void
+SetDefaultJSONKeyStatsEnable(bool val) {
+    JSON_KEY_STATS_ENABLED.store(val);
+    LOG_INFO("set default json key stats enabled: {}",
+             JSON_KEY_STATS_ENABLED.load());
 }
 
 void

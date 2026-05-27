@@ -25,12 +25,12 @@ import (
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ Segment = (*L0Segment)(nil)
@@ -129,6 +129,10 @@ func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
 
+func (s *L0Segment) IsLazyLoad() bool {
+	return false
+}
+
 func (s *L0Segment) ResetIndexesLazyLoad(lazyState bool) {
 }
 
@@ -207,4 +211,10 @@ func (s *L0Segment) RemoveUnusedFieldFiles() error {
 
 func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return nil
+}
+
+// FlushData is not supported for L0 segments.
+// L0 segments contain only delete data, not insert data.
+func (s *L0Segment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+	return nil, merr.WrapErrServiceInternal("FlushData not supported for L0 segment")
 }

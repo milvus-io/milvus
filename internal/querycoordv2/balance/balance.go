@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Balance is the interface that all balancers must implement.
@@ -186,7 +186,7 @@ func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.R
 	channelsToMove := make([]*meta.DmChannel, 0)
 
 	for _, node := range rwNodes {
-		channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 		channels = sortIfChannelAtWALLocated(channels)
 
 		if len(channels) <= average {

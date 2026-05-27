@@ -32,6 +32,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -42,8 +44,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -59,24 +61,25 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -143,6 +146,9 @@ type QueryNode struct {
 	lastModifyTs   int64
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// binlogSaver for TEXT collection growing segment flush
+	binlogSaver segments.BinlogSaver
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -242,6 +248,18 @@ func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 	}
 }
 
+func (node *QueryNode) ReconfigArrowReaderParams(evt *config.Event) {
+	if evt.HasUpdated {
+		if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+			log.Ctx(node.ctx).Warn("QueryNode failed to reconfigure arrow reader params", zap.Error(err))
+			return
+		}
+		log.Ctx(node.ctx).Info("QueryNode reconfig arrow reader params successfully",
+			zap.Int64("holeSizeLimitBytes", paramtable.Get().CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			zap.Int64("rangeSizeLimitBytes", paramtable.Get().CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+	}
+}
+
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
@@ -270,6 +288,38 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
+	arrowIOThreadHandler := func(key string) func(evt *config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newThreads := initcore.ResolveArrowIOThreadPoolCapacity()
+			initcore.UpdateArrowIOThreadPoolCapacity(newThreads)
+			log.Info("arrow io thread pool capacity updated",
+				zap.String("trigger", key),
+				zap.Int("threads", newThreads))
+		}
+	}
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
+		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
+			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
+			log.Info("queryNode.segcore.storageV2.cellTargetSizeBytes updated",
+				zap.Int64("bytes", newBytes))
+		}))
+	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, node.ReconfigArrowReaderParams))
+	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, node.ReconfigArrowReaderParams))
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
@@ -399,6 +449,8 @@ func (node *QueryNode) Init() error {
 			return
 		}
 		node.RegisterSegcoreConfigWatcher()
+
+		cleanupOrphanedSpilloverFiles(node.GetNodeID())
 
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
@@ -549,6 +601,11 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
+// SetBinlogSaver sets the BinlogSaver for TEXT collection growing segment flush.
+func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
+	node.binlogSaver = saver
+}
+
 func (node *QueryNode) GetAddress() string {
 	return node.address
 }
@@ -609,4 +666,28 @@ func (node *QueryNode) handleQueryHookEvent() {
 	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
 
 	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+}
+
+// cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files
+// from previous QueryNode runs
+func cleanupOrphanedSpilloverFiles(nodeID int64) {
+	mmapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
+	spilloverDir := filepath.Join(mmapDir, "growing_lob")
+
+	if _, err := os.Stat(spilloverDir); os.IsNotExist(err) {
+		return
+	}
+
+	log.Info("cleaning up orphaned TEXT LOB spillover files",
+		zap.String("path", spilloverDir))
+
+	if err := os.RemoveAll(spilloverDir); err != nil {
+		log.Warn("failed to clean up orphaned TEXT LOB spillover files",
+			zap.String("path", spilloverDir),
+			zap.Error(err))
+		return
+	}
+
+	log.Info("orphaned TEXT LOB spillover files cleaned up",
+		zap.String("path", spilloverDir))
 }

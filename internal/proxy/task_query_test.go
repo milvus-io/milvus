@@ -29,20 +29,20 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestQueryTask_all(t *testing.T) {
@@ -382,7 +382,7 @@ func TestQueryTask_all(t *testing.T) {
 			}
 			if groupByField != "" {
 				queryParams = append(queryParams, &commonpb.KeyValuePair{
-					Key:   QueryGroupByFieldsKey,
+					Key:   GroupByFieldsKey,
 					Value: groupByField,
 				})
 			}
@@ -746,7 +746,7 @@ func TestTaskQuery_functions(t *testing.T) {
 						Value: test.inValue[i],
 					})
 				}
-				ret, err := parseQueryParams(inParams, false)
+				ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 				if test.expectErr {
 					assert.Error(t, err)
 					assert.Empty(t, ret)
@@ -770,7 +770,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrderForBest, ret.reduceType)
 		}
@@ -784,7 +784,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "TrueXXXX",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -798,7 +798,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -809,7 +809,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting iterator tag, ignore reduce_stop_for_best
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
 		}
@@ -820,7 +820,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting reduce_stop_for_best tag, reduce by keep results in order
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -834,7 +834,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -848,9 +848,166 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "False",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
+		}
+	})
+
+	t.Run("test parseQueryParams for query iterator cursor", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err := parseQueryParams(params, false, schemapb.DataType_Int64)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		require.NotNil(t, ret.queryIteratorCursor.LastIntPk)
+		assert.EqualValues(t, 7, ret.queryIteratorCursor.GetLastIntPk())
+		assert.EqualValues(t, 2, ret.queryIteratorCursor.GetLastElementOffset())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "pk-7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_VarChar)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		assert.Equal(t, "pk-7", ret.queryIteratorCursor.GetLastStrPk())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "-1"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+	})
+
+	t.Run("test parseQueryIteratorCursor", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			params        []*commonpb.KeyValuePair
+			isIterator    bool
+			pkDataType    schemapb.DataType
+			wantNil       bool
+			wantIntPK     int64
+			checkIntPK    bool
+			wantStrPK     string
+			wantOffset    int64
+			wantErrSubstr string
+		}{
+			{
+				name:       "no cursor params",
+				params:     nil,
+				isIterator: true,
+				pkDataType: schemapb.DataType_Int64,
+				wantNil:    true,
+			},
+			{
+				name:       "int64 pk with zero offset",
+				params:     []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "0"}},
+				isIterator: true,
+				pkDataType: schemapb.DataType_Int64,
+				wantIntPK:  7,
+				checkIntPK: true,
+				wantOffset: 0,
+			},
+			{
+				name:       "varchar pk",
+				params:     []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "pk-7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator: true,
+				pkDataType: schemapb.DataType_VarChar,
+				wantStrPK:  "pk-7",
+				wantOffset: 2,
+			},
+			{
+				name:          "cursor params require iterator",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    false,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "invalid query iterator cursor params",
+			},
+			{
+				name:          "missing offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "incomplete query iterator cursor params",
+			},
+			{
+				name:          "missing pk",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "incomplete query iterator cursor params",
+			},
+			{
+				name:          "invalid offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "abc"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last element offset is invalid",
+			},
+			{
+				name:          "negative offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "-1"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last element offset is invalid",
+			},
+			{
+				name:          "invalid int64 pk",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "abc"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last primary key is invalid",
+			},
+			{
+				name:          "unsupported pk type",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int32,
+				wantErrSubstr: "unsupported primary key type",
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				cursor, err := parseQueryIteratorCursor(test.params, test.isIterator, test.pkDataType)
+				if test.wantErrSubstr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), test.wantErrSubstr)
+					assert.Nil(t, cursor)
+					return
+				}
+				require.NoError(t, err)
+				if test.wantNil {
+					assert.Nil(t, cursor)
+					return
+				}
+				require.NotNil(t, cursor)
+				assert.Equal(t, test.wantOffset, cursor.GetLastElementOffset())
+				if test.checkIntPK {
+					require.NotNil(t, cursor.LastIntPk)
+					assert.Equal(t, test.wantIntPK, cursor.GetLastIntPk())
+				}
+				if test.wantStrPK != "" {
+					require.NotNil(t, cursor.LastStrPk)
+					assert.Equal(t, test.wantStrPK, cursor.GetLastStrPk())
+				}
+			})
 		}
 	})
 

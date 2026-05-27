@@ -26,15 +26,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -473,6 +473,9 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		}
 	case schemapb.DataType_ArrayOfVector:
 		vectorArrayData := singleData.(*VectorArrayFieldData)
+		if vectorArrayData.Nullable {
+			return fmt.Errorf("nullable ArrayOfVector is not supported in V1 storage format")
+		}
 		if err = eventWriter.AddVectorArrayFieldDataToPayload(vectorArrayData); err != nil {
 			return err
 		}
@@ -891,10 +894,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 				ElementType: GetVectorElementType(singleData[0]),
 			}
 		}
-		VectorArrayFieldData := fieldData.(*VectorArrayFieldData)
+		vectorArrayFieldData := fieldData.(*VectorArrayFieldData)
 
-		VectorArrayFieldData.Data = append(VectorArrayFieldData.Data, singleData...)
-		insertData.Data[fieldID] = VectorArrayFieldData
+		if len(validData) > 0 {
+			return 0, fmt.Errorf("nullable ArrayOfVector is not supported in V1 storage format")
+		}
+		vectorArrayFieldData.Data = append(vectorArrayFieldData.Data, singleData...)
+		insertData.Data[fieldID] = vectorArrayFieldData
 		return len(singleData), nil
 
 	default:

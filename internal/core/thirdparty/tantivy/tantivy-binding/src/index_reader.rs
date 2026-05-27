@@ -13,7 +13,7 @@ use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
-use crate::index_reader_c::SetBitsetFn;
+use crate::index_reader_c::{RegexMatchFn, SetBitsetFn};
 use crate::log::init_log;
 use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::{c_ptr_to_str, make_bounds};
@@ -24,6 +24,10 @@ use crate::error::{Result, TantivyBindingError};
 // Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
 // TermSetQuery when larger than this threshold. This value is based on some experiments.
 const BATCH_THRESHOLD: usize = 10000;
+
+// Threshold for JSON batch-in query. JSON term construction is more expensive (path encoding),
+// so TermSetQuery becomes beneficial at a lower threshold than for non-JSON fields.
+const JSON_BATCH_THRESHOLD: usize = 10;
 
 #[allow(dead_code)]
 pub(crate) struct IndexReaderWrapper {
@@ -416,6 +420,56 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
+    pub fn regex_match_query(
+        &self,
+        matcher_ctx: *mut c_void,
+        matcher: RegexMatchFn,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let searcher = self.reader.searcher();
+        let bitset_wrapper = BitsetWrapper::new(bitset, self.set_bitset);
+
+        for segment_reader in searcher.segment_readers() {
+            let inverted_index = segment_reader.inverted_index(self.field)?;
+            let term_dict = inverted_index.terms();
+            let mut stream = term_dict.stream()?;
+            let doc_id_column = if self.id_field.is_some() {
+                Some(segment_reader.fast_fields().i64("doc_id")?)
+            } else {
+                None
+            };
+
+            while stream.advance() {
+                let term = stream.key();
+                if !matcher(matcher_ctx, term.as_ptr(), term.len()) {
+                    continue;
+                }
+
+                let term_info = stream.value();
+                let mut block_segment_postings = inverted_index
+                    .read_block_postings_from_terminfo(term_info, IndexRecordOption::Basic)?;
+                loop {
+                    let docs = block_segment_postings.docs();
+                    if docs.is_empty() {
+                        break;
+                    }
+                    if let Some(column) = &doc_id_column {
+                        let doc_ids: Vec<_> = column
+                            .values_for_docs_flatten(docs)
+                            .into_iter()
+                            .map(|doc_id| doc_id as u32)
+                            .collect();
+                        bitset_wrapper.batch_set(&doc_ids);
+                    } else {
+                        bitset_wrapper.batch_set(docs);
+                    }
+                    block_segment_postings.advance();
+                }
+            }
+        }
+        Ok(())
+    }
+
     // JSON related query methods
     // These methods support querying JSON fields with different data types
 
@@ -464,6 +518,88 @@ impl IndexReaderWrapper {
         let mut json_term = Term::from_field_json_path(self.field, json_path, false);
         json_term.append_type_and_str(term);
         let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
+    // Batch JSON terms queries - execute all terms in a single search when possible
+    pub fn json_terms_query_i64(
+        &self,
+        json_path: &str,
+        terms: &[i64],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        if terms.len() < JSON_BATCH_THRESHOLD {
+            return terms
+                .iter()
+                .try_for_each(|&term| self.json_term_query_i64(json_path, term, bitset));
+        }
+        let term_vec: Vec<_> = terms
+            .iter()
+            .map(|&t| {
+                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+                json_term.append_type_and_fast_value(t);
+                json_term
+            })
+            .collect();
+        let q = TermSetQuery::new(term_vec);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_terms_query_f64(
+        &self,
+        json_path: &str,
+        terms: &[f64],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        if terms.len() < JSON_BATCH_THRESHOLD {
+            return terms
+                .iter()
+                .try_for_each(|&term| self.json_term_query_f64(json_path, term, bitset));
+        }
+        let term_vec: Vec<_> = terms
+            .iter()
+            .map(|&t| {
+                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+                json_term.append_type_and_fast_value(t);
+                json_term
+            })
+            .collect();
+        let q = TermSetQuery::new(term_vec);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_terms_query_bool(
+        &self,
+        json_path: &str,
+        terms: &[bool],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // bool has at most 2 distinct values, always use per-term
+        terms
+            .iter()
+            .try_for_each(|&term| self.json_term_query_bool(json_path, term, bitset))
+    }
+
+    pub fn json_terms_query_keyword(
+        &self,
+        json_path: &str,
+        terms: &[*const c_char],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        if terms.len() < JSON_BATCH_THRESHOLD {
+            return terms.iter().try_for_each(|&term| {
+                let term_str = c_ptr_to_str(term)?;
+                self.json_term_query_keyword(json_path, term_str, bitset)
+            });
+        }
+        let mut term_vec = Vec::with_capacity(terms.len());
+        for &term in terms {
+            let term_str = c_ptr_to_str(term)?;
+            let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+            json_term.append_type_and_str(term_str);
+            term_vec.push(json_term);
+        }
+        let q = TermSetQuery::new(term_vec);
         self.search(&q, bitset)
     }
 

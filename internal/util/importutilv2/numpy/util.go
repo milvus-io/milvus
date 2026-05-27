@@ -33,13 +33,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -97,7 +97,7 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
 		}
-		retryableReader := common.NewRetryableReader(ctx, path, reader)
+		retryableReader := common.NewRetryableReaderWithReopen(ctx, path, reader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 		readers[field.GetFieldID()] = retryableReader
 		readFields[field.GetName()] = field.GetFieldID()
 	}

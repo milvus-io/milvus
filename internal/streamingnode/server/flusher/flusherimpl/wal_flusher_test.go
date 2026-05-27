@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -26,16 +29,18 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -112,6 +117,117 @@ func TestWALFlusher(t *testing.T) {
 	flusher := RecoverWALFlusher(param)
 	time.Sleep(5 * time.Second)
 	flusher.Close()
+}
+
+func TestWALFlusher_DispatchDefersAckSyncUpDropCollectionObserve(t *testing.T) {
+	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["vchannel-1"] = newDataSyncServiceWrapper(
+		"vchannel-1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, message.ImmutableMessage) error {
+			_, ok := flusher.flusherComponents.dataServices["vchannel-1"]
+			require.False(t, ok)
+			return errors.New("observe failed")
+		}).
+		Once()
+
+	msg := newAckSyncUpDropCollectionMessage(t, "vchannel-1")
+
+	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
+}
+
+func TestWALFlusher_DispatchObservesAckSyncUpTruncateCollectionBeforeHandling(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(errors.New("observe failed")).Once()
+
+	flusher := newTestWALFlusher(rs)
+	msg := newAckSyncUpTruncateCollectionMessage(t, "vchannel-1")
+
+	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
+}
+
+func TestWALFlusher_DispatchObservesTruncateCollectionBeforeHandlingWithoutAckSyncUp(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(errors.New("observe failed")).Once()
+
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents = nil
+	msg := newTruncateCollectionMessage(t, "vchannel-1")
+
+	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
+}
+
+func newTestWALFlusher(rs recovery.RecoveryStorage) *WALFlusherImpl {
+	return &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          log.With(),
+		RecoveryStorage: rs,
+		flusherComponents: &flusherComponents{
+			dataServices: make(map[string]*dataSyncServiceWrapper),
+			logger:       log.With(),
+			rs:           rs,
+		},
+	}
+}
+
+func newAckSyncUpDropCollectionMessage(t *testing.T, vchannel string) message.ImmutableMessage {
+	t.Helper()
+	broadcast := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&msgpb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{},
+		}).
+		WithBroadcast([]string{vchannel}, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast().
+		WithBroadcastID(1)
+	msgs := broadcast.SplitIntoMutableMessage()
+	require.Len(t, msgs, 1)
+	return msgs[0].
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(1)).
+		IntoImmutableMessage(rmq.NewRmqID(2))
+}
+
+func newAckSyncUpTruncateCollectionMessage(t *testing.T, vchannel string) message.ImmutableMessage {
+	t.Helper()
+	broadcast := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		WithBroadcast([]string{vchannel}, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast().
+		WithBroadcastID(1)
+	msgs := broadcast.SplitIntoMutableMessage()
+	require.Len(t, msgs, 1)
+	return msgs[0].
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(1)).
+		IntoImmutableMessage(rmq.NewRmqID(2))
+}
+
+func newTruncateCollectionMessage(t *testing.T, vchannel string) message.ImmutableMessage {
+	t.Helper()
+	return message.NewTruncateCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.TruncateCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(1)).
+		IntoImmutableMessage(rmq.NewRmqID(2))
 }
 
 func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {

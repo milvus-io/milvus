@@ -269,7 +269,8 @@ CreateIndex(CIndex* res_index,
             build_index_info->field_schema().name(),
             field_type,
             build_index_info->dim(),
-            index_non_encoding};
+            index_non_encoding,
+            build_index_info->index_store_path_version()};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
         LOG_INFO("create chunk manager success, build_id: {}",
@@ -287,6 +288,14 @@ CreateIndex(CIndex* res_index,
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
+            // For external collections, inject extfs.{collID}.* from build_index_info
+            if (!build_index_info->external_source().empty()) {
+                InjectExternalSpecProperties(
+                    *loon_properties,
+                    build_index_info->collectionid(),
+                    build_index_info->external_source(),
+                    build_index_info->external_spec());
+            }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
 
@@ -396,6 +405,14 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
+            // For external collections, inject extfs.{collID}.* from build_index_info
+            if (!build_index_info->external_source().empty()) {
+                InjectExternalSpecProperties(
+                    *loon_properties,
+                    build_index_info->collectionid(),
+                    build_index_info->external_source(),
+                    build_index_info->external_spec());
+            }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
 

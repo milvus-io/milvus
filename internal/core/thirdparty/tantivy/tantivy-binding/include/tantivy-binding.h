@@ -93,6 +93,8 @@ struct RustResult {
 
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
 
+using RegexMatchFn = bool(*)(void*, const uint8_t*, uintptr_t);
+
 struct TantivyToken {
   const char *token;
   int64_t start_offset;
@@ -242,6 +244,11 @@ RustResult tantivy_regex_query(void *ptr,
                                uintptr_t pattern_len,
                                void *bitset);
 
+RustResult tantivy_regex_match_query(void *ptr,
+                                     void *matcher_ctx,
+                                     RegexMatchFn matcher,
+                                     void *bitset);
+
 RustResult tantivy_json_term_query_i64(void *ptr,
                                        const char *json_path,
                                        int64_t term,
@@ -255,6 +262,30 @@ RustResult tantivy_json_term_query_keyword(void *ptr,
                                            const char *json_path,
                                            const char *term,
                                            void *bitset);
+
+RustResult tantivy_json_terms_query_i64(void *ptr,
+                                        const char *json_path,
+                                        const int64_t *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_f64(void *ptr,
+                                        const char *json_path,
+                                        const double *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_bool(void *ptr,
+                                         const char *json_path,
+                                         const bool *terms,
+                                         uintptr_t len,
+                                         void *bitset);
+
+RustResult tantivy_json_terms_query_keyword(void *ptr,
+                                            const char *json_path,
+                                            const char *const *terms,
+                                            uintptr_t len,
+                                            void *bitset);
 
 RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
 
@@ -432,6 +463,11 @@ RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
                                                           uintptr_t len);
 
 RustResult tantivy_index_add_json(void *ptr, const char *s, int64_t offset);
+
+RustResult tantivy_index_add_json_batch(void *ptr,
+                                        const char *const *array,
+                                        uintptr_t len,
+                                        int64_t offset_begin);
 
 RustResult tantivy_index_add_array_json(void *ptr,
                                         const char *const *array,

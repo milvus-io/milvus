@@ -22,11 +22,11 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CompressSaveBinlogPaths(req *datapb.SaveBinlogPathsRequest) error {
@@ -133,9 +133,14 @@ func DecompressBinLogs(s *datapb.SegmentInfo) error {
 	if err != nil {
 		return err
 	}
-	err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetDeltalogs())
-	if err != nil {
-		return err
+	// V3 segments store delta data in the manifest; Deltalogs entries are
+	// pathless summary placeholders for compaction triggers — skip V1 path
+	// reconstruction which would generate wrong paths.
+	if s.GetManifestPath() == "" {
+		err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetDeltalogs())
+		if err != nil {
+			return err
+		}
 	}
 	err = DecompressBinLog(storage.StatsBinlog, collectionID, partitionID, segmentID, s.GetStatslogs())
 	if err != nil {

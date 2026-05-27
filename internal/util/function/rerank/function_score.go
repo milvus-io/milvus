@@ -21,7 +21,7 @@ package rerank
 import (
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // Segment scorer (boost) constants — used by plan_parser_v2.go

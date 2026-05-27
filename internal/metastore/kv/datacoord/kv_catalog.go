@@ -28,25 +28,25 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Catalog struct {
@@ -133,8 +133,9 @@ func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*dat
 			return err
 		}
 
-		// Restore full paths for text index logs (compatible with old version)
-		// segments from etcd may have filenames only in TextStatsLogs
+		// Restore full paths for text index logs (compatible with old version).
+		// JsonKeyStats.Files intentionally remain relative in SegmentInfo; callers
+		// that need full paths should rebuild them with the segment's V2/V3 basePath.
 		metautil.BuildTextLogPaths(
 			kc.ChunkManagerRootPath,
 			segmentInfo.GetCollectionID(),
@@ -142,6 +143,7 @@ func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*dat
 			segmentInfo.GetID(),
 			segmentInfo.GetTextStatsLogs(),
 		)
+		metautil.ExtractJSONKeyStatsRelativePaths(segmentInfo.GetJsonKeyStats())
 
 		segments = append(segments, segmentInfo)
 		return nil
@@ -295,7 +297,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		resetBinlogFields(cloned)
 
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
-		if cloned.GetNumOfRows() != rowCount {
+		if rowCount > 0 && cloned.GetNumOfRows() != rowCount {
 			cloned.NumOfRows = rowCount
 		}
 
@@ -314,6 +316,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		kvs[k] = v
 	}
 
+	var removals []string
 	for _, b := range binlogs {
 		segment := b.Segment
 
@@ -330,9 +333,32 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		}
 
 		maps.Copy(kvs, binlogKvs)
+
+		for _, fid := range b.DroppedBinlogFieldIDs {
+			removals = append(removals,
+				buildFieldBinlogPath(
+					segment.GetCollectionID(),
+					segment.GetPartitionID(),
+					segment.GetID(),
+					fid))
+		}
 	}
 
-	return kc.SaveByBatch(ctx, kvs)
+	if err := kc.SaveByBatch(ctx, kvs); err != nil {
+		return err
+	}
+	// Explicit removal is required: AlterSegments persists binlogs as
+	// independent per-FieldID KVs and listBinlogs rebuilds them via a prefix
+	// scan on restart. An operator that structurally drops a FieldBinlog
+	// from segment.Binlogs (e.g. when all ChildFields of a column group are
+	// claimed by a backfill commit) must also delete the orphan KV, otherwise
+	// the stripped group resurrects on the next datacoord start.
+	if len(removals) > 0 {
+		if err := kc.MetaKv.MultiSaveAndRemove(ctx, nil, removals); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.SegmentInfo) (kvs map[string]string, err error) {

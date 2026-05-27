@@ -17,8 +17,8 @@
 package segments
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 )
 
 // Helper functions for aggregating stats across results

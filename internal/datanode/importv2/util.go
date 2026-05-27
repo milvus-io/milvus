@@ -28,8 +28,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -39,16 +39,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func WrapTaskNotFoundError(taskID int64) error {
@@ -361,7 +361,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			appender := &nullDefaultAppender[string]{}
 			if defaultVal != nil {
 				v := defaultVal.GetStringData()
@@ -384,7 +384,8 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_BinaryVector,
 			schemapb.DataType_SparseFloatVector,
-			schemapb.DataType_Int8Vector:
+			schemapb.DataType_Int8Vector,
+			schemapb.DataType_ArrayOfVector:
 			if nullable {
 				for i := 0; i < rowNum; i++ {
 					if err = fieldData.AppendRow(nil); err != nil {

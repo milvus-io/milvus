@@ -341,6 +341,20 @@ class PhyCompareFilterExpr : public Expr {
                 auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
                     op_ctx_, right_field_, right_chunk_id);
                 auto right_chunk = pw_right.get();
+                const bool* left_valid_data = left_chunk.valid_data();
+                const bool* right_valid_data = right_chunk.valid_data();
+                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
+                    res[processed_size] = false;
+                    valid_res[processed_size] = false;
+                    processed_size++;
+                    continue;
+                }
+                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
+                    res[processed_size] = false;
+                    valid_res[processed_size] = false;
+                    processed_size++;
+                    continue;
+                }
                 const T* left_data = left_chunk.data() + left_chunk_offset;
                 const U* right_data = right_chunk.data() + right_chunk_offset;
                 func.template operator()<FilterType::random>(
@@ -350,18 +364,6 @@ class PhyCompareFilterExpr : public Expr {
                     1,
                     res + processed_size,
                     values...);
-                const bool* left_valid_data = left_chunk.valid_data();
-                const bool* right_valid_data = right_chunk.valid_data();
-                // mask with valid_data
-                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
-                }
                 processed_size++;
             }
             return processed_size;
@@ -374,22 +376,34 @@ class PhyCompareFilterExpr : public Expr {
             auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
-            func.template operator()<FilterType::random>(
-                left_data, right_data, input->data(), size, res, values...);
             const bool* left_valid_data = left_chunk.valid_data();
             const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[(*input)[i]]) {
-                    res[i] = false;
-                    valid_res[i] = false;
-                    continue;
+            if (left_valid_data || right_valid_data) {
+                for (int i = 0; i < size; ++i) {
+                    auto offset = (*input)[i];
+                    if (left_valid_data && !left_valid_data[offset]) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    if (right_valid_data && !right_valid_data[offset]) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    func.template operator()<FilterType::random>(
+                        left_data + offset,
+                        right_data + offset,
+                        nullptr,
+                        1,
+                        res + i,
+                        values...);
                 }
-                if (right_valid_data && !right_valid_data[(*input)[i]]) {
-                    res[i] = false;
-                    valid_res[i] = false;
-                }
+                processed_size += size;
+                return processed_size;
             }
+            func.template operator()<FilterType::random>(
+                left_data, right_data, input->data(), size, res, values...);
             processed_size += size;
             return processed_size;
         }

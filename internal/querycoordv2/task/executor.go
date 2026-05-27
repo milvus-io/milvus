@@ -29,23 +29,23 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // segmentsVersion is used for the flushed segments should not be included in the watch dm channel request
@@ -69,7 +69,6 @@ type Executor struct {
 	executingTasks    *typeutil.ConcurrentSet[string] // task index
 	channelTaskNum    atomic.Int32                    // channel task pool counter
 	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
-	executedFlag      chan struct{}
 }
 
 func NewExecutor(nodeID int64,
@@ -91,7 +90,6 @@ func NewExecutor(nodeID int64,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
-		executedFlag:   make(chan struct{}, 1),
 	}
 }
 
@@ -203,21 +201,12 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	return true
 }
 
-func (ex *Executor) GetExecutedFlag() <-chan struct{} {
-	return ex.executedFlag
-}
-
 func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
 		log.Info("execute action done, remove it",
 			zap.Int64("taskID", task.ID()),
 			zap.Int("step", step),
 			zap.Error(task.Err()))
-	} else {
-		select {
-		case ex.executedFlag <- struct{}{}:
-		default:
-		}
 	}
 
 	ex.executingTasks.Remove(task.Index())
@@ -858,18 +847,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		return nil, nil, nil, err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
-	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, collectionID)
-	if err != nil {
-		log.Warn("failed to get partitions of collection", zap.Error(err))
-		return nil, nil, nil, err
-	}
 
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(ctx, task.CollectionID()),
 		collectionInfo,
 		task.ResourceGroup(),
 		loadFields,
-		partitions...,
 	)
 
 	// get channel first, in case of target updated after segment info fetched

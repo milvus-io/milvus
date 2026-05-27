@@ -102,7 +102,10 @@ std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type, int dim, DataType element_type);
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable = false);
 
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
@@ -423,16 +426,9 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
-// Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
-// External files store vectors in list format (e.g. List<Float32>);
-// Milvus expects FixedSizeBinary (raw bytes). Returns the input
-// unchanged if already FixedSizeBinary.
-arrow::ArrayVector
-NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
-                                       DataType data_type,
-                                       int dim);
-
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
+// The element type is inferred from the ListArray's value type.
+// Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
                             int64_t row_index);
@@ -453,5 +449,74 @@ ConvertToMicroseconds(int64_t value, arrow::TimeUnit::type unit) {
             return value;
     }
 }
+
+// ============================================================
+// Arrow type normalization helpers for external table loading.
+// Schemaless Parquet reader returns native Arrow types; these
+// helpers convert them to the types each consumer expects.
+// ============================================================
+
+// --- Tier 1: Atomic conversion helpers ---
+
+// Convert FixedSizeBinaryArray -> BinaryArray (for nullable vectors).
+// Null rows are skipped in the data buffer; offsets encode the gaps.
+arrow::ArrayVector
+ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays);
+
+// Zero-copy: reinterpret StringArray as BinaryArray (identical layout).
+arrow::ArrayVector
+ConvertStringArrayToBinary(const arrow::ArrayVector& arrays);
+
+// Convert StringArray (WKT) -> BinaryArray (WKB) via GEOS.
+arrow::ArrayVector
+ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays);
+
+// Convert TimestampArray -> Int64Array (microseconds).
+arrow::ArrayVector
+ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
+
+// --- Tier 2: Per-consumer entry points ---
+
+// Unified single-array normalize: converts external Parquet arrow types to
+// Milvus internal arrow types. All consumer-specific entry points delegate here.
+//
+// Conversions:
+//   VARCHAR/STRING/TEXT/JSON: String -> Binary (zero-copy)
+//   Geometry: String(WKT) -> Binary(WKB) via GEOS; Binary stays as-is
+//   Timestamptz: Timestamp -> Int64 (microseconds)
+//   Array: List(element) -> Binary (protobuf)
+//   Vectors: various -> FixedSizeBinary
+//   VectorArray: List<List<scalar>> -> List<FixedSizeBinary>
+//
+std::shared_ptr<arrow::Array>
+NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
+                       const FieldMeta& field_meta);
+
+// Load path: batch wrapper around NormalizeExternalArrow.
+arrow::ArrayVector
+NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
+                             const FieldMeta& field_meta);
+
+// Coerce any binary-like array (LARGE_BINARY / BINARY_VIEW /
+// LARGE_STRING / STRING_VIEW / STRING) to canonical BinaryArray.
+// Required because vortex schemaless mode emits view variants for the
+// whole variable-length family; downstream paths assume canonical layout.
+arrow::ArrayVector
+CoerceToBinary(const arrow::ArrayVector& arrays);
+
+// Coerce LARGE_LIST / LIST_VIEW to canonical (32-bit offset) ListArray.
+// Vortex schemaless mode may emit list variants for the same logical
+// List<T>; downstream code expects arrow::ListArray.
+arrow::ArrayVector
+CoerceToList(const arrow::ArrayVector& arrays);
+
+// Single source of truth for view/large-variant elimination.
+// STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,
+// LARGE_LIST/LIST_VIEW -> LIST (recursive into List/FixedSizeList inner).
+// Pure type/layout normalization, no semantic conversion. Callers ingesting
+// schemaless readers (vortex) should route arrays through this helper before
+// any type-id dispatch (refresh / load / sample / etc).
+std::shared_ptr<arrow::Array>
+CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array);
 
 }  // namespace milvus::storage

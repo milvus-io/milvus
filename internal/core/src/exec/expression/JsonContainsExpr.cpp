@@ -311,6 +311,23 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+
+    // Typed cached set used directly inside the array scan loop, mirroring
+    // the pattern in ExecArrayContainsAll. Skips the MultiElement variant
+    // round-trip, virtual dispatch and runtime type checks in In().
+    //   string: owning std::string set with transparent hash, so string_view
+    //           lookups are zero-copy and the set never holds dangling views.
+    //   bool:   std::unordered_set<bool>, since std::hash<bool> is safe.
+    //           ankerl::unordered_dense::set<bool> is avoided for the same
+    //           reason as SetElement<bool> in Element.h (wyhash 8-byte read).
+    //   other:  ankerl::unordered_dense::set<ExprValueType>.
+    using TypedSet = std::conditional_t<
+        std::is_same_v<ExprValueType, std::string>,
+        ankerl::unordered_dense::set<std::string, StringHash, std::equal_to<>>,
+        std::conditional_t<std::is_same_v<ExprValueType, bool>,
+                           std::unordered_set<bool>,
+                           ankerl::unordered_dense::set<ExprValueType>>>;
+
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
@@ -328,9 +345,15 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
+        auto elements = std::make_shared<TypedSet>();
+        elements->max_load_factor(0.5f);
+        for (const auto& val : expr_->vals_) {
+            elements->insert(GetValueWithCastNumber<ExprValueType>(val));
+        }
+        arg_cached_set_ = elements;
         arg_inited_ = true;
     }
+    auto elements = std::static_pointer_cast<TypedSet>(arg_cached_set_);
 
     int processed_cursor = 0;
     auto execute_sub_batch =
@@ -342,7 +365,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::shared_ptr<MultiElement>& elements) {
+            const TypedSet& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -352,7 +375,8 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
         auto executor = [&](size_t i) {
             const auto& array = data[i];
             for (int j = 0; j < array.length(); ++j) {
-                if (elements->In(array.template get_data<GetType>(j))) {
+                if (elements.find(array.template get_data<GetType>(j)) !=
+                    elements.end()) {
                     return true;
                 }
             }
@@ -384,10 +408,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    arg_set_);
+                                                    *elements);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, arg_set_);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

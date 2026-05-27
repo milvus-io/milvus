@@ -22,15 +22,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type UpdateLoadConfigJob struct {
@@ -114,6 +114,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	var spawnOpts []meta.SpawnOption
 	if job.needWaitRGReady {
 		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+		spawnOpts = append(spawnOpts, meta.WithQueryInvisible())
 	}
 	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
@@ -141,7 +142,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
 			}
 
-			if transferErr := job.meta.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
+			if transferErr := job.meta.MoveReplica(job.ctx, collectionID, rg, replicas); transferErr != nil {
 				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
 				err = transferErr
 				return err

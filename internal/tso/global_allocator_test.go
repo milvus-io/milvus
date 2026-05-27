@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 var gTestTsoAllocator *GlobalTSOAllocator

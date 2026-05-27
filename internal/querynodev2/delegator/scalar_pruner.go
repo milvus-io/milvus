@@ -3,9 +3,9 @@ package delegator
 import (
 	"github.com/bits-and-blooms/bitset"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 type EvalCtx struct {

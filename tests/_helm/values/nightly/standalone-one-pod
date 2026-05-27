@@ -46,6 +46,9 @@ extraConfigFiles:
         dir: /var/lib/milvus/etcd
     common:
       storageType: local
+      storage:
+        # enable storage v3
+        useLoonFFI: true
     queryNode:
       segcore:
         exprEvalBatchSize: 512

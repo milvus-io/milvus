@@ -531,8 +531,9 @@ pull_request_rules:
           - 'title~=^feat:'
           - label=kind/feature
       - -title~=\[automated\]
-      # PR body does not contain design doc link
-      - -body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+      # PR body does not reference an in-repo design doc, and the PR does not add one
+      - '-body~=(^|\s)docs/design-docs/design_docs/[^\s]+\.md'
+      - -files~=^docs/design-docs/design_docs/.*\.md$
     actions:
       label:
         add:
@@ -542,18 +543,18 @@ pull_request_rules:
           @{{author}} This is a feature PR (`feat:`). Please provide a design document.
 
           **How to resolve:**
-          Link a design doc in the PR description:
+          Add a design document under `docs/design-docs/design_docs/` in this PR, or link an existing in-repo design document in the PR description:
           ```
-          design doc: https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/your_design.md
+          design doc: docs/design-docs/design_docs/YYYYMMDD-your_design.md
           ```
-
-          Design documents location: https://github.com/milvus-io/milvus-design-docs/tree/main/design_docs
 
   - name: Dismiss block label if design doc is provided
     conditions:
       - or: *BRANCHES
       - label=do-not-merge/missing-design-doc
-      - body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+      - or:
+          - 'body~=(^|\s)docs/design-docs/design_docs/[^\s]+\.md'
+          - files~=^docs/design-docs/design_docs/.*\.md$
     actions:
       label:
         remove:

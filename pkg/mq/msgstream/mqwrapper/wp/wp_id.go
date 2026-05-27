@@ -3,7 +3,7 @@ package wp
 import (
 	"github.com/zilliztech/woodpecker/woodpecker/log"
 
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 )
 
 func NewWoodpeckerID(id *log.LogMessageId) *woodpeckerID {

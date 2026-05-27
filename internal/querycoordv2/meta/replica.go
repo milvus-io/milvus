@@ -7,11 +7,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ReplicaInterface defines read operations for replica metadata
@@ -86,6 +86,12 @@ type Replica struct {
 	// This prevents unbalanced segment loading during replica scale-up.
 	// The field is explicitly cleared after the first successful node assignment.
 	waitRGReadyAt time.Time
+
+	// queryInvisible is an in-memory only state. The zero value means visible to
+	// keep existing and recovered replicas queryable unless explicitly hidden.
+	// Newly spawned replicas during cluster-level load-config changes can be hidden
+	// from Proxy shard leader discovery until the whole change is ready to serve.
+	queryInvisible bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -135,6 +141,10 @@ func (replica *Replica) NeedWaitRGReady() bool {
 	}
 	timeout := paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.GetAsDurationByParse()
 	return time.Since(replica.waitRGReadyAt) < timeout
+}
+
+func (replica *Replica) IsQueryVisible() bool {
+	return !replica.queryInvisible
 }
 
 // GetID returns the id of the replica.
@@ -290,13 +300,14 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:     proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:       typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:       typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority:  replica.LoadPriority(),
-			waitRGReadyAt: replica.waitRGReadyAt,
+			replicaPB:      proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:        typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:        typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:   replica.LoadPriority(),
+			waitRGReadyAt:  replica.waitRGReadyAt,
+			queryInvisible: replica.queryInvisible,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -323,6 +334,10 @@ func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 // Pass zero time to clear the wait.
 func (replica *mutableReplica) SetWaitRGReadyAt(t time.Time) {
 	replica.waitRGReadyAt = t
+}
+
+func (replica *mutableReplica) SetQueryInvisible(invisible bool) {
+	replica.queryInvisible = invisible
 }
 
 // AddRWNode adds the node to rw nodes of the replica.

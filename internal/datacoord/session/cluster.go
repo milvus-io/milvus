@@ -24,14 +24,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // WorkerSlots represents the slot information for a worker node
@@ -46,7 +45,7 @@ type Cluster interface {
 	QuerySlot() map[int64]*WorkerSlots
 
 	// CreateCompaction creates a new compaction task on the specified node
-	CreateCompaction(nodeID int64, in *datapb.CompactionPlan) error
+	CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error
 	// QueryCompaction queries the status of a compaction task
 	QueryCompaction(nodeID int64, in *datapb.CompactionStateRequest) (*datapb.CompactionPlanResult, error)
 	// DropCompaction drops a compaction task
@@ -84,15 +83,15 @@ type Cluster interface {
 	// DropAnalyze drops an analysis task
 	DropAnalyze(nodeID int64, taskID int64) error
 
-	// CreateExternalCollectionTask creates and executes an external collection task
-	CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error
-	// QueryExternalCollectionTask queries the status of an external collection task
-	QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error)
-	// DropExternalCollectionTask drops an external collection task
-	DropExternalCollectionTask(nodeID int64, taskID int64) error
+	// CreateRefreshExternalCollectionTask dispatches a refresh-external-collection task to the worker
+	CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error
+	// QueryRefreshExternalCollectionTask queries the status of a refresh-external-collection task
+	QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error)
+	// DropRefreshExternalCollectionTask drops a refresh-external-collection task
+	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
-	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
@@ -209,12 +208,13 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 	return availableNodeSlots
 }
 
-func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan) error {
+func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetPlanID())
 	properties.AppendType(taskcommon.Compaction)
 	properties.AppendTaskSlot(in.GetSlotUsage())
+	properties.AppendCollectionID(collectionID)
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -245,10 +245,6 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		for _, rst := range result.GetResults() {
 			if rst.GetPlanID() != in.GetPlanID() {
 				continue
-			}
-			err = binlog.CompressCompactionBinlogs(rst.GetSegments())
-			if err != nil {
-				return nil, err
 			}
 			ret = rst
 			break
@@ -283,12 +279,12 @@ func (c *cluster) DropCompaction(nodeID int64, planID int64) error {
 }
 
 func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
-	// TODO: sheep, use taskSlot in request
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImport)
 	properties.AppendTaskSlot(taskSlot)
+	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -298,6 +294,7 @@ func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot 
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Import)
 	properties.AppendTaskSlot(taskSlot)
+	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -411,6 +408,7 @@ func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetIndexVersion())
+	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -487,6 +485,7 @@ func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) err
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetTaskVersion())
+	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -561,6 +560,7 @@ func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendTaskVersion(in.GetVersion())
+	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -627,7 +627,7 @@ func (c *cluster) DropAnalyze(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error {
+func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
 	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -641,7 +641,9 @@ func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateE
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(req.GetTaskID())
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
+	properties.AppendTaskSlot(1)
+	properties.AppendCollectionID(req.GetCollectionID())
 
 	payload, err := proto.Marshal(req)
 	if err != nil {
@@ -655,23 +657,23 @@ func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateE
 		Properties: properties,
 	})
 	if err != nil {
-		log.Ctx(ctx).Warn("create external collection task failed", zap.Error(err))
+		log.Ctx(ctx).Warn("create refresh-external-collection task failed", zap.Error(err))
 		return err
 	}
 
 	if err := merr.Error(status); err != nil {
-		log.Ctx(ctx).Warn("create external collection task returned error", zap.Error(err))
+		log.Ctx(ctx).Warn("create refresh-external-collection task returned error", zap.Error(err))
 		return err
 	}
 
 	return nil
 }
 
-func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error) {
+func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
 
 	resp, err := c.queryTask(nodeID, properties)
 	if err != nil {
@@ -679,7 +681,7 @@ func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*data
 	}
 
 	// Unmarshal the response payload
-	result := &datapb.UpdateExternalCollectionResponse{}
+	result := &datapb.RefreshExternalCollectionTaskResponse{}
 	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
 		return nil, err
 	}
@@ -687,20 +689,21 @@ func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*data
 	return result, nil
 }
 
-func (c *cluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
+func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error {
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.CopySegment)
 	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendCollectionID(collectionID)
 	return c.createTask(nodeID, in, properties)
 }
 

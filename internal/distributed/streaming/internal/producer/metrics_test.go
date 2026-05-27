@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func TestResumingProducerMetrics(t *testing.T) {

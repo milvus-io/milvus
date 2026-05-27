@@ -27,17 +27,18 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCompactionPlanHandlerSuite(t *testing.T) {
@@ -1078,4 +1079,44 @@ func TestGetCompactionTasksNum(t *testing.T) {
 		i := handler.getCompactionTasksNum(CollectionIDCompactionTaskFilter(1), L0CompactionCompactionTaskFilter())
 		assert.Equal(t, 1, i)
 	})
+}
+
+func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BackfillCompaction() {
+	s.SetupTest()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+
+	mockScheduler := task.NewMockGlobalScheduler(s.T())
+	mockScheduler.EXPECT().Enqueue(mock.Anything).Maybe()
+	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+
+	t := &datapb.CompactionTask{
+		TriggerID: 1,
+		PlanID:    10,
+		Channel:   "ch-1",
+		Type:      datapb.CompactionType_BackfillCompaction,
+	}
+
+	compactTask, err := handler.createCompactTask(t)
+	s.NoError(err)
+	s.NotNil(compactTask)
+	s.Equal(datapb.CompactionType_BackfillCompaction, compactTask.GetTaskProto().GetType())
+}
+
+func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
+	s.SetupTest()
+
+	mockScheduler := task.NewMockGlobalScheduler(s.T())
+	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+
+	t := &datapb.CompactionTask{
+		TriggerID: 2,
+		PlanID:    20,
+		Channel:   "ch-1",
+		Type:      datapb.CompactionType(9999),
+	}
+
+	compactTask, err := handler.createCompactTask(t)
+	s.Nil(compactTask)
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
 }

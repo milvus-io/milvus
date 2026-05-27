@@ -17,6 +17,8 @@ import (
 
 // TestPhraseMatchDefault tests basic phrase match functionality with slop=0
 func TestPhraseMatchDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -46,6 +48,8 @@ func TestPhraseMatchDefault(t *testing.T) {
 
 // TestPhraseMatchWithSlop tests phrase match with different slop values
 func TestPhraseMatchWithSlop(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -90,6 +94,8 @@ func TestPhraseMatchWithSlop(t *testing.T) {
 
 // TestPhraseMatchWithDiffLang tests phrase match with different languages
 func TestPhraseMatchWithDiffLang(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -140,6 +146,8 @@ func TestPhraseMatchWithDiffLang(t *testing.T) {
 
 // TestPhraseMatchWithEmptyData tests phrase match with empty data
 func TestPhraseMatchWithEmptyData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -168,6 +176,8 @@ func TestPhraseMatchWithEmptyData(t *testing.T) {
 
 // TestPhraseMatchDefault tests basic phrase match functionality with slop=0
 func TestPhraseMatchNullable(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -203,6 +213,8 @@ func TestPhraseMatchNullable(t *testing.T) {
 
 // TestPhraseMatchDefault tests basic phrase match functionality with slop=0
 func TestPhraseMatchDefaultValue(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

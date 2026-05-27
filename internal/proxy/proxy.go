@@ -28,8 +28,8 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -37,16 +37,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/resource"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -116,11 +116,6 @@ type Proxy struct {
 	enableComplexDeleteLimit bool
 
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
-
-	// alterSchemaInFlight tracks collections that have an AlterCollectionSchema
-	// request in progress, keyed by "dbName/collectionName". Prevents concurrent
-	// requests from racing past the schema version consistency gate.
-	alterSchemaInFlight sync.Map
 }
 
 // NewProxy returns a Proxy struct.
@@ -141,6 +136,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
+	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
@@ -336,6 +332,10 @@ func (node *Proxy) Stop() error {
 
 	if node.resourceManager != nil {
 		node.resourceManager.Close()
+	}
+
+	if globalMetaCache != nil {
+		globalMetaCache.Close()
 	}
 
 	node.cancel()

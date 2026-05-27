@@ -5,12 +5,12 @@ package mock_replicates
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
 	replicates "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 
-	replicateutil "github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	replicateutil "github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 
 	utility "github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 )

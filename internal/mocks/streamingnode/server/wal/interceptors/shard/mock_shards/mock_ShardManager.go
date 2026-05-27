@@ -3,13 +3,13 @@
 package mock_shards
 
 import (
-	log "github.com/milvus-io/milvus/pkg/v2/log"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	log "github.com/milvus-io/milvus/pkg/v3/log"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
 	shards "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	utils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 )
@@ -25,6 +25,64 @@ type MockShardManager_Expecter struct {
 
 func (_m *MockShardManager) EXPECT() *MockShardManager_Expecter {
 	return &MockShardManager_Expecter{mock: &_m.Mock}
+}
+
+// AlterCollection provides a mock function with given fields: msg
+func (_m *MockShardManager) AlterCollection(msg message.MutableAlterCollectionMessageV2) ([]int64, error) {
+	ret := _m.Called(msg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollection")
+	}
+
+	var r0 []int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(message.MutableAlterCollectionMessageV2) ([]int64, error)); ok {
+		return rf(msg)
+	}
+	if rf, ok := ret.Get(0).(func(message.MutableAlterCollectionMessageV2) []int64); ok {
+		r0 = rf(msg)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(message.MutableAlterCollectionMessageV2) error); ok {
+		r1 = rf(msg)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_AlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollection'
+type MockShardManager_AlterCollection_Call struct {
+	*mock.Call
+}
+
+// AlterCollection is a helper method to define mock.On call
+//   - msg message.MutableAlterCollectionMessageV2
+func (_e *MockShardManager_Expecter) AlterCollection(msg interface{}) *MockShardManager_AlterCollection_Call {
+	return &MockShardManager_AlterCollection_Call{Call: _e.mock.On("AlterCollection", msg)}
+}
+
+func (_c *MockShardManager_AlterCollection_Call) Run(run func(msg message.MutableAlterCollectionMessageV2)) *MockShardManager_AlterCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.MutableAlterCollectionMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_AlterCollection_Call) Return(_a0 []int64, _a1 error) *MockShardManager_AlterCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_AlterCollection_Call) RunAndReturn(run func(message.MutableAlterCollectionMessageV2) ([]int64, error)) *MockShardManager_AlterCollection_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // ApplyDelete provides a mock function with given fields: msg
@@ -297,6 +355,62 @@ func (_c *MockShardManager_CheckIfCollectionExists_Call) Return(_a0 error) *Mock
 }
 
 func (_c *MockShardManager_CheckIfCollectionExists_Call) RunAndReturn(run func(int64) error) *MockShardManager_CheckIfCollectionExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfCollectionSchemaVersionMatch provides a mock function with given fields: header
+func (_m *MockShardManager) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
+	ret := _m.Called(header)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfCollectionSchemaVersionMatch")
+	}
+
+	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) (int32, error)); ok {
+		return rf(header)
+	}
+	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) int32); ok {
+		r0 = rf(header)
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	if rf, ok := ret.Get(1).(func(*message.InsertMessageHeader) error); ok {
+		r1 = rf(header)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_CheckIfCollectionSchemaVersionMatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfCollectionSchemaVersionMatch'
+type MockShardManager_CheckIfCollectionSchemaVersionMatch_Call struct {
+	*mock.Call
+}
+
+// CheckIfCollectionSchemaVersionMatch is a helper method to define mock.On call
+//   - header *message.InsertMessageHeader
+func (_e *MockShardManager_Expecter) CheckIfCollectionSchemaVersionMatch(header interface{}) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+	return &MockShardManager_CheckIfCollectionSchemaVersionMatch_Call{Call: _e.mock.On("CheckIfCollectionSchemaVersionMatch", header)}
+}
+
+func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Run(run func(header *message.InsertMessageHeader)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*message.InsertMessageHeader))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Return(_a0 int32, _a1 error) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) RunAndReturn(run func(*message.InsertMessageHeader) (int32, error)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
 	_c.Call.Return(run)
 	return _c
 }

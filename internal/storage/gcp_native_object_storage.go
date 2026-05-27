@@ -24,8 +24,8 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type GcpNativeObjectStorage struct {
@@ -58,7 +58,11 @@ func (gcs *GcpNativeObjectStorage) GetObject(ctx context.Context, bucketName, ob
 	if offset == 0 && size == 0 {
 		reader, err = obj.NewReader(ctx)
 	} else {
-		reader, err = obj.NewRangeReader(ctx, offset, size)
+		length := size
+		if offset > 0 && size == 0 {
+			length = -1
+		}
+		reader, err = obj.NewRangeReader(ctx, offset, length)
 	}
 
 	if err != nil {

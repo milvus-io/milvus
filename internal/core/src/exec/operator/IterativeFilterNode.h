@@ -39,7 +39,7 @@ class PhyIterativeFilterNode : public Operator {
     PhyIterativeFilterNode(
         int32_t operator_id,
         DriverContext* ctx,
-        const std::shared_ptr<const plan::FilterNode>& filter);
+        const std::shared_ptr<const plan::IterativeFilterNode>& filter);
 
     bool
     IsFilter() const override {

@@ -33,9 +33,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -55,26 +55,26 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Helper function to validate resource groups
@@ -560,6 +560,14 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
+		// Recover file resource refCnt for pending CreateCollection broadcast tasks
+		// before registering DDL callbacks, so ack callbacks won't race with recovery.
+		// See #48612.
+		pending := broadcast.GetPendingCreateCollectionResources()
+		if len(pending) > 0 {
+			c.meta.RecoverFileResourceRefCnt(pending)
+			log.Info("recovered file resource refCnt from pending broadcast tasks", zap.Int("count", len(pending)))
+		}
 		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
@@ -1017,6 +1025,32 @@ func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectio
 	return merr.Success(), nil
 }
 
+// AddCollectionStructField add struct field
+func (c *Core) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AddCollectionStructField")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to add collection struct field")
+
+	if err := c.broadcastAlterCollectionForAddStructField(ctx, in); err != nil {
+		log.Info("failed to add collection struct field", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionStructField", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionStructField").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to add collection struct field")
+	return merr.Success(), nil
+}
+
 func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.AlterCollectionSchemaResponse{
@@ -1161,7 +1195,7 @@ func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string
 		return strconv.FormatInt(collectionID, 10)
 	}
 
-	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return "-1"
 	}
@@ -1171,7 +1205,7 @@ func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*model.Collection, error) {
 	ts := getTravelTs(in)
 	if in.GetCollectionName() != "" {
-		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts)
+		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts, false)
 	}
 	return c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
 }
@@ -1182,30 +1216,18 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = &schemapb.CollectionSchema{
-		Name:               collInfo.Name,
-		Description:        collInfo.Description,
-		AutoID:             collInfo.AutoID,
-		Fields:             model.MarshalFieldModels(collInfo.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(collInfo.Functions),
-		EnableDynamicField: collInfo.EnableDynamicField,
-		EnableNamespace:    collInfo.EnableNamespace,
-		Properties:         collInfo.Properties,
-		FileResourceIds:    collInfo.FileResourceIds,
-		ExternalSource:     collInfo.ExternalSource,
-		ExternalSpec:       collInfo.ExternalSpec,
-		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
-		Version:            collInfo.SchemaVersion,
-		DoPhysicalBackfill: collInfo.DoPhysicalBackfill,
-	}
+	resp.Schema = collInfo.ToCollectionSchemaPB()
+	// Use the dbName parameter (resolved from the request) for consistency
+	// with resp.DbName; the model's DBName may not always be in sync.
+	resp.Schema.DbName = dbName
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
-	if collInfo.ShardsNum == 0 {
-		collInfo.ShardsNum = int32(len(collInfo.VirtualChannelNames))
+	shardsNum := collInfo.ShardsNum
+	if shardsNum == 0 {
+		shardsNum = int32(len(collInfo.VirtualChannelNames))
 	}
-	resp.ShardsNum = collInfo.ShardsNum
+	resp.ShardsNum = shardsNum
 	resp.ConsistencyLevel = collInfo.ConsistencyLevel
 
 	resp.CreatedTimestamp = collInfo.CreateTime
@@ -1618,7 +1640,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		zap.String("partitionName", in.GetPartitionName()))
 	logger.Info("received request to create partition")
 
-	if err := c.broadcastCreatePartition(ctx, in); err != nil {
+	if _, err := c.broadcastCreatePartition(ctx, in); err != nil {
 		if errors.Is(err, errIgnoerdCreatePartition) {
 			logger.Info("create partition that already exists, ignore it")
 			metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
@@ -1633,6 +1655,37 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	logger.Info("done to create partition")
 	return merr.Success(), nil
+}
+
+func (c *Core) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.CreatePartitionResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CreatePartition")
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+		zap.String("partitionName", in.GetPartitionName()))
+	logger.Info("received request to create partition")
+
+	partitionID, err := c.broadcastCreatePartition(ctx, in)
+	if err != nil {
+		if errors.Is(err, errIgnoerdCreatePartition) {
+			logger.Info("create partition that already exists, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
+			return &rootcoordpb.CreatePartitionResponse{Status: merr.Success(), PartitionID: partitionID}, nil
+		}
+		logger.Info("failed to create partition", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
+		return &rootcoordpb.CreatePartitionResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	logger.Info("done to create partition")
+	return &rootcoordpb.CreatePartitionResponse{Status: merr.Success(), PartitionID: partitionID}, nil
 }
 
 // DropPartition drop partition

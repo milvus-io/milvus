@@ -89,7 +89,7 @@ The following specification (either physical or virtual machine resources) is re
 | Go | 1.21 | Required. Install from https://go.dev/dl/ |
 | CMake | 3.26 | Auto-installed by install_deps.sh |
 | Conan | 2.25.1 | Auto-installed by install_deps.sh |
-| Rust | 1.89 | Auto-installed by install_deps.sh |
+| Rust | 1.92 | Auto-installed by install_deps.sh |
 
 ### Compiler Setup
 

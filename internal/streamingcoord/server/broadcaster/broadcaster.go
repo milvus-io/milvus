@@ -5,8 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 var (
@@ -31,6 +31,11 @@ type Broadcaster interface {
 
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
+
+	// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+	// for all pending CreateCollection broadcast tasks that haven't completed
+	// their ack callback yet. Used during recovery to rebuild file resource refCnt.
+	GetPendingCreateCollectionResources() map[int64][]int64
 
 	// Close closes the broadcaster.
 	Close()

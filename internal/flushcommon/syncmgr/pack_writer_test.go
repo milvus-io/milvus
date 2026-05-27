@@ -29,17 +29,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestBulkPackWriter_Write(t *testing.T) {
@@ -165,6 +165,165 @@ func TestBulkPackWriter_Write(t *testing.T) {
 			if gotSize != tt.wantSize {
 				t.Errorf("BulkPackWriter.Write() gotSize = %v, want %v", gotSize, tt.wantSize)
 			}
+		})
+	}
+}
+
+func TestBulkPackWriter_WriteDelta_RetryTransientWriteFailure(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	schema := &schemapb.CollectionSchema{
+		Name: "sync_task_test_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	callCount := 0
+	cm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, key string, data []byte) error {
+			callCount++
+			if callCount == 1 {
+				return errors.New("transient object storage timeout")
+			}
+			return nil
+		})
+
+	deletes := &storage.DeleteData{}
+	for i := 0; i < 10; i++ {
+		pk := storage.NewInt64PrimaryKey(int64(i + 1))
+		ts := uint64(100 + i)
+		deletes.Append(pk, ts)
+	}
+
+	bw := &BulkPackWriter{
+		schema:         schema,
+		chunkManager:   cm,
+		allocator:      allocator.NewLocalAllocator(10000, 100000),
+		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond)},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := bw.writeDelta(ctx, new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithDeleteData(deletes))
+
+	require.NoError(t, err)
+	require.Equal(t, 2, callCount)
+	require.Equal(t, int64(10), got.GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
+	arrayOfVectorField := func(nullable bool) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:     101,
+			Name:        "array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    nullable,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+	}
+	arrayField := func(nullable bool) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:     102,
+			Name:        "array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			Nullable:    nullable,
+		}
+	}
+
+	tests := []struct {
+		name      string
+		schema    *schemapb.CollectionSchema
+		wantError bool
+	}{
+		{
+			name: "top level nullable array of vector",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{arrayOfVectorField(true)},
+			},
+			wantError: true,
+		},
+		{
+			name: "top level non-nullable array of vector",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{arrayOfVectorField(false)},
+			},
+		},
+		{
+			name: "nullable struct with nullable array of vector sub-field",
+			schema: &schemapb.CollectionSchema{
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						Name:     "struct_array",
+						Nullable: true,
+						Fields:   []*schemapb.FieldSchema{arrayOfVectorField(true)},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "nullable struct with normalized non-nullable array of vector sub-field",
+			schema: &schemapb.CollectionSchema{
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						Name:     "struct_array",
+						Nullable: true,
+						Fields:   []*schemapb.FieldSchema{arrayOfVectorField(false)},
+					},
+				},
+			},
+		},
+		{
+			name: "non-nullable struct with nullable array of vector sub-field",
+			schema: &schemapb.CollectionSchema{
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						Name:   "struct_array",
+						Fields: []*schemapb.FieldSchema{arrayOfVectorField(true)},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "nullable struct with array sub-field",
+			schema: &schemapb.CollectionSchema{
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					{
+						Name:     "struct_array",
+						Nullable: true,
+						Fields:   []*schemapb.FieldSchema{arrayField(false)},
+					},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := storage.ValidateStorageV1InsertWritableSchema(test.schema)
+			if test.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+				return
+			}
+			require.NoError(t, err)
 		})
 	}
 }

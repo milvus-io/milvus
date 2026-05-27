@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 type SyncNewCreatedPartitionJob struct {
@@ -74,7 +74,6 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
-
 	// check if partition already existed
 	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
 		return nil
@@ -96,5 +95,5 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return errors.Wrap(err, msg)
 	}
 
-	return WaitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
+	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())
 }

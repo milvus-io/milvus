@@ -142,6 +142,8 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         config_[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
         config_[milvus::index::EMB_LIST_META_PATH] =
             (base_path / index::EMB_LIST_META_FILE_NAME).string();
+        config_[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
+            (base_path / index::EMB_LIST_RAW_INDEX_FILE_NAME).string();
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }

@@ -33,12 +33,12 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/googleapi"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // ChunkObjectWalkFunc is the callback function for walking objects.
@@ -115,6 +115,11 @@ func (mcm *RemoteChunkManager) RootPath() string {
 	return mcm.rootPath
 }
 
+// BucketName returns the bucket name this chunk manager is configured with.
+func (mcm *RemoteChunkManager) BucketName() string {
+	return mcm.bucketName
+}
+
 // UnderlyingObjectStorage returns the underlying object storage.
 func (mcm *RemoteChunkManager) UnderlyingObjectStorage() ObjectStorage {
 	return mcm.client
@@ -137,6 +142,19 @@ func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (Fil
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 	if err != nil {
 		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (mcm *RemoteChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	if offset < 0 {
+		return nil, io.EOF
+	}
+
+	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, offset, int64(0))
+	if err != nil {
+		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Int64("offset", offset), zap.Error(err))
 		return nil, err
 	}
 	return reader, nil

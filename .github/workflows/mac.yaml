@@ -51,9 +51,9 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch || github.ref }}
       - name: Setup Python environment
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '<3.12'
+          python-version: '3.12'
       - name: Install CMake 3.31.8
         run: |
           cmake --version || true

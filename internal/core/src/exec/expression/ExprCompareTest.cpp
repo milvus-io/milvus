@@ -1480,3 +1480,48 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
 }
+
+TEST_P(ExprTest, TestCompareNullableLeftWithOffsetInputSealed) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto pk_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto nullable_fid =
+        schema->AddDebugField("nullable", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    const int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
+
+    auto nullable_col = raw_data.get_col<int64_t>(nullable_fid);
+    auto pk_col = raw_data.get_col<int64_t>(pk_fid);
+    auto valid_data_col = raw_data.get_col_valid(nullable_fid);
+
+    SetSchema(schema);
+    auto plan_str = create_search_plan_from_expr("nullable >= age64");
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    milvus::exec::OffsetVector offsets;
+    offsets.reserve(N);
+    for (auto i = 0; i < N; ++i) {
+        offsets.emplace_back(i);
+    }
+
+    auto col_vec = milvus::test::gen_filter_res(
+        plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+        seg.get(),
+        N,
+        MAX_TIMESTAMP,
+        &offsets);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetTypeView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    EXPECT_EQ(view.size(), N);
+
+    for (int i = 0; i < N; ++i) {
+        auto ref = valid_data_col[i] && nullable_col[i] >= pk_col[i];
+        ASSERT_EQ(view[i], ref) << "@" << i;
+        ASSERT_EQ(valid_view[i], valid_data_col[i]) << "@" << i;
+    }
+}

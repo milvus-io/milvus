@@ -26,22 +26,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TriggerUpdateTargetVersion = func(collectionID int64)
@@ -71,9 +71,6 @@ func (dh *distHandler) start(ctx context.Context) {
 	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(distInterval)
 	defer ticker.Stop()
-	flagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-	checkExecutedFlagTicker := time.NewTicker(flagInterval)
-	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
 		select {
@@ -83,25 +80,6 @@ func (dh *distHandler) start(ctx context.Context) {
 		case <-dh.c:
 			log.Info("close dist handler")
 			return
-		case <-checkExecutedFlagTicker.C:
-			executedFlagChan := dh.scheduler.GetExecutedFlag(dh.nodeID)
-			if executedFlagChan != nil {
-				select {
-				case <-executedFlagChan:
-					dh.pullDist(ctx, &failures, false)
-				default:
-				}
-			}
-			// only reset when interval updated
-			newFlagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-			if newFlagInterval != flagInterval {
-				flagInterval = newFlagInterval
-				select {
-				case <-checkExecutedFlagTicker.C:
-				default:
-				}
-				checkExecutedFlagTicker.Reset(flagInterval)
-			}
 		case <-ticker.C:
 			dh.pullDist(ctx, &failures, true)
 			// only reset when interval updated

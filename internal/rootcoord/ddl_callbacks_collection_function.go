@@ -23,31 +23,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: coll.EnableDynamicField,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)
 	if err != nil {
@@ -154,7 +145,7 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -174,7 +165,7 @@ func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req 
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -221,7 +212,7 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	}
 	defer broadcaster.Close()
 
-	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	oldColl, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}

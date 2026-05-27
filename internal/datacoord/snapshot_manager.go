@@ -30,24 +30,26 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ============================================================================
@@ -325,6 +327,9 @@ type snapshotManager struct {
 	handler Handler       // For generating snapshot data
 	broker  broker.Broker // For querying partition information
 
+	// Index engine version manager for compatibility checks during restore
+	indexEngineVersionManager IndexEngineVersionManager
+
 	// Helper closures
 	getChannelsByCollectionID func(context.Context, int64) ([]RWChannel, error) // For channel mapping
 
@@ -354,6 +359,7 @@ func NewSnapshotManager(
 	handler Handler,
 	broker broker.Broker,
 	getChannelsFunc func(context.Context, int64) ([]RWChannel, error),
+	ievm IndexEngineVersionManager,
 ) SnapshotManager {
 	return &snapshotManager{
 		meta:                      meta,
@@ -363,6 +369,7 @@ func NewSnapshotManager(
 		handler:                   handler,
 		broker:                    broker,
 		getChannelsByCollectionID: getChannelsFunc,
+		indexEngineVersionManager: ievm,
 	}
 }
 
@@ -894,6 +901,11 @@ func (sm *snapshotManager) RestoreIndexes(
 			return fmt.Errorf("failed to validate index %s: %w", indexInfo.GetIndexName(), err)
 		}
 
+		// Check scalar index engine version for JSON path indexes with new types
+		if err := sm.checkJSONPathIndexVersion(index); err != nil {
+			return fmt.Errorf("failed to validate index %s: %w", indexInfo.GetIndexName(), err)
+		}
+
 		// Create a new broadcaster for each index
 		// (each broadcaster can only be used once due to resource key lock consumption)
 		b, err := startBroadcaster(ctx, collectionID, snapshotName)
@@ -1226,6 +1238,7 @@ func (sm *snapshotManager) createRestoreJob(
 				DmlPosition:         dmlPos,
 				StorageVersion:      segDesc.GetStorageVersion(),
 				IsSorted:            segDesc.GetIsSorted(),
+				CommitTimestamp:     segDesc.GetCommitTimestamp(),
 			},
 		}
 		targetSegments[targetSegmentID] = newSegment
@@ -1479,4 +1492,32 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 		return (job.GetCompleteTs() - job.GetStartTs()) / 1e6 // Convert nanoseconds to milliseconds
 	}
 	return 0
+}
+
+// checkJSONPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
+// or HYBRID if the cluster's scalar index engine version is below
+// MinScalarIndexVersionForJsonPathMultiType.
+func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
+	indexType := GetIndexType(index.IndexParams)
+	if indexType != indexparamcheck.IndexSTLSORT &&
+		indexType != indexparamcheck.IndexBitmap &&
+		indexType != indexparamcheck.IndexHybrid {
+		return nil
+	}
+
+	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
+	if _, hasPath := indexParams[common.JSONPathKey]; !hasPath {
+		return nil
+	}
+
+	if sm.indexEngineVersionManager != nil {
+		resolved := sm.indexEngineVersionManager.ResolveScalarIndexVersion()
+		if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+			return merr.WrapErrParameterInvalidMsg(
+				"JSON path index with %s requires scalar index engine version >= %d, "+
+					"current resolved version: %d; please complete the rolling upgrade first",
+				indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+		}
+	}
+	return nil
 }

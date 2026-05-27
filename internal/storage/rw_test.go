@@ -33,19 +33,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestPackedBinlogRecordSuite(t *testing.T) {
@@ -270,6 +270,36 @@ func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 	}
 	_, err = NewBinlogRecordReader(s.ctx, []*datapb.FieldBinlog{{}}, s.schema, rOption...)
 	s.Error(err)
+}
+
+func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNullableArrayOfVectorWriter() {
+	s.schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+		{
+			Name:     "struct_array",
+			Nullable: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     200,
+					Name:        "embeddings",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					Nullable:    true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+						{Key: common.MaxCapacityKey, Value: "8"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+		WithVersion(StorageV1),
+		WithUploader(func(context.Context, map[string][]byte) error { return nil }),
+		WithStorageConfig(s.storageConfig),
+	)
+	s.Error(err)
+	s.Contains(err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
 }
 
 func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {

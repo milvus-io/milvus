@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // StoppingBalancer is responsible for balancing segments and channels from stopping nodes (RO nodes)
@@ -122,8 +122,8 @@ func (b *StoppingBalancer) genChannelPlan(ctx context.Context, br *balanceReport
 
 	for _, nodeID := range roNodes {
 		// Get all channels on this stopping node
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(
-			replica.GetCollectionID(),
+		dmChannels := b.dist.ChannelDistManager.GetByFilter(
+			meta.WithCollectionID2Channel(replica.GetCollectionID()),
 			meta.WithNodeID2Channel(nodeID),
 		)
 

@@ -27,20 +27,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 type collectionMeta struct {
@@ -394,6 +394,54 @@ func (coord *MixCoordMock) AddCollectionField(ctx context.Context, req *milvuspb
 	return merr.Success(), nil
 }
 
+func (coord *MixCoordMock) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection not exist",
+		}, nil
+	}
+
+	collInfo, exist := coord.collID2Meta[collID]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection info not exist",
+		}, nil
+	}
+	structField := proto.Clone(req.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	fieldIDStart := int64(common.StartOfUserFieldID + typeutil.GetTotalFieldsNum(collInfo.schema) + 1)
+	structField.FieldID = fieldIDStart
+	for i, field := range structField.GetFields() {
+		field.FieldID = fieldIDStart + int64(i) + 1
+	}
+	collInfo.schema.StructArrayFields = append(collInfo.schema.StructArrayFields, structField)
+	ts := uint64(time.Now().Nanosecond())
+	coord.collID2Meta[collID] = collectionMeta{
+		name:                 req.CollectionName,
+		id:                   collID,
+		schema:               collInfo.schema,
+		shardsNum:            collInfo.shardsNum,
+		virtualChannelNames:  collInfo.virtualChannelNames,
+		physicalChannelNames: collInfo.physicalChannelNames,
+		createdTimestamp:     ts,
+		createdUtcTimestamp:  ts,
+		properties:           collInfo.properties,
+	}
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -676,6 +724,10 @@ func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.Cr
 	}
 
 	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, nil
 }
 
 func (coord *MixCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1787,6 +1839,10 @@ func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.
 
 func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest, opts ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

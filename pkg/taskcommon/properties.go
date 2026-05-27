@@ -20,19 +20,20 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // properties keys
 const (
 	// request
-	ClusterIDKey   = "cluster_id"
-	TaskIDKey      = "task_id"
-	TypeKey        = "task_type"
-	SubTypeKey     = "task_sub_type" // optional, only for Stats
-	SlotKey        = "task_slot"
-	NumRowsKey     = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey = "task_version" // optional, only for Index, Stats and Analyze
+	ClusterIDKey    = "cluster_id"
+	TaskIDKey       = "task_id"
+	TypeKey         = "task_type"
+	SubTypeKey      = "task_sub_type" // optional, only for Stats
+	SlotKey         = "task_slot"
+	NumRowsKey      = "num_row"      // optional, only for Index, Stats
+	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	CollectionIDKey = "collection_id"
 
 	// result
 	StateKey  = "task_state"
@@ -62,7 +63,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, ExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -85,6 +86,10 @@ func (p Properties) AppendTaskVersion(version int64) {
 	p[TaskVersionKey] = fmt.Sprintf("%d", version)
 }
 
+func (p Properties) AppendCollectionID(collectionID int64) {
+	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
+}
+
 func (p Properties) AppendReason(reason string) {
 	p[ReasonKey] = reason
 }
@@ -98,7 +103,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, ExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		return p[TypeKey], nil
 	default:
 		return p[TypeKey], fmt.Errorf("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
@@ -182,4 +187,15 @@ func (p Properties) GetTaskVersion() int64 {
 		return 0
 	}
 	return version
+}
+
+func (p Properties) GetCollectionID() (int64, error) {
+	if _, ok := p[CollectionIDKey]; !ok {
+		return 0, WrapErrTaskPropertyLack(CollectionIDKey, p[TaskIDKey])
+	}
+	collectionID, err := strconv.ParseInt(p[CollectionIDKey], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return collectionID, nil
 }

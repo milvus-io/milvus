@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -37,13 +37,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestPackWriterV3Suite(t *testing.T) {
@@ -71,7 +71,7 @@ func (s *PackWriterV3Suite) SetupTest() {
 	s.ctx = context.Background()
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
 	s.rootPath = s.T().TempDir()
-	initcore.CleanArrowFileSystemSingleton()
+	initcore.CleanArrowFileSystem()
 	initcore.InitLocalArrowFileSystem(s.rootPath)
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, "/tmp")
@@ -371,7 +371,10 @@ func genInsertDataWithPKOffset(size int, pkOffset int, schema *schemapb.Collecti
 		}
 		data[101] = vector
 
-		vectorData := []float32{float32(i) * 0.1, float32(i) * 0.2}
+		vectorData := make([]float32, 2*128)
+		for j := range vectorData {
+			vectorData[j] = float32(i+j) * 0.001
+		}
 		vectorArray := &schemapb.VectorField{
 			Dim: 128,
 			Data: &schemapb.VectorField_FloatVector{

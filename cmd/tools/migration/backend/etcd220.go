@@ -8,7 +8,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
 // etcd220 implements Backend.

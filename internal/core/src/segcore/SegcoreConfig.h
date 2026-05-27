@@ -166,6 +166,16 @@ class SegcoreConfig {
         return visibility_filter_enabled_;
     }
 
+    void
+    set_prefer_field_data_when_index_has_raw_data(bool value) {
+        prefer_field_data_when_index_has_raw_data_ = value;
+    }
+
+    bool
+    get_prefer_field_data_when_index_has_raw_data() const {
+        return prefer_field_data_when_index_has_raw_data_;
+    }
+
     static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
 
     int64_t
@@ -208,6 +218,7 @@ class SegcoreConfig {
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
     inline static bool visibility_filter_enabled_ = true;
+    inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };

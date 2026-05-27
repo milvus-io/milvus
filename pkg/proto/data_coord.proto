@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.data;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/datapb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/datapb";
 
 import "common.proto";
 import "internal.proto";
@@ -117,6 +117,9 @@ service DataCoord {
   rpc UnpinSnapshotData(UnpinSnapshotDataRequest) returns(common.Status){}
   // batch update manifest
   rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
+  // commit backfill result (reads result JSON from object storage and dispatches
+  // V2/V3 segment updates through the broadcaster)
+  rpc CommitBackfillResult(CommitBackfillResultRequest) returns(CommitBackfillResultResponse){}
 
   // External Table Refresh APIs
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
@@ -446,6 +449,15 @@ message SegmentInfo {
   repeated int64 expirQuantiles = 33;
   int32 schema_version = 34;
   int32 data_version = 35;
+  // commit_timestamp is the transaction timestamp for import/CDC segments.
+  // When non-zero, it overrides start_position.Timestamp, dml_position.Timestamp,
+  // and binlog.TimestampFrom/TimestampTo for all temporal decisions (delete
+  // filtering, snapshot visibility, compaction selection, GC).
+  // Zero means normal segment.
+  // Propagated through compaction (max of input segments) because no compaction
+  // type rewrites row timestamps — stale rows always need commit_ts protection
+  // until TTL naturally expires using max(row_ts, commit_ts).
+  uint64 commit_timestamp = 36;
 }
 
 message SegmentStartPosition {
@@ -712,6 +724,11 @@ message CompactionSegmentBinlogs {
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 12;
   bool is_sorted_by_namespace = 13;
+  // commit_timestamp mirrors SegmentInfo.commit_timestamp.
+  // DataNode uses it to protect import/CDC segment rows from premature TTL
+  // expiry during compaction: isEntityExpired uses max(row_ts, commit_ts)
+  // so stale row timestamps never cause rows to be silently dropped.
+  uint64 commit_timestamp = 14;
 }
 
 message CompactionPlan {
@@ -1050,6 +1067,9 @@ message CopySegmentSource {
   // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
   // When storage_version >= 3, binlog paths must be resolved from manifest_path
   int64 storage_version = 12;
+
+  // Whether the source segment belongs to an external collection.
+  bool is_external_collection = 13;
 }
 
 message CopySegmentTarget {
@@ -1105,6 +1125,7 @@ message VectorScalarIndexInfo {
   int32 current_index_version = 7;         // Index engine version
   int32 current_scalar_index_version = 8;  // Scalar index engine version
   string index_name = 9;                   // Index name for multi-index-per-field lookup
+  index.IndexStorePathVersion index_store_path_version = 10;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1385,7 +1406,7 @@ message DropCompactionPlanRequest {
   int64 planID = 1;
 }
 
-message UpdateExternalCollectionRequest {
+message RefreshExternalCollectionTaskRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   int64 taskID = 3;
@@ -1396,9 +1417,13 @@ message UpdateExternalCollectionRequest {
   schema.CollectionSchema schema = 8;
   IDRange pre_allocated_segment_ids = 9;  // pre-allocated segment ID range for data mapping
   int64 num_segments_expected = 10;       // expected number of segments for validation
+  string explore_manifest_path = 11;      // S3 manifest path for file discovery
+  int64 file_index_begin = 12;            // File range start for this task
+  int64 file_index_end = 13;              // File range end for this task
+  int64 partitionID = 14;                 // target partition for manifest path
 }
 
-message UpdateExternalCollectionResponse {
+message RefreshExternalCollectionTaskResponse {
   common.Status status = 1;
   repeated int64 keptSegments = 2;
   repeated SegmentInfo updatedSegments = 3;
@@ -1444,6 +1469,12 @@ message ExternalCollectionRefreshJob {
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
 // A Task is an execution unit managed by the scheduler, belonging to a parent Job
+// ExternalFileInfo describes a single external file discovered during explore.
+message ExternalFileInfo {
+  string file_path = 1;
+  int64 num_rows = 2;
+}
+
 message ExternalCollectionRefreshTask {
   int64 task_id = 1;             // Unique task identifier
   int64 job_id = 2;              // Parent job ID
@@ -1455,6 +1486,13 @@ message ExternalCollectionRefreshTask {
   string external_source = 8;    // Copied from job for worker execution
   string external_spec = 9;      // Copied from job for worker execution
   int64 progress = 10;           // Task-level progress (0-100)
+  reserved 11;                   // removed: assigned_files (never wired in Part8)
+  string explore_manifest_path = 12;  // S3 manifest path for this job
+  int64 file_index_begin = 13;        // File range start for this task
+  int64 file_index_end = 14;          // File range end for this task
+  repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
+  repeated SegmentInfo updated_segments = 16;  // New segments created by this task result
+  bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
 }
 
 message GetRefreshExternalCollectionProgressResponse {
@@ -1518,6 +1556,10 @@ message SegmentDescription {
   int64 storage_version = 15; // storage version
   bool is_sorted = 16; // whether the segment is sorted by primary key
   string manifest_path = 17; // StorageV2 manifest file path
+  // commit_timestamp mirrors SegmentInfo.commit_timestamp.
+  // Must be preserved across snapshot/restore so temporal protections
+  // (GC, TTL, MVCC) are not lost on the restored segments.
+  uint64 commit_timestamp = 18;
 }
 
 message CollectionDescription {
@@ -1645,6 +1687,34 @@ message BatchUpdateManifestRequest {
 message BatchUpdateManifestItem {
   int64 segment_id = 1;
   int64 manifest_version = 2;
+}
+
+// CommitBackfillResultRequest is sent by the proxy management HTTP endpoint to
+// hand off the path of a BackfillResult JSON file on object storage. DataCoord
+// downloads the JSON, classifies each segment entry (V2/V3), and dispatches
+// the resulting operators through the BatchUpdateManifest broadcast pipeline.
+message CommitBackfillResultRequest {
+  common.MsgBase base = 1;
+  // Accepted forms:
+  //   s3a://<bucket>/<key>   (canonical form produced by Spark)
+  //   s3://<bucket>/<key>
+  //   /<key>                 (bucket implied)
+  string result_path = 2;
+}
+
+message CommitBackfillResultSegmentStatus {
+  int64  segment_id = 1;
+  bool   ok         = 2;
+  string reason     = 3;
+  string kind       = 4;  // "v2" | "v3"
+}
+
+message CommitBackfillResultResponse {
+  common.Status status = 1;
+  int32 total_segments     = 2;
+  int32 committed_segments = 3;
+  int32 failed_segments    = 4;
+  repeated CommitBackfillResultSegmentStatus segment_statuses = 5;
 }
 
 message PinSnapshotDataRequest {

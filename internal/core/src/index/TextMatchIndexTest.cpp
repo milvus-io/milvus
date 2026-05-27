@@ -42,6 +42,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/Meta.h"
 #include "index/TextMatchIndex.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
@@ -56,6 +57,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/segment_c.h"
+#include "storage/FileManager.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -103,6 +105,49 @@ GenTestSchema(std::map<std::string, std::string> params = {},
     }
     return schema;
 }
+
+storage::FileManagerContext
+CreateTextMatchTestFileManagerContext(int64_t build_id) {
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    storage::IndexMeta index_meta{3, 101, build_id, 10000};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+std::unique_ptr<index::TextMatchIndex>
+BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
+    auto index = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+
+    index->BuildIndexFromFieldData({field_data}, false);
+    return index;
+}
+
+void
+AssertTextMatchUploadReturnsRelativePaths(
+    const std::vector<index::SerializedIndexFileInfo>& files) {
+    ASSERT_FALSE(files.empty());
+    for (const auto& file : files) {
+        ASSERT_FALSE(file.file_name.empty());
+        ASSERT_EQ(file.file_name.find(TestRemotePath), std::string::npos)
+            << file.file_name;
+        ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
+            << file.file_name;
+        ASSERT_GT(file.file_size, 0);
+    }
+}
+
 std::shared_ptr<milvus::plan::FilterBitsNode>
 GetMatchExpr(SchemaPtr schema,
              const std::string& query,
@@ -256,6 +301,29 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res4[1]);
         ASSERT_TRUE(res4[2]);
     }
+}
+
+TEST(TextMatch, UploadReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1000);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->Upload({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+}
+
+TEST(TextMatch, UploadUnifiedReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1001);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->UploadUnified({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+    ASSERT_EQ(stats->GetSerializedIndexFileInfo().size(), 1);
+    ASSERT_NE(stats->GetSerializedIndexFileInfo()[0].file_name.find(".v3"),
+              std::string::npos);
 }
 
 // Regression test: BuildIndexFromFieldData with multiple FieldData batches
@@ -1402,6 +1470,183 @@ TEST(TextMatch, ExprResCacheSealed) {
     ASSERT_EQ(mgr.GetEntryCount(), 1);
 
     // Cleanup
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = GenTestSchema();
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football"};
+
+    int64_t N = 2;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    seg->CreateTextIndex(FieldId(101));
+
+    auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
+    auto plan_fragment = plan::PlanFragment(expr);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    query_context->set_enable_expr_cache(true);
+    query_context->set_enable_sub_expr_cache_write(false);
+
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    ASSERT_NE(row, nullptr);
+    ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+    ExprResCacheManager::Key filter_key{seg->get_segment_id(),
+                                        expr->ToString()};
+    ExprResCacheManager::Value filter_value;
+    ASSERT_TRUE(mgr.Get(filter_key, filter_value));
+
+    ExprResCacheManager::Key text_match_key{seg->get_segment_id(),
+                                            expr->filter()->ToString()};
+    ExprResCacheManager::Value text_match_value;
+    ASSERT_FALSE(mgr.Get(text_match_key, text_match_value));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+namespace {
+
+BitsetType
+ExecuteFilterBitsWithFullCache(
+    const std::shared_ptr<plan::FilterBitsNode>& filter_plan,
+    const segcore::SegmentInternalInterface* segment,
+    int64_t active_count,
+    Timestamp timestamp,
+    int64_t entity_ttl_physical_time_us) {
+    auto plan_fragment = plan::PlanFragment(filter_plan);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp,
+        0,
+        0,
+        milvus::query::PlanOptions(),
+        std::make_shared<milvus::exec::QueryConfig>(),
+        nullptr,
+        std::unordered_map<std::string,
+                           std::shared_ptr<milvus::exec::BaseConfig>>(),
+        entity_ttl_physical_time_us);
+    query_context->set_enable_expr_cache(true);
+    query_context->set_enable_sub_expr_cache_write(false);
+
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    AssertInfo(row != nullptr,
+               "ExecuteTask returned null row vector for query expression");
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType query_view(view);
+    query_view.flip();
+    return query_view;
+}
+
+}  // namespace
+
+TEST(TextMatch, ExprResCacheFilterBitsUsesCurrentFilterNodeKey) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = GenTestSchema();
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football"};
+
+    int64_t N = 2;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    seg->CreateTextIndex(FieldId(101));
+
+    auto football = GetMatchExpr(schema, "football", OpType::TextMatch);
+    auto swimming = GetMatchExpr(schema, "swimming", OpType::TextMatch);
+
+    auto football_result = ExecuteFilterBitsWithFullCache(
+        football, seg.get(), N, MAX_TIMESTAMP, 0);
+    ASSERT_TRUE(football_result[0]);
+    ASSERT_TRUE(football_result[1]);
+
+    auto swimming_result = ExecuteFilterBitsWithFullCache(
+        swimming, seg.get(), N, MAX_TIMESTAMP, 0);
+    ASSERT_FALSE(swimming_result[0]);
+    ASSERT_TRUE(swimming_result[1]);
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(TextMatch, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl_fid = schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    int64_t N = 2;
+    auto raw_data = DataGen(schema, N, 19190504);
+    for (auto& field_data : *raw_data.raw_->mutable_fields_data()) {
+        if (field_data.field_id() == ttl_fid.get()) {
+            auto* data =
+                field_data.mutable_scalars()->mutable_timestamptz_data();
+            data->set_data(0, 150);
+            data->set_data(1, 250);
+        }
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    auto before_expire =
+        ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 100);
+    ASSERT_TRUE(before_expire[0]);
+    ASSERT_TRUE(before_expire[1]);
+
+    auto after_expire =
+        ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 200);
+    ASSERT_FALSE(after_expire[0]);
+    ASSERT_TRUE(after_expire[1]);
+
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
 }

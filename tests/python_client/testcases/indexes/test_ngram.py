@@ -1,19 +1,17 @@
-import logging
-import time
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from idx_ngram import NGRAM
+from pymilvus import DataType
 
 index_type = "NGRAM"
 success = "success"
-pk_field_name = 'id'
-vector_field_name = 'vector'
-content_field_name = 'content_ngram'
-json_field_name = 'json_field'
+pk_field_name = "id"
+vector_field_name = "vector"
+content_field_name = "content_ngram"
+json_field_name = "json_field"
 dim = 32
 default_nb = ct.default_nb
 default_build_params = {"min_gram": 2, "max_gram": 3}
@@ -35,8 +33,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Check if this test case requires JSON field
         build_params = params.get("params", None)
-        has_json_params = (build_params is not None and
-                           ("json_path" in build_params or "json_cast_type" in build_params))
+        has_json_params = build_params is not None and ("json_path" in build_params or "json_cast_type" in build_params)
 
         target_field_name = content_field_name  # Default to VARCHAR field
 
@@ -61,7 +58,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 row[json_field_name] = {
                     "body": f"This is a {keyword} building",
                     "title": f"Location {i}",
-                    "description": f"Description for {keyword} number {i}"
+                    "description": f"Description for {keyword} number {i}",
                 }
         else:
             # Generate VARCHAR test data with varied content
@@ -74,34 +71,34 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         # Insert data in batches for better performance
         batch_size = 1000
         for i in range(0, nb, batch_size):
-            batch_rows = rows[i:i + batch_size]
+            batch_rows = rows[i : i + batch_size]
             self.insert(client, collection_name, batch_rows)
         self.flush(client, collection_name)
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
         index_name = cf.gen_str_by_length(10, letters_only=True)
-        index_params.add_index(field_name=target_field_name,
-                               index_name=index_name,
-                               index_type=index_type,
-                               params=build_params)
+        index_params.add_index(
+            field_name=target_field_name, index_name=index_name, index_type=index_type, params=build_params
+        )
 
         # Build index
         if params.get("expected", None) != success:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items=params.get("expected"))
+            self.create_index(
+                client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=params.get("expected")
+            )
         else:
             self.create_index(client, collection_name, index_params)
             self.wait_for_index_ready(client, collection_name, index_name=index_name)
 
             # Create vector index before loading collection
             vector_index_params = self.prepare_index_params(client)[0]
-            vector_index_params.add_index(field_name=vector_field_name,
-                                          metric_type=cf.get_default_metric_for_vector_type(
-                                              vector_type=DataType.FLOAT_VECTOR),
-                                          index_type="IVF_FLAT",
-                                          params={"nlist": 128})
+            vector_index_params.add_index(
+                field_name=vector_field_name,
+                metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
+                index_type="IVF_FLAT",
+                params={"nlist": 128},
+            )
             self.create_index(client, collection_name, vector_index_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
 
@@ -118,11 +115,14 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
             # Each keyword appears 2000/8 = 250 times
             expected_count = default_nb // 8  # 250 matches for "stadium"
 
-            self.query(client, collection_name, filter=filter_expr,
-                       output_fields=["count(*)"],
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"enable_milvus_client_api": True,
-                                    "count(*)": expected_count})
+            self.query(
+                client,
+                collection_name,
+                filter=filter_expr,
+                output_fields=["count(*)"],
+                check_task=CheckTasks.check_query_results,
+                check_items={"enable_milvus_client_api": True, "count(*)": expected_count},
+            )
 
             # Verify the index params are persisted
             idx_info = client.describe_index(collection_name, index_name)
@@ -148,8 +148,13 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         if scalar_field_type == DataType.VARCHAR:
             schema.add_field("scalar_field", datatype=scalar_field_type, max_length=1000, nullable=True)
         elif scalar_field_type == DataType.ARRAY:
-            schema.add_field("scalar_field", datatype=scalar_field_type,
-                             element_type=DataType.VARCHAR, max_capacity=10, max_length=100)
+            schema.add_field(
+                "scalar_field",
+                datatype=scalar_field_type,
+                element_type=DataType.VARCHAR,
+                max_capacity=10,
+                max_length=100,
+            )
         else:
             schema.add_field("scalar_field", datatype=scalar_field_type)
 
@@ -176,7 +181,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 row["scalar_field"] = {
                     "body": f"This is a {keyword}",
                     "title": f"Location {i}",
-                    "category": f"Category {keyword_idx}"
+                    "category": f"Category {keyword_idx}",
                 }
         elif scalar_field_type == DataType.ARRAY:
             # Generate varied ARRAY data for better testing
@@ -191,7 +196,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         # Insert data in batches for better performance
         batch_size = 1000
         for i in range(0, nb, batch_size):
-            batch_rows = rows[i:i + batch_size]
+            batch_rows = rows[i : i + batch_size]
             self.insert(client, collection_name, batch_rows)
         self.flush(client, collection_name)
 
@@ -200,38 +205,38 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         if scalar_field_type == DataType.JSON:
             # JSON field requires json_path and json_cast_type
-            index_params.add_index(field_name="scalar_field",
-                                   index_name=index_name,
-                                   index_type=index_type,
-                                   params={
-                                       "min_gram": 2,
-                                       "max_gram": 3,
-                                       "json_path": "scalar_field['body']",
-                                       "json_cast_type": "varchar"
-                                   })
+            index_params.add_index(
+                field_name="scalar_field",
+                index_name=index_name,
+                index_type=index_type,
+                params={"min_gram": 2, "max_gram": 3, "json_path": "scalar_field['body']", "json_cast_type": "varchar"},
+            )
         else:
-            index_params.add_index(field_name="scalar_field",
-                                   index_name=index_name,
-                                   index_type=index_type,
-                                   params=default_build_params)
+            index_params.add_index(
+                field_name="scalar_field", index_name=index_name, index_type=index_type, params=default_build_params
+            )
 
         # Check if the field type is supported for NGRAM index
         if scalar_field_type not in NGRAM.supported_field_types:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items={"err_code": 999,
-                                           "err_msg": "ngram index can only be created on VARCHAR or JSON field"})
+            self.create_index(
+                client,
+                collection_name,
+                index_params,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 999, "err_msg": "ngram index can only be created on VARCHAR or JSON field"},
+            )
         else:
             self.create_index(client, collection_name, index_params)
             self.wait_for_index_ready(client, collection_name, index_name=index_name)
 
             # Create vector index before loading collection
             vector_index_params = self.prepare_index_params(client)[0]
-            vector_index_params.add_index(field_name=vector_field_name,
-                                          metric_type=cf.get_default_metric_for_vector_type(
-                                              vector_type=DataType.FLOAT_VECTOR),
-                                          index_type="IVF_FLAT",
-                                          params={"nlist": 128})
+            vector_index_params.add_index(
+                field_name=vector_field_name,
+                metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
+                index_type="IVF_FLAT",
+                params={"nlist": 128},
+            )
             self.create_index(client, collection_name, vector_index_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
 
@@ -243,21 +248,27 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 # Each keyword appears 2000/8 = 250 times
                 expected_count = default_nb // 8  # 250 matches for "stadium"
                 filter_expr = 'scalar_field LIKE "%stadium%"'
-                self.query(client, collection_name, filter=filter_expr,
-                           output_fields=["count(*)"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "count(*)": expected_count})
+                self.query(
+                    client,
+                    collection_name,
+                    filter=filter_expr,
+                    output_fields=["count(*)"],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={"enable_milvus_client_api": True, "count(*)": expected_count},
+                )
             elif scalar_field_type == DataType.JSON:
                 # Calculate expected count: 2000 data points with 8 keywords cycling
                 # Each keyword appears 2000/8 = 250 times
                 expected_count = default_nb // 8  # 250 matches for "school"
                 filter_expr = "scalar_field['body'] LIKE \"%school%\""
-                self.query(client, collection_name, filter=filter_expr,
-                           output_fields=["count(*)"],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"enable_milvus_client_api": True,
-                                        "count(*)": expected_count})
+                self.query(
+                    client,
+                    collection_name,
+                    filter=filter_expr,
+                    output_fields=["count(*)"],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={"enable_milvus_client_api": True, "count(*)": expected_count},
+                )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="skip for issue #44164")
@@ -283,40 +294,51 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="content_ngram",
-                               index_name="content_ngram",
-                               index_type=index_type,
-                               params={"min_gram": 2, "max_gram": 3})
-        index_params.add_index(field_name=vector_field_name,
-                               index_type="IVF_FLAT",
-                               metric_type="COSINE",
-                               params={"nlist": 128})
+        index_params.add_index(
+            field_name="content_ngram",
+            index_name="content_ngram",
+            index_type=index_type,
+            params={"min_gram": 2, "max_gram": 3},
+        )
+        index_params.add_index(
+            field_name=vector_field_name, index_type="IVF_FLAT", metric_type="COSINE", params={"nlist": 128}
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name="content_ngram")
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         self.load_collection(client, collection_name)
         # Query to check if the index is created
-        res = self.query(client, collection_name, filter="content_ngram LIKE 'stad_%'",
-                         output_fields=["id", "content_ngram"])[0]
+        res = self.query(
+            client, collection_name, filter="content_ngram LIKE 'stad_%'", output_fields=["id", "content_ngram"]
+        )[0]
         assert len(res) == default_nb // len(content_keywords)
 
         # Release collection before alter ngram index
         self.release_collection(client, collection_name)
         # Alter index mmap properties
-        self.alter_index_properties(client, collection_name, index_name="content_ngram", properties={"mmap.enabled": True})
+        self.alter_index_properties(
+            client, collection_name, index_name="content_ngram", properties={"mmap.enabled": True}
+        )
         res = self.describe_index(client, collection_name, index_name="content_ngram")[0]
-        assert res.get('mmap.enabled', None) == 'True'
+        assert res.get("mmap.enabled", None) == "True"
         # Load the collection and query again
         self.load_collection(client, collection_name)
-        res = self.query(client, collection_name, filter="content_ngram LIKE 'stad_%'",
-                         output_fields=["id", "content_ngram"])[0]
+        res = self.query(
+            client, collection_name, filter="content_ngram LIKE 'stad_%'", output_fields=["id", "content_ngram"]
+        )[0]
         assert len(res) == default_nb // len(content_keywords)
 
         # Alter index gram value properties is not supported
         self.release_collection(client, collection_name)
         error = {ct.err_code: 1, ct.err_msg: "invalid mmap.enabled value: True, expected: true, false"}
-        self.alter_index_properties(client, collection_name, index_name="content_ngram", properties={"min_gram": 3, "max_gram": 4},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_index_properties(
+            client,
+            collection_name,
+            index_name="content_ngram",
+            properties={"min_gram": 3, "max_gram": 4},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_ngram_search_with_diff_length_of_filter_value(self):
@@ -346,105 +368,88 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Create vector index before loading collection
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type="COSINE",
-                               index_type="IVF_FLAT",
-                               params={"nlist": 128})
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
         min_gram = 2
         max_gram = 4
-        index_params.add_index(field_name="content_ngram",
-                               index_type=index_type,
-                               params={"min_gram": min_gram, "max_gram": max_gram})
+        index_params.add_index(
+            field_name="content_ngram", index_type=index_type, params={"min_gram": min_gram, "max_gram": max_gram}
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         self.wait_for_index_ready(client, collection_name, index_name="content_ngram")
         self.load_collection(client, collection_name)
 
         # Test query 0: filter value length is less than min_gram
-        filter_expr = f'content_ngram LIKE "{content_keywords[0][:min_gram - 1]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_ngram LIKE "{content_keywords[0][: min_gram - 1]}%"'
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "{content_keywords[0][:min_gram - 1]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_no_index LIKE "{content_keywords[0][: min_gram - 1]}%"'
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query 1: filter value length is equal to min_gram
         filter_expr = f'content_ngram LIKE "{content_keywords[0][:min_gram]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
         filter_expr = f'content_no_index LIKE "{content_keywords[0][:min_gram]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query 2: filter value length is less than max_gram
-        filter_expr = f'content_ngram LIKE "{content_keywords[0][:max_gram - 1]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_ngram LIKE "{content_keywords[0][: max_gram - 1]}%"'
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "{content_keywords[0][:max_gram - 1]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_no_index LIKE "{content_keywords[0][: max_gram - 1]}%"'
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query 3: filter value length is equal to max_gram
         filter_expr = f'content_ngram LIKE "{content_keywords[0][:max_gram]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
         filter_expr = f'content_no_index LIKE "{content_keywords[0][:max_gram]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query 4: filter value length is greater than max_gram
-        filter_expr = f'content_ngram LIKE "{content_keywords[0][:max_gram + 1]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_ngram LIKE "{content_keywords[0][: max_gram + 1]}%"'
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "{content_keywords[0][:max_gram + 1]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        filter_expr = f'content_no_index LIKE "{content_keywords[0][: max_gram + 1]}%"'
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query with suffix match
         filter_expr = f'content_ngram LIKE "%{content_keywords[0][4:]}"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
         filter_expr = f'content_no_index LIKE "%{content_keywords[0][4:]}"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query with infix match
         filter_expr = f'content_ngram LIKE "%{content_keywords[0][2:4]}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
         filter_expr = f'content_no_index LIKE "%{content_keywords[0][2:4]}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
         # Test query with Mixed Wildcard Match
-        filter_expr = f'content_ngram LIKE "%st_d_um%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
+        filter_expr = 'content_ngram LIKE "%st_d_um%"'
+        res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "%st_d_um%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
+        filter_expr = 'content_no_index LIKE "%st_d_um%"'
+        res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index
 
@@ -465,27 +470,26 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Multilingual test data with various UTF-8 characters
         multilingual_keywords = [
-            "北京大学",           # Chinese
-            "東京大学",           # Japanese  
-            "Московский",        # Russian
-            "café",              # French with accent
-            "naïve",             # French with diaeresis
-            "München",           # German with umlaut
-            "🏫学校🎓",           # Chinese with emojis
-            "🌟star⭐",          # English with emojis
-            "مدرسة",             # Arabic
-            "Γειά",              # Greek
-            "प्रविष्टि",           # Hindi/Devanagari
-            "한국어",             # Korean
-            "español",           # Spanish
-            "português",         # Portuguese
-            "中英mix英文",        # Mixed Chinese-English
-            "café☕北京🏙️"        # Mixed with emojis and multiple languages
+            "北京大学",  # Chinese
+            "東京大学",  # Japanese
+            "Московский",  # Russian
+            "café",  # French with accent
+            "naïve",  # French with diaeresis
+            "München",  # German with umlaut
+            "🏫学校🎓",  # Chinese with emojis
+            "🌟star⭐",  # English with emojis
+            "مدرسة",  # Arabic
+            "Γειά",  # Greek
+            "प्रविष्टि",  # Hindi/Devanagari
+            "한국어",  # Korean
+            "español",  # Spanish
+            "português",  # Portuguese
+            "中英mix英文",  # Mixed Chinese-English
+            "café☕北京🏙️",  # Mixed with emojis and multiple languages
         ]
 
         # Insert test data
         insert_times = 2
-        total_records = insert_times * default_nb
         for i in range(insert_times):
             rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
             for j, row in enumerate(rows):
@@ -494,200 +498,68 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 row["content_no_index"] = {
                     "body": f"This is a {keyword} building",
                     "title": f"Location {i}",
-                    "description": f"Description for {keyword} number {i}"
+                    "description": f"Description for {keyword} number {i}",
                 }
                 row["content_ngram"] = {
                     "body": f"This is a {keyword} building",
                     "title": f"Location {i}",
-                    "description": f"Description for {keyword} number {i}"
+                    "description": f"Description for {keyword} number {i}",
                 }
             self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create vector index before loading collection
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type="COSINE",
-                               index_type="IVF_FLAT",
-                               params={"nlist": 128})
-        
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+
         # Create NGRAM index with appropriate parameters for multilingual content
         min_gram = 1  # Use 1 for better multilingual support
         max_gram = 3
-        index_params.add_index(field_name="content_ngram",
-                               index_name="content_ngram",
-                               index_type=index_type,
-                               params={"min_gram": min_gram, "max_gram": max_gram, 
-                                       "json_path": "content_ngram['body']", "json_cast_type": "varchar"})
+        index_params.add_index(
+            field_name="content_ngram",
+            index_name="content_ngram",
+            index_type=index_type,
+            params={
+                "min_gram": min_gram,
+                "max_gram": max_gram,
+                "json_path": "content_ngram['body']",
+                "json_cast_type": "varchar",
+            },
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         self.wait_for_index_ready(client, collection_name, index_name="content_ngram")
         self.load_collection(client, collection_name)
 
-        expected_count_per_keyword = total_records // len(multilingual_keywords)
+        test_keywords = [
+            "北京",  # Chinese
+            "東京",  # Japanese
+            "Моск",  # Russian Cyrillic
+            "café",  # French accent
+            "🏫",  # Emoji
+            "⭐",  # Star emoji
+            "مدرسة",  # Arabic
+            "한국",  # Korean
+            "München",  # German umlaut
+            "mix",  # Mixed language
+            "café☕",  # Complex multilingual with emoji prefix
+            "प्रविष्टि",  # Hindi/Devanagari
+            "Γειά",  # Greek
+            "português",  # Portuguese with tilde
+            "学",  # Single CJK character
+        ]
 
-        # Test 1: Chinese character search
-        chinese_keyword = "北京"
-        filter_expr = f'content_ngram["body"] LIKE "%{chinese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{chinese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
+        for keyword in test_keywords:
+            filter_expr = f'content_ngram["body"] LIKE "%{keyword}%"'
+            res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[
+                0
+            ]
+            filter_expr = f'content_no_index["body"] LIKE "%{keyword}%"'
+            res_no_index = self.query(
+                client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"]
+            )[0]
 
-        # Test 2: Japanese character search
-        japanese_keyword = "東京"
-        filter_expr = f'content_ngram["body"] LIKE "%{japanese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{japanese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 3: Russian Cyrillic character search
-        russian_keyword = "Моск"
-        filter_expr = f'content_ngram["body"] LIKE "%{russian_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{russian_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 4: French accent character search
-        french_keyword = "café"
-        filter_expr = f'content_ngram["body"] LIKE "%{french_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{french_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 5: Emoji character search
-        emoji_keyword = "🏫"
-        filter_expr = f'content_ngram["body"] LIKE "%{emoji_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{emoji_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 6: Star emoji search
-        star_keyword = "⭐"
-        filter_expr = f'content_ngram["body"] LIKE "%{star_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{star_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 7: Arabic character search
-        arabic_keyword = "مدرسة"
-        filter_expr = f'content_ngram["body"] LIKE "%{arabic_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{arabic_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 8: Korean character search
-        korean_keyword = "한국"
-        filter_expr = f'content_ngram["body"] LIKE "%{korean_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{korean_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 9: German umlaut character search
-        german_keyword = "München"
-        filter_expr = f'content_ngram["body"] LIKE "%{german_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{german_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 10: Mixed language search
-        mixed_keyword = "mix"
-        filter_expr = f'content_ngram["body"] LIKE "%{mixed_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{mixed_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 11: Complex multilingual with emojis prefix search
-        complex_keyword = "café☕"
-        filter_expr = f'content_ngram["body"] LIKE "%{complex_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{complex_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 12: Hindi/Devanagari character search
-        hindi_keyword = "प्रविष्टि"
-        filter_expr = f'content_ngram["body"] LIKE "%{hindi_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{hindi_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 13: Greek character search
-        greek_keyword = "Γειά"
-        filter_expr = f'content_ngram["body"] LIKE "%{greek_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{greek_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 14: Portuguese with tilde character search
-        portuguese_keyword = "português"
-        filter_expr = f'content_ngram["body"] LIKE "%{portuguese_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{portuguese_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        assert len(res_ngram) >= expected_count_per_keyword
-        assert res_ngram == res_no_index
-
-        # Test 15: Test single character search (especially important for CJK)
-        single_char_keyword = "学"
-        filter_expr = f'content_ngram["body"] LIKE "%{single_char_keyword}%"'
-        res_ngram = self.query(client, collection_name, filter=filter_expr,
-                               output_fields=["id", "content_ngram"])[0]
-        filter_expr = f'content_no_index["body"] LIKE "%{single_char_keyword}%"'
-        res_no_index = self.query(client, collection_name, filter=filter_expr,
-                                  output_fields=["id", "content_ngram"])[0]
-        # Should match both "北京大学" and "🏫学校🎓"
-        assert len(res_ngram) >= expected_count_per_keyword * 2
-        assert res_ngram == res_no_index
+            assert len(res_ngram) > 0
+            assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])

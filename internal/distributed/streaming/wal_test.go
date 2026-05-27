@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
@@ -18,11 +18,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
 	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -148,6 +148,48 @@ func TestWAL(t *testing.T) {
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
 	assert.Error(t, resp.UnwrapFirstError())
+}
+
+func TestReleaseTimeout(t *testing.T) {
+	oldTimeout := releaseTimeout
+	oldSingleton := singleton
+	releaseTimeout = 10 * time.Millisecond
+	defer func() {
+		releaseTimeout = oldTimeout
+		singleton = oldSingleton
+	}()
+
+	coordClient := mock_client.NewMockClient(t)
+	closeDone := make(chan struct{})
+	coordClient.EXPECT().Close().Run(func() {
+		close(closeDone)
+	}).Return()
+	handler := mock_handler.NewMockHandlerClient(t)
+	handler.EXPECT().Close().Return().Maybe()
+	w := &walAccesserImpl{
+		lifetime:             typeutil.NewLifetime(),
+		streamingCoordClient: coordClient,
+		handlerClient:        handler,
+		producerMutex:        sync.Mutex{},
+		producers:            make(map[string]*producer.ResumableProducer),
+	}
+	assert.True(t, w.lifetime.Add(typeutil.LifetimeStateWorking))
+	singleton = w
+
+	start := time.Now()
+	err := Release()
+	assert.ErrorIs(t, err, ErrWALReleaseTimeout)
+	assert.Less(t, time.Since(start), time.Second)
+
+	w.lifetime.Done()
+	assert.Eventually(t, func() bool {
+		select {
+		case <-closeDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 }
 
 func newInsertMessage(vChannel string) message.MutableMessage {

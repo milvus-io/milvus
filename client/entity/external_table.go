@@ -16,7 +16,7 @@
 
 package entity
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 // RefreshExternalCollectionState represents the state of a refresh external collection job.
 type RefreshExternalCollectionState milvuspb.RefreshExternalCollectionState
@@ -41,6 +41,7 @@ type RefreshExternalCollectionJobInfo struct {
 	Progress       int64
 	Reason         string
 	ExternalSource string
+	ExternalSpec   string
 	StartTime      int64
 	EndTime        int64
 }

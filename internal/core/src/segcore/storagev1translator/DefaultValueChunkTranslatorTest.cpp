@@ -1091,6 +1091,49 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorFloat) {
     EXPECT_EQ(total_rows, row_count);
 }
 
+// Test nullable VECTOR_ARRAY with all-null default values.
+TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
+    int64_t dim = 4;
+    int64_t row_count = 100;
+
+    FieldMeta field_meta(FieldName("test_vector_array_nullable"),
+                         FieldId(1302),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         dim,
+                         std::nullopt,  // metric_type
+                         true);         // nullable
+
+    FieldDataInfo field_data_info(1302, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, GetParam(), true);
+
+    EXPECT_EQ(translator->value_size(), 0);
+
+    size_t num_cells = translator->num_cells();
+    ASSERT_GE(num_cells, 1);
+
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (auto& [cid, chunk] : cells) {
+        total_rows += chunk->RowNums();
+        for (int64_t i = 0; i < chunk->RowNums(); ++i) {
+            EXPECT_FALSE(chunk->isValid(i))
+                << "Expected null at cell " << cid << " row " << i;
+        }
+    }
+
+    EXPECT_EQ(total_rows, row_count);
+}
+
 // Test nullable VECTOR_SPARSE_U32_F32 with all-null default values
 TEST_P(DefaultValueChunkTranslatorTest, TestNullableSparseVector) {
     bool use_mmap = GetParam();

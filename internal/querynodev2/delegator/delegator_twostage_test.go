@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -25,19 +26,19 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TwoStageSearchSuite struct {
@@ -130,7 +131,7 @@ func (s *TwoStageSearchSuite) SetupTest() {
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
 	var err error
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
@@ -179,7 +180,7 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 		s.False(result, "should return false when both segments and topk are below threshold")
 	})
 
-	s.Run("segments_above_threshold", func() {
+	s.Run("topk_below_threshold", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -195,12 +196,12 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=10 is above min segments (5), so it should pass even if topk is below threshold
+		// topk=1000 is below min topk (2000), so it should not pass even if sealedNum is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 10)
-		s.True(result, "should return true when segments are above threshold")
+		s.False(result, "should return false when topk is below threshold")
 	})
 
-	s.Run("topk_above_threshold", func() {
+	s.Run("segments_below_threshold", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -216,9 +217,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// topk=3000 is above min topk (2000), so it should pass even if segments are below threshold
+		// sealedNum=3 is below min segments (5), so it should not pass even if topk is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 3)
-		s.True(result, "should return true when topk is above threshold")
+		s.False(result, "should return false when segments are below threshold")
 	})
 
 	s.Run("wrong_search_type_no_filter", func() {
@@ -327,10 +328,11 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		// Verify that the request has FilterOnly=true
+		// Verify that the request has FilterOnly=true and EnableExprCache=true
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.True(req.GetFilterOnly(), "FilterOnly should be true in filter stage")
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true in filter stage")
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
 		}, nil)
@@ -479,16 +481,18 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
-				if callCount == 1 {
+				n := callCount.Add(1)
+				if n == 1 {
 					// First call should be filter stage with FilterOnly=true
 					s.True(req.GetFilterOnly(), "First call should have FilterOnly=true")
+					s.True(req.GetEnableExprCache(), "First call should have EnableExprCache=true")
 				} else {
-					// Second call should be normal search with FilterOnly=false
+					// Second call should be normal search with FilterOnly=false but EnableExprCache=true
 					s.False(req.GetFilterOnly(), "Second call should have FilterOnly=false")
+					s.True(req.GetEnableExprCache(), "Second call should have EnableExprCache=true")
 				}
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
@@ -528,7 +532,65 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.False(fallback)
 		s.NotNil(results)
 		// Should have called SearchSegments twice: once for filter stage, once for vector search
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
+	})
+
+	s.Run("incomplete_filter_counts_fallback_restores_enable_expr_cache", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+		}()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+			Run(func(_ context.Context, req *querypb.SearchRequest) {
+				s.True(req.GetFilterOnly(), "FilterOnly should be true in filter stage")
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true in filter stage")
+			}).Return(&internalpb.SearchResults{
+			FilterValidCounts: []int64{100},
+		}, nil).Once()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		s.delegator.distribution.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 3100},
+			SegmentEntry{NodeID: 1, SegmentID: 3101},
+		)
+
+		ctx := context.Background()
+		req := &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Topk: 100,
+			},
+			DmlChannels:     []string{s.vchannelName},
+			EnableExprCache: false,
+		}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 3100, NodeID: 1},
+					{SegmentID: 3101, NodeID: 1},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+		sealedRowCount := map[int64]int64{
+			3100: 10000,
+			3101: 10000,
+		}
+
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		s.NoError(err)
+		s.True(fallback)
+		s.Nil(results)
+		s.False(req.GetFilterOnly(), "FilterOnly should be restored after fallback")
+		s.False(req.GetEnableExprCache(), "EnableExprCache should be restored after fallback")
 	})
 
 	s.Run("optimizer_path_exercised", func() {
@@ -558,10 +620,17 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
+				n := callCount.Add(1)
+				if n == 2 {
+					optimizedPlan := &planpb.PlanNode{}
+					err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), optimizedPlan)
+					s.Require().NoError(err)
+					s.NotNil(optimizedPlan.GetVectorAnns().GetPredicates(),
+						"second-stage search must keep predicates in the serialized plan")
+				}
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{5000},
 		}, nil)
@@ -616,7 +685,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
 		s.True(hookCalled, "QueryHook.Run should have been called by the optimizer")
 		mockHook.AssertExpectations(s.T())
 	})
@@ -825,7 +894,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithMultipleSegments() {
 }
 
 func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
-	s.Run("exact_threshold_segments", func() {
+	s.Run("topk_below_threshold_at_exact_segments", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -841,12 +910,12 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=5 is exactly at threshold
+		// sealedNum=5 is exactly at threshold, but topk is below threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 5)
-		s.True(result, "should return true when segments equal threshold")
+		s.False(result, "should return false when topk is below threshold")
 	})
 
-	s.Run("exact_threshold_topk", func() {
+	s.Run("segments_below_threshold_at_exact_topk", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -862,9 +931,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=4 is below threshold
+		// topk=2000 is exactly at threshold, but sealedNum=4 is below threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 4)
-		s.True(result, "should return true when topk equals threshold")
+		s.False(result, "should return false when segments are below threshold")
 	})
 
 	s.Run("zero_segments", func() {
@@ -903,9 +972,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=10 is above threshold, so it should pass
+		// topk=0 is below threshold, so it should not pass even if sealedNum is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 10)
-		s.True(result, "should return true when segments above threshold even with zero topk")
+		s.False(result, "should return false when topk is below threshold")
 	})
 }
 
@@ -922,10 +991,12 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
+				callCount.Add(1)
+				// All calls in two-stage search should have EnableExprCache=true
+				s.True(req.GetEnableExprCache(), "EnableExprCache should be true for all two-stage search calls")
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{100},
 		}, nil)
@@ -968,7 +1039,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		// Should have called SearchSegments 3 times:
 		// filter stage: 1 call for sealed only (growing not included in filter stage)
 		// search stage: 1 call for sealed + 1 call for growing = 2
-		s.Equal(3, callCount)
+		s.Equal(int32(3), callCount.Load())
 	})
 }
 

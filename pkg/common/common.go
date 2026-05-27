@@ -30,8 +30,8 @@ import (
 	"github.com/twpayne/go-geom/encoding/wkbcommon"
 	"github.com/twpayne/go-geom/encoding/wkt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // system field id:
@@ -115,9 +115,19 @@ const (
 	// - Packed single-file index layout (file format v3) becomes the default
 	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
 	//   INVERTED to STL_SORT
+	//
+	// Scalar index engine version 4:
+	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
+	//   the existing INVERTED / NGRAM)
+	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(3)
-	MaximumScalarIndexEngineVersion = int32(3)
+	CurrentScalarIndexEngineVersion = int32(4)
+	MaximumScalarIndexEngineVersion = int32(4)
+
+	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
+	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
+	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
+	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
@@ -146,8 +156,11 @@ const (
 	// SegmentStatslogPath storage path const for segment stats log.
 	SegmentStatslogPath = `stats_log`
 
-	// SegmentIndexPath storage path const for segment index files.
-	SegmentIndexPath = `index_files`
+	// SegmentIndexV0Path storage path const for legacy build-rooted segment index files.
+	SegmentIndexV0Path = `index_files`
+
+	// SegmentIndexV1Path storage path const for collection-rooted segment index files.
+	SegmentIndexV1Path = `index_v1`
 
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`
@@ -188,6 +201,10 @@ const (
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
 	RecallEvalKey   = "recall_eval"
+
+	GlobalRefineKey    = "global_refine"
+	SearchTopkRatioKey = "search_topk_ratio"
+	RefineTopkRatioKey = "refine_topk_ratio"
 
 	ParamsKey      = "params"
 	IndexTypeKey   = "index_type"
@@ -235,6 +252,8 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	CollectionExternalSource    = "collection.external_source"
+	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
 

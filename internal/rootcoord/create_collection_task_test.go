@@ -28,19 +28,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
@@ -662,14 +662,18 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			StructArrayFields: []*schemapb.StructArrayFieldSchema{
 				{
-					Name: "struct_field",
+					Name:     "struct_field",
+					Nullable: true,
 					Fields: []*schemapb.FieldSchema{
 						{
 							Name:        "vector_array_field",
 							DataType:    schemapb.DataType_ArrayOfVector,
 							ElementType: schemapb.DataType_FloatVector,
 							Nullable:    true,
-							TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "128"},
+								{Key: common.MaxCapacityKey, Value: "100"},
+							},
 						},
 					},
 				},
@@ -822,6 +826,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "nested_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Array,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -850,6 +855,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:        "array_field",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_None,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 					},
 				},
@@ -880,12 +886,14 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_VarChar,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.MaxLengthKey, Value: "100"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 						{
 							Name:        "int_array",
 							DataType:    schemapb.DataType_Array,
 							ElementType: schemapb.DataType_Int32,
+							TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 						},
 						{
 							Name:        "vector_array",
@@ -893,6 +901,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							ElementType: schemapb.DataType_FloatVector,
 							TypeParams: []*commonpb.KeyValuePair{
 								{Key: common.DimKey, Value: "128"},
+								{Key: common.MaxCapacityKey, Value: "100"},
 							},
 						},
 					},
@@ -914,6 +923,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-west-2","anonymous":"true","cloud_provider":"aws"}}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -948,6 +958,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "pk",
@@ -980,6 +991,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -1468,6 +1480,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1498,7 +1513,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1522,6 +1537,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1552,7 +1570,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1640,7 +1658,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -1733,7 +1751,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		}).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 		defer cleanTestEnv()
 
 		collectionName := funcutil.GenRandomStr()
@@ -1796,7 +1814,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -1997,6 +2015,7 @@ func TestNamespaceProperty(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:            collectionName,
 			ExternalSource:  "s3://bucket/path",
+			ExternalSpec:    `{"format":"parquet"}`,
 			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{

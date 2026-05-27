@@ -15,7 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -28,15 +29,15 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 const testVChannel = "v1"
@@ -53,6 +54,7 @@ func TestFencedError(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
+	walimplstest.Reset()
 	initResourceForTest(t)
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
@@ -172,14 +174,16 @@ func (f *testOneWALFramework) Run() {
 				CollectionId: 100,
 				PartitionIds: []int64{200},
 			}).
-			WithBody(&msgpb.CreateCollectionRequest{}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection_100"},
+			}).
 			WithVChannel(testVChannel).
 			MustBuildMutable()
 
 		result, err := rwWAL.Append(ctx, createMsg)
+		walimplstest.DisableFenced(pChannel.Name)
 		require.Nil(f.t, result)
 		require.True(f.t, status.AsStreamingError(err).IsFenced())
-		walimplstest.DisableFenced(pChannel.Name)
 		rwWAL.Close()
 	}
 }
@@ -283,7 +287,9 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 			CollectionId: 1,
 			PartitionIds: []int64{2},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection"},
+		}).
 		WithVChannel(testVChannel).
 		BuildMutable()
 	require.NoError(f.t, err)

@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -10,12 +11,14 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 func TestPartitionsDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -61,6 +64,8 @@ func TestPartitionsDefault(t *testing.T) {
 }
 
 func TestCreatePartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -106,16 +111,48 @@ func TestCreatePartitionInvalid(t *testing.T) {
 }
 
 func TestPartitionsNumExceedsMax(t *testing.T) {
-	// 120 seconds may timeout for 1024 partitions
-	ctx := hp.CreateContext(t, time.Second*300)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	// Temporarily lower maxPartitionNum via management API so we only need a
+	// handful of CreatePartition calls instead of 1023, avoiding CI timeouts.
+	const testMaxPartitions = 10
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 
-	// create collection
+	prev, err := hp.AlterServerConfig("rootCoord.maxPartitionNum", fmt.Sprintf("%d", testMaxPartitions))
+	if err != nil {
+		// Management API unreachable — fall back to original approach with generous timeout.
+		t.Logf("management API unavailable (%v), falling back to full partition creation", err)
+		ctx = hp.CreateContext(t, time.Second*600)
+		testPartitionsNumExceedsMaxFull(t, ctx)
+		return
+	}
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig("rootCoord.maxPartitionNum", prev)
+	})
+
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	// create multi partitions
+	// create partitions up to the (lowered) limit; _default counts as 1
+	for i := 0; i < testMaxPartitions-1; i++ {
+		parName := fmt.Sprintf("par_%d", i)
+		err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
+		common.CheckErr(t, err, true)
+	}
+	pars, errList := mc.ListPartitions(ctx, client.NewListPartitionOption(schema.CollectionName))
+	common.CheckErr(t, errList, true)
+	require.Len(t, pars, testMaxPartitions)
+
+	// one more should fail
+	parName := common.GenRandomString("par", 4)
+	err = mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
+	common.CheckErr(t, err, false, fmt.Sprintf("exceeds max configuration (%d)", testMaxPartitions))
+}
+
+// testPartitionsNumExceedsMaxFull is the fallback when the management API is not available.
+func testPartitionsNumExceedsMaxFull(t *testing.T, ctx context.Context) {
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
 	for i := 0; i < common.MaxPartitionNum-1; i++ {
-		// create par
 		parName := fmt.Sprintf("par_%d", i)
 		err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 		common.CheckErr(t, err, true)
@@ -124,13 +161,14 @@ func TestPartitionsNumExceedsMax(t *testing.T) {
 	common.CheckErr(t, errList, true)
 	require.Len(t, pars, common.MaxPartitionNum)
 
-	// create partition exceed max
 	parName := common.GenRandomString("par", 4)
 	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
 	common.CheckErr(t, err, false, fmt.Sprintf("exceeds max configuration (%d)", common.MaxPartitionNum))
 }
 
 func TestDropPartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -151,6 +189,8 @@ func TestDropPartitionInvalid(t *testing.T) {
 }
 
 func TestListHasPartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -164,6 +204,8 @@ func TestListHasPartitionInvalid(t *testing.T) {
 }
 
 func TestDropPartitionData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

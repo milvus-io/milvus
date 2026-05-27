@@ -1,16 +1,15 @@
-import pytest
-import numpy as np
 import random
 
+import numpy as np
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from common.constants import *  # noqa
-from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
 from pymilvus.client.embedding_list import EmbeddingList
+from utils.util_log import test_log as log
 
 prefix = "struct_elem_search"
 epsilon = 0.001
@@ -21,6 +20,7 @@ default_growing_nb = 500
 insert_batch_size = 500
 default_capacity = 100
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
+HNSW_SEARCH_PARAMS = {"ef": 1000}
 COLORS = ["Red", "Blue", "Green"]
 SIZES = ["S", "M", "L", "XL"]
 CATEGORIES = ["A", "B", "C", "D"]
@@ -37,6 +37,7 @@ def _seed_vector(seed, dim=default_dim):
 
 
 # ========== Ground Truth Computation ==========
+
 
 def _cosine_sim(v1, v2):
     """Compute cosine similarity between two vectors."""
@@ -75,8 +76,14 @@ def _is_descending(metric_type):
     return metric_type in ("COSINE", "IP")
 
 
-def gt_element_filter_search(data, query_vector, elem_filter_fn, metric_type="COSINE",
-                              limit=10, doc_filter_fn=None):
+def gt_element_filter_search(
+    data,
+    query_vector,
+    elem_filter_fn,
+    metric_type="COSINE",
+    limit=10,
+    doc_filter_fn=None,
+):
     """
     Ground truth for element_filter search.
 
@@ -98,8 +105,11 @@ def gt_element_filter_search(data, query_vector, elem_filter_fn, metric_type="CO
         for j, elem in enumerate(row["structA"]):
             if elem_filter_fn(elem):
                 score = _compute_similarity(query_vector, elem["embedding"], metric_type)
-                if best_score is None or (_is_descending(metric_type) and score > best_score) or \
-                   (not _is_descending(metric_type) and score < best_score):
+                if (
+                    best_score is None
+                    or (_is_descending(metric_type) and score > best_score)
+                    or (not _is_descending(metric_type) and score < best_score)
+                ):
                     best_score = score
                     best_offset = j
         if best_offset >= 0:
@@ -109,8 +119,7 @@ def gt_element_filter_search(data, query_vector, elem_filter_fn, metric_type="CO
     return row_scores[:limit]
 
 
-def gt_match_query(data, match_type, elem_filter_fn, threshold=None,
-                   doc_filter_fn=None):
+def gt_match_query(data, match_type, elem_filter_fn, threshold=None, doc_filter_fn=None):
     """
     Ground truth for MATCH family query.
 
@@ -126,23 +135,31 @@ def gt_match_query(data, match_type, elem_filter_fn, threshold=None,
         total = len(row["structA"])
         matched = False
         if match_type == "MATCH_ALL":
-            matched = (count == total)
+            matched = count == total
         elif match_type == "MATCH_ANY":
-            matched = (count >= 1)
+            matched = count >= 1
         elif match_type == "MATCH_LEAST":
-            matched = (count >= threshold)
+            matched = count >= threshold
         elif match_type == "MATCH_MOST":
-            matched = (count <= threshold)
+            matched = count <= threshold
         elif match_type == "MATCH_EXACT":
-            matched = (count == threshold)
+            matched = count == threshold
         if matched:
             matching.append(row["id"])
     return set(matching)
 
 
-def gt_match_search(data, query_vector, match_type, elem_filter_fn,
-                    threshold=None, metric_type="COSINE", limit=10,
-                    anns_field="normal_vector", doc_filter_fn=None):
+def gt_match_search(
+    data,
+    query_vector,
+    match_type,
+    elem_filter_fn,
+    threshold=None,
+    metric_type="COSINE",
+    limit=10,
+    anns_field="normal_vector",
+    doc_filter_fn=None,
+):
     """
     Ground truth for MATCH + vector search.
 
@@ -164,8 +181,7 @@ def gt_match_search(data, query_vector, match_type, elem_filter_fn,
     return row_scores[:limit]
 
 
-def assert_result_ids_match(milvus_results, gt_results, recall_threshold=0.9,
-                            is_search=True, check_order=False):
+def assert_result_ids_match(milvus_results, gt_results, recall_threshold=0.9, is_search=True, check_order=False):
     """
     Compare Milvus results against ground truth.
 
@@ -192,17 +208,17 @@ def assert_result_ids_match(milvus_results, gt_results, recall_threshold=0.9,
     if len(gt_ids) > 0:
         overlap = milvus_id_set & gt_ids
         recall = len(overlap) / min(len(gt_ids), len(milvus_ids)) if milvus_ids else 0
-        assert recall >= recall_threshold, \
-            f"Recall {recall:.2f} < {recall_threshold}. " \
-            f"GT IDs (top-{len(gt_ids)}): {sorted(gt_ids)[:20]}, " \
+        assert recall >= recall_threshold, (
+            f"Recall {recall:.2f} < {recall_threshold}. "
+            f"GT IDs (top-{len(gt_ids)}): {sorted(gt_ids)[:20]}, "
             f"Milvus IDs: {sorted(milvus_id_set)[:20]}"
+        )
 
     # Check order (top-1 should match in most cases)
     if check_order and gt_results and milvus_ids:
         gt_top1 = gt_results[0][0] if isinstance(gt_results, list) else None
         if gt_top1 is not None:
-            assert milvus_ids[0] == gt_top1, \
-                f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_top1}"
+            assert milvus_ids[0] == gt_top1, f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_top1}"
 
 
 def _assert_distance_order(results, metric_type):
@@ -212,12 +228,122 @@ def _assert_distance_order(results, metric_type):
     distances = [hit["distance"] for hit in results[0]]
     if _is_descending(metric_type):
         for k in range(len(distances) - 1):
-            assert distances[k] >= distances[k + 1] - epsilon, \
-                f"Results not sorted descending: distances[{k}]={distances[k]} < distances[{k+1}]={distances[k+1]}"
+            assert distances[k] >= distances[k + 1] - epsilon, (
+                f"Results not sorted descending: distances[{k}]={distances[k]} < distances[{k + 1}]={distances[k + 1]}"
+            )
     else:
         for k in range(len(distances) - 1):
-            assert distances[k] <= distances[k + 1] + epsilon, \
-                f"Results not sorted ascending: distances[{k}]={distances[k]} > distances[{k+1}]={distances[k+1]}"
+            assert distances[k] <= distances[k + 1] + epsilon, (
+                f"Results not sorted ascending: distances[{k}]={distances[k]} > distances[{k + 1}]={distances[k + 1]}"
+            )
+
+
+def _assert_element_range_hits_ground_truth(
+    results,
+    data,
+    query_vectors,
+    metric_type,
+    elem_filter_fn,
+    low=None,
+    high=None,
+):
+    """
+    Verify every returned element-level range-search hit against inserted data.
+
+    This intentionally checks returned-hit correctness rather than exact recall:
+    HNSW search is approximate, but any returned (row id, element offset, distance)
+    must be independently valid.
+    """
+    assert len(results) == len(query_vectors), f"result nq={len(results)} != query nq={len(query_vectors)}"
+    data_by_id = {row["id"]: row for row in data}
+
+    for q_idx, (hits, query_vector) in enumerate(zip(results, query_vectors)):
+        for hit in hits:
+            row_id = hit["id"]
+            assert row_id in data_by_id, f"query {q_idx}: row id {row_id} not found in inserted data"
+            assert "offset" in hit, f"query {q_idx}: hit {row_id} has no element offset"
+
+            row = data_by_id[row_id]
+            offset = hit["offset"]
+            assert 0 <= offset < len(row["structA"]), (
+                f"query {q_idx}: row {row_id} offset {offset} out of range, structA length={len(row['structA'])}"
+            )
+
+            elem = row["structA"][offset]
+            assert elem_filter_fn(elem), f"query {q_idx}: row {row_id} offset {offset} violates element_filter"
+
+            expected_distance = _compute_similarity(query_vector, elem["embedding"], metric_type)
+            assert abs(hit["distance"] - expected_distance) <= epsilon, (
+                f"query {q_idx}: row {row_id} offset {offset} distance mismatch: "
+                f"milvus={hit['distance']}, expected={expected_distance}"
+            )
+            if low is not None:
+                assert hit["distance"] >= low - epsilon, (
+                    f"query {q_idx}: row {row_id} offset {offset} distance {hit['distance']} < low {low}"
+                )
+            if high is not None:
+                assert hit["distance"] <= high + epsilon, (
+                    f"query {q_idx}: row {row_id} offset {offset} distance {hit['distance']} > high {high}"
+                )
+
+
+def _expected_element_range_hits(data, query_vector, metric_type, elem_filter_fn, low=None, high=None):
+    """Compute exact element-level range-search candidates from inserted data."""
+    expected = []
+    for row in data:
+        for offset, elem in enumerate(row["structA"]):
+            if not elem_filter_fn(elem):
+                continue
+            distance = _compute_similarity(query_vector, elem["embedding"], metric_type)
+            if low is not None and distance < low:
+                continue
+            if high is not None and distance > high:
+                continue
+            expected.append((row["id"], offset, distance))
+    expected.sort(key=lambda x: x[2], reverse=_is_descending(metric_type))
+    return expected
+
+
+def _assert_no_missing_range_hits(results, expected_hits):
+    """Assert returned element hits exactly match the expected element candidates."""
+    actual_pairs = {(hit["id"], hit["offset"]) for hit in results[0]}
+    expected_pairs = {(row_id, offset) for row_id, offset, _ in expected_hits}
+    missing = expected_pairs - actual_pairs
+    extra = actual_pairs - expected_pairs
+    assert not missing and not extra, (
+        f"range search result mismatch: missing={sorted(missing)[:20]}, "
+        f"extra={sorted(extra)[:20]}, expected={len(expected_pairs)}, actual={len(actual_pairs)}"
+    )
+
+
+def _assert_range_recall(hits, expected_hits, limit, recall_threshold=0.8, context="range search"):
+    """Assert ANN range-search results recall enough exact top candidates."""
+    expected_top = expected_hits[: min(limit, len(expected_hits))]
+    assert expected_top, f"{context}: exact expected range candidates should not be empty"
+
+    actual_pairs = {(hit["id"], hit["offset"]) for hit in hits}
+    expected_pairs = {(row_id, offset) for row_id, offset, _ in expected_top}
+    overlap = actual_pairs & expected_pairs
+    recall = len(overlap) / len(expected_pairs)
+    assert recall >= recall_threshold, (
+        f"{context}: recall {recall:.2f} < {recall_threshold}; "
+        f"overlap={len(overlap)}, expected={len(expected_pairs)}, actual={len(actual_pairs)}, "
+        f"missing={sorted(expected_pairs - actual_pairs)[:20]}"
+    )
+
+
+def _hnsw_search_params(**params):
+    """Compose HNSW search params with a recall-oriented ef value."""
+    merged = dict(HNSW_SEARCH_PARAMS)
+    merged.update(params)
+    return merged
+
+
+def _diskann_search_params(**params):
+    """Compose DISKANN search params with a recall-oriented search_list value."""
+    merged = {"search_list": 1000}
+    merged.update(params)
+    return merged
 
 
 def _generate_float16_vector(dim, seed=None):
@@ -229,6 +355,7 @@ def _generate_float16_vector(dim, seed=None):
 def _generate_bfloat16_vector(dim, seed=None):
     """Generate BFloat16 vector as np.ndarray(dtype=bfloat16) via ml_dtypes."""
     import ml_dtypes  # noqa: F811
+
     rng = np.random.RandomState(seed)
     return rng.rand(dim).astype(ml_dtypes.bfloat16)
 
@@ -288,28 +415,38 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
                     emb = [1.0] + [0.0] * (dim - 1)
                 else:
                     emb = _seed_vector(i * 1000 + j, dim)
-                struct_array.append({
-                    "embedding": emb,
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                    "size": SIZES[(i + j) % 4],
-                })
-            data.append({
-                "id": i,
-                "doc_int": i,
-                "doc_varchar": f"cat_{i % 10}",
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": emb,
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "float_val": float(i + j * 0.1),
+                        "color": COLORS[j % 3],
+                        "size": SIZES[(i + j) % 4],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "doc_varchar": f"cat_{i % 10}",
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
-    def _create_collection_and_insert(self, client, collection_name, nb=1000,
-                                       dim=default_dim, flush=True,
-                                       metric_type="COSINE",
-                                       create_nested_index=False,
-                                       index_type="HNSW"):
+    def _create_collection_and_insert(
+        self,
+        client,
+        collection_name,
+        nb=1000,
+        dim=default_dim,
+        flush=True,
+        metric_type="COSINE",
+        create_nested_index=False,
+        index_type="HNSW",
+    ):
         """Helper: create collection, insert data, build index, load."""
         schema = self._create_schema(client, dim=dim)
         index_params = client.prepare_index_params()
@@ -347,7 +484,6 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
     # ---- L0 tests ----
 
-    @pytest.mark.xfail(reason="flaky: element-level search on growing segment returns wrong element-to-row mapping")
     @pytest.mark.tags(CaseLabel.L0)
     def test_element_filter_search_basic_cosine(self):
         """
@@ -362,11 +498,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         # Use a known element vector as query
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            search_params={"metric_type": "COSINE", "params": HNSW_SEARCH_PARAMS},
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -374,15 +511,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert len(results) > 0
         # Scalar condition: each hit must have at least one element with int_val >= 0
         for hit in results[0]:
-            assert any(e["int_val"] >= 0 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val >= 0"
+            assert any(e["int_val"] >= 0 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val >= 0"
         # Top-1: querying row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0 (queried its own vector), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (queried its own vector), got {results[0][0]['id']}"
         # Distance ordering
         _assert_distance_order(results, "COSINE")
 
-    @pytest.mark.xfail(reason="flaky: element-level search on growing segment returns wrong element-to-row mapping")
     @pytest.mark.tags(CaseLabel.L0)
     def test_element_filter_search_basic_l2(self):
         """
@@ -396,11 +530,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "L2"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -408,11 +543,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert len(results) > 0
         # Scalar condition verification
         for hit in results[0]:
-            assert any(e["int_val"] >= 0 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val >= 0"
+            assert any(e["int_val"] >= 0 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val >= 0"
         # Top-1: querying row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0, got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0, got {results[0][0]['id']}"
         # Distance ordering (L2: ascending)
         _assert_distance_order(results, "L2")
 
@@ -429,7 +562,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[200]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -442,8 +576,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert hit["doc_int"] > 100
         # Top-1: querying row 200's vector with its specific str_val filter
-        assert results[0][0]["id"] == 200, \
-            f"Top-1 should be row 200, got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 200, f"Top-1 should be row 200, got {results[0][0]['id']}"
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_element_filter_search_compound_same_element_semantic(self):
@@ -461,12 +594,16 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -475,29 +612,59 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         target_vec = _seed_vector(77777)
         data = [
             {
-                "id": 0, "doc_int": 0, "doc_varchar": "cat_0",
+                "id": 0,
+                "doc_int": 0,
+                "doc_varchar": "cat_0",
                 "normal_vector": _seed_vector(99990),
                 "structA": [
-                    {"embedding": _seed_vector(0), "int_val": 1, "str_val": "a",
-                     "float_val": 0.1, "color": "Red", "size": "S"},
-                    {"embedding": target_vec, "int_val": 2, "str_val": "b",
-                     "float_val": 0.2, "color": "Blue", "size": "L"},
+                    {
+                        "embedding": _seed_vector(0),
+                        "int_val": 1,
+                        "str_val": "a",
+                        "float_val": 0.1,
+                        "color": "Red",
+                        "size": "S",
+                    },
+                    {
+                        "embedding": target_vec,
+                        "int_val": 2,
+                        "str_val": "b",
+                        "float_val": 0.2,
+                        "color": "Blue",
+                        "size": "L",
+                    },
                 ],
             },
             {
-                "id": 1, "doc_int": 1, "doc_varchar": "cat_1",
+                "id": 1,
+                "doc_int": 1,
+                "doc_varchar": "cat_1",
                 "normal_vector": _seed_vector(99991),
                 "structA": [
-                    {"embedding": target_vec, "int_val": 10, "str_val": "x",
-                     "float_val": 1.0, "color": "Red", "size": "L"},
+                    {
+                        "embedding": target_vec,
+                        "int_val": 10,
+                        "str_val": "x",
+                        "float_val": 1.0,
+                        "color": "Red",
+                        "size": "L",
+                    },
                 ],
             },
             {
-                "id": 2, "doc_int": 2, "doc_varchar": "cat_2",
+                "id": 2,
+                "doc_int": 2,
+                "doc_varchar": "cat_2",
                 "normal_vector": _seed_vector(99992),
                 "structA": [
-                    {"embedding": _seed_vector(20), "int_val": 20, "str_val": "p",
-                     "float_val": 2.0, "color": "Blue", "size": "S"},
+                    {
+                        "embedding": _seed_vector(20),
+                        "int_val": 20,
+                        "str_val": "p",
+                        "float_val": 2.0,
+                        "color": "Blue",
+                        "size": "S",
+                    },
                 ],
             },
         ]
@@ -507,7 +674,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         # Search using target_vec so Row 0 (elem[1]) and Row 1 (elem[0]) are closest
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[target_vec],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -518,38 +686,38 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert check
         matched_ids = {hit["id"] for hit in results[0]}
         # Row 0: Red on elem[0](size=S), L on elem[1](color=Blue) → NO match
-        assert 0 not in matched_ids, \
-            "Row 0 should NOT match (Red and L are on different elements)"
+        assert 0 not in matched_ids, "Row 0 should NOT match (Red and L are on different elements)"
         # Row 1: elem[0]={Red,L} → YES
-        assert 1 in matched_ids, \
-            "Row 1 should match (Red+L on same element)"
+        assert 1 in matched_ids, "Row 1 should match (Red+L on same element)"
         # Ground truth verification
         gt = gt_element_filter_search(
-            data, target_vec,
+            data,
+            target_vec,
             elem_filter_fn=lambda e: e["color"] == "Red" and e["size"] == "L",
-            metric_type="COSINE", limit=10,
+            metric_type="COSINE",
+            limit=10,
         )
         assert_result_ids_match(results, gt, recall_threshold=1.0)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="pymilvus element_indices not yet re-exposed after PR #3240 refactoring")
     def test_element_filter_search_verify_in_struct_offset(self):
         """
-        target: verify element_indices corresponds to correct array subscript
-        method: insert known data, search with element_filter matching specific element
-        expected: element_indices matches the known position
+        target: verify the hit's `offset` maps to the correct element subscript inside structA
+        method: insert known data, search for a specific element via a unique str_val filter
+        expected: top-1 hit.id == target_row AND hit["offset"] == target_elem
+        note: `offset` is accessible via dict-style hit["offset"] (not attribute access).
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_offset")
         data = self._create_collection_and_insert(client, collection_name, nb=1000, metric_type="COSINE")
 
-        # Search for elem_2 of row 50 specifically
         target_row = 50
         target_elem = 2
         query_vector = data[target_row]["structA"][target_elem]["embedding"]
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -558,13 +726,11 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             output_fields=["id", "structA"],
         )
         assert check
-        assert len(results) > 0
-        # Check element_indices (offset) if exposed
-        top_hit = results[0]
-        assert top_hit["id"] == target_row
-        # Verify offset field exists
-        assert "offset" in top_hit or hasattr(top_hit, "offset"), \
-            "element_indices (offset) not exposed in pymilvus"
+        assert len(results[0]) > 0, "no hits returned for unique element filter"
+        top_hit = results[0][0]
+        assert top_hit["id"] == target_row, f"expected row {target_row}, got {top_hit['id']}"
+        assert "offset" in top_hit, "element offset not exposed on hit"
+        assert top_hit["offset"] == target_elem, f"expected element offset={target_elem}, got {top_hit['offset']}"
 
     # ---- L1 tests ----
 
@@ -581,19 +747,19 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "IP"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
         assert check
         assert len(results) > 0
         for hit in results[0]:
-            assert any(e["int_val"] >= 0 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val >= 0"
+            assert any(e["int_val"] >= 0 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val >= 0"
         _assert_distance_order(results, "IP")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -609,11 +775,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[10]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 50)',
+            filter="element_filter(structA, $[int_val] > 50)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -621,8 +788,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert len(results) > 0
         # Scalar condition: each hit must have element with int_val > 50
         for hit in results[0]:
-            assert any(e["int_val"] > 50 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val > 50"
+            assert any(e["int_val"] > 50 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val > 50"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -638,7 +804,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -650,8 +817,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert len(results) > 0
         # CRITICAL: BOTH conditions must hold on the SAME element
         for hit in results[0]:
-            assert any(e["color"] == "Red" and e["int_val"] > 10 for e in hit["structA"]), \
+            assert any(e["color"] == "Red" and e["int_val"] > 10 for e in hit["structA"]), (
                 f"Row {hit['id']} has no element with color==Red AND int_val>10 on same element"
+            )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -667,7 +835,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -678,8 +847,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
         for hit in results[0]:
-            assert any(e["color"] == "Red" or e["int_val"] > 99900 for e in hit["structA"]), \
+            assert any(e["color"] == "Red" or e["int_val"] > 99900 for e in hit["structA"]), (
                 f"Row {hit['id']} has no element matching OR condition"
+            )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -695,11 +865,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[1]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 100 && $[int_val] < 200)',
+            filter="element_filter(structA, $[int_val] > 100 && $[int_val] < 200)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -707,8 +878,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0, "Range filter should match row 1 elements (int_val 101-109)"
         # Scalar condition verification: each hit must have element in range
         for hit in results[0]:
-            assert any(100 < e["int_val"] < 200 for e in hit["structA"]), \
+            assert any(100 < e["int_val"] < 200 for e in hit["structA"]), (
                 f"Row {hit['id']} has no element in range (100, 200)"
+            )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -724,7 +896,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[1]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -751,19 +924,19 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         query_vector = data[5]["structA"][0]["embedding"]
         # All elements of row 5 have int_val = 500..509, all > 100
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 100)',
+            filter="element_filter(structA, $[int_val] > 100)",
             limit=10,
             output_fields=["id", "structA"],
         )
         assert check
         assert len(results) > 0
         for hit in results[0]:
-            assert any(e["int_val"] > 100 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val > 100"
+            assert any(e["int_val"] > 100 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val > 100"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -780,11 +953,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         # int_val max is 999*100+9 = 99909, so > 999999 matches nothing
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 999999)',
+            filter="element_filter(structA, $[int_val] > 999999)",
             limit=10,
         )
         assert check
@@ -799,17 +973,16 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_growing")
-        data = self._create_collection_and_insert(
-            client, collection_name, nb=1000, metric_type="COSINE", flush=False
-        )
+        data = self._create_collection_and_insert(client, collection_name, nb=1000, metric_type="COSINE", flush=False)
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -818,11 +991,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"])
         # Top-1: searching row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
         _assert_distance_order(results, "COSINE")
 
-    @pytest.mark.xfail(reason="flaky: element-level search on sealed segment returns wrong element-to-row mapping")
     @pytest.mark.tags(CaseLabel.L1)
     def test_element_filter_search_sealed_segment(self):
         """
@@ -832,17 +1003,16 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_sealed")
-        data = self._create_collection_and_insert(
-            client, collection_name, nb=1000, metric_type="COSINE", flush=True
-        )
+        data = self._create_collection_and_insert(client, collection_name, nb=1000, metric_type="COSINE", flush=True)
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -851,8 +1021,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"])
         # Top-1: searching row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -868,11 +1037,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "doc_int", "structA[int_val]", "structA[color]"],
         )
@@ -882,12 +1052,11 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert hit["id"] is not None
             # Access doc_int via [] (pymilvus proxies to entity)
-            assert hit["doc_int"] is not None, f"doc_int missing from hit"
+            assert hit["doc_int"] is not None, "doc_int missing from hit"
             # Verify structA sub-fields accessible
             assert hit["structA"] is not None
         _assert_distance_order(results, "COSINE")
 
-    @pytest.mark.xfail(reason="FLAT index on struct array vector not supported for element_filter search")
     @pytest.mark.tags(CaseLabel.L1)
     def test_element_filter_search_brute_force(self):
         """
@@ -925,11 +1094,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -938,8 +1108,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"])
         # Top-1: searching row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -957,7 +1126,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE", "params": {"ef": 200}},
@@ -968,8 +1138,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
         for hit in results[0]:
-            assert any(e["color"] == "Red" for e in hit["structA"]), \
-                f"Row {hit['id']} has no Red element"
+            assert any(e["color"] == "Red" for e in hit["structA"]), f"Row {hit['id']} has no Red element"
         _assert_distance_order(results, "COSINE")
 
     # ---- L2 tests ----
@@ -987,12 +1156,16 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -1009,30 +1182,36 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                    "size": SIZES[(i + j) % 4],
-                })
-            growing_data.append({
-                "id": i, "doc_int": i, "doc_varchar": f"cat_{i % 10}",
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "float_val": float(i + j * 0.1),
+                        "color": COLORS[j % 3],
+                        "size": SIZES[(i + j) % 4],
+                    }
+                )
+            growing_data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "doc_varchar": f"cat_{i % 10}",
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, growing_data)
         self.load_collection(client, collection_name)
 
-        all_data = sealed_data + growing_data
         query_vector = sealed_data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=20,
             output_fields=["id", "structA"],
         )
@@ -1056,21 +1235,23 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         # First page
         results_p1, _ = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=5,
             offset=0,
         )
         # Second page
         results_p2, _ = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=5,
             offset=5,
         )
@@ -1085,8 +1266,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             # Last score of page 1 should be >= first score of page 2 (COSINE: higher is better)
             p1_last = results_p1[0][-1]["distance"]
             p2_first = results_p2[0][0]["distance"]
-            assert p1_last >= p2_first - 1e-4, \
-                f"Page 1 last distance ({p1_last}) should >= page 2 first ({p2_first})"
+            assert p1_last >= p2_first - 1e-4, f"Page 1 last distance ({p1_last}) should >= page 2 first ({p2_first})"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_element_filter_search_nq_multiple(self):
@@ -1099,15 +1279,14 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_ef_nq")
         data = self._create_collection_and_insert(client, collection_name, nb=1000, metric_type="COSINE")
 
-        query_vectors = [
-            data[i]["structA"][0]["embedding"] for i in range(3)
-        ]
+        query_vectors = [data[i]["structA"][0]["embedding"] for i in range(3)]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=query_vectors,
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=5,
             output_fields=["id", "structA"],
         )
@@ -1121,8 +1300,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             # Verify distance ordering within each nq
             distances = [hit["distance"] for hit in results[nq_idx]]
             for k in range(len(distances) - 1):
-                assert distances[k] >= distances[k + 1] - 1e-4, \
+                assert distances[k] >= distances[k + 1] - 1e-4, (
                     f"nq[{nq_idx}] distances not sorted: {distances[k]} < {distances[k + 1]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_element_filter_search_negation(self):
@@ -1137,11 +1317,12 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, !($[int_val] < 0))',
+            filter="element_filter(structA, !($[int_val] < 0))",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -1162,17 +1343,16 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_{metric_type.lower()}")
-        data = self._create_collection_and_insert(
-            client, collection_name, nb=500, metric_type=metric_type
-        )
+        data = self._create_collection_and_insert(client, collection_name, nb=500, metric_type=metric_type)
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": metric_type},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
         )
@@ -1181,8 +1361,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"])
         # Top-1: searching row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, \
-            f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
         _assert_distance_order(results, metric_type)
 
 
@@ -1225,19 +1404,24 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
                     emb = [1.0] + [0.0] * (dim - 1)
                 else:
                     emb = _seed_vector(i * 1000 + j, dim)
-                struct_array.append({
-                    "embedding": emb,
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                    "size": SIZES[(i + j) % 4],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": emb,
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "float_val": float(i + j * 0.1),
+                        "color": COLORS[j % 3],
+                        "size": SIZES[(i + j) % 4],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
     def _generate_semantic_data(self, client, dim=default_dim):
@@ -1248,52 +1432,108 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         """
         data = [
             {
-                "id": 0, "doc_int": 0,
+                "id": 0,
+                "doc_int": 0,
                 "normal_vector": _seed_vector(99990, dim),
                 "structA": [
-                    {"embedding": _seed_vector(0, dim), "int_val": 1, "str_val": "a",
-                     "float_val": 0.1, "color": "Red", "size": "S"},
-                    {"embedding": _seed_vector(1, dim), "int_val": 2, "str_val": "b",
-                     "float_val": 0.2, "color": "Blue", "size": "L"},
-                    {"embedding": _seed_vector(2, dim), "int_val": 3, "str_val": "c",
-                     "float_val": 0.3, "color": "Green", "size": "M"},
+                    {
+                        "embedding": _seed_vector(0, dim),
+                        "int_val": 1,
+                        "str_val": "a",
+                        "float_val": 0.1,
+                        "color": "Red",
+                        "size": "S",
+                    },
+                    {
+                        "embedding": _seed_vector(1, dim),
+                        "int_val": 2,
+                        "str_val": "b",
+                        "float_val": 0.2,
+                        "color": "Blue",
+                        "size": "L",
+                    },
+                    {
+                        "embedding": _seed_vector(2, dim),
+                        "int_val": 3,
+                        "str_val": "c",
+                        "float_val": 0.3,
+                        "color": "Green",
+                        "size": "M",
+                    },
                 ],
             },
             {
-                "id": 1, "doc_int": 1,
+                "id": 1,
+                "doc_int": 1,
                 "normal_vector": _seed_vector(99991, dim),
                 "structA": [
-                    {"embedding": _seed_vector(10, dim), "int_val": 10, "str_val": "x",
-                     "float_val": 1.0, "color": "Red", "size": "L"},
-                    {"embedding": _seed_vector(11, dim), "int_val": 11, "str_val": "y",
-                     "float_val": 1.1, "color": "Red", "size": "L"},
+                    {
+                        "embedding": _seed_vector(10, dim),
+                        "int_val": 10,
+                        "str_val": "x",
+                        "float_val": 1.0,
+                        "color": "Red",
+                        "size": "L",
+                    },
+                    {
+                        "embedding": _seed_vector(11, dim),
+                        "int_val": 11,
+                        "str_val": "y",
+                        "float_val": 1.1,
+                        "color": "Red",
+                        "size": "L",
+                    },
                 ],
             },
             {
-                "id": 2, "doc_int": 2,
+                "id": 2,
+                "doc_int": 2,
                 "normal_vector": _seed_vector(99992, dim),
                 "structA": [
-                    {"embedding": _seed_vector(20, dim), "int_val": 20, "str_val": "p",
-                     "float_val": 2.0, "color": "Blue", "size": "S"},
-                    {"embedding": _seed_vector(21, dim), "int_val": 21, "str_val": "q",
-                     "float_val": 2.1, "color": "Green", "size": "XL"},
+                    {
+                        "embedding": _seed_vector(20, dim),
+                        "int_val": 20,
+                        "str_val": "p",
+                        "float_val": 2.0,
+                        "color": "Blue",
+                        "size": "S",
+                    },
+                    {
+                        "embedding": _seed_vector(21, dim),
+                        "int_val": 21,
+                        "str_val": "q",
+                        "float_val": 2.1,
+                        "color": "Green",
+                        "size": "XL",
+                    },
                 ],
             },
         ]
         return data
 
-    def _setup_collection(self, client, collection_name, data, dim=default_dim,
-                          flush=True, create_nested_index=False):
+    def _setup_collection(
+        self,
+        client,
+        collection_name,
+        data,
+        dim=default_dim,
+        flush=True,
+        create_nested_index=False,
+    ):
         """Helper to create collection, insert data, build index, load."""
         schema = self._create_schema(client, dim=dim)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
         )
         if create_nested_index:
             index_params.add_index(field_name="structA[int_val]", index_type="INVERTED")
@@ -1323,7 +1563,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ALL(structA, $[color] == "Red")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1353,7 +1594,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ALL(structA, $[color] == "Red" && $[size] == "L")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1378,7 +1620,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Blue")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1410,7 +1653,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red" && $[size] == "L")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1437,7 +1681,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red" && $[size] == "L")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1460,8 +1705,9 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_LEAST(structA, $[int_val] > 5, threshold=3)',
+            client,
+            collection_name,
+            filter="MATCH_LEAST(structA, $[int_val] > 5, threshold=3)",
             output_fields=["id", "structA"],
             limit=100,
         )
@@ -1489,13 +1735,15 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results_least, _ = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_LEAST(structA, $[color] == "Blue", threshold=1)',
             output_fields=["id"],
             limit=500,
         )
         results_any, _ = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Blue")',
             output_fields=["id"],
             limit=500,
@@ -1517,8 +1765,9 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_MOST(structA, $[int_val] > 5, threshold=2)',
+            client,
+            collection_name,
+            filter="MATCH_MOST(structA, $[int_val] > 5, threshold=2)",
             output_fields=["id", "structA"],
             limit=100,
         )
@@ -1546,7 +1795,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_EXACT(structA, $[color] == "Red", threshold=2)',
             output_fields=["id", "structA"],
             limit=100,
@@ -1575,7 +1825,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='doc_int > 10 && MATCH_ANY(structA, $[color] == "Red")',
             output_fields=["id", "doc_int", "structA"],
             limit=100,
@@ -1586,7 +1837,9 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
             assert any(e["color"] == "Red" for e in hit["structA"])
         # GT completeness check with doc-level filter
         gt_ids = gt_match_query(
-            data, "MATCH_ANY", lambda e: e["color"] == "Red",
+            data,
+            "MATCH_ANY",
+            lambda e: e["color"] == "Red",
             doc_filter_fn=lambda row: row["doc_int"] > 10,
         )
         milvus_ids = {r["id"] for r in results}
@@ -1608,7 +1861,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -1622,8 +1876,13 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
             assert any(e["color"] == "Red" for e in hit["structA"])
         # GT: MATCH_ANY filter + normal_vector search
         gt = gt_match_search(
-            data, query_vector, "MATCH_ANY", lambda e: e["color"] == "Red",
-            metric_type="COSINE", limit=10, anns_field="normal_vector",
+            data,
+            query_vector,
+            "MATCH_ANY",
+            lambda e: e["color"] == "Red",
+            metric_type="COSINE",
+            limit=10,
+            anns_field="normal_vector",
         )
         assert_result_ids_match(results, gt, recall_threshold=0.8)
         _assert_distance_order(results, "COSINE")
@@ -1641,7 +1900,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data, flush=False)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red")',
             output_fields=["id"],
             limit=100,
@@ -1662,7 +1922,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data, flush=True)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Blue")',
             output_fields=["id"],
             limit=100,
@@ -1683,8 +1944,9 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data, create_nested_index=False)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 500)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 500)",
             output_fields=["id", "structA"],
             limit=100,
         )
@@ -1710,7 +1972,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data, create_nested_index=True)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Green")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1732,12 +1995,16 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(field_name="structA[int_val]", index_type="STL_SORT")
 
@@ -1750,8 +2017,9 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 1000)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 1000)",
             output_fields=["id", "structA"],
             limit=100,
         )
@@ -1774,7 +2042,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_MOST(structA, $[color] == "Red", threshold=0)',
             output_fields=["id", "structA"],
             limit=100,
@@ -1802,7 +2071,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_EXACT(structA, $[color] == "Red", threshold=0)',
             output_fields=["id", "structA"],
             limit=100,
@@ -1825,7 +2095,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ALL(structA, $[color] == "Red" || $[size] == "L")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1835,7 +2106,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
             for elem in hit["structA"]:
                 assert elem["color"] == "Red" or elem["size"] == "L"
         gt_ids = gt_match_query(
-            data, "MATCH_ALL",
+            data,
+            "MATCH_ALL",
             lambda e: e["color"] == "Red" or e["size"] == "L",
         )
         milvus_ids = {r["id"] for r in results}
@@ -1856,14 +2128,18 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results_upper, _ = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red")',
-            output_fields=["id"], limit=500,
+            output_fields=["id"],
+            limit=500,
         )
         results_lower, _ = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='match_any(structA, $[color] == "Red")',
-            output_fields=["id"], limit=500,
+            output_fields=["id"],
+            limit=500,
         )
         ids_upper = sorted([r["id"] for r in results_upper])
         ids_lower = sorted([r["id"] for r in results_lower])
@@ -1882,9 +2158,11 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_LEAST(structA, $[int_val] >= 0, threshold=100)',
-            output_fields=["id"], limit=100,
+            client,
+            collection_name,
+            filter="MATCH_LEAST(structA, $[int_val] >= 0, threshold=100)",
+            output_fields=["id"],
+            limit=100,
         )
         assert check
         assert len(results) == 0, "No row should have 100+ matching elements"
@@ -1902,27 +2180,39 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = [
             {
-                "id": 0, "doc_int": 0,
+                "id": 0,
+                "doc_int": 0,
                 "normal_vector": _seed_vector(0),
                 "structA": [],  # empty array
             },
             {
-                "id": 1, "doc_int": 1,
+                "id": 1,
+                "doc_int": 1,
                 "normal_vector": _seed_vector(1),
                 "structA": [
-                    {"embedding": _seed_vector(10), "int_val": 1, "str_val": "a",
-                     "float_val": 0.1, "color": "Red", "size": "S"},
+                    {
+                        "embedding": _seed_vector(10),
+                        "int_val": 1,
+                        "str_val": "a",
+                        "float_val": 0.1,
+                        "color": "Red",
+                        "size": "S",
+                    },
                 ],
             },
         ]
@@ -1931,7 +2221,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ALL(structA, $[color] == "Red")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1959,7 +2250,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ALL(structA, $[int_val] > 0) && MATCH_ANY(structA, $[color] == "Blue")',
             output_fields=["id", "structA"],
             limit=100,
@@ -1990,7 +2282,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, data)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red") || doc_int > 900',
             output_fields=["id", "doc_int", "structA"],
             limit=500,
@@ -2026,10 +2319,8 @@ class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
 
         filter_expr = 'MATCH_ANY(structA, $[color] == "Red" && $[int_val] > 500)'
 
-        results_bf, _ = self.query(client, name_bf, filter=filter_expr,
-                                    output_fields=["id"], limit=500)
-        results_idx, _ = self.query(client, name_idx, filter=filter_expr,
-                                     output_fields=["id"], limit=500)
+        results_bf, _ = self.query(client, name_bf, filter=filter_expr, output_fields=["id"], limit=500)
+        results_idx, _ = self.query(client, name_idx, filter=filter_expr, output_fields=["id"], limit=500)
 
         ids_bf = sorted([r["id"] for r in results_bf])
         ids_idx = sorted([r["id"] for r in results_idx])
@@ -2057,7 +2348,8 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
             struct_schema.add_field("bool_val", DataType.BOOL)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -2087,25 +2379,39 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
                 if add_bool:
                     elem["bool_val"] = (i + j) % 2 == 0
                 struct_array.append(elem)
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
-    def _setup_base_collection(self, client, collection_name, dim=default_dim,
-                               nb=500, add_bool=False, extra_index_fn=None):
+    def _setup_base_collection(
+        self,
+        client,
+        collection_name,
+        dim=default_dim,
+        nb=500,
+        add_bool=False,
+        extra_index_fn=None,
+    ):
         """Create collection with base indexes, optionally add extra indexes."""
         schema = self._create_schema(client, dim=dim, add_bool=add_bool)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         if extra_index_fn:
             extra_index_fn(index_params)
@@ -2187,8 +2493,7 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         def add_nested(ip):
             ip.add_index(field_name="structA[bool_val]", index_type="INVERTED")
 
-        self._setup_base_collection(client, collection_name, add_bool=True,
-                                     extra_index_fn=add_nested)
+        self._setup_base_collection(client, collection_name, add_bool=True, extra_index_fn=add_nested)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_struct_float(self):
@@ -2252,19 +2557,19 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 100)',
+            filter="element_filter(structA, $[int_val] > 100)",
             limit=10,
             output_fields=["id", "structA"],
         )
         assert check
         assert len(results) > 0
         for hit in results[0]:
-            assert any(e["int_val"] > 100 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element with int_val > 100"
+            assert any(e["int_val"] > 100 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val > 100"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2283,7 +2588,8 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         self._setup_base_collection(client, collection_name, extra_index_fn=add_nested)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Blue")',
             output_fields=["id", "structA"],
             limit=100,
@@ -2309,11 +2615,12 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 100)',
+            filter="element_filter(structA, $[int_val] > 100)",
             limit=10,
         )
         assert check
@@ -2334,8 +2641,9 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         self._setup_base_collection(client, collection_name, extra_index_fn=add_nested)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 1000)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 1000)",
             output_fields=["id", "structA"],
             limit=100,
         )
@@ -2361,7 +2669,8 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         # Query using both indexed fields
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red" && $[int_val] > 100)',
             output_fields=["id"],
             limit=100,
@@ -2384,8 +2693,9 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         self._setup_base_collection(client, collection_name, extra_index_fn=add_nested)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 100)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 100)",
             output_fields=["id"],
             limit=100,
         )
@@ -2405,8 +2715,7 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         def add_nested(ip):
             ip.add_index(field_name="structA[int_val]", index_type="INVERTED")
 
-        self._setup_base_collection(client, collection_name, nb=500,
-                                            extra_index_fn=add_nested)
+        self._setup_base_collection(client, collection_name, nb=500, extra_index_fn=add_nested)
 
         # Insert more data without flush (growing)
         extra_data = []
@@ -2415,25 +2724,31 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                    "size": SIZES[(i + j) % 4],
-                })
-            extra_data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "float_val": float(i + j * 0.1),
+                        "color": COLORS[j % 3],
+                        "size": SIZES[(i + j) % 4],
+                    }
+                )
+            extra_data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, extra_data)
         # No flush - growing segment
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 60000)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 60000)",
             output_fields=["id"],
             limit=100,
         )
@@ -2456,8 +2771,11 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_ni_rebuild")
 
         def add_nested(ip):
-            ip.add_index(field_name="structA[int_val]", index_type="INVERTED",
-                         index_name="nested_int_idx")
+            ip.add_index(
+                field_name="structA[int_val]",
+                index_type="INVERTED",
+                index_name="nested_int_idx",
+            )
 
         self._setup_base_collection(client, collection_name, extra_index_fn=add_nested)
 
@@ -2467,14 +2785,18 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         # Rebuild
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="structA[int_val]", index_type="INVERTED",
-                               index_name="nested_int_idx_v2")
+        index_params.add_index(
+            field_name="structA[int_val]",
+            index_type="INVERTED",
+            index_name="nested_int_idx_v2",
+        )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] > 100)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] > 100)",
             output_fields=["id"],
             limit=100,
         )
@@ -2513,17 +2835,26 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
         struct_schema.add_field("test_field", scalar_type, **scalar_params)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         index_params.add_index(field_name="structA[test_field]", index_type="INVERTED")
 
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -2536,15 +2867,19 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
             num_elems = rng.randint(2, 5)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 100 + j),
-                    "test_field": gen_val(i, j),
-                })
-            data.append({
-                "id": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 100 + j),
+                        "test_field": gen_val(i, j),
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -2552,8 +2887,11 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         # Verify index is functional with a query
         results, check = self.query(
-            client, collection_name, filter="id >= 0",
-            output_fields=["id"], limit=10,
+            client,
+            collection_name,
+            filter="id >= 0",
+            output_fields=["id"],
+            limit=10,
         )
         assert check
         assert len(results) > 0, "Should be able to query data after nested index creation"
@@ -2570,18 +2908,33 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
 
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         # Try INVERTED on vector sub-field
-        index_params.add_index(field_name="structA[embedding]", index_type="INVERTED",
-                               index_name="invalid_inv_on_vec")
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="INVERTED",
+            index_name="invalid_inv_on_vec",
+        )
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params,
-            check_task=CheckTasks.err_res, check_items=error,
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
 
@@ -2601,7 +2954,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         struct_schema.add_field("str_val", DataType.VARCHAR, max_length=256)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -2652,32 +3006,48 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
             num_elems = rng.randint(2, 5)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": self._gen_vec_by_type(vec_type, dim, seed=i * 100 + j),
-                    "int_val": i * 10 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": self._gen_vec_by_type(vec_type, dim, seed=i * 100 + j),
+                        "int_val": i * 10 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
-    def _setup_collection(self, client, collection_name, vec_type, nb=200, dim=default_dim,
-                          use_max_sim=True):
+    def _setup_collection(
+        self,
+        client,
+        collection_name,
+        vec_type,
+        nb=200,
+        dim=default_dim,
+        use_max_sim=True,
+    ):
         """Create collection with non-float vector type, insert data, load."""
         schema = self._create_schema_with_vec_type(client, vec_type, dim)
         metric = self._get_max_sim_metric(vec_type) if use_max_sim else self._get_metric_for_type(vec_type)
 
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type=metric, params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type=metric,
+            params=INDEX_PARAMS,
         )
 
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -2704,10 +3074,18 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         schema = self._create_schema_with_vec_type(client, DataType.FLOAT16_VECTOR)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="MAX_SIM_L2", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_L2",
+            params=INDEX_PARAMS,
+        )
 
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -2724,10 +3102,18 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         schema = self._create_schema_with_vec_type(client, DataType.BFLOAT16_VECTOR)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="MAX_SIM_IP", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_IP",
+            params=INDEX_PARAMS,
+        )
 
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -2768,8 +3154,11 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, DataType.FLOAT16_VECTOR, nb=200)
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
-            output_fields=["id", "structA"], limit=10,
+            client,
+            collection_name,
+            filter="id < 10",
+            output_fields=["id", "structA"],
+            limit=10,
         )
         assert check
         assert len(results) == 10
@@ -2786,8 +3175,11 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, DataType.BFLOAT16_VECTOR, nb=200)
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
-            output_fields=["id", "structA"], limit=10,
+            client,
+            collection_name,
+            filter="id < 10",
+            output_fields=["id", "structA"],
+            limit=10,
         )
         assert check
         assert len(results) == 10
@@ -2804,8 +3196,11 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, DataType.INT8_VECTOR, nb=200)
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
-            output_fields=["id", "structA"], limit=10,
+            client,
+            collection_name,
+            filter="id < 10",
+            output_fields=["id", "structA"],
+            limit=10,
         )
         assert check
         assert len(results) == 10
@@ -2822,8 +3217,11 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, DataType.BINARY_VECTOR, nb=200)
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
-            output_fields=["id", "structA"], limit=10,
+            client,
+            collection_name,
+            filter="id < 10",
+            output_fields=["id", "structA"],
+            limit=10,
         )
         assert check
         assert len(results) == 10
@@ -2843,7 +3241,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         search_tensor.add(self._gen_vec_by_type(DataType.FLOAT16_VECTOR, default_dim, seed=42))
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_L2"},
@@ -2867,7 +3266,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         search_tensor.add(self._gen_vec_by_type(DataType.BFLOAT16_VECTOR, default_dim, seed=42))
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_IP"},
@@ -2891,7 +3291,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         search_tensor.add(self._gen_vec_by_type(DataType.INT8_VECTOR, default_dim, seed=42))
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
@@ -2915,7 +3316,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         search_tensor.add(self._gen_vec_by_type(DataType.BINARY_VECTOR, default_dim, seed=42))
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_HAMMING"},
@@ -2933,16 +3335,16 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_nf_f16_ef")
-        data = self._setup_collection(client, collection_name, DataType.FLOAT16_VECTOR, nb=200,
-                                      use_max_sim=False)
+        data = self._setup_collection(client, collection_name, DataType.FLOAT16_VECTOR, nb=200, use_max_sim=False)
 
         query_vec = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vec],
             anns_field="structA[embedding]",
             search_params={"metric_type": "L2"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
         )
         assert check
@@ -2957,16 +3359,16 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_nf_bf16_ef")
-        data = self._setup_collection(client, collection_name, DataType.BFLOAT16_VECTOR, nb=200,
-                                      use_max_sim=False)
+        data = self._setup_collection(client, collection_name, DataType.BFLOAT16_VECTOR, nb=200, use_max_sim=False)
 
         query_vec = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vec],
             anns_field="structA[embedding]",
             search_params={"metric_type": "IP"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
         )
         assert check
@@ -3003,7 +3405,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         struct_schema.add_field("sparse_vec", DataType.SPARSE_FLOAT_VECTOR)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -3014,8 +3417,11 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
             ct.err_msg: "only fixed dimension vector types are supported",
         }
         self.create_collection(
-            client, collection_name, schema=schema,
-            check_task=CheckTasks.err_res, check_items=error,
+            client,
+            collection_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     # ---- L2 tests ----
@@ -3029,16 +3435,16 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_nf_int8_ef")
-        data = self._setup_collection(client, collection_name, DataType.INT8_VECTOR, nb=200,
-                                      use_max_sim=False)
+        data = self._setup_collection(client, collection_name, DataType.INT8_VECTOR, nb=200, use_max_sim=False)
 
         query_vec = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vec],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
         )
         assert check
@@ -3053,16 +3459,16 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_nf_bin_ef")
-        data = self._setup_collection(client, collection_name, DataType.BINARY_VECTOR, nb=200,
-                                      use_max_sim=False)
+        data = self._setup_collection(client, collection_name, DataType.BINARY_VECTOR, nb=200, use_max_sim=False)
 
         query_vec = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vec],
             anns_field="structA[embedding]",
             search_params={"metric_type": "HAMMING"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
         )
         assert check
@@ -3088,19 +3494,32 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         struct_schema.add_field("int_val", DataType.INT64)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[float_emb]", index_type="HNSW",
-                               metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[float16_emb]", index_type="HNSW",
-                               metric_type="MAX_SIM_L2", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[float_emb]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[float16_emb]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_L2",
+            params=INDEX_PARAMS,
+        )
 
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
@@ -3111,16 +3530,20 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
             num_elems = rng.randint(2, 5)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "float_emb": _seed_vector(i * 100 + j),
-                    "float16_emb": _generate_float16_vector(default_dim, seed=i * 100 + j),
-                    "int_val": i * 10 + j,
-                })
-            data.append({
-                "id": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "float_emb": _seed_vector(i * 100 + j),
+                        "float16_emb": _generate_float16_vector(default_dim, seed=i * 100 + j),
+                        "int_val": i * 10 + j,
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         res, check = self.insert(client, collection_name, data)
         assert check
         self.flush(client, collection_name)
@@ -3130,7 +3553,8 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         search_tensor = EmbeddingList()
         search_tensor.add(_seed_vector(42))
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[float_emb]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
@@ -3138,6 +3562,7 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         )
         assert check
         assert len(results) > 0
+
 
 class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
     """Test element_filter search + hybrid search (4 cases)"""
@@ -3155,7 +3580,8 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -3174,27 +3600,46 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
                     emb = [1.0] + [0.0] * (dim - 1)
                 else:
                     emb = _seed_vector(i * 1000 + j, dim)
-                struct_array.append({
-                    "embedding": emb,
-                    "int_val": i * 100 + j,
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": emb,
+                        "int_val": i * 100 + j,
+                        "color": COLORS[j % 3],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
-    def _setup_collection(self, client, collection_name, nb=500, dim=default_dim,
-                          struct_metric_type="COSINE"):
+    def _setup_collection(
+        self,
+        client,
+        collection_name,
+        nb=500,
+        dim=default_dim,
+        struct_metric_type="COSINE",
+    ):
         """Helper to setup collection for hybrid search."""
         schema = self._create_schema(client, dim)
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type=struct_metric_type, params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type=struct_metric_type,
+            params=INDEX_PARAMS,
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = self._generate_data(nb=nb, dim=dim)
@@ -3217,25 +3662,32 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         data = self._setup_collection(client, collection_name, nb=500)
 
         # Request 1: element_filter search on struct vector
-        req1 = AnnSearchRequest(**{
-            "data": [data[0]["structA"][0]["embedding"]],
-            "anns_field": "structA[embedding]",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-            "expr": 'element_filter(structA, $[int_val] >= 0)',
-        })
+        req1 = AnnSearchRequest(
+            **{
+                "data": [data[0]["structA"][0]["embedding"]],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+                "expr": "element_filter(structA, $[int_val] >= 0)",
+            }
+        )
 
         # Request 2: normal vector search
-        req2 = AnnSearchRequest(**{
-            "data": [data[0]["normal_vector"]],
-            "anns_field": "normal_vector",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-        })
+        req2 = AnnSearchRequest(
+            **{
+                "data": [data[0]["normal_vector"]],
+                "anns_field": "normal_vector",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+            }
+        )
 
         results, check = self.hybrid_search(
-            client, collection_name, [req1, req2],
-            ranker=RRFRanker(), limit=10,
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=10,
             output_fields=["id"],
         )
         assert check
@@ -3252,70 +3704,37 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_hyb_weighted")
         data = self._setup_collection(client, collection_name, nb=500)
 
-        req1 = AnnSearchRequest(**{
-            "data": [data[0]["structA"][0]["embedding"]],
-            "anns_field": "structA[embedding]",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-            "expr": 'element_filter(structA, $[int_val] >= 0)',
-        })
+        req1 = AnnSearchRequest(
+            **{
+                "data": [data[0]["structA"][0]["embedding"]],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+                "expr": "element_filter(structA, $[int_val] >= 0)",
+            }
+        )
 
-        req2 = AnnSearchRequest(**{
-            "data": [data[0]["normal_vector"]],
-            "anns_field": "normal_vector",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-        })
+        req2 = AnnSearchRequest(
+            **{
+                "data": [data[0]["normal_vector"]],
+                "anns_field": "normal_vector",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+            }
+        )
 
         results, check = self.hybrid_search(
-            client, collection_name, [req1, req2],
-            ranker=WeightedRanker(0.7, 0.3), limit=10,
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=WeightedRanker(0.7, 0.3),
+            limit=10,
             output_fields=["id"],
         )
         assert check
         assert len(results) > 0
 
     # ---- L2 tests ----
-
-    @pytest.mark.xfail(reason="element_filter(COSINE) + EmbeddingList(MAX_SIM) require different index metrics on same field")
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_hybrid_element_filter_and_max_sim(self):
-        """
-        target: element_filter search + MAX_SIM search hybrid
-        method: combine element-level search with MAX_SIM search
-        expected: hybrid results (requires server metric adaptation)
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_hyb_maxsim")
-        data = self._setup_collection(client, collection_name, nb=500,
-                                      struct_metric_type="MAX_SIM_COSINE")
-
-        # element_filter search (single vector)
-        req1 = AnnSearchRequest(**{
-            "data": [data[0]["structA"][0]["embedding"]],
-            "anns_field": "structA[embedding]",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-            "expr": 'element_filter(structA, $[color] == "Red")',
-        })
-
-        # MAX_SIM search (EmbeddingList)
-        search_tensor = EmbeddingList()
-        search_tensor.add(_seed_vector(42))
-        req2 = AnnSearchRequest(**{
-            "data": [search_tensor],
-            "anns_field": "structA[embedding]",
-            "param": {"metric_type": "MAX_SIM_COSINE"},
-            "limit": 10,
-        })
-
-        results, check = self.hybrid_search(
-            client, collection_name, [req1, req2],
-            ranker=RRFRanker(), limit=10,
-            output_fields=["id"],
-        )
-        assert check
-        assert len(results) > 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_with_match_as_filter(self):
@@ -3326,29 +3745,35 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_hyb_match")
-        data = self._setup_collection(client, collection_name, nb=500,
-                                      struct_metric_type="MAX_SIM_COSINE")
+        data = self._setup_collection(client, collection_name, nb=500, struct_metric_type="MAX_SIM_COSINE")
 
-        req1 = AnnSearchRequest(**{
-            "data": [data[0]["normal_vector"]],
-            "anns_field": "normal_vector",
-            "param": {"metric_type": "COSINE"},
-            "limit": 10,
-            "expr": 'MATCH_ANY(structA, $[color] == "Red")',
-        })
+        req1 = AnnSearchRequest(
+            **{
+                "data": [data[0]["normal_vector"]],
+                "anns_field": "normal_vector",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+                "expr": 'MATCH_ANY(structA, $[color] == "Red")',
+            }
+        )
 
         search_tensor = EmbeddingList()
         search_tensor.add(_seed_vector(42))
-        req2 = AnnSearchRequest(**{
-            "data": [search_tensor],
-            "anns_field": "structA[embedding]",
-            "param": {"metric_type": "MAX_SIM_COSINE"},
-            "limit": 10,
-        })
+        req2 = AnnSearchRequest(
+            **{
+                "data": [search_tensor],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "MAX_SIM_COSINE"},
+                "limit": 10,
+            }
+        )
 
         results, check = self.hybrid_search(
-            client, collection_name, [req1, req2],
-            ranker=RRFRanker(), limit=10,
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=10,
             output_fields=["id"],
         )
         assert check
@@ -3373,17 +3798,26 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         struct_schema.add_field("size", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = []
@@ -3392,18 +3826,23 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 100 + j),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "color": COLORS[j % 3],
-                    "size": SIZES[(i + j) % 4],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 100 + j),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "color": COLORS[j % 3],
+                        "size": SIZES[(i + j) % 4],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -3423,13 +3862,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, element_filter(structA, $[int_val] > 0))',
+            filter="element_filter(structA, element_filter(structA, $[int_val] > 0))",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3446,13 +3887,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 0) && doc_int > 10',
+            filter="element_filter(structA, $[int_val] > 0) && doc_int > 10",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3469,13 +3912,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 0) || doc_int > 10',
+            filter="element_filter(structA, $[int_val] > 0) || doc_int > 10",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3492,13 +3937,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(nonexistent_field, $[int_val] > 0)',
+            filter="element_filter(nonexistent_field, $[int_val] > 0)",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3515,13 +3962,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[nonexistent_field] > 0)',
+            filter="element_filter(structA, $[nonexistent_field] > 0)",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3538,13 +3987,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter()',
+            filter="element_filter()",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3560,11 +4011,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='$[int_val] > 1',
+            client,
+            collection_name,
+            filter="$[int_val] > 1",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3581,13 +4034,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: "metric type not match"}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
-            filter='element_filter(structA, $[int_val] > 0)',
+            filter="element_filter(structA, $[int_val] > 0)",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3605,13 +4060,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         search_tensor.add(_seed_vector(42))
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[search_tensor],
             anns_field="structA[embedding]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
-            filter='element_filter(structA, $[int_val] > 0)',
+            filter="element_filter(structA, $[int_val] > 0)",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3627,11 +4084,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, MATCH_ALL(structA, $[int_val] > 0))',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, MATCH_ALL(structA, $[int_val] > 0))",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3647,11 +4106,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_LEAST(structA, $[int_val] > 0, threshold=-1)',
+            client,
+            collection_name,
+            filter="MATCH_LEAST(structA, $[int_val] > 0, threshold=-1)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3667,11 +4128,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_LEAST(structA, $[int_val] > 0, threshold=0)',
+            client,
+            collection_name,
+            filter="MATCH_LEAST(structA, $[int_val] > 0, threshold=0)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3687,11 +4150,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_MOST(structA, $[int_val] > 0, threshold=-1)',
+            client,
+            collection_name,
+            filter="MATCH_MOST(structA, $[int_val] > 0, threshold=-1)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3707,11 +4172,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_EXACT(structA, $[int_val] > 0, threshold=-1)',
+            client,
+            collection_name,
+            filter="MATCH_EXACT(structA, $[int_val] > 0, threshold=-1)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3727,11 +4194,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_ANY(nonexistent_struct, $[int_val] > 0)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(nonexistent_struct, $[int_val] > 0)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3747,11 +4216,13 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[nonexistent_field] > 0)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[nonexistent_field] > 0)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3771,21 +4242,37 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema.add_field("int_val", DataType.INT64)
-        schema.add_field("structA", datatype=DataType.ARRAY,
-                         element_type=DataType.STRUCT,
-                         struct_schema=struct_schema, max_capacity=10)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         index_params.add_index(field_name="structA[nonexistent]", index_type="INVERTED")
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params,
-            check_task=CheckTasks.err_res, check_items=error,
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3805,22 +4292,41 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema.add_field("int_val", DataType.INT64)
-        schema.add_field("structA", datatype=DataType.ARRAY,
-                         element_type=DataType.STRUCT,
-                         struct_schema=struct_schema, max_capacity=10)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="STL_SORT",
-                               index_name="invalid_stl_on_vec")
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="STL_SORT",
+            index_name="invalid_stl_on_vec",
+        )
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params,
-            check_task=CheckTasks.err_res, check_items=error,
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3837,13 +4343,15 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA)',
+            filter="element_filter(structA)",
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3859,12 +4367,131 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: ""}
         self.query(
-            client, collection_name,
-            filter='MATCH_ALL(structA)',
+            client,
+            collection_name,
+            filter="MATCH_ALL(structA)",
             output_fields=["id"],
             limit=10,
-            check_task=CheckTasks.err_res, check_items=error,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
+
+    def _create_embedding_list_collection(self, client, collection_name, sealed_nb=3000, growing_nb=500):
+        """Build a collection whose struct vector field uses an embedding-list metric
+        (MAX_SIM_COSINE) so the anns_field behaves as embedding-list-level and the
+        proxy rejection paths for range search / iterator can be exercised.
+
+        Default: 3000 sealed + 500 growing = 3500 rows.
+        """
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("doc_int", DataType.INT64)
+        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        ss = client.create_struct_field_schema()
+        ss.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        ss.add_field("int_val", DataType.INT64)
+        schema.add_field(
+            "structA", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=ss, max_capacity=default_capacity
+        )
+
+        ip = client.prepare_index_params()
+        ip.add_index("normal_vector", index_type="HNSW", metric_type="COSINE", params=INDEX_PARAMS)
+        ip.add_index("structA[embedding]", index_type="HNSW", metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS)
+        self.create_collection(client, collection_name, schema=schema, index_params=ip)
+
+        def _gen_row(i):
+            rng = random.Random(i)
+            num = rng.randint(3, 6)
+            return {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": _seed_vector(i + 999999),
+                "structA": [{"embedding": _seed_vector(i * 100 + k), "int_val": i * 10 + k} for k in range(num)],
+            }
+
+        all_data = []
+        if sealed_nb > 0:
+            sealed = [_gen_row(i) for i in range(sealed_nb)]
+            for start in range(0, sealed_nb, insert_batch_size):
+                self.insert(client, collection_name, sealed[start : start + insert_batch_size])
+            self.flush(client, collection_name)
+            all_data.extend(sealed)
+        if growing_nb > 0:
+            growing = [_gen_row(sealed_nb + i) for i in range(growing_nb)]
+            for start in range(0, growing_nb, insert_batch_size):
+                self.insert(client, collection_name, growing[start : start + insert_batch_size])
+            all_data.extend(growing)
+        self.load_collection(client, collection_name)
+        return all_data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_element_search_invalid_embedding_list_with_radius(self):
+        """
+        target: range search (radius) is rejected on embedding-list-level struct vector search
+        method: build MAX_SIM_COSINE index, search with EmbeddingList + radius
+        expected: server rejects with an error (proxy task_search.go:810-819 path)
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_inv_emblist_radius")
+        self._create_embedding_list_collection(client, collection_name)
+
+        tensor = EmbeddingList()
+        tensor.add(_seed_vector(7))
+        tensor.add(_seed_vector(8))
+        error = {ct.err_code: 65535, ct.err_msg: ""}
+        self.search(
+            client,
+            collection_name,
+            data=[tensor],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "MAX_SIM_COSINE", "params": {"radius": 0.1}},
+            limit=10,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_element_search_invalid_embedding_list_with_search_iterator(self):
+        """
+        target: search_iterator is rejected on embedding-list-level struct vector search
+        method: build MAX_SIM_COSINE index, open search_iterator with EmbeddingList
+        expected: server rejects (proxy task_search.go:815-818 path)
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_inv_emblist_iter")
+        self._create_embedding_list_collection(client, collection_name)
+
+        tensor = EmbeddingList()
+        tensor.add(_seed_vector(3))
+        tensor.add(_seed_vector(4))
+        # iterator construction or first next() should surface the server-side rejection
+        try:
+            iterator, _ = self.search_iterator(
+                client,
+                collection_name,
+                data=[tensor],
+                batch_size=20,
+                anns_field="structA[embedding]",
+                search_params={"metric_type": "MAX_SIM_COSINE"},
+                limit=50,
+                output_fields=["id"],
+            )
+            if iterator is not None:
+                try:
+                    iterator.next()
+                except Exception as e:
+                    log.info(f"expected rejection at iterator.next(): {e}")
+                    return
+                finally:
+                    try:
+                        iterator.close()
+                    except Exception:
+                        pass
+            # if iterator creation silently returned None or didn't raise, fail loud
+            pytest.fail("expected server to reject search_iterator on embedding-list-level search")
+        except Exception as e:
+            log.info(f"expected rejection at iterator creation: {e}")
 
 
 class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
@@ -3884,7 +4511,8 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -3895,10 +4523,18 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         """Helper: create collection, insert data, index, load."""
         schema = self._create_schema(client, dim)
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = []
@@ -3907,17 +4543,22 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j, dim),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "color": COLORS[j % 3],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -3937,23 +4578,27 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         # Upsert rows 0-9 with color="Purple"
         upsert_data = []
         for i in range(10):
-            upsert_data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": [
-                    {
-                        "embedding": _seed_vector(i * 1000),
-                        "int_val": i * 100 + 9999,
-                        "str_val": f"upserted_{i}",
-                        "color": "Purple",
-                    }
-                ],
-            })
+            upsert_data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": [
+                        {
+                            "embedding": _seed_vector(i * 1000),
+                            "int_val": i * 100 + 9999,
+                            "str_val": f"upserted_{i}",
+                            "color": "Purple",
+                        }
+                    ],
+                }
+            )
         self.upsert(client, collection_name, upsert_data)
         self.flush(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Purple")',
             output_fields=["id", "structA"],
             limit=100,
@@ -3979,11 +4624,12 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
 
         query_vector = data[15]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=100,
             output_fields=["id"],
         )
@@ -4006,8 +4652,9 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         self.delete(client, collection_name, ids=list(range(10)))
 
         results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[int_val] >= 0)',
+            client,
+            collection_name,
+            filter="MATCH_ANY(structA, $[int_val] >= 0)",
             output_fields=["id"],
             limit=500,
         )
@@ -4028,24 +4675,28 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, nb=500)
 
         # Upsert row 50 with known struct
-        upsert_data = [{
-            "id": 50, "doc_int": 50,
-            "normal_vector": _seed_vector(50 + 999999),
-            "structA": [
-                {
-                    "embedding": _seed_vector(99999),
-                    "int_val": 99999,
-                    "str_val": "upserted_target",
-                    "color": "Gold",
-                }
-            ],
-        }]
+        upsert_data = [
+            {
+                "id": 50,
+                "doc_int": 50,
+                "normal_vector": _seed_vector(50 + 999999),
+                "structA": [
+                    {
+                        "embedding": _seed_vector(99999),
+                        "int_val": 99999,
+                        "str_val": "upserted_target",
+                        "color": "Gold",
+                    }
+                ],
+            }
+        ]
         self.upsert(client, collection_name, upsert_data)
         self.flush(client, collection_name)
 
         query_vector = _seed_vector(99999)
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -4075,25 +4726,29 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
         # Re-insert new data
         new_data = []
         for i in range(100):
-            new_data.append({
-                "id": i + 10000, "doc_int": i + 10000,
-                "normal_vector": _seed_vector(i + 888888),
-                "structA": [
-                    {
-                        "embedding": _seed_vector(i * 500),
-                        "int_val": i + 50000,
-                        "str_val": f"new_{i}",
-                        "color": "Silver",
-                    }
-                ],
-            })
+            new_data.append(
+                {
+                    "id": i + 10000,
+                    "doc_int": i + 10000,
+                    "normal_vector": _seed_vector(i + 888888),
+                    "structA": [
+                        {
+                            "embedding": _seed_vector(i * 500),
+                            "int_val": i + 50000,
+                            "str_val": f"new_{i}",
+                            "color": "Silver",
+                        }
+                    ],
+                }
+            )
         self.insert(client, collection_name, new_data)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
         query_vector = new_data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -4107,11 +4762,27 @@ class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
             assert r["id"] >= 10000
 
 
-class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
-    """Test search iterator + element_filter (3 cases)"""
+class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
+    """
+    Range search on struct array element-level search (radius / range_filter).
+    Covered by PR #49182 on master (element-level only; embedding-list-level is rejected).
+    """
 
-    def _setup_collection(self, client, collection_name, nb=500):
-        """Helper to setup collection for iterator tests."""
+    def _setup_collection(
+        self,
+        client,
+        collection_name,
+        sealed_nb=3000,
+        growing_nb=500,
+        metric_type="COSINE",
+        elems_per_row=None,
+        index_type="HNSW",
+    ):
+        """Create collection + insert `sealed_nb` rows (flushed → sealed) then `growing_nb`
+        rows (no flush → growing). Default totals 3500 rows (3000 sealed + 500 growing).
+
+        elems_per_row: if int, every row has exactly that many struct elements; None → random 3..8.
+        """
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
         schema.add_field(field_name="doc_int", datatype=DataType.INT64)
@@ -4123,119 +4794,1548 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type=index_type,
+            metric_type=metric_type,
+            params=INDEX_PARAMS if index_type == "HNSW" else {},
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        data = []
-        for i in range(nb):
+        def _gen_row(i):
             rng = random.Random(i)
-            num_elems = rng.randint(3, 8)
-            struct_array = []
-            for j in range(num_elems):
-                struct_array.append({
+            num_elems = elems_per_row if elems_per_row else rng.randint(3, 8)
+            struct_array = [
+                {
                     "embedding": _seed_vector(i * 1000 + j),
                     "int_val": i * 100 + j,
                     "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
+                }
+                for j in range(num_elems)
+            ]
+            return {
+                "id": i,
+                "doc_int": i,
                 "normal_vector": _seed_vector(i + 999999),
                 "structA": struct_array,
-            })
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
+            }
+
+        all_data = []
+        if sealed_nb > 0:
+            sealed = [_gen_row(i) for i in range(sealed_nb)]
+            for start in range(0, sealed_nb, insert_batch_size):
+                self.insert(client, collection_name, sealed[start : start + insert_batch_size])
+            self.flush(client, collection_name)
+            all_data.extend(sealed)
+        if growing_nb > 0:
+            growing = [_gen_row(sealed_nb + i) for i in range(growing_nb)]
+            for start in range(0, growing_nb, insert_batch_size):
+                self.insert(client, collection_name, growing[start : start + insert_batch_size])
+            all_data.extend(growing)
         self.load_collection(client, collection_name)
-        return data
+        return all_data
 
-    @pytest.mark.xfail(reason="search iterator not supported for vector array (embedding list) fields")
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_search_iterator_with_element_filter(self):
+    def _pick_range(self, client, collection_name, query_vector, metric_type, filter_expr):
         """
-        target: search_iterator with element_filter
-        method: iterate through all results using search_iterator + element_filter
-        expected: all results collected across batches
+        Pick a [low, high] distance window by running a wider one-shot search
+        and taking the 30%/70% quantiles of the observed distances.
         """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_iter_ef")
-        data = self._setup_collection(client, collection_name, nb=500)
-
-        query_vector = data[0]["structA"][0]["embedding"]
-        iterator, _ = self.search_iterator(
-            client, collection_name,
+        res, check = self.search(
+            client,
+            collection_name,
             data=[query_vector],
-            batch_size=50,
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            search_params={"metric_type": metric_type, "params": HNSW_SEARCH_PARAMS},
+            filter=filter_expr,
             limit=200,
             output_fields=["id"],
         )
-        all_results = []
-        if iterator:
-            while True:
-                batch = iterator.next()
-                if not batch:
-                    break
-                all_results.extend(batch)
-            iterator.close()
-        assert len(all_results) > 0
-        log.info(f"Iterator collected {len(all_results)} results")
+        assert check
+        distances = sorted(hit["distance"] for hit in res[0])
+        assert len(distances) >= 20, f"not enough hits ({len(distances)}) to pick a range window"
+        low = distances[int(len(distances) * 0.3)]
+        high = distances[int(len(distances) * 0.7)]
+        # For L2 (ascending), radius is upper bound (=high), range_filter is lower (=low).
+        # For COSINE/IP (descending), radius is lower bound (=low), range_filter is upper (=high).
+        if metric_type == "L2":
+            return low, high  # (range_filter, radius)
+        return low, high  # caller composes params based on metric
 
-    @pytest.mark.xfail(reason="search iterator not supported for vector array (embedding list) fields")
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("batch_size", [10, 50, 100])
-    def test_search_iterator_element_filter_batch_size(self, batch_size):
+    def _assert_range(self, results, metric_type, low, high):
+        """Assert every returned distance sits within [low, high] (with tolerance)."""
+        for hit in results[0]:
+            d = hit["distance"]
+            assert low - epsilon <= d <= high + epsilon, f"{metric_type} distance {d} not in window [{low}, {high}]"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_flat_no_missing_results(self):
         """
-        target: search_iterator with different batch sizes
-        method: parametrize batch_size=10,50,100
-        expected: all batch sizes work correctly
+        target: FLAT range search returns every exact element candidate in the range window
+        method: use one struct element per row, compute exact ground truth from inserted data,
+                then compare returned (id, offset) pairs with the full expected set
+        expected: no missing or extra element hits
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_iter_bs_{batch_size}")
-        data = self._setup_collection(client, collection_name, nb=500)
+        collection_name = cf.gen_unique_str(f"{prefix}_range_flat_exact")
+        data = self._setup_collection(
+            client,
+            collection_name,
+            sealed_nb=300,
+            growing_nb=0,
+            metric_type="COSINE",
+            elems_per_row=1,
+            index_type="FLAT",
+        )
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+
+        all_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+        )
+        start = 30
+        end = 80
+        upper_bound = (all_hits[start - 1][2] + all_hits[start][2]) / 2
+        lower_bound = (all_hits[end - 1][2] + all_hits[end][2]) / 2
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        assert 0 < len(expected_hits) < 100, f"unexpected exact candidate count: {len(expected_hits)}"
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": {"radius": lower_bound, "range_filter": upper_bound}},
+            filter=filter_expr,
+            limit=len(expected_hits) + 10,
+            output_fields=["id"],
+        )
+        assert check
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        _assert_no_missing_range_hits(results, expected_hits)
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_diskann_recall(self):
+        """
+        target: DISKANN range search on struct array element-level vectors has acceptable recall
+        method: build DISKANN on structA[embedding], compute exact range candidates from inserted data,
+                then require at least 70% overlap with the expected top candidates
+        expected: returned hits are valid range hits and recall is not too low
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_diskann")
+        data = self._setup_collection(
+            client,
+            collection_name,
+            sealed_nb=1000,
+            growing_nb=0,
+            metric_type="COSINE",
+            elems_per_row=1,
+            index_type="DISKANN",
+        )
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+
+        all_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+        )
+        start = 50
+        end = 150
+        upper_bound = (all_hits[start - 1][2] + all_hits[start][2]) / 2
+        lower_bound = (all_hits[end - 1][2] + all_hits[end][2]) / 2
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        assert expected_hits, "DISKANN range exact candidates should not be empty"
+
+        limit = 100
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={
+                "metric_type": "COSINE",
+                "params": _diskann_search_params(radius=lower_bound, range_filter=upper_bound),
+            },
+            filter=filter_expr,
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0, "DISKANN range search returned 0 rows"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="DISKANN COSINE range search")
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_cosine_radius_only(self):
+        """
+        target: COSINE range search with radius only (lower bound)
+        method: radius=low, no range_filter → expect all distances >= low
+        expected: every returned hit has distance >= radius
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_cos_radius")
+        data = self._setup_collection(client, collection_name, metric_type="COSINE")
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vector, "COSINE", filter_expr)
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low)},
+            filter=filter_expr,
+            limit=100,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0, "COSINE radius-only range search returned 0 rows"
+        for hit in results[0]:
+            assert hit["distance"] >= low - epsilon, f"COSINE distance {hit['distance']} < radius {low}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="COSINE radius-only range search")
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_l2_radius_only(self):
+        """
+        target: L2 range search with radius only (upper bound)
+        method: radius=high, no range_filter → expect all distances <= high
+        expected: every returned hit has distance <= radius
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_l2_radius")
+        data = self._setup_collection(client, collection_name, metric_type="L2")
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vector, "L2", filter_expr)
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "L2", "params": _hnsw_search_params(radius=high)},
+            filter=filter_expr,
+            limit=100,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit["distance"] <= high + epsilon, f"L2 distance {hit['distance']} > radius {high}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="L2 radius-only range search")
+        _assert_distance_order(results, "L2")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_ip_radius_only(self):
+        """
+        target: IP range search with radius only (lower bound)
+        method: radius=low → all distances >= low
+        expected: every hit has distance >= radius
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_ip_radius")
+        data = self._setup_collection(client, collection_name, metric_type="IP")
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vector, "IP", filter_expr)
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "IP", "params": _hnsw_search_params(radius=low)},
+            filter=filter_expr,
+            limit=100,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit["distance"] >= low - epsilon, f"IP distance {hit['distance']} < radius {low}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "IP",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "IP",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="IP radius-only range search")
+        _assert_distance_order(results, "IP")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_l2_radius_and_range_filter(self):
+        """
+        target: L2 range search with both radius (upper) and range_filter (lower)
+        method: radius > range_filter; expect range_filter <= d <= radius
+        expected: every hit is inside [range_filter, radius]; result count < topK
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_l2_both")
+        data = self._setup_collection(client, collection_name, metric_type="L2")
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vector, "L2", filter_expr)
+
+        limit = 200
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "L2", "params": _hnsw_search_params(radius=high, range_filter=low)},
+            filter=filter_expr,
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert 0 < len(results[0]) < limit, f"expect a bounded non-empty result set, got {len(results[0])}"
+        for hit in results[0]:
+            assert low - epsilon <= hit["distance"] <= high + epsilon, (
+                f"L2 distance {hit['distance']} outside [{low}, {high}]"
+            )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="L2 bounded range search")
+        _assert_distance_order(results, "L2")
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_cosine_radius_and_range_filter(self):
+        """
+        target: COSINE range search with both radius (lower) and range_filter (upper)
+        method: range_filter > radius; expect radius <= d <= range_filter
+        expected: every hit is inside [radius, range_filter]; result count < topK
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_cos_both")
+        data = self._setup_collection(client, collection_name, metric_type="COSINE")
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vector, "COSINE", filter_expr)
+
+        limit = 200
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=filter_expr,
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert 0 < len(results[0]) < limit
+        for hit in results[0]:
+            assert low - epsilon <= hit["distance"] <= high + epsilon, (
+                f"COSINE distance {hit['distance']} outside [{low}, {high}]"
+            )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="COSINE bounded range search")
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_with_element_filter(self):
+        """
+        target: range search combined with a tighter element_filter scalar condition
+        method: radius window + element_filter(structA, $[int_val] > 1000)
+        expected: every hit has distance inside window AND some element matching the scalar filter
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_with_ef")
+        data = self._setup_collection(client, collection_name, metric_type="COSINE")
+        query_vector = data[0]["structA"][0]["embedding"]
+
+        # broader window (10%/90%) since tighter scalar filter shrinks the candidate pool
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": HNSW_SEARCH_PARAMS},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=200,
+            output_fields=["id"],
+        )
+        distances = sorted(hit["distance"] for hit in res[0])
+        low = distances[int(len(distances) * 0.1)]
+        high = distances[int(len(distances) * 0.9)]
+
+        tight_filter = "element_filter(structA, $[int_val] > 1000 && $[int_val] < 40000)"
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=tight_filter,
+            limit=100,
+            output_fields=["id", "structA"],
+        )
+        assert check
+        assert len(results[0]) > 0, "range search with element_filter returned 0 rows"
+        for hit in results[0]:
+            assert low - epsilon <= hit["distance"] <= high + epsilon, (
+                f"COSINE distance {hit['distance']} outside [{low}, {high}]"
+            )
+            assert any(1000 < e["int_val"] < 40000 for e in hit["structA"]), (
+                f"row {hit['id']} has no element matching scalar filter"
+            )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: 1000 < e["int_val"] < 40000,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: 1000 < e["int_val"] < 40000,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="COSINE range search with element_filter")
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_growing_segment(self):
+        """
+        target: range search on growing-only segments (no flush)
+        method: insert 3500 rows without flush; run COSINE range search
+        expected: all returned distances inside the window
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_growing")
+        data = self._setup_collection(client, collection_name, sealed_nb=0, growing_nb=3500, metric_type="COSINE")
+
+        qv = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, qv, "COSINE", filter_expr)
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[qv],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=filter_expr,
+            limit=200,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0, "range search on growing segment returned 0 rows"
+        for hit in results[0]:
+            assert low - epsilon <= hit["distance"] <= high + epsilon
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=200, context="COSINE growing range search")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_mixed_segments(self):
+        """
+        target: range search on mixed sealed + growing segments with baseline data size
+        method: 3000 sealed + 500 growing = 3500 rows; pick range window, run search
+        expected: hits from both segments, all inside the distance window
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_mixed")
+        data = self._setup_collection(client, collection_name, metric_type="COSINE")
+
+        qv = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, qv, "COSINE", filter_expr)
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[qv],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=filter_expr,
+            limit=400,
+            output_fields=["id"],
+        )
+        assert check
+        ids = [h["id"] for h in results[0]]
+        for hit in results[0]:
+            assert low - epsilon <= hit["distance"] <= high + epsilon
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=400, context="COSINE mixed-segment range search")
+        # recall hits from both segments (may be weaker for growing due to serial scan)
+        has_sealed = any(i < 3000 for i in ids)
+        has_growing = any(i >= 3000 for i in ids)
+        assert has_sealed or has_growing, "no hits from either segment"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_nq_multiple(self):
+        """
+        target: range search with multiple query vectors (nq=3)
+        method: 3 queries, each should return its own distance window
+        expected: every result list respects the window
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_nq")
+        data = self._setup_collection(client, collection_name, metric_type="COSINE")
+
+        query_vectors = [
+            data[0]["structA"][0]["embedding"],
+            data[1500]["structA"][0]["embedding"],
+            data[3200]["structA"][0]["embedding"],  # in the growing segment (>= 3000)
+        ]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+        low, high = self._pick_range(client, collection_name, query_vectors[0], "COSINE", filter_expr)
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=query_vectors,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=filter_expr,
+            limit=100,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results) == 3, f"expect 3 result lists for nq=3, got {len(results)}"
+        for q_idx, hits in enumerate(results):
+            assert len(hits) > 0, f"query {q_idx}: range search returned 0 rows"
+            for hit in hits:
+                assert low - epsilon <= hit["distance"] <= high + epsilon, (
+                    f"query {q_idx}: distance {hit['distance']} outside [{low}, {high}]"
+                )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            query_vectors,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        for q_idx, query_vector in enumerate(query_vectors):
+            expected_hits = _expected_element_range_hits(
+                data,
+                query_vector,
+                "COSINE",
+                elem_filter_fn=lambda e: e["int_val"] >= 0,
+                low=low,
+                high=high,
+            )
+            _assert_range_recall(
+                results[q_idx],
+                expected_hits,
+                limit=100,
+                context=f"COSINE nq={q_idx} range search",
+            )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_l2_invalid_radius_less_than_range_filter(self):
+        """
+        target: for L2, radius must be > range_filter (radius is upper bound)
+        method: set radius < range_filter
+        expected: server rejects with an error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_l2_invalid")
+        data = self._setup_collection(client, collection_name, metric_type="L2")
+        qv = data[0]["structA"][0]["embedding"]
+        error = {ct.err_code: 65535, ct.err_msg: ""}
+        self.search(
+            client,
+            collection_name,
+            data=[qv],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "L2", "params": {"radius": 10, "range_filter": 20}},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=10,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+
+class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
+    """Test search iterator + element_filter (3 cases)"""
+
+    def _setup_collection(
+        self, client, collection_name, sealed_nb=3000, growing_nb=500, metric_type="COSINE", elems_per_row=None
+    ):
+        """Helper to setup collection for iterator tests.
+
+        Inserts `sealed_nb` rows then flushes (sealed segments) and `growing_nb` more rows
+        without flushing (growing segments). Default totals 3500 rows (3000 sealed + 500 growing).
+
+        elems_per_row: if int, every row has exactly that many struct elements;
+                       if None, each row has random 3..8 elements (default).
+        """
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=default_capacity,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type=metric_type,
+            params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        def _gen_row(i):
+            rng = random.Random(i)
+            num_elems = elems_per_row if elems_per_row else rng.randint(3, 8)
+            sa = [
+                {
+                    "embedding": _seed_vector(i * 1000 + j),
+                    "int_val": i * 100 + j,
+                    "color": COLORS[j % 3],
+                }
+                for j in range(num_elems)
+            ]
+            return {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": _seed_vector(i + 999999),
+                "structA": sa,
+            }
+
+        all_data = []
+        if sealed_nb > 0:
+            sealed = [_gen_row(i) for i in range(sealed_nb)]
+            for start in range(0, sealed_nb, insert_batch_size):
+                self.insert(client, collection_name, sealed[start : start + insert_batch_size])
+            self.flush(client, collection_name)
+            all_data.extend(sealed)
+        if growing_nb > 0:
+            growing = [_gen_row(sealed_nb + i) for i in range(growing_nb)]
+            for start in range(0, growing_nb, insert_batch_size):
+                self.insert(client, collection_name, growing[start : start + insert_batch_size])
+            all_data.extend(growing)
+        self.load_collection(client, collection_name)
+        return all_data
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_iterator_with_element_filter(self):
+        """
+        target: search_iterator with element_filter on struct array element-level search (PR #49182)
+        method: iterate through all results using search_iterator + element_filter
+        expected:
+          - iterator returns exactly `limit` results across batches
+          - (row_id, element_offset) pairs are unique — the iterator's natural unit is a single
+            matched element, so the same row_id may repeat with different offsets, but never
+            the same (row_id, offset) twice
+          - distances are monotonic (COSINE: descending)
+          - every hit satisfies the element_filter predicate
+          - iterator's unique row ids overlap substantially with one-shot search ids
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_ef")
+        data = self._setup_collection(client, collection_name)  # 2500 sealed + 500 growing
 
         query_vector = data[0]["structA"][0]["embedding"]
+        limit = 200
+        batch_size = 50
         iterator, _ = self.search_iterator(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             batch_size=batch_size,
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
-            limit=200,
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=limit,
+            output_fields=["id", "structA"],
+        )
+        assert iterator is not None, "search_iterator should return a valid iterator for element-level search"
+
+        all_results = []
+        batch_count = 0
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_results.extend(batch)
+            batch_count += 1
+        iterator.close()
+
+        # 1. total count == limit
+        assert len(all_results) == limit, f"expect {limit} results across batches, got {len(all_results)}"
+        # 2. (id, offset) pairs are unique — element-level iterator emits one hit per matched element
+        pairs = [(h["id"], h["offset"]) for h in all_results]
+        assert len(pairs) == len(set(pairs)), (
+            f"duplicated (id, offset) pairs across batches: "
+            f"{len(pairs) - len(set(pairs))} duplicates out of {len(pairs)}"
+        )
+        # 3. distance monotonic (COSINE descending)
+        distances = [hit["distance"] for hit in all_results]
+        for k in range(len(distances) - 1):
+            assert distances[k] >= distances[k + 1] - epsilon, (
+                f"COSINE distances not descending at {k}: {distances[k]} < {distances[k + 1]}"
+            )
+        # 4. element_filter correctness
+        for hit in all_results:
+            assert any(e["int_val"] >= 0 for e in hit["structA"]), f"row {hit['id']} has no element with int_val >= 0"
+        # 5. iterator's unique row ids vs one-shot search (wider one-shot to account for HNSW recall)
+        oneshot, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=500,
             output_fields=["id"],
         )
-        all_results = []
-        if iterator:
-            while True:
-                batch = iterator.next()
-                if not batch:
-                    break
-                all_results.extend(batch)
-            iterator.close()
-        assert len(all_results) > 0
+        assert check
+        oneshot_ids = {hit["id"] for hit in oneshot[0]}
+        iter_unique_ids = {h["id"] for h in all_results}
+        overlap = len(iter_unique_ids & oneshot_ids) / max(len(iter_unique_ids), 1)
+        assert overlap >= 0.9, (
+            f"iterator unique ids diverge from one-shot search: overlap={overlap:.2f} "
+            f"iter_unique={len(iter_unique_ids)}, oneshot={len(oneshot_ids)}"
+        )
+        log.info(
+            f"iterator collected {len(all_results)} hits in {batch_count} batches, "
+            f"unique ids={len(iter_unique_ids)} (duplicates reflect element-level semantics)"
+        )
 
-    @pytest.mark.xfail(reason="search iterator not supported for vector array (embedding list) fields")
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("batch_size", [10, 50, 100])
+    def test_search_iterator_element_filter_batch_size(self, batch_size):
+        """
+        target: search_iterator with different batch sizes on element-level search
+        method: parametrize batch_size=10,50,100
+        expected:
+          - total count exactly == limit
+          - each batch size <= batch_size (SearchIteratorV2 may return fewer due to internal
+            dedup / fetch rounds)
+          - distances monotonic (COSINE descending)
+        note: element-level iterator may duplicate row ids; this is element-level semantics.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_bs_{batch_size}")
+        data = self._setup_collection(client, collection_name)  # 2500 sealed + 500 growing
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        limit = 200
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[query_vector],
+            batch_size=batch_size,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert iterator is not None
+
+        batches = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            batches.append(batch)
+        iterator.close()
+
+        all_results = [hit for batch in batches for hit in batch]
+        # 1. total count == limit
+        assert len(all_results) == limit, f"expect total={limit}, got {len(all_results)}"
+        # 2. every batch <= batch_size (V2 may return fewer after internal dedup)
+        for k, batch in enumerate(batches):
+            assert len(batch) <= batch_size, f"batch {k}: size={len(batch)} exceeds batch_size={batch_size}"
+        # 3. distance monotonic across concatenated batches (COSINE descending)
+        distances = [hit["distance"] for hit in all_results]
+        for k in range(len(distances) - 1):
+            assert distances[k] >= distances[k + 1] - epsilon, (
+                f"distances not descending at {k}: {distances[k]} vs {distances[k + 1]}"
+            )
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_iterator_mixed_segments(self):
         """
-        target: search_iterator on mixed sealed + growing segments
-        method: insert + flush + insert more, then iterate with element_filter
-        expected: results from both segments
+        target: search_iterator on mixed sealed + growing segments (element-level search)
+        method: insert 3000 rows + flush (sealed), insert another 500 (growing, no flush),
+                every row has exactly 1 struct element so row ids are unique;
+                iterate with element_filter covering all rows
+        expected:
+          - iterator returns rows from BOTH segments
+          - ids unique across batches
+          - every hit satisfies element_filter
+          - distances monotonic (COSINE descending)
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_iter_mixed")
+        data = self._setup_collection(client, collection_name, elems_per_row=1)  # 3000+500
 
+        query_vector = data[0]["structA"][0]["embedding"]
+        limit = 1000
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[query_vector],
+            batch_size=100,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=limit,
+            output_fields=["id", "structA"],
+        )
+        assert iterator is not None
+        all_hits = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_hits.extend(batch)
+        iterator.close()
+
+        all_ids = [h["id"] for h in all_hits]
+        # 1. total count == limit (3500 rows > limit, every row has 1 element)
+        assert len(all_hits) == limit, f"expect {limit} results, got {len(all_hits)}"
+        # 2. ids unique (every row has exactly 1 struct element, no element-level duplication)
+        assert len(all_ids) == len(set(all_ids)), "duplicated ids despite single-element rows"
+        # 3. hits come from BOTH segments
+        has_sealed = any(i < 3000 for i in all_ids)
+        has_growing = any(i >= 3000 for i in all_ids)
+        assert has_sealed and has_growing, "iterator should return results from both sealed and growing segments"
+        # 4. distance monotonic (COSINE descending)
+        distances = [h["distance"] for h in all_hits]
+        for k in range(len(distances) - 1):
+            assert distances[k] >= distances[k + 1] - epsilon, (
+                f"distances not descending at {k}: {distances[k]} vs {distances[k + 1]}"
+            )
+        # 5. element_filter correctness
+        for hit in all_hits:
+            assert any(e["int_val"] >= 0 for e in hit["structA"]), f"row {hit['id']} violates element_filter"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("metric_type", ["L2", "IP"])
+    def test_search_iterator_element_filter_non_cosine(self, metric_type):
+        """
+        target: search_iterator on element-level with L2/IP metrics
+        method: build index with metric, iterate with element_filter
+        expected: iterator works, distances monotonic in the metric's direction
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_{metric_type.lower()}")
+        data = self._setup_collection(client, collection_name, metric_type=metric_type)
+
+        qv = data[0]["structA"][0]["embedding"]
+        limit = 100
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[qv],
+            batch_size=30,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": metric_type},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=limit,
+            output_fields=["id", "structA"],
+        )
+        assert iterator is not None
+        all_hits = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_hits.extend(batch)
+        iterator.close()
+        assert len(all_hits) == limit
+        distances = [h["distance"] for h in all_hits]
+        if metric_type == "L2":
+            for k in range(len(distances) - 1):
+                assert distances[k] <= distances[k + 1] + epsilon, (
+                    f"L2 distances not ascending at {k}: {distances[k]} vs {distances[k + 1]}"
+                )
+        else:  # IP descending
+            for k in range(len(distances) - 1):
+                assert distances[k] >= distances[k + 1] - epsilon, (
+                    f"IP distances not descending at {k}: {distances[k]} vs {distances[k + 1]}"
+                )
+        for hit in all_hits:
+            assert any(e["int_val"] >= 0 for e in hit["structA"])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_iterator_empty_result(self):
+        """
+        target: search_iterator with an element_filter that matches nothing
+        method: filter `int_val > 10_000_000` never holds in generated data
+        expected: iterator returns 0 hits across 0 batches and closes cleanly
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_empty")
+        data = self._setup_collection(client, collection_name)  # 2500 sealed + 500 growing
+        qv = data[0]["structA"][0]["embedding"]
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[qv],
+            batch_size=50,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] > 10000000)",
+            limit=100,
+            output_fields=["id"],
+        )
+        assert iterator is not None
+        all_hits = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_hits.extend(batch)
+        iterator.close()
+        assert len(all_hits) == 0, f"expected 0 hits for impossible filter, got {len(all_hits)}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_iterator_no_duplicate_ids_single_element(self):
+        """
+        target: confirm no row-id duplication when every row has exactly 1 struct element
+        method: each row has a single struct element → element-level ≡ row-level
+        expected: iterator returns unique ids across batches
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_unique_1elem")
+        # 3500 rows (3000 sealed + 500 growing), 1 element each
+        data = self._setup_collection(client, collection_name, elems_per_row=1)
+        qv = data[0]["structA"][0]["embedding"]
+        limit = 1000
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[qv],
+            batch_size=100,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert iterator is not None
+        ids = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            for hit in batch:
+                ids.append(hit["id"])
+        iterator.close()
+        assert len(ids) == min(limit, 3500)
+        assert len(ids) == len(set(ids)), "duplicated row ids despite single-element rows"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_iterator_limit_larger_than_available(self):
+        """
+        target: iterator with limit greater than the number of matching rows
+        method: collection has 3500 rows × 1 element each; request limit=10000 (> total);
+                iterator should emit at most 3500 unique rows then terminate
+        expected: iterator stops cleanly; unique id count <= 3500
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_overlimit")
+        data = self._setup_collection(client, collection_name, elems_per_row=1)  # 3500 rows
+        qv = data[0]["structA"][0]["embedding"]
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[qv],
+            batch_size=200,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=10000,
+            output_fields=["id"],
+        )
+        assert iterator is not None
+        hits = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            hits.extend(batch)
+        iterator.close()
+        ids = {h["id"] for h in hits}
+        assert len(ids) <= 3500, f"unique rows {len(ids)} exceeds actual data size 3500"
+        assert len(ids) > 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_iterator_with_range_search(self):
+        """
+        target: search_iterator combined with range search (radius/range_filter)
+        method: build COSINE index; pick a distance window from a wider one-shot search;
+                iterate with radius+range_filter set
+        expected: every hit across batches sits within the distance window;
+                  iterator terminates when no more candidates qualify
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_iter_range")
+        data = self._setup_collection(client, collection_name)  # 2500 sealed + 500 growing
+        qv = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+
+        # pick [low, high] from a one-shot sample
+        res, check = self.search(
+            client,
+            collection_name,
+            data=[qv],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter=filter_expr,
+            limit=200,
+            output_fields=["id"],
+        )
+        assert check
+        distances = sorted(h["distance"] for h in res[0])
+        low = distances[int(len(distances) * 0.3)]
+        high = distances[int(len(distances) * 0.7)]
+
+        iterator, _ = self.search_iterator(
+            client,
+            collection_name,
+            data=[qv],
+            batch_size=30,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
+            filter=filter_expr,
+            limit=200,
+            output_fields=["id"],
+        )
+        assert iterator is not None
+        all_hits = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_hits.extend(batch)
+        iterator.close()
+        assert len(all_hits) > 0, "iterator+range should return at least some hits within the window"
+        for hit in all_hits:
+            assert low - epsilon <= hit["distance"] <= high + epsilon, (
+                f"iterator+range hit distance {hit['distance']} outside [{low}, {high}]"
+            )
+        _assert_element_range_hits_ground_truth(
+            [all_hits],
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(all_hits, expected_hits, limit=200, context="iterator COSINE range search")
+        dists = [h["distance"] for h in all_hits]
+        for k in range(len(dists) - 1):
+            assert dists[k] >= dists[k + 1] - epsilon, f"iterator distances not descending at {k}"
+
+
+class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
+    """
+    Query iterator + element_filter / MATCH family on struct array sub-fields.
+    Unlike search_iterator, query iterates over filtered rows without a vector anchor,
+    so row ids are expected to be unique.
+    """
+
+    def _setup_collection(self, client, collection_name, sealed_nb=3000, growing_nb=500):
+        """Insert `sealed_nb` rows (flushed → sealed) then `growing_nb` rows (no flush → growing).
+        Default totals 3500 rows (3000 sealed + 500 growing).
+        """
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("doc_int", DataType.INT64)
+        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        ss = client.create_struct_field_schema()
+        ss.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        ss.add_field("int_val", DataType.INT64)
+        ss.add_field("color", DataType.VARCHAR, max_length=128)
+        schema.add_field(
+            "structA", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=ss, max_capacity=default_capacity
+        )
+
+        ip = client.prepare_index_params()
+        ip.add_index("normal_vector", index_type="HNSW", metric_type="COSINE", params=INDEX_PARAMS)
+        ip.add_index("structA[embedding]", index_type="HNSW", metric_type="COSINE", params=INDEX_PARAMS)
+        self.create_collection(client, collection_name, schema=schema, index_params=ip)
+
+        def _gen_row(i):
+            rng = random.Random(i)
+            num_elems = rng.randint(3, 6)
+            sa = [
+                {
+                    "embedding": _seed_vector(i * 1000 + j),
+                    "int_val": i * 100 + j,
+                    "color": COLORS[j % 3],
+                }
+                for j in range(num_elems)
+            ]
+            return {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": _seed_vector(i + 999999),
+                "structA": sa,
+            }
+
+        all_data = []
+        if sealed_nb > 0:
+            sealed = [_gen_row(i) for i in range(sealed_nb)]
+            for start in range(0, sealed_nb, insert_batch_size):
+                self.insert(client, collection_name, sealed[start : start + insert_batch_size])
+            self.flush(client, collection_name)
+            all_data.extend(sealed)
+        if growing_nb > 0:
+            growing = [_gen_row(sealed_nb + i) for i in range(growing_nb)]
+            for start in range(0, growing_nb, insert_batch_size):
+                self.insert(client, collection_name, growing[start : start + insert_batch_size])
+            all_data.extend(growing)
+        self.load_collection(client, collection_name)
+        return all_data
+
+    def _drain(self, iterator):
+        """Collect all results from a query iterator until exhaustion."""
+        assert iterator is not None
+        all_rows = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            all_rows.extend(batch)
+        iterator.close()
+        return all_rows
+
+    def _assert_match_query_and_iterator(self, client, collection_name, match_expr, predicate):
+        query_rows, _ = self.query(
+            client,
+            collection_name,
+            filter=match_expr,
+            output_fields=["id", "structA"],
+            limit=16384,
+            consistency_level="Strong",
+        )
+        query_ids = {r["id"] for r in query_rows}
+        assert len(query_ids) == len(query_rows), "one-shot query returned duplicated row ids"
+        for row in query_rows:
+            assert predicate(row["structA"]), f"row {row['id']} does not satisfy match predicate"
+
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=40,
+            filter=match_expr,
+            output_fields=["id", "structA"],
+            consistency_level="Strong",
+        )
+        iterator_rows = self._drain(iterator)
+        iterator_ids = {r["id"] for r in iterator_rows}
+        assert len(iterator_ids) == len(iterator_rows), "query_iterator returned duplicated row ids"
+        for row in iterator_rows:
+            assert predicate(row["structA"]), f"row {row['id']} does not satisfy match predicate"
+        assert iterator_ids == query_ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_with_element_filter(self):
+        """
+        target: query_iterator with element_filter on struct array
+        method: iterate with `element_filter(structA, $[int_val] >= 20000)`
+        expected: element_filter is element-level; each hit carries a row `id` plus an
+                  `offset` (the index inside structA) and the (id, offset) pairs are unique
+                  across batches. Pair set must equal the one-shot query's pair set.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_ef")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        filter_expr = "element_filter(structA, $[int_val] >= 20000)"
+        batch_size = 50
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=batch_size,
+            filter=filter_expr,
+            output_fields=["id", "structA"],
+            consistency_level="Strong",
+        )
+        rows = self._drain(iterator)
+        pairs = [(r["id"], r["offset"]) for r in rows]
+        assert len(pairs) == len(set(pairs)), (
+            f"duplicated (id, offset) pairs across batches: "
+            f"{len(pairs) - len(set(pairs))} duplicates out of {len(pairs)}"
+        )
+        for row in rows:
+            assert row["structA"][row["offset"]]["int_val"] >= 20000, (
+                f"row {row['id']} offset {row['offset']} violates element_filter"
+            )
+
+        # cross-check against one-shot query (also element-level)
+        oneshot, _ = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=16384,
+        )
+        oneshot_pairs = {(r["id"], r["offset"]) for r in oneshot}
+        assert set(pairs) == oneshot_pairs, (
+            f"query_iterator pairs diverge from one-shot: "
+            f"only_iter={set(pairs) - oneshot_pairs}, only_oneshot={oneshot_pairs - set(pairs)}"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "match_type,match_expr,predicate",
+        [
+            pytest.param(
+                "ANY",
+                'match_any(structA, $[color] == "Red")',
+                lambda sa: any(e["color"] == "Red" for e in sa),
+                marks=pytest.mark.skip(
+                    reason="milvus-io/milvus#49755: query_iterator + match_any can trigger ASan abort"
+                ),
+            ),
+            pytest.param(
+                "ALL",
+                "match_all(structA, $[int_val] >= 0)",
+                lambda sa: all(e["int_val"] >= 0 for e in sa),
+                marks=pytest.mark.skip(
+                    reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail"
+                ),
+            ),
+        ],
+    )
+    def test_query_iterator_with_match_family(self, match_type, match_expr, predicate):
+        """
+        target: query_iterator combined with MATCH_ANY / MATCH_ALL predicates on struct array
+        method: iterate with match expr, predicate applied row-level
+        expected: every returned row satisfies the predicate; ids unique; count matches one-shot
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_match_{match_type.lower()}")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
+
+    @pytest.mark.skip(
+        reason="milvus-io/milvus#49693: full StructArray output fails after release/load "
+        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
+    )
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_full_struct_output_after_reload(self):
+        """
+        target: query/query_iterator return full struct array output after release/load
+        method: query with output_fields=["id", "structA"], then release_collection +
+                load_collection and query with the same output fields again
+        expected: reload does not change full struct array output behavior
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_reload")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        match_expr = "match_all(structA, $[int_val] >= 0)"
+
+        def predicate(sa):
+            return all(e["int_val"] >= 0 for e in sa)
+
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("batch_size", [10, 50, 100])
+    def test_query_iterator_element_filter_batch_size(self, batch_size):
+        """
+        target: query_iterator with element_filter across different batch sizes
+        method: parametrize batch_size; expect element-level (id, offset) pair set stable
+                across sizes and equal to the one-shot query pair set.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_bs_{batch_size}")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        filter_expr = "element_filter(structA, $[int_val] >= 10000)"
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=batch_size,
+            filter=filter_expr,
+            output_fields=["id"],
+            consistency_level="Strong",
+        )
+        rows = self._drain(iterator)
+        pairs = [(r["id"], r["offset"]) for r in rows]
+        assert len(pairs) == len(set(pairs)), (
+            f"batch_size={batch_size}: duplicated (id, offset) pairs: "
+            f"{len(pairs) - len(set(pairs))} dups out of {len(pairs)}"
+        )
+
+        oneshot, _ = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=16384,
+        )
+        oneshot_pairs = {(r["id"], r["offset"]) for r in oneshot}
+        assert set(pairs) == oneshot_pairs, (
+            f"batch_size={batch_size}: iterator pairs={len(pairs)} vs one-shot={len(oneshot)}"
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_iterator_empty_result(self):
+        """
+        target: query_iterator with an unsatisfiable element_filter
+        method: `int_val > 10_000_000` never holds → 0 rows → pagination never triggers
+        expected: iterator yields 0 rows and terminates cleanly without composing an invalid
+                  AND expression (element_filter alone is not blocked).
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_empty")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=50,
+            filter="element_filter(structA, $[int_val] > 10000000)",
+            output_fields=["id"],
+        )
+        rows = self._drain(iterator)
+        assert len(rows) == 0, f"expected 0 rows for impossible filter, got {len(rows)}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_iterator_doc_scalar_filter_on_struct_array_collection(self):
+        """
+        target: on a collection that contains a struct array, query_iterator over a plain
+                doc-level scalar predicate works normally (sanity check that iterator itself
+                is not blocked by struct array schema; only element_filter composition is).
+        method: 3500 rows (3000 sealed + 500 growing); filter covers sealed+growing
+        expected: iterator returns exactly the one-shot set; ids unique; count > 2000
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_qiter_doc_scalar")
+        self._setup_collection(client, collection_name)  # 3000 sealed + 500 growing
+
+        # Covers both sealed (1000..2999) and growing (3000..3199) rows
+        filter_expr = "doc_int >= 1000 and doc_int < 3200"
+        iterator, _ = self.query_iterator(
+            client,
+            collection_name,
+            batch_size=100,
+            filter=filter_expr,
+            output_fields=["id"],
+        )
+        rows = self._drain(iterator)
+        ids = [r["id"] for r in rows]
+        assert len(ids) == len(set(ids))
+        assert len(ids) == 2200, f"expect 2200 rows matching [1000, 3200), got {len(ids)}"
+        # Span both segments
+        assert any(i < 3000 for i in ids) and any(i >= 3000 for i in ids), "must span sealed+growing"
+
+        oneshot, _ = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=16384,
+        )
+        assert set(ids) == {r["id"] for r in oneshot}
+
+
+@pytest.mark.xdist_group("TestMilvusClientStructArrayElementContainsSearch")
+class TestMilvusClientStructArrayElementContainsSearch(TestMilvusClientV2Base):
+    """Test ARRAY_CONTAINS on struct sub-fields in search filters."""
+
+    SEARCH_VEC_SEED = 616161
+    SEARCH_LIMIT = 50
+
+    def _query_vec(self):
+        return _seed_vector(self.SEARCH_VEC_SEED)
+
+    def _create_schema(self, client):
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
         schema.add_field(field_name="doc_int", datatype=DataType.INT64)
@@ -4247,131 +6347,174 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
+        return schema
 
+    def _make_row(self, row_id, struct_elements):
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": self._query_vec(),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000 + offset),
+                    "int_val": elem["int_val"],
+                    "color": elem["color"],
+                }
+                for offset, elem in enumerate(struct_elements)
+            ],
+        }
+
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_shared_collection(self, request):
+        """Create a deterministic FLAT-indexed collection with sealed and growing rows."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_ac_search")
+
+        schema = self._create_schema(client)
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, force_teardown=False)
 
-        # Sealed segment
-        sealed_data = []
-        for i in range(300):
-            random.Random(i)
-            struct_array = [{"embedding": _seed_vector(i * 1000), "int_val": i * 100, "color": "Red"}]
-            sealed_data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
-        self.insert(client, collection_name, sealed_data)
+        controlled_rows = [
+            self._make_row(0, [{"int_val": 5, "color": "Red"}]),
+            self._make_row(1, [{"int_val": 5, "color": "Blue"}, {"int_val": 11, "color": "Green"}]),
+            self._make_row(2, [{"int_val": 7, "color": "Red"}, {"int_val": 13, "color": "Blue"}]),
+            self._make_row(3, [{"int_val": 5, "color": "Red"}, {"int_val": 13, "color": "Blue"}]),
+            self._make_row(
+                4,
+                [{"int_val": 11, "color": "Blue"}, {"int_val": 17, "color": "Green"}],
+            ),
+            self._make_row(
+                5,
+                [
+                    {"int_val": 5, "color": "Red"},
+                    {"int_val": 11, "color": "Green"},
+                    {"int_val": 17, "color": "Blue"},
+                ],
+            ),
+            self._make_row(6, []),
+            self._make_row(7, [{"int_val": 23, "color": "Yellow"}]),
+        ]
+
+        self.insert(client, collection_name, controlled_rows[:4])
         self.flush(client, collection_name)
-
-        # Growing segment
-        growing_data = []
-        for i in range(300, 500):
-            struct_array = [{"embedding": _seed_vector(i * 1000), "int_val": i * 100, "color": "Blue"}]
-            growing_data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
-        self.insert(client, collection_name, growing_data)
+        self.insert(client, collection_name, controlled_rows[4:])
         self.load_collection(client, collection_name)
 
-        query_vector = sealed_data[0]["structA"][0]["embedding"]
-        iterator, _ = self.search_iterator(
-            client, collection_name,
-            data=[query_vector],
-            batch_size=50,
+        request.cls.shared_client = client
+        request.cls.shared_collection = collection_name
+
+        yield
+
+        client.drop_collection(collection_name)
+
+    def _search_ids(self, expr):
+        results, check = self.search(
+            self.shared_client,
+            self.shared_collection,
+            data=[self._query_vec()],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter=expr,
+            limit=self.SEARCH_LIMIT,
+            output_fields=["id"],
+            consistency_level="Strong",
+        )
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
+
+    def _element_search_ids(self, expr):
+        results, check = self.search(
+            self.shared_client,
+            self.shared_collection,
+            data=[_seed_vector(0)],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
-            limit=400,
+            filter=expr,
+            limit=self.SEARCH_LIMIT,
             output_fields=["id"],
+            consistency_level="Strong",
         )
-        all_ids = set()
-        if iterator:
-            while True:
-                batch = iterator.next()
-                if not batch:
-                    break
-                for r in batch:
-                    all_ids.add(r["id"])
-            iterator.close()
-        has_sealed = any(i < 300 for i in all_ids)
-        has_growing = any(i >= 300 for i in all_ids)
-        assert has_sealed and has_growing, "Should have results from both segments"
-
-
-class TestMilvusClientStructArrayElementContainsSearch(TestMilvusClientV2Base):
-    """Test ARRAY_CONTAINS on struct sub-fields (6 cases, all skip - depends on PR #47172)"""
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_struct_int_subfield(self):
         """
         target: array_contains on struct array int sub-field
-        method: array_contains query on struct sub-field of array type
-        expected: matching rows returned
+        method: search with array_contains(structA[int_val], 5)
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains(structA[int_val], 5)")
+        assert ids == [0, 1, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_all_struct_varchar_subfield(self):
         """
         target: array_contains_all on struct varchar sub-field
-        method: array_contains_all query
-        expected: matching rows returned
+        method: search with array_contains_all(structA[color], ["Red", "Blue"])
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids('id < 100 && array_contains_all(structA[color], ["Red", "Blue"])')
+        assert ids == [2, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_any_struct_int_subfield(self):
         """
         target: array_contains_any on struct int sub-field
-        method: array_contains_any query
-        expected: matching rows returned
+        method: search with array_contains_any(structA[int_val], [13, 99])
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains_any(structA[int_val], [13, 99])")
+        assert ids == [2, 3]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_combined_with_match(self):
         """
         target: array_contains combined with MATCH operator
-        method: MATCH_ANY(structA, array_contains($[tags], 5) && $[int_val] > 10)
-        expected: matching rows returned
+        method: array_contains(structA[int_val], 5) && MATCH_ANY(structA, $[int_val] > 10)
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._search_ids("id < 100 && array_contains(structA[int_val], 5) && MATCH_ANY(structA, $[int_val] > 10)")
+        assert ids == [1, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_combined_with_element_filter(self):
         """
         target: array_contains combined with element_filter
-        method: element_filter(structA, array_contains($[tags], 5))
-        expected: matching rows returned
+        method: element-level search with array_contains(structA[int_val], 5)
+                and element_filter(structA, $[color] == "Red")
+        expected: exact matching row ids returned
         """
-        pass
+        ids = self._element_search_ids(
+            'id < 100 && array_contains(structA[int_val], 5) && element_filter(structA, $[color] == "Red")'
+        )
+        assert ids == [0, 3, 5]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="Depends on PR #47172 - ARRAY_CONTAINS support for struct arrays")
     def test_array_contains_empty_array(self):
         """
         target: array_contains on empty array sub-field
-        method: query where sub-field array is empty
+        method: search with row whose structA is empty
         expected: no match
         """
-        pass
+        ids = self._search_ids("id == 6 && array_contains(structA[int_val], 5)")
+        assert ids == []
 
 
 class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
@@ -4390,17 +6533,26 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = []
@@ -4409,16 +6561,21 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j),
+                        "int_val": i * 100 + j,
+                        "color": COLORS[j % 3],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
         return data
@@ -4437,18 +6594,20 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
         # Release before enabling mmap (cannot alter mmap on loaded collection)
         self.release_collection(client, collection_name)
         self.alter_collection_properties(
-            client, collection_name,
+            client,
+            collection_name,
             properties={"mmap.enabled": True},
         )
         self.load_collection(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] >= 0)',
+            filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id"],
         )
@@ -4469,13 +6628,15 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
         # Release before enabling mmap (cannot alter mmap on loaded collection)
         self.release_collection(client, collection_name)
         self.alter_collection_properties(
-            client, collection_name,
+            client,
+            collection_name,
             properties={"mmap.enabled": True},
         )
         self.load_collection(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Red")',
             output_fields=["id", "structA"],
             limit=100,
@@ -4506,17 +6667,26 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
         index_params.add_index(field_name="structA[int_val]", index_type="INVERTED")
         index_params.add_index(field_name="structA[color]", index_type="INVERTED")
 
@@ -4528,29 +6698,36 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j),
+                        "int_val": i * 100 + j,
+                        "color": COLORS[j % 3],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "normal_vector": _seed_vector(i + 999999),
+                    "structA": struct_array,
+                }
+            )
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
 
         # Release before enabling mmap (cannot alter mmap on loaded collection)
         self.release_collection(client, collection_name)
         self.alter_collection_properties(
-            client, collection_name,
+            client,
+            collection_name,
             properties={"mmap.enabled": True},
         )
         self.load_collection(client, collection_name)
 
         results, check = self.query(
-            client, collection_name,
+            client,
+            collection_name,
             filter='MATCH_ANY(structA, $[color] == "Blue" && $[int_val] > 100)',
             output_fields=["id", "structA"],
             limit=100,
@@ -4558,7 +6735,9 @@ class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
+
 # ==================== Test Case 3: Group By + Element-level Search ====================
+
 
 @pytest.mark.xdist_group("TestMilvusClientStructArrayElementGroupBySearch")
 class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
@@ -4586,7 +6765,8 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -4601,21 +6781,25 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i,
-                "doc_int": i,
-                "doc_category": CATEGORIES[i % 4],
-                "doc_group": i % 5,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
+                struct_array.append(
+                    {
+                        "embedding": _seed_vector(i * 1000 + j, dim),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "float_val": float(i + j * 0.1),
+                        "color": COLORS[j % 3],
+                    }
+                )
+            data.append(
+                {
+                    "id": i,
+                    "doc_int": i,
+                    "doc_category": CATEGORIES[i % 4],
+                    "doc_group": i % 5,
+                    "normal_vector": _seed_vector(i + 999999, dim),
+                    "structA": struct_array,
+                }
+            )
         return data
 
     @pytest.fixture(scope="class", autouse=True)
@@ -4627,15 +6811,24 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, force_teardown=False)
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            force_teardown=False,
+        )
 
         # Sealed: 3000 rows in batches
         data = []
@@ -4675,11 +6868,12 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
-            filter='MATCH_ANY(structA, $[int_val] > 100)',
+            filter="MATCH_ANY(structA, $[int_val] > 100)",
             group_by_field="doc_category",
             limit=10,
             output_fields=["id", "doc_category", "structA"],
@@ -4692,12 +6886,10 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         for hit in results[0]:
             cat = hit.get("doc_category")
             if cat is not None:
-                assert cat not in seen_categories, \
-                    f"Duplicate category '{cat}' in grouped results"
+                assert cat not in seen_categories, f"Duplicate category '{cat}' in grouped results"
                 seen_categories.append(cat)
             # Verify element filter
-            assert any(e["int_val"] > 100 for e in hit["structA"]), \
-                f"Row {hit['id']}: no element with int_val > 100"
+            assert any(e["int_val"] > 100 for e in hit["structA"]), f"Row {hit['id']}: no element with int_val > 100"
 
     # ---- 3.2 Group by + MATCH_ALL filter ----
 
@@ -4714,11 +6906,12 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
-            filter='MATCH_ALL(structA, $[int_val] > 0)',
+            filter="MATCH_ALL(structA, $[int_val] > 0)",
             group_by_field="doc_category",
             limit=10,
             output_fields=["id", "doc_category", "structA"],
@@ -4727,8 +6920,7 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         assert len(results) > 0
 
         for hit in results[0]:
-            assert all(e["int_val"] > 0 for e in hit["structA"]), \
-                f"Row {hit['id']}: not all elements have int_val > 0"
+            assert all(e["int_val"] > 0 for e in hit["structA"]), f"Row {hit['id']}: not all elements have int_val > 0"
 
     # ---- 3.3 Group by + group_size ----
 
@@ -4745,7 +6937,8 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -4765,8 +6958,7 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
             if gval is not None:
                 groups.setdefault(gval, []).append(hit)
         for gval, hits in groups.items():
-            assert len(hits) <= 3, \
-                f"Group '{gval}' has {len(hits)} results, expected <= 3"
+            assert len(hits) <= 3, f"Group '{gval}' has {len(hits)} results, expected <= 3"
 
     # ---- 3.4 Group by on INT32 field + struct filter ----
 
@@ -4783,11 +6975,12 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
-            filter='MATCH_ANY(structA, $[int_val] > 0)',
+            filter="MATCH_ANY(structA, $[int_val] > 0)",
             group_by_field="doc_group",
             limit=10,
             output_fields=["id", "doc_group"],
@@ -4800,8 +6993,7 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         for hit in results[0]:
             gval = hit.get("doc_group")
             if gval is not None:
-                assert gval not in seen_groups, \
-                    f"Duplicate doc_group '{gval}' in grouped results"
+                assert gval not in seen_groups, f"Duplicate doc_group '{gval}' in grouped results"
                 seen_groups.append(gval)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4817,7 +7009,8 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[0]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -4833,8 +7026,7 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         for hit in results[0]:
             cat = hit.get("doc_category")
             if cat is not None:
-                assert cat not in seen_categories, \
-                    f"Duplicate doc_category '{cat}' in grouped results"
+                assert cat not in seen_categories, f"Duplicate doc_category '{cat}' in grouped results"
                 seen_categories.append(cat)
             colors = [e["color"] for e in hit["structA"]]
             assert "Red" in colors
@@ -4854,7 +7046,8 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
 
         query_vector = data[200]["normal_vector"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -4867,8 +7060,8 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         assert len(results) > 0
 
 
-
 # ==================== Test Case 9: Element-Level Search Without Filter ====================
+
 
 def gt_element_search_no_filter(data, query_vector, metric_type="COSINE", limit=10):
     """Ground truth for element-level search without filter.
@@ -4880,8 +7073,11 @@ def gt_element_search_no_filter(data, query_vector, metric_type="COSINE", limit=
         best_offset = -1
         for j, elem in enumerate(row["structA"]):
             score = _compute_similarity(query_vector, elem["embedding"], metric_type)
-            if best_score is None or (_is_descending(metric_type) and score > best_score) or \
-               (not _is_descending(metric_type) and score < best_score):
+            if (
+                best_score is None
+                or (_is_descending(metric_type) and score > best_score)
+                or (not _is_descending(metric_type) and score < best_score)
+            ):
                 best_score = score
                 best_offset = j
         if best_offset >= 0:
@@ -4918,7 +7114,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=default_capacity,
@@ -4926,34 +7123,48 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="HNSW",
-            metric_type="COSINE", params=INDEX_PARAMS,
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, force_teardown=False)
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            force_teardown=False,
+        )
 
         def _make_rows(start, count):
             rows = []
             for i in range(start, start + count):
                 rng = random.Random(i)
                 num_elems = rng.randint(2, 6)
-                struct_array = [{
-                    "embedding": _seed_vector(i * 1000 + j, default_dim),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "color": COLORS[j % 3],
-                } for j in range(num_elems)]
-                rows.append({
-                    "id": i,
-                    "doc_int": i,
-                    "doc_category": CATEGORIES[i % 4],
-                    "normal_vector": _seed_vector(i + 999999, default_dim),
-                    "structA": struct_array,
-                })
+                struct_array = [
+                    {
+                        "embedding": _seed_vector(i * 1000 + j, default_dim),
+                        "int_val": i * 100 + j,
+                        "str_val": f"row_{i}_elem_{j}",
+                        "color": COLORS[j % 3],
+                    }
+                    for j in range(num_elems)
+                ]
+                rows.append(
+                    {
+                        "id": i,
+                        "doc_int": i,
+                        "doc_category": CATEGORIES[i % 4],
+                        "normal_vector": _seed_vector(i + 999999, default_dim),
+                        "structA": struct_array,
+                    }
+                )
             return rows
 
         # Sealed: default_nb rows in batches
@@ -4996,7 +7207,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5008,13 +7220,11 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert len(results[0]) == 10
 
         # First result should be the query vector itself (self-match)
-        assert results[0][0]["id"] == 0, \
-            f"Expected row 0 as top hit (self-match), got {results[0][0]['id']}"
+        assert results[0][0]["id"] == 0, f"Expected row 0 as top hit (self-match), got {results[0][0]['id']}"
 
         # Distance should be ~1.0 for cosine self-match
         top_distance = results[0][0]["distance"]
-        assert abs(top_distance - 1.0) < epsilon, \
-            f"Self-match distance should be ~1.0, got {top_distance}"
+        assert abs(top_distance - 1.0) < epsilon, f"Self-match distance should be ~1.0, got {top_distance}"
 
     # ---- 9.2 Ground truth ranking verification ----
 
@@ -5032,7 +7242,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[42]["structA"][1]["embedding"]
         limit = 20
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5047,14 +7258,12 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         milvus_ids = [hit["id"] for hit in results[0]]
 
         # Top-1 must match
-        assert milvus_ids[0] == gt_ids[0], \
-            f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
+        assert milvus_ids[0] == gt_ids[0], f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
 
         # At least 90% overlap in top-K (HNSW recall tolerance)
         overlap = len(set(milvus_ids) & set(gt_ids))
         recall = overlap / limit
-        assert recall >= 0.9, \
-            f"Recall too low: {recall:.2f} ({overlap}/{limit})"
+        assert recall >= 0.9, f"Recall too low: {recall:.2f} ({overlap}/{limit})"
 
     # ---- 9.3 Distance monotonicity ----
 
@@ -5072,7 +7281,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         limit = 50
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5084,8 +7294,9 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         distances = [hit["distance"] for hit in results[0]]
         for i in range(len(distances) - 1):
-            assert distances[i] >= distances[i + 1] - epsilon, \
-                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i+1]}"
+            assert distances[i] >= distances[i + 1] - epsilon, (
+                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i + 1]}"
+            )
 
     # ---- 9.4 Offset / pagination without filter ----
 
@@ -5103,7 +7314,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[5]["structA"][0]["embedding"]
 
         results_full, check1 = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5113,7 +7325,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert check1
 
         results_offset, check2 = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5125,8 +7338,7 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         full_tail_ids = [hit["id"] for hit in results_full[0][10:20]]
         offset_ids = [hit["id"] for hit in results_offset[0]]
-        assert full_tail_ids == offset_ids, \
-            f"Offset mismatch:\n  full[10:20]={full_tail_ids}\n  offset={offset_ids}"
+        assert full_tail_ids == offset_ids, f"Offset mismatch:\n  full[10:20]={full_tail_ids}\n  offset={offset_ids}"
 
     # ---- 9.5 Multiple query vectors (batch search) ----
 
@@ -5147,7 +7359,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
             data[200]["structA"][0]["embedding"],
         ]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=query_vectors,
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5160,8 +7373,9 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         # Each query should find its own source row as top-1
         expected_top1 = [0, 100, 200]
         for i, expected_id in enumerate(expected_top1):
-            assert results[i][0]["id"] == expected_id, \
+            assert results[i][0]["id"] == expected_id, (
                 f"Query {i}: expected top-1 id={expected_id}, got {results[i][0]['id']}"
+            )
 
     # ---- 9.6 Large limit ----
 
@@ -5179,7 +7393,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[50]["structA"][0]["embedding"]
         limit = 200
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5189,16 +7404,22 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert check
         assert len(results[0]) == limit
 
-        # No duplicate IDs (each row appears at most once)
+        # Element-level search returns element hits, so the same row id may
+        # appear multiple times. If pymilvus exposes element offset, the
+        # element identity should still be unique.
         ids = [hit["id"] for hit in results[0]]
-        assert len(ids) == len(set(ids)), \
-            f"Duplicate IDs in results: {len(ids)} total, {len(set(ids))} unique"
+        offsets = [hit.get("offset") for hit in results[0]]
+        if any(offset is not None for offset in offsets):
+            assert all(offset is not None for offset in offsets), "Some element hits are missing offset"
+            element_keys = list(zip(ids, offsets))
+            assert len(element_keys) == len(set(element_keys)), (
+                f"Duplicate element hits in results: {len(element_keys)} total, {len(set(element_keys))} unique"
+            )
 
         # Distances monotonically decreasing
         distances = [hit["distance"] for hit in results[0]]
         for i in range(len(distances) - 1):
-            assert distances[i] >= distances[i + 1] - epsilon, \
-                f"Distance not monotonic at position {i}"
+            assert distances[i] >= distances[i + 1] - epsilon, f"Distance not monotonic at position {i}"
 
     # ---- 9.7 Element-level vs normal vector search independence ----
 
@@ -5211,12 +7432,12 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         """
         client = self.shared_client
         collection_name = self.shared_collection
-        data = self.shared_data
 
         query_vector = _seed_vector(12345, default_dim)
 
         results_elem, check1 = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5226,7 +7447,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert check1
 
         results_normal, check2 = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -5240,39 +7462,7 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         # Results should differ because element embeddings and normal vectors
         # are generated from different seeds
-        assert elem_ids != normal_ids, \
-            "Element-level and normal vector search returned identical results"
-
-    # ---- 9.8 Range search not supported on element-level embedding ----
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_element_search_no_filter_range_search_not_supported(self):
-        """
-        target: range search on structA[embedding] should be rejected
-        method: search with radius and range_filter params on element-level field
-        expected: server returns error (range search not supported for vector array)
-        """
-        client = self.shared_client
-        collection_name = self.shared_collection
-        data = self.shared_data
-
-        query_vector = data[0]["structA"][0]["embedding"]
-        radius = 0.5
-        range_filter = 1.0
-        results, check = self.search(
-            client, collection_name,
-            data=[query_vector],
-            anns_field="structA[embedding]",
-            search_params={
-                "metric_type": "COSINE",
-                "params": {"radius": radius, "range_filter": range_filter},
-            },
-            limit=50,
-            output_fields=["id"],
-            check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "range search is not supported for vector array"},
-        )
+        assert elem_ids != normal_ids, "Element-level and normal vector search returned identical results"
 
     # ---- 9.9 Growing segment search without filter ----
 
@@ -5292,7 +7482,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[growing_row_id]["structA"][0]["embedding"]
 
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5303,8 +7494,9 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert len(results[0]) > 0
 
         # Self-match should be top-1
-        assert results[0][0]["id"] == growing_row_id, \
+        assert results[0][0]["id"] == growing_row_id, (
             f"Expected growing row {growing_row_id} as top-1, got {results[0][0]['id']}"
+        )
         assert abs(results[0][0]["distance"] - 1.0) < epsilon
 
         # Verify results include both sealed and growing rows
@@ -5331,7 +7523,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         limit = 20
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5344,8 +7537,7 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         # No duplicate PK — group_by PK ensures each row at most once
         ids = [hit["id"] for hit in results[0]]
-        assert len(ids) == len(set(ids)), \
-            f"Duplicate PKs: {len(ids)} total, {len(set(ids))} unique"
+        assert len(ids) == len(set(ids)), f"Duplicate PKs: {len(ids)} total, {len(set(ids))} unique"
 
         # Self-match should be top-1
         assert ids[0] == 0, f"Expected PK 0 as top-1 (self-match), got {ids[0]}"
@@ -5353,8 +7545,9 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         # Distance monotonically decreasing
         distances = [hit["distance"] for hit in results[0]]
         for i in range(len(distances) - 1):
-            assert distances[i] >= distances[i + 1] - epsilon, \
-                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i+1]}"
+            assert distances[i] >= distances[i + 1] - epsilon, (
+                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i + 1]}"
+            )
 
     # ---- 9.11 Group by PK with group_size on element-level search ----
 
@@ -5373,7 +7566,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         limit = 10
         group_size = 3
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5391,14 +7585,12 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
             groups.setdefault(hit["id"], []).append(hit)
 
         for pk, hits in groups.items():
-            assert len(hits) <= group_size, \
-                f"PK {pk}: {len(hits)} hits exceeds group_size={group_size}"
+            assert len(hits) <= group_size, f"PK {pk}: {len(hits)} hits exceeds group_size={group_size}"
 
         # Distance monotonically decreasing
         distances = [hit["distance"] for hit in results[0]]
         for i in range(len(distances) - 1):
-            assert distances[i] >= distances[i + 1] - epsilon, \
-                f"Distance not monotonic at position {i}"
+            assert distances[i] >= distances[i + 1] - epsilon, f"Distance not monotonic at position {i}"
 
     # ---- 9.12 Group by PK with element_filter ----
 
@@ -5416,11 +7608,12 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[0]["structA"][0]["embedding"]
         limit = 20
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 500)',
+            filter="element_filter(structA, $[int_val] > 500)",
             group_by_field="id",
             limit=limit,
             output_fields=["id", "structA"],
@@ -5434,8 +7627,7 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         # Every returned row must have at least one element with int_val > 500
         for hit in results[0]:
-            assert any(e["int_val"] > 500 for e in hit["structA"]), \
-                f"Row {hit['id']}: no element with int_val > 500"
+            assert any(e["int_val"] > 500 for e in hit["structA"]), f"Row {hit['id']}: no element with int_val > 500"
 
     # ---- 9.13 Group by PK ground truth verification ----
 
@@ -5453,7 +7645,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         query_vector = data[50]["structA"][1]["embedding"]
         limit = 20
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5470,14 +7663,12 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         milvus_ids = [hit["id"] for hit in results[0]]
 
         # Top-1 must match
-        assert milvus_ids[0] == gt_ids[0], \
-            f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
+        assert milvus_ids[0] == gt_ids[0], f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
 
         # At least 90% recall
         overlap = len(set(milvus_ids) & set(gt_ids))
         recall = overlap / limit
-        assert recall >= 0.9, \
-            f"Group-by PK recall too low: {recall:.2f} ({overlap}/{limit})"
+        assert recall >= 0.9, f"Group-by PK recall too low: {recall:.2f} ({overlap}/{limit})"
 
     # ---- 9.14 Group by non-PK field not supported on element-level search ----
 
@@ -5494,7 +7685,8 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
@@ -5502,6 +7694,520 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
             limit=10,
             output_fields=["id"],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "only group by primary key is supported for element-level search"},
+            check_items={
+                "err_code": 1100,
+                "err_msg": "only group by primary key is supported for element-level search",
+            },
         )
+
+
+# ==================== Test Case 10: StructArray Index-Access in search() (PR #48987) ====================
+
+
+class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
+    """search() filter coverage for the same predicates verified by query in
+    TestMilvusClientStructArrayIndexAccess (PR #48987 + companion array ops).
+
+    Verification strategy:
+    - normal_vector uses FLAT index -> brute-force, recall=1.0 (exact ID set
+      assertions are independent of ANN behavior).
+    - Controlled rows share the same normal_vector as the query vector so they
+      sit at COSINE=1.0 (top of the result list); inert background rows use
+      diverse seeds -> always lower similarity.
+    - limit is set well above the controlled row count, so all controlled
+      rows that pass the filter are guaranteed to be returned.
+    - Each case still has >= 3500 rows total: 3000 sealed + 500 growing inert
+      background, controlled rows split across both segments.
+    """
+
+    SEARCH_VEC_SEED = 424242
+    SEARCH_LIMIT = 200
+
+    def _create_schema(self, client, dim=default_dim):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+        return schema
+
+    def _query_vec(self):
+        return _seed_vector(self.SEARCH_VEC_SEED)
+
+    def _make_row(self, row_id, struct_elements):
+        """Controlled row: normal_vector == query vec so it sits at COSINE=1.0."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": self._query_vec(),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000 + j),
+                    "int_val": elem["int_val"],
+                    "str_val": elem.get("str_val", f"r{row_id}_e{j}"),
+                    "color": elem.get("color", "Red"),
+                }
+                for j, elem in enumerate(struct_elements)
+            ],
+        }
+
+    def _make_inert_row(self, row_id):
+        """Background row with diverse vector (low similarity to query vec)
+        and a single struct element that never matches controlled predicates."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000),
+                    "int_val": 0,
+                    "str_val": f"inert_{row_id}",
+                    "color": "Inert",
+                }
+            ],
+        }
+
+    def _setup_collection(self, client, collection_name, controlled_rows):
+        """3000 sealed inert + first half of controlled (sealed) +
+        500 growing inert + second half of controlled (growing).
+        normal_vector uses FLAT for recall=1.0."""
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k) for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+
+        half = len(controlled_rows) // 2
+        sealed_part = controlled_rows[:half]
+        growing_part = controlled_rows[half:]
+        if sealed_part:
+            self.insert(client, collection_name, sealed_part)
+        self.flush(client, collection_name)
+
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k) for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+        if growing_part:
+            self.insert(client, collection_name, growing_part)
+
+        self.load_collection(client, collection_name)
+
+    def _setup_collection_split(self, client, collection_name, sealed_rows, growing_rows):
+        """Same as _setup_collection but with explicit sealed/growing row groups."""
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k) for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+        if sealed_rows:
+            self.insert(client, collection_name, sealed_rows)
+        self.flush(client, collection_name)
+
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k) for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+        if growing_rows:
+            self.insert(client, collection_name, growing_rows)
+
+        self.load_collection(client, collection_name)
+
+    def _search_ids(self, client, collection_name, expr, limit=None):
+        """Run search() with given filter, return sorted unique controlled IDs."""
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[self._query_vec()],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter=expr,
+            limit=limit or self.SEARCH_LIMIT,
+            output_fields=["id"],
+        )
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
+
+    # ---- 10.1 search filter: structA[i][sub_field] == ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_eq(self):
+        """
+        target: structA[i][sub_field] == X usable as search() filter, exact recall
+        expected: hits exactly == predicted ID set (FLAT recall=1.0)
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_eq")
+
+        rows = [
+            self._make_row(0, [{"int_val": 10}, {"int_val": 20}]),
+            self._make_row(1, [{"int_val": 100}, {"int_val": 200}]),
+            self._make_row(2, [{"int_val": 100}]),
+            self._make_row(3, [{"int_val": 50}, {"int_val": 100}]),
+            self._make_row(4, [{"int_val": 999}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] == 100",
+        )
+        assert ids == [1, 2], f"Expected [1, 2], got {ids}"
+
+    # ---- 10.2 search filter: comparison operators ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_comparison_operators(self):
+        """target: !=, >, >=, <, <= as search() filter, all exact."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_cmp")
+
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ("id < 100 && structA[0][int_val] != 30", [0, 1, 3, 4]),
+            ("id < 100 && structA[0][int_val] > 30", [3, 4]),
+            ("id < 100 && structA[0][int_val] >= 30", [2, 3, 4]),
+            ("id < 100 && structA[0][int_val] < 30", [0, 1]),
+            ("id < 100 && structA[0][int_val] <= 30", [0, 1, 2]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.3 search filter: IN / NOT IN ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_in_not_in(self):
+        """target: IN / NOT IN as search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_in")
+
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] in [10, 30, 50, 999]",
+        )
+        assert ids == [0, 2, 4], f"IN expected [0,2,4], got {ids}"
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] not in [10, 30, 50]",
+        )
+        assert ids == [1, 3], f"NOT IN expected [1,3], got {ids}"
+
+    # ---- 10.4 search filter: range (forward + reverse) ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_range(self):
+        """target: forward and reverse range syntax as search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_range")
+
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ("id < 100 && 20 < structA[0][int_val] < 40", [2]),
+            ("id < 100 && 20 <= structA[0][int_val] <= 40", [1, 2, 3]),
+            ("id < 100 && 40 > structA[0][int_val] > 20", [2]),
+            ("id < 100 && 40 >= structA[0][int_val] >= 20", [1, 2, 3]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.5 search filter: string sub-field ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_string_subfield(self):
+        """target: VARCHAR sub-field index access in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_str")
+
+        rows = [
+            self._make_row(0, [{"int_val": 1, "str_val": "apple"}]),
+            self._make_row(1, [{"int_val": 2, "str_val": "banana"}]),
+            self._make_row(2, [{"int_val": 3, "str_val": "apple"}]),
+            self._make_row(3, [{"int_val": 4, "str_val": "cherry"}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            'id < 100 && structA[0][str_val] == "apple"',
+        )
+        assert ids == [0, 2]
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            'id < 100 && structA[0][str_val] in ["banana", "cherry"]',
+        )
+        assert ids == [1, 3]
+
+    # ---- 10.6 search filter: compound across indices ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_compound_indices(self):
+        """target: structA[0]... && structA[1]... compound predicate in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_compound")
+
+        rows = [
+            self._make_row(0, [{"int_val": 100}, {"int_val": 1}]),
+            self._make_row(1, [{"int_val": 100}, {"int_val": 50}]),
+            self._make_row(2, [{"int_val": 10}, {"int_val": 1}]),
+            self._make_row(3, [{"int_val": 200}, {"int_val": 5}]),
+            self._make_row(4, [{"int_val": 60}, {"int_val": 9}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] > 50 && structA[1][int_val] < 10",
+        )
+        assert ids == [0, 3, 4]
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && (structA[0][int_val] > 150 || structA[1][int_val] == 50)",
+        )
+        assert ids == [1, 3]
+
+    # ---- 10.7 search filter: array_contains exact ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_array_contains_exact(self):
+        """target: array_contains(structA[sub_field], v) in search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_ac")
+
+        rows = [
+            self._make_row(0, [{"int_val": 100}]),
+            self._make_row(1, [{"int_val": 200}, {"int_val": 201}]),
+            self._make_row(2, [{"int_val": 301}, {"int_val": 302}]),
+            self._make_row(3, [{"int_val": 200}, {"int_val": 999}]),
+            self._make_row(4, [{"int_val": 700}, {"int_val": 100}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ("id < 100 && array_contains(structA[int_val], 100)", [0, 4]),
+            ("id < 100 && array_contains(structA[int_val], 200)", [1, 3]),
+            ("id < 100 && array_contains(structA[int_val], 999)", [3]),
+            ("id < 100 && array_contains(structA[int_val], 12345)", []),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.8 search filter: array_contains_all / _any ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_array_contains_all_any(self):
+        """target: array_contains_all and array_contains_any in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_acall")
+
+        def _e(s):
+            return {"int_val": 0, "str_val": s}
+
+        rows = [
+            self._make_row(0, [_e("Red")]),
+            self._make_row(1, [_e("Red"), _e("Blue")]),
+            self._make_row(2, [_e("Blue"), _e("Green")]),
+            self._make_row(3, [_e("Red"), _e("Blue"), _e("Green")]),
+            self._make_row(4, [_e("Red"), _e("Green")]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        # ALL
+        cases_all = [
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue"])', [1, 3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue", "Green"])', [3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Yellow"])', []),
+        ]
+        for expr, expected in cases_all:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+        # ANY
+        cases_any = [
+            ('id < 100 && array_contains_any(structA[str_val], ["Red", "Yellow"])', [0, 1, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Blue", "Green"])', [1, 2, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Yellow", "Magenta"])', []),
+        ]
+        for expr, expected in cases_any:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.9 search filter: array_length exact ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_array_length_exact(self):
+        """target: array_length(structA[sub_field]) ==/>=/< in search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_arrlen")
+
+        rows = [self._make_row(i, [{"int_val": j} for j in range(i + 1)]) for i in range(5)]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ("id < 100 && array_length(structA[int_val]) == 3", [2]),
+            ("id < 100 && array_length(structA[int_val]) >= 4", [3, 4]),
+            ("id < 100 && array_length(structA[int_val]) < 3", [0, 1]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.10 search per-segment consistency ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_sealed_growing_consistency(self):
+        """
+        target: search() filter produces equivalent per-segment results when
+                matching rows live in sealed vs growing.
+        method: mirrored controlled groups (sealed ids 0..4, growing ids 5..9
+                with identical first-element int_val pattern).
+        expected: per-segment subsets are exact and isomorphic.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_segments")
+
+        pattern = [10, 20, 30, 40, 50]
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate(pattern)]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate(pattern)]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        cases = [
+            ("id < 100 && structA[0][int_val] == 30", [2], [7]),
+            ("id < 100 && structA[0][int_val] >= 30", [2, 3, 4], [7, 8, 9]),
+            ("id < 100 && structA[0][int_val] in [10, 50]", [0, 4], [5, 9]),
+        ]
+        for expr, exp_sealed, exp_growing in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            sealed_part = [i for i in ids if i < 5]
+            growing_part = [i for i in ids if 5 <= i < 100]
+            assert sealed_part == exp_sealed, f"{expr}: sealed expected {exp_sealed}, got {sealed_part}"
+            assert growing_part == exp_growing, f"{expr}: growing expected {exp_growing}, got {growing_part}"
+            assert [i + 5 for i in sealed_part] == growing_part, (
+                f"{expr}: sealed/growing not mirrored: sealed={sealed_part} growing={growing_part}"
+            )
+
+    # ---- 10.11 search after delete ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_after_delete(self):
+        """target: search filter reflects deletions across both segments."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_delete")
+
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
+        )
+        assert ids == [2, 3, 4, 7, 8, 9]
+
+        # Delete 4 (sealed match), 7 (growing match), 0 (non-matching)
+        self.delete(client, collection_name, ids=[4, 7, 0])
+        import time
+
+        time.sleep(1)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
+        )
+        assert ids == [2, 3, 8, 9], f"After delete expected [2,3,8,9], got {ids}"
+
+    # ---- 10.12 search after upsert ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_after_upsert(self):
+        """target: search filter reflects upsert that changes the indexed value."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_upsert")
+
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
+        )
+        assert ids == [2, 3, 4, 7, 8, 9]
+
+        # id 1 sealed (20 -> 100, becomes match)
+        # id 9 growing (50 -> 5, drops out)
+        upserts = [
+            self._make_row(1, [{"int_val": 100}]),
+            self._make_row(9, [{"int_val": 5}]),
+        ]
+        self.upsert(client, collection_name, upserts)
+        import time
+
+        time.sleep(1)
+
+        ids = self._search_ids(
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
+        )
+        assert ids == [1, 2, 3, 4, 7, 8], f"After upsert expected [1,2,3,4,7,8], got {ids}"

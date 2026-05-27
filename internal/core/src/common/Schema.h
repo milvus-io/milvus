@@ -44,6 +44,23 @@ namespace milvus {
 using ArrowSchemaPtr = std::shared_ptr<arrow::Schema>;
 static int64_t debug_id = START_USER_FIELDID;
 
+inline std::optional<std::string>
+GetStructNameForArrayField(const FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    if (data_type != DataType::ARRAY && data_type != DataType::VECTOR_ARRAY) {
+        return std::nullopt;
+    }
+
+    const auto& field_name = field_meta.get_name().get();
+    auto left = field_name.find('[');
+    auto right = field_name.find(']', left == std::string::npos ? 0 : left);
+    if (left == std::string::npos || right == std::string::npos || left == 0) {
+        return std::nullopt;
+    }
+
+    return field_name.substr(0, left);
+}
+
 class Schema {
  public:
     FieldId
@@ -142,7 +159,8 @@ class Schema {
     AddDebugVectorArrayField(const std::string& name,
                              DataType element_type,
                              int64_t dim,
-                             std::optional<knowhere::MetricType> metric_type) {
+                             std::optional<knowhere::MetricType> metric_type,
+                             bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -150,7 +168,8 @@ class Schema {
                                     DataType::VECTOR_ARRAY,
                                     element_type,
                                     dim,
-                                    metric_type);
+                                    metric_type,
+                                    nullable);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -399,13 +418,10 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToLoonArrowSchema() const;
 
-    // Build an Arrow schema suitable for reading data from storage.
-    // Normal collections: same as ConvertToArrowSchema().
-    // External collections: filtered to external fields only, using
-    // parquet column names with ARROW_FIELD_ID_KEY metadata for
-    // downstream field ID resolution.
-    const ArrowSchemaPtr
-    BuildReaderArrowSchema() const;
+    // Get the list of external column names (parquet column names) for
+    // external collections. Used as needed_columns for schemaless Reader.
+    std::shared_ptr<std::vector<std::string>>
+    GetExternalColumnNames() const;
 
     // Resolve a column group column name to a FieldId.
     // Normal collections: column name is the numeric field ID string.
@@ -427,6 +443,9 @@ class Schema {
 
     bool
     ShouldLoadField(FieldId field_id) {
+        if (bm25_function_output_fields_.count(field_id) > 0) {
+            return false;
+        }
         auto it = fields_.find(field_id);
         if (it != fields_.end() && !it->second.NeedLoad()) {
             return false;
@@ -456,20 +475,13 @@ class Schema {
         name_ids_.emplace(field_name, field_id);
         id_names_.emplace(field_id, field_name);
 
-        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields
-        // Field name format: "struct_name[0].field_name"
-        auto data_type = field_meta.get_data_type();
-        if (data_type == DataType::ARRAY ||
-            data_type == DataType::VECTOR_ARRAY) {
-            const std::string& name_str = field_name.get();
-            auto bracket_pos = name_str.find('[');
-            if (bracket_pos != std::string::npos && bracket_pos > 0) {
-                std::string struct_name = name_str.substr(0, bracket_pos);
-                // Only cache the first array field for each struct
-                if (struct_array_field_cache_.find(struct_name) ==
-                    struct_array_field_cache_.end()) {
-                    struct_array_field_cache_[struct_name] = field_id;
-                }
+        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields.
+        if (auto struct_name = GetStructNameForArrayField(field_meta);
+            struct_name.has_value()) {
+            // Only cache the first array field for each struct.
+            if (struct_array_field_cache_.find(*struct_name) ==
+                struct_array_field_cache_.end()) {
+                struct_array_field_cache_[*struct_name] = field_id;
             }
         }
 
@@ -561,6 +573,7 @@ class Schema {
     // field partial load list
     // work as hint now
     std::unordered_set<FieldId> load_fields_;
+    std::unordered_set<FieldId> bm25_function_output_fields_;
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;

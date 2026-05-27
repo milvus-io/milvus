@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestPayloadWriter_Failed(t *testing.T) {
@@ -388,6 +388,21 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 		err = w.AddDataToPayloadForUT(wrongData, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "incorrect data type")
+
+		invalidLengthData := &VectorArrayFieldData{
+			Data: []*schemapb.VectorField{
+				{
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}},
+					},
+				},
+			},
+			ElementType: schemapb.DataType_FloatVector,
+			Dim:         4,
+		}
+		err = w.AddVectorArrayFieldDataToPayload(invalidLengthData)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not divisible")
 	})
 
 	t.Run("Test ArrayOfFloatVector - Multiple Batches", func(t *testing.T) {

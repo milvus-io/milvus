@@ -41,13 +41,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func InitExecExpressionFunctionFactory() {
@@ -155,10 +155,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 }
 
 func InitLocalArrowFileSystem(path string) error {
-	CLocalRootPath := C.CString(path)
-	defer C.free(unsafe.Pointer(CLocalRootPath))
-	status := C.InitLocalArrowFileSystemSingleton(CLocalRootPath)
-	return HandleCStatus(&status, "InitLocalArrowFileSystemSingleton failed")
+	cRootPath := C.CString(path)
+	cStorageType := C.CString("local")
+	defer C.free(unsafe.Pointer(cRootPath))
+	defer C.free(unsafe.Pointer(cStorageType))
+	storageConfig := C.CStorageConfig{
+		root_path:    cRootPath,
+		storage_type: cStorageType,
+	}
+	status := C.InitArrowFileSystem(storageConfig)
+	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
 func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
@@ -211,8 +217,8 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
-	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
-	return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
+	status := C.InitArrowFileSystem(storageConfig)
+	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
@@ -277,8 +283,10 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 	growingMMapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
 	cGrowingMMapDir := C.CString(growingMMapDir)
 	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
+	cJSONStatsMmapPath := C.CString(params.QueryNodeCfg.MmapDirPath.GetValue())
 	defer C.free(unsafe.Pointer(cGrowingMMapDir))
 	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
+	defer C.free(unsafe.Pointer(cJSONStatsMmapPath))
 	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
 	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
@@ -293,6 +301,8 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
+		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")
@@ -492,6 +502,15 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
+	arrowReaderConfig := C.CArrowReaderConfig{
+		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+		range_size_limit_bytes: C.int64_t(params.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()),
+	}
+	status := C.InitArrowReaderConfig(arrowReaderConfig)
+	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
 var coreParamCallbackInitOnce sync.Once
 
 func SetupCoreConfigChangelCallback() {
@@ -579,6 +598,15 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateDefaultOptimizeExprEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnabledJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultJSONKeyStatsEnable(enable)
 			return nil
 		})
 

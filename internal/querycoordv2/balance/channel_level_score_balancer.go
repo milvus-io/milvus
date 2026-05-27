@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ChannelLevelScoreBalancer extends ScoreBasedBalancer to provide channel-level balance awareness.
@@ -163,7 +163,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 func (b *ChannelLevelScoreBalancer) genChannelPlanForOutboundNodes(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []assign.ChannelAssignPlan {
 	channelPlans := make([]assign.ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
+		dmChannels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
 		plans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
@@ -276,7 +276,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica 
 		nodeWithLessChannel := make([]int64, 0)
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range onlineNodes {
-			channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+			channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 			channels = sortIfChannelAtWALLocated(channels)
 
 			if len(channels) <= average {

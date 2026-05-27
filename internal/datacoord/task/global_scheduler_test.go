@@ -26,8 +26,8 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func init() {

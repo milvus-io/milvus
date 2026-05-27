@@ -3,7 +3,7 @@ package typeutil
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func genEmptyBoolFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
@@ -282,6 +282,8 @@ func genEmptyArrayOfVectorFieldData(field *schemapb.FieldSchema) (*schemapb.Fiel
 				},
 			},
 		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
 	}, nil
 }
 

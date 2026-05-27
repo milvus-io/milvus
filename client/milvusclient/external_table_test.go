@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
@@ -97,6 +97,7 @@ func TestConvertToEntityJobInfo(t *testing.T) {
 			Progress:       50,
 			Reason:         "",
 			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
 			StartTime:      1000,
 			EndTime:        0,
 		}
@@ -109,6 +110,7 @@ func TestConvertToEntityJobInfo(t *testing.T) {
 		assert.Equal(t, int64(50), result.Progress)
 		assert.Equal(t, "", result.Reason)
 		assert.Equal(t, "s3://bucket/path", result.ExternalSource)
+		assert.Equal(t, `{"format":"parquet"}`, result.ExternalSpec)
 		assert.Equal(t, int64(1000), result.StartTime)
 		assert.Equal(t, int64(0), result.EndTime)
 	})

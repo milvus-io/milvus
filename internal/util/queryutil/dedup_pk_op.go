@@ -23,9 +23,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // DeduplicatePKOperator concatenates multiple RetrieveResults and deduplicates
@@ -95,8 +95,10 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 	var retSize int64
 
 	origResults := make([]*internalpb.RetrieveResults, len(validResults))
+	rowSizeCalculators := make([]*rowSizeCalculator, len(validResults))
 	for i, v := range validResults {
 		origResults[i] = v.result
+		rowSizeCalculators[i] = newRowSizeCalculator(v.result)
 	}
 
 	for i, v := range validResults {
@@ -107,7 +109,7 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 			if v.timestamps != nil && int(j) < len(v.timestamps) {
 				ts = v.timestamps[j]
 			}
-			rowSize := calcRowSize(v.result, j)
+			rowSize := rowSizeCalculators[i].rowSize(j)
 
 			if entry, exists := pkMap[pk]; !exists {
 				pkMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts}
@@ -116,7 +118,7 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 			} else if ts != 0 && ts > entry.ts {
 				// Duplicate PK with higher timestamp — replace, swap sizes
 				oldRef := selectedRows[entry.rowIndex]
-				oldSize := calcRowSize(origResults[oldRef.resultIdx], oldRef.rowIdx)
+				oldSize := rowSizeCalculators[oldRef.resultIdx].rowSize(oldRef.rowIdx)
 				retSize = retSize - oldSize + rowSize
 				pkMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts}
 				selectedRows[entry.rowIndex] = rowRef{resultIdx: i, rowIdx: j}

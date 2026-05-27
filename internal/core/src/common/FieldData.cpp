@@ -128,7 +128,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    null_count_ = array->null_count();
+    if (!IsVectorDataType(data_type_)) {
+        null_count_ = array->null_count();
+    }
     switch (data_type_) {
         case DataType::BOOL: {
             AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
@@ -232,13 +234,41 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             AssertInfo(array->type()->id() == arrow::Type::type::STRING,
                        "inconsistent data type");
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);
+        }
+        case DataType::TEXT: {
+            // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
+            // Insert path: TEXT arrives as STRING
+            AssertInfo(array->type()->id() == arrow::Type::type::STRING ||
+                           array->type()->id() == arrow::Type::type::BINARY,
+                       "inconsistent data type");
+            std::vector<std::string> values(element_count);
+            if (array->type()->id() == arrow::Type::type::STRING) {
+                auto string_array =
+                    std::dynamic_pointer_cast<arrow::StringArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = string_array->GetString(index);
+                }
+            } else {
+                auto binary_array =
+                    std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sv = binary_array->GetView(index);
+                    values[index].assign(sv.data(), sv.size());
+                }
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(values.data(), element_count);
         }
         case DataType::JSON: {
             // The code here is not referenced.
@@ -659,6 +689,9 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
             this->valid_data_.data(),
             this->length_,
             total_element_count);
+    } else {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+            this->valid_data_.data(), this->length_, total_element_count, true);
     }
 
     // update logical to physical offset mapping
@@ -675,7 +708,7 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
         this->valid_count_ += valid_count;
     }
 
-    this->null_count_ = total_element_count - valid_count;
+    this->null_count_ += total_element_count - valid_count;
     this->length_ += total_element_count;
 }
 
@@ -687,6 +720,17 @@ template class FieldDataVectorImpl<float16, false>;
 template class FieldDataVectorImpl<bfloat16, false>;
 template class FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
                                    true>;
+
+namespace {
+
+template <typename T>
+FieldDataPtr
+InitScalarFieldDataWithLengthImpl(const DataType& type, int64_t length) {
+    FixedVector<T> values(length);
+    return std::make_shared<FieldData<T>>(type, false, std::move(values));
+}
+
+}  // namespace
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
@@ -726,6 +770,38 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         default:
             ThrowInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type {}",
+                      GetDataTypeName(type));
+    }
+}
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
+    switch (type) {
+        case DataType::BOOL:
+            return InitScalarFieldDataWithLengthImpl<bool>(type, length);
+        case DataType::INT8:
+            return InitScalarFieldDataWithLengthImpl<int8_t>(type, length);
+        case DataType::INT16:
+            return InitScalarFieldDataWithLengthImpl<int16_t>(type, length);
+        case DataType::INT32:
+            return InitScalarFieldDataWithLengthImpl<int32_t>(type, length);
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return InitScalarFieldDataWithLengthImpl<int64_t>(type, length);
+        case DataType::FLOAT:
+            return InitScalarFieldDataWithLengthImpl<float>(type, length);
+        case DataType::DOUBLE:
+            return InitScalarFieldDataWithLengthImpl<double>(type, length);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::GEOMETRY:
+            return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
+        case DataType::JSON:
+            return InitScalarFieldDataWithLengthImpl<Json>(type, length);
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "InitScalarFieldDataWithLength not support data type {}",
                       GetDataTypeName(type));
     }
 }

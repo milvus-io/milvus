@@ -25,11 +25,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type DistributionSuite struct {
@@ -43,6 +43,9 @@ func (s *DistributionSuite) SetupTest() {
 }
 
 func (s *DistributionSuite) TearDownTest() {
+	if s.dist != nil {
+		s.dist.Close()
+	}
 	s.dist = nil
 }
 
@@ -193,6 +196,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 			_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.Unpin(version)
@@ -628,12 +632,10 @@ func (s *DistributionSuite) TestPeek() {
 			s.SetupTest()
 			defer s.TearDownTest()
 
-			// peek during lock
 			s.dist.AddDistributions(tc.input...)
-			s.dist.mut.Lock()
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(tc.readable)
 			s.compareSnapshotItems(tc.expected, sealed)
-			s.dist.mut.Unlock()
 		})
 	}
 }
@@ -698,6 +700,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 				DroppedInTarget:       nil,
 			}, nil)
 			s.dist.MarkOfflineSegments(tc.offlines...)
+			s.dist.Flush()
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
 			for _, offline := range tc.offlines {
@@ -824,6 +827,28 @@ func TestDistribution_NewDistribution(t *testing.T) {
 	assert.NotNil(t, dist.sealedSegments)
 	assert.NotNil(t, dist.snapshots)
 	assert.NotNil(t, dist.current)
+}
+
+func TestDistribution_NotifyAfterClose(t *testing.T) {
+	dist := NewDistribution("test_channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+	dist.Close()
+	refunded := false
+
+	assert.NotPanics(t, func() {
+		dist.notifySnapshotUpdate()
+		dist.AddDistributions(SegmentEntry{
+			NodeID:      1,
+			SegmentID:   1,
+			PartitionID: 1,
+			Version:     1,
+			Candidate: &refundTrackingCandidate{
+				mockCandidate: mockCandidate{id: 1, partition: 1},
+				refunded:      &refunded,
+			},
+		})
+	})
+	assert.True(t, refunded)
+	assert.False(t, dist.SealedSegmentExists(1))
 }
 
 func TestDistribution_UpdateServiceable(t *testing.T) {
@@ -1441,6 +1466,10 @@ func TestPinReadableSegments(t *testing.T) {
 			SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 			GrowingInTarget:       []int64{},
 		}, []int64{1})
+		// Flush pending snapshot and stop background goroutine to avoid
+		// data race with mockey patches in sub-tests.
+		dist.Flush()
+		dist.Close()
 		return dist
 	}
 
@@ -1524,6 +1553,10 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
 	// This tests the case where load ratio is satisfied but serviceable is false
 	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
@@ -1556,6 +1589,10 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=false, loadRatioSatisfy=false
 	// This tests the case where partial result is requested but load ratio is insufficient
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
@@ -1585,6 +1622,10 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
+
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
@@ -1646,6 +1687,10 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
 
@@ -1700,6 +1745,15 @@ func (m *mockCandidate) GetMinPk() *storage.PrimaryKey            { return nil }
 func (m *mockCandidate) GetMaxPk() *storage.PrimaryKey            { return nil }
 func (m *mockCandidate) Charge()                                  {}
 func (m *mockCandidate) Refund()                                  {}
+
+type refundTrackingCandidate struct {
+	mockCandidate
+	refunded *bool
+}
+
+func (m *refundTrackingCandidate) Refund() {
+	*m.refunded = true
+}
 
 func TestBatchGetFromSegments(t *testing.T) {
 	t.Run("basic_sealed_segments", func(t *testing.T) {

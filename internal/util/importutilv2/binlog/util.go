@@ -25,14 +25,14 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, [][]bool, error) {
@@ -214,13 +214,25 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	}
 
 	for _, structArrayField := range schema.GetStructArrayFields() {
+		missingFields := make([]string, 0)
+		presentLogs := make(map[int64][]string, len(structArrayField.GetFields()))
 		for _, field := range structArrayField.GetFields() {
 			id := field.GetFieldID()
 			logs, ok := insertLogs[id]
 			if !ok {
-				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", field.GetName()))
+				missingFields = append(missingFields, field.GetName())
+				continue
 			}
+			presentLogs[id] = logs
+		}
 
+		if len(missingFields) == len(structArrayField.GetFields()) && structArrayField.GetNullable() {
+			continue
+		}
+		if len(missingFields) > 0 {
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", missingFields[0]))
+		}
+		for id, logs := range presentLogs {
 			validInsertLogs[id] = logs
 		}
 		cloneSchema.StructArrayFields = append(cloneSchema.StructArrayFields, structArrayField)

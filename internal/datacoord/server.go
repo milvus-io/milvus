@@ -33,8 +33,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -48,19 +48,19 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -331,7 +331,7 @@ func (s *Server) initDataCoord() error {
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
 
-	s.initExternalCollectionInspector()
+	s.initExternalCollectionInspector(storageCli)
 	log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
@@ -380,6 +380,7 @@ func (s *Server) initDataCoord() error {
 		s.handler,
 		s.broker,
 		s.getChannelsByCollectionID,
+		s.indexEngineVersionManager,
 	)
 	log.Info("init snapshot manager done")
 
@@ -488,6 +489,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 func (s *Server) initServiceDiscovery() error {
 	log := log.Ctx(s.ctx)
 	r := semver.MustParseRange(">=2.2.3")
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -516,7 +520,6 @@ func (s *Server) initServiceDiscovery() error {
 		s.dnSessionWatcher = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
 	}
 
-	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
@@ -538,6 +541,9 @@ func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) err
 // rewatchDataNodes is used to rewatch data nodes when datacoord is started or reconnected to etcd
 // Note: may apply same node multiple times, so rewatchDataNodes must be idempotent
 func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) error {
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -657,11 +663,11 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
-func (s *Server) initExternalCollectionInspector() {
+func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.handler.GetCollection)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
 	}
 }
 
@@ -865,7 +871,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			if s.fileResourceObserver != nil {
 				s.fileResourceObserver.Notify()
 			}
-			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -879,6 +884,10 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return nil
 			}
 			s.nodeManager.RemoveNode(event.Session.ServerID)
+		case sessionutil.SessionUpdateEvent:
+			log.Info("received datanode SessionUpdateEvent",
+				zap.String("address", info.Address),
+				zap.Int64("serverID", info.Version))
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))

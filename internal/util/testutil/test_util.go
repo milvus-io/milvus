@@ -12,14 +12,14 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -472,17 +472,18 @@ func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType
 		for i := 0; i < logicalRows; i++ {
 			isValid := len(validData) == 0 || validData[i]
 			builder.Append(isValid)
-			indicesBuilder.Append(isValid)
-			valuesBuilder.Append(isValid)
-			if isValid {
-				rowVecData := contents[physicalIdx]
-				elemCount := len(rowVecData) / 8
-				for j := 0; j < elemCount; j++ {
-					appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
-					appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
-				}
-				physicalIdx++
+			if !isValid {
+				continue
 			}
+			indicesBuilder.Append(true)
+			valuesBuilder.Append(true)
+			rowVecData := contents[physicalIdx]
+			elemCount := len(rowVecData) / 8
+			for j := 0; j < elemCount; j++ {
+				appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
+				appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
+			}
+			physicalIdx++
 		}
 		return builder.NewStructArray(), nil
 	}

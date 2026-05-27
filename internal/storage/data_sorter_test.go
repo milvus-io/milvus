@@ -22,9 +22,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDataSorter(t *testing.T) {
@@ -324,6 +324,254 @@ func TestDataSorter(t *testing.T) {
 		dataSorter.InsertData.Data[114].(*VectorArrayFieldData).Data[1].Data.(*schemapb.VectorField_FloatVector).FloatVector.Data)
 	assert.Equal(t, []float32{5, 6, 7, 8, 9, 10},
 		dataSorter.InsertData.Data[114].(*VectorArrayFieldData).Data[2].Data.(*schemapb.VectorField_FloatVector).FloatVector.Data)
+}
+
+func TestDataSorterNullableCompactVectors(t *testing.T) {
+	schema := &etcdpb.CollectionMeta{
+		ID:         1,
+		CreateTime: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: 200, Name: "nullable_int64", DataType: schemapb.DataType_Int64, Nullable: true},
+				{FieldID: 201, Name: "binary_vector", DataType: schemapb.DataType_BinaryVector, Nullable: true},
+				{FieldID: 202, Name: "float_vector", DataType: schemapb.DataType_FloatVector, Nullable: true},
+				{FieldID: 203, Name: "float16_vector", DataType: schemapb.DataType_Float16Vector, Nullable: true},
+				{FieldID: 204, Name: "bfloat16_vector", DataType: schemapb.DataType_BFloat16Vector, Nullable: true},
+				{FieldID: 205, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+				{FieldID: 206, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, Nullable: true},
+			},
+		},
+	}
+
+	binaryVector := &BinaryVectorFieldData{Dim: 8, Nullable: true}
+	assert.NoError(t, binaryVector.AppendRow([]byte{0x11}))
+	assert.NoError(t, binaryVector.AppendRow(nil))
+	assert.NoError(t, binaryVector.AppendRow([]byte{0x33}))
+
+	floatVector := &FloatVectorFieldData{Dim: 2, Nullable: true}
+	assert.NoError(t, floatVector.AppendRow([]float32{1, 2}))
+	assert.NoError(t, floatVector.AppendRow(nil))
+	assert.NoError(t, floatVector.AppendRow([]float32{5, 6}))
+
+	float16Vector := &Float16VectorFieldData{Dim: 2, Nullable: true}
+	assert.NoError(t, float16Vector.AppendRow([]byte{1, 2, 3, 4}))
+	assert.NoError(t, float16Vector.AppendRow(nil))
+	assert.NoError(t, float16Vector.AppendRow([]byte{5, 6, 7, 8}))
+
+	bfloat16Vector := &BFloat16VectorFieldData{Dim: 2, Nullable: true}
+	assert.NoError(t, bfloat16Vector.AppendRow([]byte{11, 12, 13, 14}))
+	assert.NoError(t, bfloat16Vector.AppendRow(nil))
+	assert.NoError(t, bfloat16Vector.AppendRow([]byte{15, 16, 17, 18}))
+
+	sparseRow0 := typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1})
+	sparseRow2 := typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3})
+	sparseVector := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Dim: 8}, Nullable: true}
+	assert.NoError(t, sparseVector.AppendRow(sparseRow0))
+	assert.NoError(t, sparseVector.AppendRow(nil))
+	assert.NoError(t, sparseVector.AppendRow(sparseRow2))
+
+	int8Vector := &Int8VectorFieldData{Dim: 2, Nullable: true}
+	assert.NoError(t, int8Vector.AppendRow([]int8{21, 22}))
+	assert.NoError(t, int8Vector.AppendRow(nil))
+	assert.NoError(t, int8Vector.AppendRow([]int8{25, 26}))
+
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			0:   &Int64FieldData{Data: []int64{20, 10, 30}},
+			200: &Int64FieldData{Data: []int64{200, 0, 300}, ValidData: []bool{true, false, true}, Nullable: true},
+			201: binaryVector,
+			202: floatVector,
+			203: float16Vector,
+			204: bfloat16Vector,
+			205: sparseVector,
+			206: int8Vector,
+		},
+	}
+
+	dataSorter := &DataSorter{
+		InsertCodec: NewInsertCodecWithSchema(schema),
+		InsertData:  insertData,
+	}
+
+	sort.Sort(dataSorter)
+
+	assert.Equal(t, []int64{10, 20, 30}, insertData.Data[0].(*Int64FieldData).Data)
+
+	int64Field := insertData.Data[200].(*Int64FieldData)
+	assert.Equal(t, []bool{false, true, true}, int64Field.ValidData)
+	assert.Equal(t, []int64{0, 200, 300}, int64Field.Data)
+	assert.Nil(t, int64Field.GetRow(0))
+	assert.Equal(t, int64(200), int64Field.GetRow(1))
+
+	assert.Equal(t, []bool{false, true, true}, binaryVector.ValidData)
+	assert.Equal(t, []byte{0x11, 0x33}, binaryVector.Data)
+	assert.Nil(t, binaryVector.GetRow(0))
+	assert.Equal(t, []byte{0x11}, binaryVector.GetRow(1))
+	assert.Equal(t, []byte{0x33}, binaryVector.GetRow(2))
+
+	assert.Equal(t, []bool{false, true, true}, floatVector.ValidData)
+	assert.Equal(t, []float32{1, 2, 5, 6}, floatVector.Data)
+	assert.Nil(t, floatVector.GetRow(0))
+	assert.Equal(t, []float32{1, 2}, floatVector.GetRow(1))
+	assert.Equal(t, []float32{5, 6}, floatVector.GetRow(2))
+
+	assert.Equal(t, []bool{false, true, true}, float16Vector.ValidData)
+	assert.Equal(t, []byte{1, 2, 3, 4, 5, 6, 7, 8}, float16Vector.Data)
+	assert.Nil(t, float16Vector.GetRow(0))
+	assert.Equal(t, []byte{1, 2, 3, 4}, float16Vector.GetRow(1))
+	assert.Equal(t, []byte{5, 6, 7, 8}, float16Vector.GetRow(2))
+
+	assert.Equal(t, []bool{false, true, true}, bfloat16Vector.ValidData)
+	assert.Equal(t, []byte{11, 12, 13, 14, 15, 16, 17, 18}, bfloat16Vector.Data)
+	assert.Nil(t, bfloat16Vector.GetRow(0))
+	assert.Equal(t, []byte{11, 12, 13, 14}, bfloat16Vector.GetRow(1))
+	assert.Equal(t, []byte{15, 16, 17, 18}, bfloat16Vector.GetRow(2))
+
+	assert.Equal(t, []bool{false, true, true}, sparseVector.ValidData)
+	assert.Equal(t, [][]byte{sparseRow0, sparseRow2}, sparseVector.Contents)
+	assert.Nil(t, sparseVector.GetRow(0))
+	assert.Equal(t, sparseRow0, sparseVector.GetRow(1))
+	assert.Equal(t, sparseRow2, sparseVector.GetRow(2))
+
+	assert.Equal(t, []bool{false, true, true}, int8Vector.ValidData)
+	assert.Equal(t, []int8{21, 22, 25, 26}, int8Vector.Data)
+	assert.Nil(t, int8Vector.GetRow(0))
+	assert.Equal(t, []int8{21, 22}, int8Vector.GetRow(1))
+	assert.Equal(t, []int8{25, 26}, int8Vector.GetRow(2))
+}
+
+func TestDataSorterNullableCompactVectorsInterleavedRows(t *testing.T) {
+	schema := &etcdpb.CollectionMeta{
+		ID:         1,
+		CreateTime: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: 201, Name: "float_vector", DataType: schemapb.DataType_FloatVector, Nullable: true},
+				{FieldID: 202, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+			},
+		},
+	}
+
+	floatVector := &FloatVectorFieldData{Dim: 1, Nullable: true}
+	sparseVector := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Dim: 8}, Nullable: true}
+	rows := []struct {
+		rowID int64
+		valid bool
+		value float32
+	}{
+		{40, true, 40},
+		{10, false, 0},
+		{30, true, 30},
+		{20, false, 0},
+		{50, true, 50},
+	}
+	for _, row := range rows {
+		if row.valid {
+			assert.NoError(t, floatVector.AppendRow([]float32{row.value}))
+			assert.NoError(t, sparseVector.AppendRow(typeutil.CreateSparseFloatRow([]uint32{uint32(row.value)}, []float32{row.value})))
+		} else {
+			assert.NoError(t, floatVector.AppendRow(nil))
+			assert.NoError(t, sparseVector.AppendRow(nil))
+		}
+	}
+
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			0:   &Int64FieldData{Data: []int64{40, 10, 30, 20, 50}},
+			201: floatVector,
+			202: sparseVector,
+		},
+	}
+	sort.Sort(&DataSorter{
+		InsertCodec: NewInsertCodecWithSchema(schema),
+		InsertData:  insertData,
+	})
+
+	assert.Equal(t, []int64{10, 20, 30, 40, 50}, insertData.Data[0].(*Int64FieldData).Data)
+	assert.Equal(t, []bool{false, false, true, true, true}, floatVector.ValidData)
+	assert.Equal(t, []float32{30, 40, 50}, floatVector.Data)
+	assert.Nil(t, floatVector.GetRow(0))
+	assert.Nil(t, floatVector.GetRow(1))
+	assert.Equal(t, []float32{30}, floatVector.GetRow(2))
+	assert.Equal(t, []float32{40}, floatVector.GetRow(3))
+	assert.Equal(t, []float32{50}, floatVector.GetRow(4))
+
+	assert.Equal(t, []bool{false, false, true, true, true}, sparseVector.ValidData)
+	assert.Len(t, sparseVector.Contents, 3)
+	assert.Nil(t, sparseVector.GetRow(0))
+	assert.Nil(t, sparseVector.GetRow(1))
+	assert.Equal(t, typeutil.CreateSparseFloatRow([]uint32{30}, []float32{30}), sparseVector.GetRow(2))
+	assert.Equal(t, typeutil.CreateSparseFloatRow([]uint32{40}, []float32{40}), sparseVector.GetRow(3))
+	assert.Equal(t, typeutil.CreateSparseFloatRow([]uint32{50}, []float32{50}), sparseVector.GetRow(4))
+}
+
+func BenchmarkDataSorterNullableCompactVectorSort(b *testing.B) {
+	const (
+		rowCount = 4096
+		dim      = 8
+	)
+	schema := &etcdpb.CollectionMeta{
+		ID:         1,
+		CreateTime: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+				{FieldID: 201, Name: "float_vector", DataType: schemapb.DataType_FloatVector, Nullable: true},
+			},
+		},
+	}
+
+	makeInsertData := func() *InsertData {
+		rowIDs := make([]int64, rowCount)
+		vector := &FloatVectorFieldData{Dim: dim, Nullable: true}
+		for i := 0; i < rowCount; i++ {
+			rowIDs[i] = int64(rowCount - i)
+			if i%3 == 0 {
+				assert.NoError(b, vector.AppendRow(nil))
+				continue
+			}
+			row := make([]float32, dim)
+			for j := range row {
+				row[j] = float32(i*dim + j)
+			}
+			assert.NoError(b, vector.AppendRow(row))
+		}
+		return &InsertData{
+			Data: map[int64]FieldData{
+				0:   &Int64FieldData{Data: rowIDs},
+				201: vector,
+			},
+		}
+	}
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		insertData := makeInsertData()
+		dataSorter := &DataSorter{
+			InsertCodec: NewInsertCodecWithSchema(schema),
+			InsertData:  insertData,
+		}
+		b.StartTimer()
+		sort.Sort(dataSorter)
+		b.StopTimer()
+		if got := insertData.Data[0].(*Int64FieldData).Data[0]; got != 1 {
+			b.Fatalf("first row id = %d, want 1", got)
+		}
+		if got := insertData.Data[0].(*Int64FieldData).Data[rowCount-1]; got != rowCount {
+			b.Fatalf("last row id = %d, want %d", got, rowCount)
+		}
+		if got := insertData.Data[201].(*FloatVectorFieldData).RowNum(); got != rowCount {
+			b.Fatalf("vector row count = %d, want %d", got, rowCount)
+		}
+	}
 }
 
 func TestDataSorter_Len(t *testing.T) {

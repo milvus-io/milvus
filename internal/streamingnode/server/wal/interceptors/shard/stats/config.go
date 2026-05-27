@@ -5,8 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // newStatsConfig creates a new config for the stats manager.
@@ -23,6 +23,8 @@ func newStatsConfig() statsConfig {
 	l1MinSizeFromIdleTime := paramtable.Get().DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsInt64() * 1024 * 1024
 
 	l0MaxLifetime := params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse()
+	blockingL0EntryNum := params.DataCoordCfg.BlockingL0EntryNum.GetAsInt64()
+	blockingL0SizeBytes := params.DataCoordCfg.BlockingL0SizeInMB.GetAsInt64() * 1024 * 1024
 	return statsConfig{
 		maxBinlogFileNum:      segmentMaxBinlogFileNum,
 		memoryThreshold:       memoryTheshold,
@@ -32,6 +34,8 @@ func newStatsConfig() statsConfig {
 		l1MaxIdleTime:         l1MaxIdleTime,
 		l1MinSizeFromIdleTime: l1MinSizeFromIdleTime,
 		l0MaxLifetime:         l0MaxLifetime,
+		blockingL0EntryNum:    blockingL0EntryNum,
+		blockingL0SizeBytes:   blockingL0SizeBytes,
 	}
 }
 
@@ -45,6 +49,8 @@ type statsConfig struct {
 	l1MaxIdleTime         time.Duration
 	l1MinSizeFromIdleTime int64
 	l0MaxLifetime         time.Duration
+	blockingL0EntryNum    int64
+	blockingL0SizeBytes   int64
 }
 
 // Validate checks if the config is valid.

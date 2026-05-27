@@ -3,8 +3,8 @@ package indexparamcheck
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // TRIEChecker checks if a TRIE index can be built.

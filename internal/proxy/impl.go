@@ -37,11 +37,11 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
@@ -51,32 +51,33 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const moduleName = "Proxy"
@@ -182,11 +183,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				log.Warn("invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			// drop all the alias as well
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-			}
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
+			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
@@ -912,7 +909,18 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 			Status: merr.Status(err),
 		}, nil
 	}
-	return interceptor.Call(ctx, request)
+	resp, err := interceptor.Call(ctx, request)
+	// Single-point redaction at the API edge. The persisted spec carries
+	// extfs credentials (access_key_id / access_key_value / ssl_ca_cert)
+	// that internal callers (refresh / load) need raw via the same
+	// mixCoord.DescribeCollection RPC; redacting at source would break
+	// FFI auth. Sanitize here so every provider path (cached / remote)
+	// converges through one spot — adding a new provider does not
+	// re-introduce the leak.
+	if resp != nil && resp.GetSchema() != nil {
+		resp.Schema.ExternalSpec = externalspec.RedactExternalSpec(resp.Schema.ExternalSpec)
+	}
+	return resp, err
 }
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
@@ -969,11 +977,6 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	// TODO(#48808): gate AddCollectionField against in-progress backfill once segment schema-version
-	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Currently the backfill
-	// policy updates segment schema versions on a tick, so a rapid second AddCollectionField
-	// can arrive before the tick fires and be incorrectly rejected by the gate.
-
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -983,6 +986,75 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	}
 
 	method := "AddCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+// AddCollectionStructField add a struct field to collection
+func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
+	}
+
+	task := &addCollectionStructFieldTask{
+		ctx:                             ctx,
+		Condition:                       NewTaskCondition(ctx),
+		AddCollectionStructFieldRequest: request,
+		mixCoord:                        node.mixCoord,
+		oldSchema:                       dresp.GetSchema(),
+	}
+
+	method := "AddCollectionStructField"
 	tr := timerecord.NewTimeRecorder(method)
 
 	log := log.Ctx(ctx).With(
@@ -1048,25 +1120,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Prevent concurrent AlterCollectionSchema requests on the same collection from
-	// racing past the schema version consistency gate. Only one request per collection
-	// is allowed to proceed at a time; others are rejected immediately.
-	collKey := request.GetDbName() + "/" + request.GetCollectionName()
-	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"another AlterCollectionSchema request is already in progress for collection %s", request.GetCollectionName())),
-		}, nil
-	}
-	defer node.alterSchemaInFlight.Delete(collKey)
-
-	// Check schema version consistency before proceeding with alter collection schema
-	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(err),
-		}, nil
-	}
-
 	task := &alterCollectionSchemaTask{
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
@@ -1116,87 +1169,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return task.AlterCollectionSchemaResponse, nil
-}
-
-// checkSchemaVersionConsistency checks if all segments have consistent schema version
-// Returns error if schema version consistency proportion is less than 100%
-func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", dbName),
-		zap.String("collection", collectionName))
-
-	// Get collection statistics to check schema version consistency
-	statsResp, err := node.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
-		Base:           commonpbutil.NewMsgBase(),
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if err := merr.CheckRPCCall(statsResp, err); err != nil {
-		log.Warn("failed to get collection statistics for schema version consistency check", zap.Error(err))
-		return err
-	}
-
-	// Find schema_version_consistent_segments and schema_version_total_segments from Stats.
-	// DataCoord emits these two integer keys only when the collection's schema version > 0
-	// (i.e. AlterCollectionSchema has been called at least once).  Absent keys mean the
-	// schema version is still 0 — no function field has ever been added — so there is no
-	// in-flight backfill and no DDL can be racing with one.  This does NOT open a window
-	// for concurrent DDL to slip through: RootCoord serializes all schema-change DDLs through
-	// a single DDL queue, so a second AlterCollectionSchema call can only enter this check
-	// after the first has already bumped the schema version and DataCoord has started reporting
-	// the count keys.
-	//
-	// Integer counts are used instead of a floating-point proportion to avoid the rounding
-	// hazard where e.g. 99999/100000 = 99.999% would format as "100.00" with "%.2f" and
-	// falsely satisfy the 100% gate check.
-	consistentSegments := -1
-	totalSegments := -1
-	for _, stat := range statsResp.GetStats() {
-		switch stat.GetKey() {
-		case common.SchemaVersionConsistentSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_consistent_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_consistent_segments value: %s", stat.GetValue())
-			}
-			consistentSegments = v
-		case common.SchemaVersionTotalSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_total_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_total_segments value: %s", stat.GetValue())
-			}
-			totalSegments = v
-		}
-	}
-
-	log.Info("checked schema version consistency",
-		zap.Int("consistentSegments", consistentSegments),
-		zap.Int("totalSegments", totalSegments))
-
-	if consistentSegments < 0 && totalSegments < 0 {
-		// Both keys absent: schema version is 0, no backfill has ever been triggered.
-		return nil
-	}
-	if consistentSegments < 0 || totalSegments < 0 {
-		// Exactly one key present — should never happen since DataCoord emits both atomically.
-		// Treat as a data corruption signal and block the DDL rather than silently passing.
-		log.Warn("incomplete schema version consistency stats, blocking DDL",
-			zap.Int("consistentSegments", consistentSegments),
-			zap.Int("totalSegments", totalSegments))
-		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
-	}
-	if consistentSegments < totalSegments {
-		return merr.WrapErrParameterInvalidMsg(
-			"schema version consistency check failed: %d/%d segments are consistent, required 100%%",
-			consistentSegments, totalSegments)
-	}
-	return nil
 }
 
 // GetStatistics get the statistics, such as `num_rows`.
@@ -7689,6 +7661,31 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
+	// External source and spec form an atomic tuple. Either omit both
+	// (reuse the persisted pair) or pass both (atomic override). Passing
+	// only one would silently use the empty value for the other downstream.
+	srcSet := req.GetExternalSource() != ""
+	specSet := req.GetExternalSpec() != ""
+	if srcSet != specSet {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
+				req.GetExternalSource(), req.GetExternalSpec())),
+		}, nil
+	}
+
+	// Defense in depth: refresh is the only post-create mutation path for
+	// (source, spec); enforce the same scheme allowlist and spec validation
+	// that CreateCollection runs, otherwise alter-bypass via refresh would
+	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
+	if srcSet {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	}
+
 	// Get collection info from cache (includes schema for validation)
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
@@ -7704,6 +7701,25 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 		}, nil
+	}
+
+	// Reuse path: caller did not provide override. The persisted
+	// (source, spec) on the collection must both be non-empty, otherwise
+	// downstream would look for files at "" and the job would fail with
+	// "no files found" after enqueue. Reject early so the user gets
+	// InvalidArgument instead of a stuck-then-failed job. Both halves are
+	// checked to defensively reassert the atomic-tuple invariant in case
+	// any legacy collection holds a half-initialized pair.
+	if !srcSet {
+		persistedSrc := collectionInfo.schema.GetExternalSource()
+		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		if persistedSrc == "" || persistedSpec == "" {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"collection %s has no persisted external_source/external_spec; provide both in the refresh request to initialize",
+					req.GetCollectionName())),
+			}, nil
+		}
 	}
 
 	collectionID := collectionInfo.collID
@@ -7783,7 +7799,8 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	}, nil
 }
 
-// ListRefreshExternalCollectionJobs lists refresh jobs for an external collection
+// ListRefreshExternalCollectionJobs lists refresh jobs for external collections.
+// An empty collection name lists all jobs.
 func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
@@ -7804,30 +7821,32 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 
 	log.Debug(rpcReceived(method))
 
-	// Validate collection name
-	if err := validateCollectionName(req.GetCollectionName()); err != nil {
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
+	var collectionID int64
+	if req.GetCollectionName() != "" {
+		if err := validateCollectionName(req.GetCollectionName()); err != nil {
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
 
-	// Get collection info from cache and validate it's an external collection
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
-	if err != nil {
-		log.Warn("failed to get collection info", zap.Error(err))
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
+		// Get collection info from cache and validate it's an external collection
+		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		if err != nil {
+			log.Warn("failed to get collection info", zap.Error(err))
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
 
-	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
-		log.Warn("collection is not an external collection")
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
-		}, nil
-	}
+		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+			log.Warn("collection is not an external collection")
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
+			}, nil
+		}
 
-	collectionID := collectionInfo.collID
+		collectionID = collectionInfo.collID
+	}
 
 	// Call DataCoord to list jobs
 	resp, err := node.mixCoord.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
@@ -7868,6 +7887,7 @@ func convertToExternalCollectionJobInfo(internal *datapb.ExternalCollectionRefre
 		Progress:       internal.GetProgress(),
 		Reason:         internal.GetFailReason(),
 		ExternalSource: internal.GetExternalSource(),
+		ExternalSpec:   externalspec.RedactExternalSpec(internal.GetExternalSpec()),
 		StartTime:      internal.GetStartTime(),
 		EndTime:        internal.GetEndTime(),
 	}

@@ -24,13 +24,16 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
 	defaultToleranceMB = 0.05
 )
+
+// IsInlineExecutable returns false: force merge is real compaction work.
+func (v *ForceMergeSegmentView) IsInlineExecutable() bool { return false }
 
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {

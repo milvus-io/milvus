@@ -1,8 +1,8 @@
 package shallowcopy
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 // ShallowCopySearchRequest creates a lightweight copy of SearchRequest that shares

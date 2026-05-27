@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
@@ -191,7 +192,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp32_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float>>(
             DataType::NONE,
@@ -208,7 +209,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float16>>(
             DataType::NONE,
@@ -225,7 +226,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
             DataType::NONE,
@@ -585,8 +586,7 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             auto chunk_manager =
                 milvus::storage::LocalChunkManagerSingleton::GetInstance()
                     .GetChunkManager();
-            auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+            auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
             // Create FieldDataMeta for RTree index
             storage::FieldDataMeta field_data_meta;

@@ -17,6 +17,7 @@ extern "C" {
 
 #include "common/common_type_c.h"
 #include "common/type_c.h"
+#include "futures/future_c_types.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 
@@ -26,11 +27,25 @@ CStatus
 ReduceSearchResultsAndFillData(CTraceContext c_trace,
                                CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
+                               CPlaceholderGroup c_placeholder_group,
                                CSearchResult* search_results,
                                int64_t num_segments,
                                int64_t* slice_nqs,
                                int64_t* slice_topKs,
                                int64_t num_slices);
+
+// Async variant of ReduceSearchResultsAndFillData. The returned CFuture
+// resolves to a CSearchResultDataBlobs pointer; cancellation propagates
+// to per-segment FillTargetEntry / FillPrimaryKeys via OpContext.
+CFuture*  // Future<CSearchResultDataBlobs>
+AsyncReduceSearchResultsAndFillData(CTraceContext c_trace,
+                                    CSearchPlan c_plan,
+                                    CPlaceholderGroup c_placeholder_group,
+                                    CSearchResult* search_results,
+                                    int64_t num_segments,
+                                    int64_t* slice_nqs,
+                                    int64_t* slice_topKs,
+                                    int64_t num_slices);
 
 CStatus
 GetSearchResultDataBlob(CProto* searchResultDataBlob,

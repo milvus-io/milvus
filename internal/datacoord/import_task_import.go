@@ -25,20 +25,20 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ ImportTask = (*importTask)(nil)
@@ -163,6 +163,18 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
 	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
+		// Clear partial progress recorded from the failed attempt. Otherwise,
+		// if the retried attempt's PickSegment lands on a different subset of
+		// the preallocated segments, the segments it skips will keep stale
+		// NumOfRows without insert binlogs — causing sort compaction to fail
+		// with "unexpected row count" or EOF.
+		if segmentIDs := t.GetSegmentIDs(); len(segmentIDs) > 0 {
+			if resetErr := t.meta.UpdateSegmentsInfo(context.TODO(), ResetImportingSegmentRows(segmentIDs...)); resetErr != nil {
+				log.Warn("failed to reset import segment row counts on retry",
+					WrapTaskLog(t, zap.Error(resetErr))...)
+				return
+			}
+		}
 		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)

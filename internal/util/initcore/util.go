@@ -29,6 +29,9 @@ import "C"
 import (
 	"strings"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func UpdateLogLevel(level string) error {
@@ -72,12 +75,44 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
+func UpdateDefaultJSONKeyStatsEnable(enable bool) {
+	C.SetDefaultJSONKeyStatsEnable(C.bool(enable))
+}
+
 func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }
 
 func UpdateExprResCacheCapacityBytes(capacity int) {
 	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+}
+
+func UpdateArrowIOThreadPoolCapacity(threads int) {
+	C.SetArrowIOThreadPoolCapacity(C.int(threads))
+}
+
+// ResolveArrowIOThreadPoolCapacity returns the effective arrow IO thread pool
+// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. Returns 0
+// when the coefficient is unset, which signals the C++ side to keep arrow's
+// built-in default (8).
+func ResolveArrowIOThreadPoolCapacity() int {
+	cfg := &paramtable.Get().CommonCfg
+	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
+	if coef <= 0 {
+		return 0
+	}
+	threads := int(coef * float64(hardware.GetCPUNum()))
+	if threads < 1 {
+		threads = 1
+	}
+	if maxCap := cfg.ArrowIOThreadPoolMaxCapacity.GetAsInt(); maxCap > 0 && threads > maxCap {
+		threads = maxCap
+	}
+	return threads
+}
+
+func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
+	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

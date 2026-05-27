@@ -104,6 +104,18 @@ PhyElementFilterBitsNode::GetOutput() {
         array_offsets->ElementIDRangeOfRow(query_context_->get_active_count());
     query_context_->set_active_element_count(first_elem);
 
+    if (first_elem == 0) {
+        // No active row has struct elements. Keep the output as a doc-level
+        // all-filtered bitmap so downstream operators can still consume a
+        // non-empty filter and convert it if they need element-level input.
+        TargetBitmap bitset(query_context_->get_active_count(), true);
+        TargetBitmap valid_bitset(query_context_->get_active_count(), true);
+        std::vector<VectorPtr> col_res;
+        col_res.push_back(std::make_shared<ColumnVector>(
+            std::move(bitset), std::move(valid_bitset)));
+        return std::make_shared<RowVector>(col_res);
+    }
+
     // Step 2: Prepare doc bitset
     auto col_input = GetColumnVector(input_);
     TargetBitmapView doc_bitset(col_input->GetRawData(), col_input->size());
@@ -181,6 +193,15 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         tracer::AddEvent(fmt::format("offset_mode, input_elements: {}",
                                      element_offsets.size()));
+
+        // No doc passed the upstream predicate on this segment: skip Eval
+        // (expressions return nullptr on empty input) and mark all elements
+        // as filtered out.
+        if (element_offsets.empty()) {
+            TargetBitmap bitset(total_elements, true);
+            TargetBitmap valid_bitset(total_elements, true);
+            return std::make_pair(std::move(bitset), std::move(valid_bitset));
+        }
 
         EvalCtx eval_ctx(operator_context_->get_exec_context(),
                          &element_offsets);

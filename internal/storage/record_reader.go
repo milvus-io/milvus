@@ -8,13 +8,13 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RecordReader interface {
@@ -211,6 +211,10 @@ func NewManifestReader(manifest string,
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
+
+	// Override TEXT fields to binary type — LOB references are binary encoded in manifest storage
+	arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return nil, err
@@ -257,7 +261,7 @@ func (mr *ManifestReader) init() error {
 	return nil
 }
 
-func (mr ManifestReader) Next() (Record, error) {
+func (mr *ManifestReader) Next() (Record, error) {
 	rec, err := mr.reader.ReadNext()
 	if err != nil {
 		return nil, err
@@ -265,7 +269,7 @@ func (mr ManifestReader) Next() (Record, error) {
 	return NewSimpleArrowRecord(rec, mr.field2Col), nil
 }
 
-func (mr ManifestReader) Close() error {
+func (mr *ManifestReader) Close() error {
 	if mr.reader != nil {
 		return mr.reader.Close()
 	}

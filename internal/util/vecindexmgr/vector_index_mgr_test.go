@@ -3,7 +3,7 @@ package vecindexmgr
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func Test_VecIndex_DataType_Support(t *testing.T) {

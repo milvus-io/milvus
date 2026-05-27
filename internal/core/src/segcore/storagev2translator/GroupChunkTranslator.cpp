@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/default_fs.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -150,15 +151,19 @@ GroupChunkTranslator::GroupChunkTranslator(
     }
 
     // Build cell mapping: cells DO NOT span files — each cell's row groups
-    // come entirely from one file.
+    // come entirely from one file. Derive row-groups-per-cell from the
+    // runtime-configurable target cell byte size so avg cell size ≈ target.
+    const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     meta_.total_row_groups_ = total_row_groups;
+    const size_t rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
     size_t global_rg_offset = 0;
     for (const auto& rg_meta : row_group_meta_list_) {
         size_t file_rg_count = rg_meta.size();
         for (size_t local_start = 0; local_start < file_rg_count;
-             local_start += kRowGroupsPerCell) {
+             local_start += rgs_per_cell) {
             size_t local_end =
-                std::min(local_start + kRowGroupsPerCell, file_rg_count);
+                std::min(local_start + rgs_per_cell, file_rg_count);
             meta_.cell_row_group_ranges_.push_back(
                 {global_rg_offset + local_start, global_rg_offset + local_end});
         }
@@ -194,12 +199,12 @@ GroupChunkTranslator::GroupChunkTranslator(
             column_group_info_.row_count));
 
     LOG_INFO(
-        "[StorageV2] translator {} merged {} row groups into {} cells ({} "
-        "row groups per cell)",
+        "[StorageV2] translator {} merged {} row groups into {} cells "
+        "(cell_target_size_bytes={})",
         key_,
         total_row_groups,
         num_cells,
-        kRowGroupsPerCell);
+        cell_target_size_bytes);
 
     // Set loading overhead config to cap total overhead reservation.
     // During get_cells, decoded Arrow Tables exist simultaneously in:
@@ -354,8 +359,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
     auto load_futures =

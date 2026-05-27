@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestTracer(t *testing.T) {
@@ -64,6 +64,17 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+}
+
+func TestInitArrowReaderConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	assert.NoError(t, InitArrowReaderConfig(pt))
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
+	assert.NoError(t, InitArrowReaderConfig(pt))
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

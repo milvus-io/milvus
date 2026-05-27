@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const waitCollectionReleasedTimeout = 30 * time.Second
@@ -58,7 +58,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 				return partitionSet.Contain(segment.GetPartitionID())
 			})
 		} else {
-			channels = dist.ChannelDistManager.GetByCollectionAndFilter(collection)
+			channels = dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
 		}
 
 		currentChannelCount := len(channels)
@@ -104,6 +104,33 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 
 	// accelerate check
 	targetObserver.TriggerUpdateCurrentTarget(collection)
+
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+	case <-time.After(waitCollectionReleasedTimeout):
+		return errors.Errorf("wait current target updated timeout, collection=%d", collection)
+	}
+}
+
+func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetObserver, collection int64, partition int64) error {
+	// manual trigger update next target
+	ready, err := targetObserver.UpdatePartition(collection, partition)
+	if err != nil {
+		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
+	}
+	select {
+	case <-ready:
+		return nil
+	default:
+	}
+
+	// accelerate check
+	targetObserver.TriggerUpdateCurrentTarget(collection)
+
 	// wait current target ready
 	select {
 	case <-ready:

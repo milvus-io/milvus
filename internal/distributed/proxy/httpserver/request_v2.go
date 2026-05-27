@@ -19,14 +19,15 @@ package httpserver
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type EmptyReq struct{}
@@ -325,15 +326,54 @@ func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
 func (req *CollectionFilterReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionDataReq struct {
-	DbName         string                   `json:"dbName"`
-	CollectionName string                   `json:"collectionName" binding:"required"`
-	PartitionName  string                   `json:"partitionName"`
-	Data           []map[string]interface{} `json:"data" binding:"required"`
-	PartialUpdate  bool                     `json:"partialUpdate"`
+	DbName         string                    `json:"dbName"`
+	CollectionName string                    `json:"collectionName" binding:"required"`
+	PartitionName  string                    `json:"partitionName"`
+	Data           []map[string]interface{}  `json:"data" binding:"required"`
+	PartialUpdate  bool                      `json:"partialUpdate"`
+	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }
 
 func (req *CollectionDataReq) GetDbName() string         { return req.DbName }
 func (req *CollectionDataReq) GetCollectionName() string { return req.CollectionName }
+
+type FieldPartialUpdateOpReq struct {
+	FieldName string `json:"fieldName"`
+	Op        string `json:"op"`
+}
+
+func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	if len(fieldOps) == 0 {
+		return nil, nil
+	}
+
+	ops := make([]*schemapb.FieldPartialUpdateOp, 0, len(fieldOps))
+	for _, fieldOp := range fieldOps {
+		op, err := parseFieldPartialUpdateOp(fieldOp.Op)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, &schemapb.FieldPartialUpdateOp{
+			FieldName: fieldOp.FieldName,
+			Op:        op,
+		})
+	}
+	return ops, nil
+}
+
+func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
+	switch strings.ToUpper(strings.TrimSpace(op)) {
+	case "REPLACE":
+		return schemapb.FieldPartialUpdateOp_REPLACE, nil
+	case "ARRAY_APPEND":
+		return schemapb.FieldPartialUpdateOp_ARRAY_APPEND, nil
+	case "ARRAY_REMOVE":
+		return schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, nil
+	default:
+		return schemapb.FieldPartialUpdateOp_REPLACE,
+			merr.WrapErrParameterInvalidMsg("unsupported partial update op: " + op)
+	}
+}
 
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
@@ -571,6 +611,7 @@ type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
 	DataType          string                 `json:"dataType" binding:"required"`
 	ElementDataType   string                 `json:"elementDataType"`
+	ExternalField     string                 `json:"externalField"`
 	IsPrimary         bool                   `json:"isPrimary"`
 	IsPartitionKey    bool                   `json:"isPartitionKey"`
 	IsClusteringKey   bool                   `json:"isClusteringKey"`
@@ -594,6 +635,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		DataType:        dataType,
 		TypeParams:      []*commonpb.KeyValuePair{},
 		Nullable:        field.Nullable,
+		ExternalField:   field.ExternalField,
 	}
 
 	var err error
@@ -602,7 +644,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue), zap.Error(err))
 		return nil, merr.WrapErrParameterInvalidMsg("convert defaultValue fail, err: %s", err.Error())
 	}
-	if dataType == schemapb.DataType_Array {
+	if dataType == schemapb.DataType_Array || dataType == schemapb.DataType_ArrayOfVector {
 		if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 			log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
 			return nil, merr.WrapErrParameterInvalidMsg("element data type %s is invalid(case sensitive)", field.ElementDataType)
@@ -617,6 +659,71 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
 	return fieldSchema, nil
+}
+
+// StructArrayFieldSchema describes a struct array field in RESTful v2 API.
+// Each struct array field contains multiple sub-fields; every sub-field must
+// be declared as either Array (scalar element) or ArrayOfVector (vector element).
+type StructArrayFieldSchema struct {
+	FieldName   string                 `json:"fieldName" binding:"required"`
+	Description string                 `json:"description"`
+	Fields      []FieldSchema          `json:"fields" binding:"required"`
+	TypeParams  map[string]interface{} `json:"typeParams"`
+}
+
+// GetProto converts the RESTful StructArrayFieldSchema to its proto counterpart.
+// Only Array / ArrayOfVector data types are allowed for sub-fields.
+func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.StructArrayFieldSchema, error) {
+	if len(sf.Fields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("struct field %s must contain at least one sub-field", sf.FieldName)
+	}
+	proto := &schemapb.StructArrayFieldSchema{
+		Name:        sf.FieldName,
+		Description: sf.Description,
+		TypeParams:  []*commonpb.KeyValuePair{},
+	}
+	subNames := map[string]struct{}{}
+	for i := range sf.Fields {
+		sub := sf.Fields[i]
+		subProto, err := sub.GetProto(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if subProto.DataType != schemapb.DataType_Array && subProto.DataType != schemapb.DataType_ArrayOfVector {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s must be Array or ArrayOfVector, got %s",
+				sub.FieldName, sf.FieldName, sub.DataType)
+		}
+		if subProto.IsPrimaryKey || subProto.IsPartitionKey || subProto.IsClusteringKey {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot be primary / partition / clustering key",
+				sub.FieldName, sf.FieldName)
+		}
+		if subProto.Nullable {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot be nullable",
+				sub.FieldName, sf.FieldName)
+		}
+		if subProto.DefaultValue != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot set defaultValue",
+				sub.FieldName, sf.FieldName)
+		}
+		if _, dup := subNames[subProto.Name]; dup {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
+		}
+		subNames[subProto.Name] = struct{}{}
+		proto.Fields = append(proto.Fields, subProto)
+	}
+	for key, param := range sf.TypeParams {
+		value, err := getElementTypeParams(param)
+		if err != nil {
+			return nil, err
+		}
+		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
+	}
+	return proto, nil
 }
 
 type FunctionScore struct {
@@ -634,10 +741,13 @@ type FunctionSchema struct {
 }
 
 type CollectionSchema struct {
-	Fields             []FieldSchema    `json:"fields"`
-	Functions          []FunctionSchema `json:"functions"`
-	AutoId             bool             `json:"autoID"`
-	EnableDynamicField bool             `json:"enableDynamicField"`
+	Fields             []FieldSchema            `json:"fields"`
+	StructFields       []StructArrayFieldSchema `json:"structFields"`
+	Functions          []FunctionSchema         `json:"functions"`
+	AutoId             bool                     `json:"autoID"`
+	EnableDynamicField bool                     `json:"enableDynamicField"`
+	ExternalSource     string                   `json:"externalSource"`
+	ExternalSpec       string                   `json:"externalSpec"`
 }
 
 type CollectionReq struct {
@@ -653,10 +763,45 @@ type CollectionReq struct {
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
 	Description      string                 `json:"description"`
+	// Top-level external config is accepted only for explicit rejection.
+	// Create external collection must use schema.externalSource/schema.externalSpec.
+	TopLevelExternalSource string `json:"externalSource"`
+	TopLevelExternalSpec   string `json:"externalSpec"`
 }
 
 func (req *CollectionReq) GetDbName() string         { return req.DbName }
 func (req *CollectionReq) GetCollectionName() string { return req.CollectionName }
+
+func (req *CollectionReq) GetExternalSource() string {
+	return req.Schema.ExternalSource
+}
+
+func (req *CollectionReq) GetExternalSpec() string {
+	return req.Schema.ExternalSpec
+}
+
+func (req *CollectionReq) HasTopLevelExternalConfig() bool {
+	return req.TopLevelExternalSource != "" || req.TopLevelExternalSpec != ""
+}
+
+type RefreshExternalCollectionReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	ExternalSource string `json:"externalSource"`
+	ExternalSpec   string `json:"externalSpec"`
+}
+
+func (req *RefreshExternalCollectionReq) GetDbName() string { return req.DbName }
+
+func (req *RefreshExternalCollectionReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type RefreshExternalCollectionProgressReq struct {
+	JobID int64 `json:"jobId" binding:"required"`
+}
+
+func (req *RefreshExternalCollectionProgressReq) GetJobID() int64 { return req.JobID }
 
 type AliasReq struct {
 	DbName    string `json:"dbName"`

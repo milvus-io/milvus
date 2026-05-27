@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb";
+option go_package="github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";
@@ -48,6 +48,15 @@ service RootCoord {
      * @return Status
      */
     rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to add collection struct field.
+     *
+     * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+     *
+     * @return Status
+     */
+    rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
 
 
      /**
@@ -109,6 +118,7 @@ service RootCoord {
    * @return Status
    */
     rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+    rpc CreatePartitionV2(milvus.CreatePartitionRequest) returns (CreatePartitionResponse) {}
 
     /**
      * @brief This method is used to drop partition
@@ -314,4 +324,9 @@ message DBCollections {
 message ShowCollectionIDsResponse {
   common.Status status = 1;
   repeated DBCollections db_collections = 2;
+}
+
+message CreatePartitionResponse {
+  common.Status status = 1;
+  int64 partitionID = 2;
 }

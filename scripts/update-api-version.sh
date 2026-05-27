@@ -38,25 +38,25 @@ echo "Updating milvus-proto version in all go.mod files..."
 # 1. Update main go.mod
 echo "Updating main go.mod..."
 cd "$PROJECT_ROOT"
-go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go get -u github.com/milvus-io/milvus-proto/go-api/v3@$update_version
 go mod tidy
 
 # 2. Update client/go.mod
 echo "Updating client/go.mod..."
 cd "$PROJECT_ROOT/client"
-go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go get -u github.com/milvus-io/milvus-proto/go-api/v3@$update_version
 go mod tidy
 
 # 3. Update pkg/go.mod
 echo "Updating pkg/go.mod..."
 cd "$PROJECT_ROOT/pkg"
-go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go get -u github.com/milvus-io/milvus-proto/go-api/v3@$update_version
 go mod tidy
 
 # 4. Update tests/go_client/go.mod
 echo "Updating tests/go_client/go.mod..."
 cd "$PROJECT_ROOT/tests/go_client"
-go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go get -u github.com/milvus-io/milvus-proto/go-api/v3@$update_version
 go mod tidy
 
 # Return to project root

@@ -5,28 +5,28 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
 	grpc "google.golang.org/grpc"
 
-	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	metricsinfo "github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	metricsinfo "github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 
-	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 
-	rootcoordpb "github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
@@ -160,6 +160,65 @@ func (_c *MixCoord_AddCollectionField_Call) Return(_a0 *commonpb.Status, _a1 err
 }
 
 func (_c *MixCoord_AddCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)) *MixCoord_AddCollectionField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AddCollectionStructField provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AddCollectionStructField(_a0 context.Context, _a1 *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionStructField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AddCollectionStructField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionStructField'
+type MixCoord_AddCollectionStructField_Call struct {
+	*mock.Call
+}
+
+// AddCollectionStructField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddCollectionStructFieldRequest
+func (_e *MixCoord_Expecter) AddCollectionStructField(_a0 interface{}, _a1 interface{}) *MixCoord_AddCollectionStructField_Call {
+	return &MixCoord_AddCollectionStructField_Call{Call: _e.mock.On("AddCollectionStructField", _a0, _a1)}
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddCollectionStructFieldRequest)) *MixCoord_AddCollectionStructField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionStructFieldRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AddCollectionStructField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)) *MixCoord_AddCollectionStructField_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1403,6 +1462,65 @@ func (_c *MixCoord_ClientHeartbeat_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// CommitBackfillResult provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CommitBackfillResult(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitBackfillResult")
+	}
+
+	var r0 *datapb.CommitBackfillResultResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) *datapb.CommitBackfillResultResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CommitBackfillResultResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitBackfillResultRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CommitBackfillResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitBackfillResult'
+type MixCoord_CommitBackfillResult_Call struct {
+	*mock.Call
+}
+
+// CommitBackfillResult is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitBackfillResultRequest
+func (_e *MixCoord_Expecter) CommitBackfillResult(_a0 interface{}, _a1 interface{}) *MixCoord_CommitBackfillResult_Call {
+	return &MixCoord_CommitBackfillResult_Call{Call: _e.mock.On("CommitBackfillResult", _a0, _a1)}
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest)) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitBackfillResultRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) Return(_a0 *datapb.CommitBackfillResultResponse, _a1 error) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) RunAndReturn(run func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1812,6 +1930,65 @@ func (_c *MixCoord_CreatePartition_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 func (_c *MixCoord_CreatePartition_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)) *MixCoord_CreatePartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePartitionV2 provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CreatePartitionV2(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePartitionV2")
+	}
+
+	var r0 *rootcoordpb.CreatePartitionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) *rootcoordpb.CreatePartitionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.CreatePartitionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePartitionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CreatePartitionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePartitionV2'
+type MixCoord_CreatePartitionV2_Call struct {
+	*mock.Call
+}
+
+// CreatePartitionV2 is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePartitionRequest
+func (_e *MixCoord_Expecter) CreatePartitionV2(_a0 interface{}, _a1 interface{}) *MixCoord_CreatePartitionV2_Call {
+	return &MixCoord_CreatePartitionV2_Call{Call: _e.mock.On("CreatePartitionV2", _a0, _a1)}
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest)) *MixCoord_CreatePartitionV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) Return(_a0 *rootcoordpb.CreatePartitionResponse, _a1 error) *MixCoord_CreatePartitionV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error)) *MixCoord_CreatePartitionV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -33,26 +33,27 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -174,7 +175,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 }
 
@@ -209,7 +210,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
 	})
 
@@ -248,7 +249,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
 	})
 }
@@ -380,6 +381,7 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 		Version:     2001,
 	})
 
+	s.delegator.(*shardDelegator).distribution.Flush()
 	sealed, growing = s.delegator.GetSegmentInfo(false)
 	s.EqualValues([]SnapshotItem{
 		{
@@ -636,6 +638,16 @@ func (s *DelegatorSuite) TestSearch() {
 		})
 
 		s.Error(err)
+		s.ErrorIs(err, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(err))
+
+		status := merr.Status(err)
+		s.True(status.GetRetriable())
+		s.Equal(commonpb.ErrorCode_TimeTickLongDelay, status.GetErrorCode())
+
+		roundTripErr := merr.Error(status)
+		s.ErrorIs(roundTripErr, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(roundTripErr))
 	})
 
 	s.Run("downgrade_tsafe", func() {
@@ -700,6 +712,7 @@ func (s *DelegatorSuite) TestSearch() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
+		sd.distribution.Flush()
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -888,6 +901,7 @@ func (s *DelegatorSuite) TestQuery() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
+		sd.distribution.Flush()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1045,6 +1059,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
+		s.ErrorIs(err, merr.ErrChannelTSafeStalled)
+		s.True(merr.IsRetryableErr(err))
 	})
 
 	s.Run("get_worker_failed", func() {
@@ -1169,6 +1185,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
+		sd.distribution.Flush()
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1346,6 +1363,7 @@ func (s *DelegatorSuite) TestGetStats() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
+		sd.distribution.Flush()
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1447,6 +1465,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
+		sd.distribution.Flush()
 
 		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
 		s.Error(err)
@@ -1466,8 +1485,16 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
+}
+
+func (s *DelegatorSuite) nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
+	version := uint64(1)
+	if collection := s.manager.Collection.Get(s.collectionID); collection != nil {
+		version = collection.SchemaVersion() + 1
+	}
+	return &querypb.LoadMetaInfo{SchemaVersion: version}
 }
 
 func (s *DelegatorSuite) TestRunAnalyzer() {
@@ -1481,13 +1508,23 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("normal analyer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1502,7 +1539,8 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1514,18 +1552,28 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1533,9 +1581,10 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1545,7 +1594,8 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1559,18 +1609,28 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("error multi analyzer but no analyzer name", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1578,9 +1638,10 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1590,10 +1651,11 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
-		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId:     100,
 			Placeholder: [][]byte{[]byte("test doc")},
 		})
@@ -1618,13 +1680,23 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("normal highlight with single analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1639,7 +1711,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1661,19 +1734,29 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("highlight with multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 				{
 					FieldID:  100,
 					Name:     "text",
 					DataType: schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "multi_analyzer_params", Value: `{
 						"by_field": "analyzer",
     					"analyzers": {
 							"standard": {},
 							"default": {}
 						}
-					}`}},
+					}`},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1681,9 +1764,10 @@ func (s *DelegatorSuite) TestGetHighlight() {
 					DataType: schemapb.DataType_SparseFloatVector,
 				},
 				{
-					FieldID:  102,
-					Name:     "analyzer",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:    102,
+					Name:       "analyzer",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
 				},
 			},
 			Functions: []*schemapb.FunctionSchema{{
@@ -1693,7 +1777,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		// two target with two analyzer
@@ -1714,13 +1799,23 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("empty target texts", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:    100,
-					Name:       "text",
-					DataType:   schemapb.DataType_VarChar,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+					FieldID:      103,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+						{Key: "analyzer_params", Value: "{}"},
+					},
 				},
 				{
 					FieldID:  101,
@@ -1735,7 +1830,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, s.nextSchemaVersionLoadMeta())
+		s.Require().NoError(err)
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -2186,7 +2282,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2210,7 +2306,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2234,7 +2330,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2297,7 +2393,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
 	})
 
@@ -2306,7 +2402,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
 	})
 }

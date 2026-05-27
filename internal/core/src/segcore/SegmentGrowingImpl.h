@@ -38,6 +38,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "segcore/TextLobSpillover.h"
 #include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
@@ -149,7 +150,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) override;
+
+    void
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
@@ -253,6 +259,19 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
+    // Returns the total disk usage of TEXT LOB spillover files in bytes.
+    // Used by Go-side sync policies for back-pressure.
+    uint64_t
+    GetTextSpilloverDiskUsage() const {
+        uint64_t total = 0;
+        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
+            if (spillover) {
+                total += spillover->GetDiskUsage();
+            }
+        }
+        return total;
+    }
+
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -292,6 +311,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
                             int64_t count,
                             T* dst) const;
 
+    template <typename SetOutput>
+    void
+    bulk_subscript_text_impl(FieldId field_id,
+                             const VectorBase* vec_ptr,
+                             const int64_t* seg_offsets,
+                             int64_t count,
+                             SetOutput set_output) const;
+
     // for scalar array vectors
     template <typename T>
     void
@@ -309,6 +336,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const VectorBase& vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
+        const bool* valid_data,
         google::protobuf::RepeatedPtrField<T>* dst) const;
 
     template <typename T>
@@ -399,6 +427,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
+        this->InitializeTextLobSpillovers();
         this->InitializeArrayOffsets();
         this->UpdateResourceTracking();
     }
@@ -532,11 +561,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(int64_t limit,
-                         const BitsetTypeView& element_bitset,
-                         const IArrayOffsets* array_offsets) const override {
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override {
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets);
+            limit, element_bitset, array_offsets, cursor);
     }
 
     bool
@@ -556,6 +587,28 @@ class SegmentGrowingImpl : public SegmentGrowing {
     is_field_exist(FieldId field_id) const override {
         return schema_->get_fields().find(field_id) !=
                schema_->get_fields().end();
+    }
+
+    /**
+     * @brief Check if a TEXT field has spillover enabled
+     */
+    bool
+    HasTextLobSpillover(FieldId field_id) const {
+        return text_lob_spillovers_.find(field_id) !=
+               text_lob_spillovers_.end();
+    }
+
+    /**
+     * @brief Get TextLobSpillover for a TEXT field (for query/flush paths)
+     * @return Pointer to TextLobSpillover, or nullptr if not found
+     */
+    TextLobSpillover*
+    GetTextLobSpillover(FieldId field_id) const {
+        auto it = text_lob_spillovers_.find(field_id);
+        if (it != text_lob_spillovers_.end()) {
+            return it->second.get();
+        }
+        return nullptr;
     }
 
     std::shared_ptr<const IArrayOffsets>
@@ -651,6 +704,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     fill_empty_field(const FieldMeta& field_meta);
 
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
+
     /**
      * @brief Update resource tracking by refunding old estimate and charging new
      *
@@ -675,6 +732,32 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndexes();
+
+    /**
+     * @brief Initialize TEXT LOB spillover files for each TEXT field
+     *
+     * Creates TextLobSpillover instances for all TEXT fields in the schema.
+     * TEXT data will be written to temporary LOB files to reduce memory usage.
+     */
+    void
+    InitializeTextLobSpillovers();
+
+    /**
+     * @brief Initialize TEXT LOB paths from manifest path (for reload from V3 storage)
+     *
+     * Similar to ChunkedSegmentSealedImpl::InitTextLobPaths.
+     * Resolves LOBReferences at query time via TextColumnCache.
+     */
+    void
+    InitTextLobPaths(const std::string& manifest_path);
+
+    /**
+     * @brief Check if a TEXT field has LOB path (reload from V3 storage)
+     */
+    bool
+    HasTextLobPath(FieldId field_id) const {
+        return text_lob_paths_.find(field_id) != text_lob_paths_.end();
+    }
 
     /**
      * @brief Load all column groups from a manifest file path
@@ -745,6 +828,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage tracked_resource_{};
     // Mutex to protect tracked_resource_ updates (refund-then-charge must be atomic)
     mutable std::mutex resource_tracking_mutex_;
+
+    // TEXT field spillover: field_id -> TextLobSpillover
+    // TEXT data is written to temporary LOB files to reduce memory usage.
+    // Memory stores only 16-byte references (offset, size, flags).
+    std::unordered_map<FieldId, std::unique_ptr<TextLobSpillover>>
+        text_lob_spillovers_;
+
+    // TEXT field LOB paths for V3 storage reload (same as sealed segment)
+    // field_id -> LOB base path on remote storage
+    // LOBReferences in ConcurrentVector are resolved at query time via TextColumnCache
+    std::unordered_map<FieldId, std::string> text_lob_paths_;
+
+    // Boundary between loaded data and inserted data for TEXT fields.
+    // [0, text_loaded_row_count_): loaded via load paths (raw text or LOBReference)
+    // [text_loaded_row_count_, total): inserted via Insert() (spillover LOBRef)
+    // Query path uses this to determine resolution strategy.
+    int64_t text_loaded_row_count_ = 0;
 };
 
 inline SegmentGrowingPtr

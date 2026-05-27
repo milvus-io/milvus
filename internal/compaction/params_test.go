@@ -23,12 +23,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestGetJSONParams(t *testing.T) {
 	paramtable.Init()
-	jsonStr, err := GenerateJSONParams()
+	jsonStr, err := GenerateJSONParams(nil)
 	assert.NoError(t, err)
 
 	storageVersion := storage.StorageV2
@@ -48,6 +48,10 @@ func TestGetJSONParams(t *testing.T) {
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
 		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:       getTextInlineThreshold(),
+		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}, result)
 }
 

@@ -25,10 +25,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var (
@@ -42,6 +42,11 @@ var (
 // since different type stored in it will cause panicking.
 type hookContainer struct {
 	hook hook.Hook
+}
+
+type hookSetter interface {
+	SetZapLogger(*zap.Logger)
+	SetClientInfoProvider(any)
 }
 
 // extensionContainer is Container to wrap hook.Extension interface
@@ -74,6 +79,7 @@ func initHook() error {
 	if err != nil {
 		return err
 	}
+
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
@@ -98,6 +104,15 @@ func initHook() error {
 	storeExtension(extVal)
 
 	return nil
+}
+
+func SetHook(connectionManager any) {
+	hookVal := GetHook()
+	if setter, ok := hookVal.(hookSetter); ok {
+		setter.SetZapLogger(log.L())
+		setter.SetClientInfoProvider(connectionManager)
+		log.Info("hook setter injected")
+	}
 }
 
 func InitOnceHook() {

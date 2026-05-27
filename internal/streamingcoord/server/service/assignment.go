@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -19,13 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
 var _ streamingpb.StreamingCoordAssignmentServiceServer = (*assignmentServiceImpl)(nil)
@@ -168,23 +168,8 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 		return nil, err
 	}
 
-	// Drop path: empty config means clear all replication configuration.
-	if validator.IsDropConfig() {
-		// Idempotent: proto.Equal(empty, nil) is false, so handle explicitly.
-		if currentConfig == nil {
-			return nil, errReplicateConfigurationSame
-		}
-		b := message.NewAlterReplicateConfigMessageBuilderV2().
-			WithHeader(&message.AlterReplicateConfigMessageHeader{
-				ReplicateConfiguration: nil,
-			}).
-			WithBody(&message.AlterReplicateConfigMessageBody{}).
-			WithClusterLevelBroadcast(cc).
-			MustBuildBroadcast()
-		return b, nil
-	}
-
-	if _, err := replicateutil.NewConfigHelper(currentClusterID, config); err != nil {
+	// TODO: validate the incoming configuration is compatible with the current config.
+	if _, err := replicateutil.NewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config); err != nil {
 		return nil, err
 	}
 	b := message.NewAlterReplicateConfigMessageBuilderV2().

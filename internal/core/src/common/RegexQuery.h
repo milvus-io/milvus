@@ -20,7 +20,6 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-
 namespace milvus {
 bool
 is_special(char c);
@@ -79,6 +78,44 @@ inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
     re2::StringPiece sp(operand.data(), operand.size());
     return RE2::FullMatch(sp, *re2_);
+}
+
+// PartialRegexMatcher using RE2 for partial regex matching (substring match)
+// Unlike RegexMatcher which uses RE2::FullMatch, this uses RE2::PartialMatch
+struct PartialRegexMatcher {
+    template <typename T>
+    inline bool
+    operator()(const T& operand) const {
+        return false;
+    }
+
+    explicit PartialRegexMatcher(const std::string& pattern) {
+        RE2::Options options;
+        options.set_dot_nl(true);  // Make . match \n
+        options.set_log_errors(false);
+        // Use UTF-8 mode so regex engine natively understands Unicode
+        // codepoints — consistent with Tantivy's Unicode regex engine.
+        options.set_encoding(RE2::Options::EncodingUTF8);
+        re2_ = std::make_unique<RE2>(pattern, options);
+        AssertInfo(re2_->ok(),
+                   "Failed to compile regex pattern: " + re2_->error());
+    }
+
+ private:
+    std::unique_ptr<RE2> re2_;
+};
+
+template <>
+inline bool
+PartialRegexMatcher::operator()(const std::string& operand) const {
+    return RE2::PartialMatch(operand, *re2_);
+}
+
+template <>
+inline bool
+PartialRegexMatcher::operator()(const std::string_view& operand) const {
+    re2::StringPiece sp(operand.data(), operand.size());
+    return RE2::PartialMatch(sp, *re2_);
 }
 
 // Extract fixed prefix from LIKE pattern (before first % or _)

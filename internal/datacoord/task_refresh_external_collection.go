@@ -23,16 +23,16 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // refreshExternalCollectionTask wraps ExternalCollectionRefreshTask for scheduling.
@@ -45,6 +45,14 @@ type refreshExternalCollectionTask struct {
 	refreshMeta *externalCollectionRefreshMeta
 	mt          *meta
 	allocator   allocator.Allocator
+	// processFinishedJob is the per-job entry point on the refresh checker.
+	// The task calls it synchronously after transitioning to a terminal state
+	// so the finished-callback (schema update + WAL broadcast) fires before
+	// the task method returns and progress polls observe a consistent state.
+	// The checker still runs the same logic on its periodic tick as a safety
+	// net for missed events. Set by the manager during task wrapping; nil in
+	// unit tests.
+	processFinishedJob func(jobID int64)
 }
 
 var _ globalTask.Task = (*refreshExternalCollectionTask)(nil)
@@ -69,8 +77,7 @@ func (t *refreshExternalCollectionTask) GetTaskID() int64 {
 }
 
 func (t *refreshExternalCollectionTask) GetTaskType() taskcommon.Type {
-	// Reuse Stats type for now
-	return taskcommon.Stats
+	return taskcommon.RefreshExternalCollection
 }
 
 func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
@@ -141,24 +148,17 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 	}
 	t.SetState(state, failReason)
 
-	// When task reaches a terminal state, aggregate and persist job state immediately.
-	// This eliminates the race window where HasActiveJob still sees InProgress
-	// while all tasks have already completed (checker loop updates every 10s).
+	// When the task reaches a terminal state, synchronously drive per-job
+	// processing on the checker. processJob is the single aggregation point
+	// — it re-reads tasks, transitions job state, and fires the finish
+	// callback + schema update + WAL broadcast before this method returns.
+	// This guarantees that callers polling GetRefreshExternalCollectionProgress
+	// observe a consistent state: when the job appears Finished, the schema
+	// update has already been applied. The checker's periodic tick runs the
+	// same logic as a safety net for missed events (e.g., DataCoord restart).
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
-		jobState, _ := t.refreshMeta.AggregateJobStateFromTasks(t.GetJobId())
-		if jobState == indexpb.JobState_JobStateFinished || jobState == indexpb.JobState_JobStateFailed {
-			jobFailReason := ""
-			if jobState == indexpb.JobState_JobStateFailed {
-				jobFailReason = failReason
-			}
-			if err := t.refreshMeta.UpdateJobState(t.GetJobId(), jobState, jobFailReason); err != nil {
-				log.Warn("failed to eagerly update job state after task completion",
-					zap.Int64("taskID", t.GetTaskId()),
-					zap.Int64("jobID", t.GetJobId()),
-					zap.String("jobState", jobState.String()),
-					zap.Error(err))
-				// Non-fatal: checker loop will eventually update the job state
-			}
+		if t.processFinishedJob != nil {
+			t.processFinishedJob(t.GetJobId())
 		}
 	}
 
@@ -177,19 +177,46 @@ func (t *refreshExternalCollectionTask) UpdateProgressWithMeta(progress int64) e
 	return nil
 }
 
-// SetJobInfo processes the task response and updates segment information atomically
-func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *datapb.UpdateExternalCollectionResponse) error {
-	if t.mt == nil {
-		return fmt.Errorf("meta is nil, cannot update segments")
+func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
+	state indexpb.JobState,
+	failReason string,
+	keptSegments []int64,
+	updatedSegments []*datapb.SegmentInfo,
+) error {
+	if err := t.refreshMeta.UpdateTaskResult(t.GetTaskId(), state, failReason, keptSegments, updatedSegments); err != nil {
+		log.Warn("update refresh task result failed",
+			zap.Int64("taskID", t.GetTaskId()),
+			zap.String("state", state.String()),
+			zap.String("failReason", failReason),
+			zap.Error(err))
+		return err
+	}
+	t.SetState(state, failReason)
+	t.KeptSegments = append([]int64(nil), keptSegments...)
+	t.UpdatedSegments = cloneProtoSegments(updatedSegments)
+
+	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+		if t.processFinishedJob != nil {
+			t.processFinishedJob(t.GetJobId())
+		}
 	}
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("taskID", t.GetTaskId()),
-		zap.Int64("collectionID", t.GetCollectionId()),
-	)
+	return nil
+}
 
-	keptSegmentIDs := resp.GetKeptSegments()
-	updatedSegments := resp.GetUpdatedSegments()
+func applyExternalCollectionSegmentUpdate(
+	ctx context.Context,
+	mt *meta,
+	collectionID int64,
+	keptSegmentIDs []int64,
+	updatedSegments []*datapb.SegmentInfo,
+	logFields ...zap.Field,
+) error {
+	if mt == nil {
+		return fmt.Errorf("meta is nil, cannot update segments")
+	}
+	fields := append(logFields, zap.Int64("collectionID", collectionID))
+	log := log.Ctx(ctx).With(fields...)
 
 	log.Info("processing external collection update response",
 		zap.Int("keptSegments", len(keptSegmentIDs)),
@@ -202,7 +229,7 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 	}
 
 	// Safety validation: count current active segments and segments to be dropped
-	currentSegments := t.mt.SelectSegments(ctx, CollectionFilter(t.GetCollectionId()))
+	currentSegments := mt.SelectSegments(ctx, CollectionFilter(collectionID))
 	activeSegmentCount := 0
 	segmentsToDrop := make([]int64, 0)
 	for _, seg := range currentSegments {
@@ -255,17 +282,17 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 	// Just set the segment state to Flushed — no second ID allocation needed.
 	// Also populate InsertChannel and PartitionID which DataNode doesn't set for external segments.
 	// These are required for QueryCoord to include segments in its loading target.
-	collInfo := t.mt.GetCollection(t.GetCollectionId())
+	collInfo := mt.GetCollection(collectionID)
 	if collInfo == nil {
-		return fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
+		return fmt.Errorf("collection %d not found in meta", collectionID)
 	}
 	// External collections are single-shard, single-partition (enforced at creation).
 	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
 	if len(collInfo.VChannelNames) != 1 {
-		return fmt.Errorf("external collection %d expected exactly 1 VChannel, got %d", t.GetCollectionId(), len(collInfo.VChannelNames))
+		return fmt.Errorf("external collection %d expected exactly 1 VChannel, got %d", collectionID, len(collInfo.VChannelNames))
 	}
 	if len(collInfo.Partitions) != 1 {
-		return fmt.Errorf("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+		return fmt.Errorf("external collection %d expected exactly 1 partition, got %d", collectionID, len(collInfo.Partitions))
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
@@ -287,7 +314,7 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 		currentSegments := modPack.meta.segments.GetSegments()
 		for _, seg := range currentSegments {
 			// Skip segments not in this collection
-			if seg.GetCollectionID() != t.GetCollectionId() {
+			if seg.GetCollectionID() != collectionID {
 				continue
 			}
 
@@ -343,7 +370,7 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 	}
 
 	// Execute all operators atomically
-	if err := t.mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		log.Warn("failed to update segments atomically", zap.Error(err))
 		return err
 	}
@@ -353,6 +380,18 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 		zap.Int("keptSegments", len(keptSegmentIDs)))
 
 	return nil
+}
+
+// SetJobInfo processes a complete job-level response and updates segment information atomically.
+func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *datapb.RefreshExternalCollectionTaskResponse) error {
+	return applyExternalCollectionSegmentUpdate(
+		ctx,
+		t.mt,
+		t.GetCollectionId(),
+		resp.GetKeptSegments(),
+		resp.GetUpdatedSegments(),
+		zap.Int64("taskID", t.GetTaskId()),
+	)
 }
 
 func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -369,7 +408,9 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	defer func() {
 		if err != nil {
 			log.Warn("failed to create refresh task on worker", zap.Error(err))
-			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
+			if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn("failed to persist Failed state after create error", zap.Error(updateErr))
+			}
 		}
 	}()
 
@@ -429,10 +470,15 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		err = fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
 		return
 	}
+	if len(collInfo.Partitions) != 1 {
+		err = fmt.Errorf("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+		return
+	}
+	partitionID := collInfo.Partitions[0]
 
-	// Build request
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           t.GetCollectionId(),
+		PartitionID:            partitionID,
 		TaskID:                 t.GetTaskId(),
 		CurrentSegments:        currentSegments,
 		ExternalSource:         t.GetExternalSource(),
@@ -441,10 +487,13 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		Schema:                 collInfo.Schema,
 		PreAllocatedSegmentIds: idRange,
 		NumSegmentsExpected:    preAllocCount,
+		ExploreManifestPath:    t.GetExploreManifestPath(),
+		FileIndexBegin:         t.GetFileIndexBegin(),
+		FileIndexEnd:           t.GetFileIndexEnd(),
 	}
 
 	// Submit task to worker via unified task system
-	err = cluster.CreateExternalCollectionTask(nodeID, req)
+	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
 	if err != nil {
 		log.Warn("failed to create refresh task on worker", zap.Error(err))
 		return
@@ -475,9 +524,11 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		log.Info("job not found, task has been canceled")
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
-			_ = cluster.DropExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled")
+		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
+			log.Warn("failed to persist Failed state after job cancellation", zap.Error(err))
+		}
 		return
 	}
 	if job.GetState() == indexpb.JobState_JobStateFailed {
@@ -485,18 +536,22 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			zap.String("jobFailReason", job.GetFailReason()))
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
-			_ = cluster.DropExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason())
+		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason()); err != nil {
+			log.Warn("failed to persist Failed state after job cancellation", zap.Error(err))
+		}
 		return
 	}
 
 	// Query task status from worker
-	resp, err := cluster.QueryExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+	resp, err := cluster.QueryRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
 		log.Warn("query refresh task result failed", zap.Error(err))
 		// If query fails, mark task as failed
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err))
+		if updateErr := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("query task failed: %v", err)); updateErr != nil {
+			log.Warn("failed to persist Failed state after query error", zap.Error(updateErr))
+		}
 		return
 	}
 
@@ -517,15 +572,15 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			return
 		}
 
-		// Process the response and update segment info
-		if err := t.SetJobInfo(ctx, resp); err != nil {
-			log.Warn("failed to process job info", zap.Error(err))
-			t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("failed to process job info: %v", err))
-			return
-		}
-
-		// Task completed successfully
-		if err := t.UpdateStateWithMeta(state, ""); err != nil {
+		// Persist the task result. Segment metadata is applied once at the
+		// job level after all sibling tasks have finished, so a single task
+		// cannot drop segments produced by another task of the same job.
+		if err := t.UpdateResultWithMeta(
+			state,
+			"",
+			resp.GetKeptSegments(),
+			resp.GetUpdatedSegments(),
+		); err != nil {
 			log.Warn("failed to update task state to Finished", zap.Error(err))
 			return
 		}
@@ -539,15 +594,18 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		}
 		log.Warn("refresh task failed", zap.String("reason", failReason))
 
-	case indexpb.JobState_JobStateInProgress:
-		// Task still in progress, no action needed
-		log.Info("refresh task still in progress")
+	case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateNone, indexpb.JobState_JobStateInit:
+		// Task still in progress or not yet picked up by scheduler, no action needed
+		log.Info("refresh task still in progress",
+			zap.String("state", state.String()))
 
-	case indexpb.JobState_JobStateNone, indexpb.JobState_JobStateRetry:
-		// Task not found or needs retry - mark as failed
+	case indexpb.JobState_JobStateRetry:
+		// Task needs retry - mark as failed
 		log.Warn("refresh task in unexpected state, marking as failed",
 			zap.String("state", state.String()))
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String()))
+		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, fmt.Sprintf("task in unexpected state: %s", state.String())); err != nil {
+			log.Warn("failed to persist Failed state for retry branch", zap.Error(err))
+		}
 
 	default:
 		log.Warn("refresh task in unknown state",
@@ -566,7 +624,7 @@ func (t *refreshExternalCollectionTask) DropTaskOnWorker(cluster session.Cluster
 	)
 
 	// Drop task on worker to cancel execution and clean up resources
-	err := cluster.DropExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
+	err := cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 	if err != nil {
 		log.Warn("failed to drop refresh task on worker", zap.Error(err))
 		return

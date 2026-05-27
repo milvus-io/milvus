@@ -30,11 +30,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.CompactionTask {
@@ -96,9 +96,13 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		// - Level0DeleteCompaction tasks never use PreAllocatedSegmentIDs and must be ignored here,
 		//   otherwise unfinished L0 delete compaction tasks created before upgrade will be
 		//   incorrectly marked as failed on reload.
+		// - BackfillCompaction is an in-place update of the original segment — no new segment
+		//   ID is allocated. Without this exception, an in-progress backfill task would be killed
+		//   on every datacoord restart, preventing backfill from ever completing under restart loops.
 		if !isCompactionTaskFinished(task) &&
 			task.PreAllocatedSegmentIDs == nil &&
-			task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+			task.GetType() != datapb.CompactionType_Level0DeleteCompaction &&
+			task.GetType() != datapb.CompactionType_BackfillCompaction {
 			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
 				zap.Int64("taskID", task.GetPlanID()),
 				zap.String("type", task.GetType().String()),

@@ -5,8 +5,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 var (
@@ -39,6 +39,7 @@ func newMockTask(c mockTaskConfig) Task {
 		notifier:    make(chan error, 1),
 		mergeAble:   c.mergeAble,
 		nq:          c.nq,
+		minNQ:       c.nq,
 		username:    c.username,
 		execution:   c.execution,
 		tr:          timerecord.NewTimeRecorderWithTrace(c.ctx, "searchTask"),
@@ -51,6 +52,7 @@ type MockTask struct {
 	notifier    chan error
 	mergeAble   bool
 	nq          int64
+	minNQ       int64
 	username    string
 	execution   func(ctx context.Context) error
 	tr          *timerecord.TimeRecorder
@@ -90,10 +92,6 @@ func (t *MockTask) Done(err error) {
 	t.notifier <- err
 }
 
-func (t *MockTask) Canceled() error {
-	return t.ctx.Err()
-}
-
 func (t *MockTask) Wait() error {
 	return <-t.notifier
 }
@@ -108,6 +106,9 @@ func (t *MockTask) MergeWith(t2 Task) bool {
 	case *MockTask:
 		if t.mergeAble && t2.mergeAble {
 			t.nq += t2.nq
+			if t2.MinNQ() < t.minNQ {
+				t.minNQ = t2.MinNQ()
+			}
 			t.executeCost += t2.executeCost
 			return true
 		}
@@ -121,4 +122,8 @@ func (t *MockTask) SearchResult() *internalpb.SearchResults {
 
 func (t *MockTask) NQ() int64 {
 	return t.nq
+}
+
+func (t *MockTask) MinNQ() int64 {
+	return t.minNQ
 }

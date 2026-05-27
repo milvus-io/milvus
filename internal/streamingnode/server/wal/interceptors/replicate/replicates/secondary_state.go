@@ -2,7 +2,7 @@ package replicates
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // newSecondaryState creates a new secondary state.

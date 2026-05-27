@@ -25,11 +25,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type RestfulAccessInfoSuite struct {
@@ -185,6 +185,19 @@ func (s *RestfulAccessInfoSuite) TestOutputFields() {
 	s.info.InitReq()
 	result = Get(s.info, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestPartialUpdate() {
+	// non-Upsert request -> NotAny
+	s.Equal(NotAny, Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: false})
+	s.info.InitReq()
+	s.Equal("false", Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: true})
+	s.info.InitReq()
+	s.Equal("true", Get(s.info, "$partial_update")[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestConsistencyLevel() {

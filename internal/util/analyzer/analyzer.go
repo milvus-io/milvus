@@ -3,7 +3,7 @@ package analyzer
 import (
 	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 type (

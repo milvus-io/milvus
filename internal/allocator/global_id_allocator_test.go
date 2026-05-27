@@ -26,7 +26,7 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var gTestIDAllocator *GlobalIDAllocator

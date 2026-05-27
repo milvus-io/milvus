@@ -34,6 +34,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/CacheSlot.h"
@@ -97,8 +98,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
 
         // Use globally initialized ArrowFileSystem
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
         std::vector<std::string> paths = {"test_data/0/10000.parquet",
@@ -225,8 +225,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     void
     TearDown() override {
         // Clean up test data directory
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
         auto status = fs->DeleteDir("test_data");
         ASSERT_TRUE(status.ok());
     }

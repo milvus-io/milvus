@@ -19,7 +19,7 @@ package typeutil
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // IDsChecker provides efficient lookup functionality for schema.IDs

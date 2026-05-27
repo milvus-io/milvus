@@ -3,8 +3,8 @@
 package mock_message
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
 )

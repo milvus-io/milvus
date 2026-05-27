@@ -30,22 +30,24 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type opMsg map[string]any
@@ -111,17 +113,20 @@ func (n *Node) Run(ctx context.Context, span trace.Span, msg opMsg) (opMsg, erro
 	return outputs, nil
 }
 
+const aggOp = "search_agg"
+
 const (
-	searchReduceOp       = "search_reduce"
-	hybridSearchReduceOp = "hybrid_search_reduce"
-	rerankOp             = "rerank"
-	requeryOp            = "requery"
-	organizeOp           = "organize"
-	hybridAssembleOp     = "hybrid_assemble"
-	endOp                = "end"
-	lambdaOp             = "lambda"
-	highlightOp          = "highlight"
-	orderByOp            = "order_by"
+	searchReduceOp        = "search_reduce"
+	hybridSearchReduceOp  = "hybrid_search_reduce"
+	rerankOp              = "rerank"
+	requeryOp             = "requery"
+	organizeOp            = "organize"
+	elementBestCollapseOp = "element_best_collapse"
+	hybridAssembleOp      = "hybrid_assemble"
+	endOp                 = "end"
+	lambdaOp              = "lambda"
+	highlightOp           = "highlight"
+	orderByOp             = "order_by"
 )
 
 const (
@@ -131,16 +136,18 @@ const (
 )
 
 var opFactory = map[string]func(t *searchTask, params map[string]any) (operator, error){
-	searchReduceOp:       newSearchReduceOperator,
-	hybridSearchReduceOp: newHybridSearchReduceOperator,
-	rerankOp:             newRerankOperator,
-	organizeOp:           newOrganizeOperator,
-	hybridAssembleOp:     newHybridAssembleOperator,
-	requeryOp:            newRequeryOperator,
-	lambdaOp:             newLambdaOperator,
-	endOp:                newEndOperator,
-	highlightOp:          newHighlightOperator,
-	orderByOp:            newOrderByOperator,
+	searchReduceOp:        newSearchReduceOperator,
+	hybridSearchReduceOp:  newHybridSearchReduceOperator,
+	aggOp:                 newAggregateOperator,
+	rerankOp:              newRerankOperator,
+	organizeOp:            newOrganizeOperator,
+	elementBestCollapseOp: newElementBestCollapseOperator,
+	hybridAssembleOp:      newHybridAssembleOperator,
+	requeryOp:             newRequeryOperator,
+	lambdaOp:              newLambdaOperator,
+	endOp:                 newEndOperator,
+	highlightOp:           newHighlightOperator,
+	orderByOp:             newOrderByOperator,
 }
 
 func NewNode(info *nodeDef, t *searchTask) (*Node, error) {
@@ -159,15 +166,16 @@ func NewNode(info *nodeDef, t *searchTask) (*Node, error) {
 }
 
 type searchReduceOperator struct {
-	traceCtx           context.Context
-	primaryFieldSchema *schemapb.FieldSchema
-	nq                 int64
-	topK               int64
-	offset             int64
-	collectionID       int64
-	partitionIDs       []int64
-	queryInfos         []*planpb.QueryInfo
-	collSchema         *schemapb.CollectionSchema
+	traceCtx            context.Context
+	primaryFieldSchema  *schemapb.FieldSchema
+	nq                  int64
+	topK                int64
+	offset              int64
+	collectionID        int64
+	partitionIDs        []int64
+	queryInfos          []*planpb.QueryInfo
+	collSchema          *schemapb.CollectionSchema
+	isSearchAggregation bool
 }
 
 func newSearchReduceOperator(t *searchTask, _ map[string]any) (operator, error) {
@@ -176,15 +184,16 @@ func newSearchReduceOperator(t *searchTask, _ map[string]any) (operator, error) 
 		return nil, err
 	}
 	return &searchReduceOperator{
-		traceCtx:           t.TraceCtx(),
-		primaryFieldSchema: pkField,
-		nq:                 t.GetNq(),
-		topK:               t.GetTopk(),
-		offset:             t.GetOffset(),
-		collectionID:       t.GetCollectionID(),
-		partitionIDs:       t.GetPartitionIDs(),
-		queryInfos:         t.queryInfos,
-		collSchema:         t.schema.CollectionSchema,
+		traceCtx:            t.TraceCtx(),
+		primaryFieldSchema:  pkField,
+		nq:                  t.GetNq(),
+		topK:                t.GetTopk(),
+		offset:              t.GetOffset(),
+		collectionID:        t.GetCollectionID(),
+		partitionIDs:        t.GetPartitionIDs(),
+		queryInfos:          t.queryInfos,
+		collSchema:          t.schema.CollectionSchema,
+		isSearchAggregation: t.aggCtx != nil,
 	}, nil
 }
 
@@ -195,7 +204,7 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	metricType := getMetricType(toReduceResults)
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
-		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.collectionID, op.partitionIDs)
+		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +275,7 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		subMetricType := getMetricType(internalResults)
 		result, err := reduceResults(
 			op.traceCtx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType,
-			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, op.collectionID, op.partitionIDs)
+			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -275,6 +284,477 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		multipleMilvusResults[index] = result
 	}
 	return []any{multipleMilvusResults, searchMetrics}, nil
+}
+
+type elementBestCollapseOperator struct{}
+
+func newElementBestCollapseOperator(_ *searchTask, _ map[string]any) (operator, error) {
+	return &elementBestCollapseOperator{}, nil
+}
+
+// elementBestCollapseOperator normalizes element-level hybrid sub-search
+// results into row-level results before rerank. For each query chunk, duplicate
+// PKs keep the best element score under that sub-search metric direction.
+func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	if len(inputs) < 2 {
+		return nil, merr.WrapErrServiceInternal("element best collapse: missing inputs")
+	}
+	results, ok := inputs[0].([]*milvuspb.SearchResults)
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("element best collapse: inputs[0] must be []*SearchResults, got %T", inputs[0])
+	}
+	metrics, ok := inputs[1].([]string)
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("element best collapse: inputs[1] must be []string, got %T", inputs[1])
+	}
+	if len(metrics) != len(results) {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: metrics length (%d) does not match results length (%d)", len(metrics), len(results)))
+	}
+
+	collapsed := make([]*milvuspb.SearchResults, len(results))
+	for i, result := range results {
+		metricType := metrics[i]
+		if result != nil && result.GetResults() != nil && result.GetResults().GetElementIndices() != nil && strings.TrimSpace(metricType) == "" {
+			totalRows := int64(0)
+			for _, topk := range result.GetResults().GetTopks() {
+				totalRows += topk
+			}
+			if totalRows > 0 {
+				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: missing metric type for element-level result[%d]", i))
+			}
+		}
+		var err error
+		collapsed[i], err = collapseElementLevelResultByBestScore(result, metric.PositivelyRelated(metricType))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return []any{collapsed}, nil
+}
+
+type bestElementHit struct {
+	rowIdx int64
+	score  float32
+	order  int
+}
+
+func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, largerScoreIsBetter bool) (*milvuspb.SearchResults, error) {
+	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
+		return result, nil
+	}
+
+	data := result.GetResults()
+	topks := data.GetTopks()
+	totalRows := int64(0)
+	for _, topk := range topks {
+		totalRows += topk
+	}
+	if totalRows == 0 {
+		return copySearchResultsWithData(result, &schemapb.SearchResultData{
+			NumQueries:              data.GetNumQueries(),
+			TopK:                    0,
+			Topks:                   append([]int64(nil), topks...),
+			FieldsData:              []*schemapb.FieldData{},
+			Scores:                  []float32{},
+			OutputFields:            append([]string(nil), data.GetOutputFields()...),
+			AllSearchCount:          data.GetAllSearchCount(),
+			PrimaryFieldName:        data.GetPrimaryFieldName(),
+			SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
+		}), nil
+	}
+
+	if typeutil.GetSizeOfIDs(data.GetIds()) < int(totalRows) {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: ids length (%d) is less than total rows (%d)",
+			typeutil.GetSizeOfIDs(data.GetIds()), totalRows))
+	}
+	if int64(len(data.GetScores())) < totalRows {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: scores length (%d) is less than total rows (%d)",
+			len(data.GetScores()), totalRows))
+	}
+	if int64(len(data.GetElementIndices().GetData())) < totalRows {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: element_indices length (%d) is less than total rows (%d)",
+			len(data.GetElementIndices().GetData()), totalRows))
+	}
+	if len(data.GetDistances()) > 0 && int64(len(data.GetDistances())) < totalRows {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: distances length (%d) is less than total rows (%d)",
+			len(data.GetDistances()), totalRows))
+	}
+	if len(data.GetRecalls()) > 0 && int64(len(data.GetRecalls())) < totalRows {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: recalls length (%d) is less than total rows (%d)",
+			len(data.GetRecalls()), totalRows))
+	}
+
+	output := &schemapb.SearchResultData{
+		NumQueries:              data.GetNumQueries(),
+		Topks:                   make([]int64, 0, len(topks)),
+		FieldsData:              typeutil.PrepareResultFieldData(data.GetFieldsData(), totalRows),
+		Scores:                  make([]float32, 0, totalRows),
+		Ids:                     &schemapb.IDs{},
+		OutputFields:            append([]string(nil), data.GetOutputFields()...),
+		AllSearchCount:          data.GetAllSearchCount(),
+		PrimaryFieldName:        data.GetPrimaryFieldName(),
+		SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
+	}
+	if len(data.GetDistances()) > 0 {
+		output.Distances = make([]float32, 0, totalRows)
+	}
+	if len(data.GetRecalls()) > 0 {
+		output.Recalls = make([]float32, 0, totalRows)
+	}
+
+	idxComputer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
+	offset := int64(0)
+	for _, topk := range topks {
+		selected := make(map[any]bestElementHit)
+		for i := int64(0); i < topk; i++ {
+			rowIdx := offset + i
+			pk := typeutil.GetPK(data.GetIds(), rowIdx)
+			if pk == nil {
+				continue
+			}
+			score := data.GetScores()[rowIdx]
+			hit, ok := selected[pk]
+			if !ok || isBetterElementScore(score, hit.score, largerScoreIsBetter) {
+				selected[pk] = bestElementHit{
+					rowIdx: rowIdx,
+					score:  score,
+					order:  int(i),
+				}
+			}
+		}
+
+		hits := make([]bestElementHit, 0, len(selected))
+		for _, hit := range selected {
+			hits = append(hits, hit)
+		}
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].score != hits[j].score {
+				return isBetterElementScore(hits[i].score, hits[j].score, largerScoreIsBetter)
+			}
+			return hits[i].order < hits[j].order
+		})
+
+		output.Topks = append(output.Topks, int64(len(hits)))
+		if int64(len(hits)) > output.TopK {
+			output.TopK = int64(len(hits))
+		}
+		for _, hit := range hits {
+			typeutil.AppendIDs(output.Ids, data.GetIds(), int(hit.rowIdx))
+			output.Scores = append(output.Scores, data.GetScores()[hit.rowIdx])
+			if len(data.GetDistances()) > 0 {
+				output.Distances = append(output.Distances, data.GetDistances()[hit.rowIdx])
+			}
+			if len(data.GetRecalls()) > 0 {
+				output.Recalls = append(output.Recalls, data.GetRecalls()[hit.rowIdx])
+			}
+			if len(data.GetFieldsData()) > 0 {
+				fieldIdxs := idxComputer.Compute(hit.rowIdx)
+				typeutil.AppendFieldData(output.FieldsData, data.GetFieldsData(), hit.rowIdx, fieldIdxs...)
+			}
+		}
+		offset += topk
+	}
+
+	return copySearchResultsWithData(result, output), nil
+}
+
+func isBetterElementScore(candidate, current float32, largerScoreIsBetter bool) bool {
+	if largerScoreIsBetter {
+		return candidate > current
+	}
+	return candidate < current
+}
+
+func copySearchResultsWithData(src *milvuspb.SearchResults, data *schemapb.SearchResultData) *milvuspb.SearchResults {
+	return &milvuspb.SearchResults{
+		Status:         src.GetStatus(),
+		Results:        data,
+		CollectionName: src.GetCollectionName(),
+		SessionTs:      src.GetSessionTs(),
+	}
+}
+
+type aggregateOperator struct {
+	aggCtx     *search_agg.SearchAggregationContext
+	collSchema *schemapb.CollectionSchema
+}
+
+func newAggregateOperator(t *searchTask, _ map[string]any) (operator, error) {
+	if t.aggCtx == nil {
+		return nil, merr.WrapErrServiceInternal("aggregate operator requires non-nil aggCtx")
+	}
+	return &aggregateOperator{
+		aggCtx:     t.aggCtx,
+		collSchema: t.schema.CollectionSchema,
+	}, nil
+}
+
+func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "aggregateOperator")
+	defer sp.End()
+
+	// Defensive guards for pipeline-wire invariants (len + type). Static
+	// analysis of searchWithAggPipe makes these unreachable, but surfacing
+	// them as service-internal errors is cheaper than a process-level panic
+	// if a future refactor breaks the wire.
+	if len(inputs) == 0 {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
+	}
+	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
+	if !ok {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("aggregateOperator: expected []*milvuspb.SearchResults, got %T (pipeline wire)", inputs[0]))
+	}
+	// Upstream searchReduceOp has already done cross-shard composite-key reduce
+	// and produced a single *milvuspb.SearchResults wrapping one SearchResultData.
+	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
+	}
+	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx)
+	nqAggResults, err := computer.Compute(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIDToName := make(map[int64]string, len(op.collSchema.GetFields()))
+	for _, f := range op.collSchema.GetFields() {
+		fieldIDToName[f.GetFieldID()] = f.GetName()
+	}
+
+	aggBuckets := make([]*schemapb.AggBucket, 0)
+	aggTopks := make([]int64, 0, len(nqAggResults))
+	for _, buckets := range nqAggResults {
+		aggTopks = append(aggTopks, int64(len(buckets)))
+		aggBuckets = append(aggBuckets, serializeAggBuckets(buckets, fieldIDToName, op.aggCtx.Levels, 0)...)
+	}
+
+	result := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     op.aggCtx.NQ,
+			Topks:          make([]int64, op.aggCtx.NQ),
+			AggBuckets:     aggBuckets,
+			AggTopks:       aggTopks,
+			AllSearchCount: aggregatedAllSearchCount(reducedList),
+		},
+	}
+	return []any{result}, nil
+}
+
+func serializeAggBuckets(buckets []*search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int) []*schemapb.AggBucket {
+	if len(buckets) == 0 {
+		return nil
+	}
+	serialized := make([]*schemapb.AggBucket, 0, len(buckets))
+	for _, bucket := range buckets {
+		if bucket == nil {
+			continue
+		}
+		serialized = append(serialized, serializeAggBucket(bucket, fieldIDToName, levels, levelIdx))
+	}
+	return serialized
+}
+
+func serializeAggBucket(bucket *search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int) *schemapb.AggBucket {
+	if bucket == nil {
+		return nil
+	}
+
+	var fieldOrder []int64
+	if levelIdx < len(levels) {
+		fieldOrder = levels[levelIdx].OwnFieldIDs
+	}
+	result := &schemapb.AggBucket{
+		Key:       serializeBucketKey(bucket.Key, fieldIDToName, fieldOrder),
+		Count:     bucket.Count,
+		Metrics:   serializeAggMetrics(bucket.Metrics),
+		Hits:      serializeAggHits(bucket.Hits, fieldIDToName),
+		SubGroups: serializeAggBuckets(bucket.SubAggBuckets, fieldIDToName, levels, levelIdx+1),
+	}
+	return result
+}
+
+// serializeAggMetrics maps each metric alias value into the proto MetricValue
+// oneof. Numeric widths collapse: all signed ints → int_val, all floats →
+// double_val. nil (accumulator never received a non-null row) is dropped.
+func serializeAggMetrics(metrics map[string]any) map[string]*schemapb.MetricValue {
+	if len(metrics) == 0 {
+		return nil
+	}
+	out := make(map[string]*schemapb.MetricValue, len(metrics))
+	for alias, v := range metrics {
+		if v == nil {
+			continue
+		}
+		mv := &schemapb.MetricValue{}
+		switch val := v.(type) {
+		case int:
+			mv.Value = &schemapb.MetricValue_IntVal{IntVal: int64(val)}
+		case int8:
+			mv.Value = &schemapb.MetricValue_IntVal{IntVal: int64(val)}
+		case int16:
+			mv.Value = &schemapb.MetricValue_IntVal{IntVal: int64(val)}
+		case int32:
+			mv.Value = &schemapb.MetricValue_IntVal{IntVal: int64(val)}
+		case int64:
+			mv.Value = &schemapb.MetricValue_IntVal{IntVal: val}
+		case float32:
+			mv.Value = &schemapb.MetricValue_DoubleVal{DoubleVal: float64(val)}
+		case float64:
+			mv.Value = &schemapb.MetricValue_DoubleVal{DoubleVal: val}
+		case string:
+			mv.Value = &schemapb.MetricValue_StringVal{StringVal: val}
+		case bool:
+			mv.Value = &schemapb.MetricValue_BoolVal{BoolVal: val}
+		default:
+			// Unknown scalar: fall back to string representation so the SDK
+			// still sees some result rather than a dropped alias.
+			mv.Value = &schemapb.MetricValue_StringVal{StringVal: fmt.Sprintf("%v", val)}
+		}
+		out[alias] = mv
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func serializeBucketKey(key map[int64]interface{}, fieldIDToName map[int64]string, fieldOrder []int64) []*schemapb.BucketKeyEntry {
+	if len(key) == 0 {
+		return nil
+	}
+	fieldIDs := make([]int64, 0, len(key))
+	seen := make(map[int64]struct{}, len(key))
+	for _, fieldID := range fieldOrder {
+		if _, ok := key[fieldID]; ok {
+			fieldIDs = append(fieldIDs, fieldID)
+			seen[fieldID] = struct{}{}
+		}
+	}
+	for fieldID := range key {
+		if _, ok := seen[fieldID]; ok {
+			continue
+		}
+		fieldIDs = append(fieldIDs, fieldID)
+	}
+
+	entries := make([]*schemapb.BucketKeyEntry, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		entry := &schemapb.BucketKeyEntry{FieldId: fieldID, FieldName: fieldIDToName[fieldID]}
+		value := key[fieldID]
+		if value == nil {
+			entries = append(entries, entry)
+			continue
+		}
+		switch value := value.(type) {
+		case int:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case int8:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case int16:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case int32:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case int64:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: value}
+		case uint:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case uint8:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case uint16:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case uint32:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case uint64:
+			entry.Value = &schemapb.BucketKeyEntry_IntVal{IntVal: int64(value)}
+		case string:
+			entry.Value = &schemapb.BucketKeyEntry_StringVal{StringVal: value}
+		case bool:
+			entry.Value = &schemapb.BucketKeyEntry_BoolVal{BoolVal: value}
+		default:
+			entry.Value = &schemapb.BucketKeyEntry_StringVal{StringVal: fmt.Sprintf("%v", value)}
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func serializeAggHits(hits []*search_agg.HitResult, fieldIDToName map[int64]string) []*schemapb.AggHit {
+	if len(hits) == 0 {
+		return nil
+	}
+	serialized := make([]*schemapb.AggHit, 0, len(hits))
+	for _, hit := range hits {
+		if hit == nil {
+			continue
+		}
+		aggHit := &schemapb.AggHit{Score: hit.Score}
+		switch pk := hit.PK.(type) {
+		case int64:
+			aggHit.Pk = &schemapb.AggHit_IntPk{IntPk: pk}
+		case string:
+			aggHit.Pk = &schemapb.AggHit_StrPk{StrPk: pk}
+		}
+		aggHit.Fields = serializeAggHitFields(hit.Fields, fieldIDToName)
+		serialized = append(serialized, aggHit)
+	}
+	return serialized
+}
+
+func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64]string) []*schemapb.AggHitField {
+	if len(fields) == 0 {
+		return nil
+	}
+	fieldIDs := make([]int64, 0, len(fields))
+	for fieldID := range fields {
+		fieldIDs = append(fieldIDs, fieldID)
+	}
+	sort.Slice(fieldIDs, func(i, j int) bool { return fieldIDs[i] < fieldIDs[j] })
+
+	serialized := make([]*schemapb.AggHitField, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		field := &schemapb.AggHitField{FieldId: fieldID, FieldName: fieldIDToName[fieldID]}
+		value := fields[fieldID]
+		if value == nil {
+			serialized = append(serialized, field)
+			continue
+		}
+		switch value := value.(type) {
+		case int:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case int8:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case int16:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case int32:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case int64:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: value}
+		case uint:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case uint8:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case uint16:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case uint32:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case uint64:
+			field.Value = &schemapb.AggHitField_IntVal{IntVal: int64(value)}
+		case bool:
+			field.Value = &schemapb.AggHitField_BoolVal{BoolVal: value}
+		case float32:
+			field.Value = &schemapb.AggHitField_FloatVal{FloatVal: value}
+		case float64:
+			field.Value = &schemapb.AggHitField_DoubleVal{DoubleVal: value}
+		case string:
+			field.Value = &schemapb.AggHitField_StringVal{StringVal: value}
+		case []byte:
+			field.Value = &schemapb.AggHitField_BytesVal{BytesVal: value}
+		default:
+			field.Value = &schemapb.AggHitField_StringVal{StringVal: fmt.Sprintf("%v", value)}
+		}
+		serialized = append(serialized, field)
+	}
+	return serialized
 }
 
 type rerankOperator struct {
@@ -327,7 +807,10 @@ func fillFieldNames(schema *schemapb.CollectionSchema, resultData *schemapb.Sear
 			}
 		}
 	}
-	if gbv := resultData.GetGroupByFieldValue(); gbv != nil && gbv.GetFieldName() == "" {
+	for _, gbv := range resultData.GetGroupByFieldValues() {
+		if gbv == nil || gbv.GetFieldName() != "" {
+			continue
+		}
 		if name, ok := fieldIDToName[gbv.GetFieldId()]; ok {
 			gbv.FieldName = name
 		}
@@ -520,6 +1003,7 @@ type requeryOperator struct {
 	partitionIDs       []int64
 	primaryFieldSchema *schemapb.FieldSchema
 	queryChannelsTs    map[string]Timestamp
+	queryChannelsNode  map[string]int64
 	consistencyLevel   commonpb.ConsistencyLevel
 	guaranteeTimestamp uint64
 	namespace          *string
@@ -551,6 +1035,13 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 			outputFieldNames.Insert(highlightDynFields...)
 		}
 	}
+	queryChannelsNode := make(map[string]int64)
+	if t.queryChannelsNode != nil {
+		t.queryChannelsNode.Range(func(channel string, nodeID int64) bool {
+			queryChannelsNode[channel] = nodeID
+			return true
+		})
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   outputFieldNames.Collect(),
@@ -559,6 +1050,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		collectionName:     t.request.GetCollectionName(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
+		queryChannelsNode:  queryChannelsNode,
 		consistencyLevel:   t.GetConsistencyLevel(),
 		guaranteeTimestamp: t.GetGuaranteeTimestamp(),
 		notReturnAllMeta:   t.request.GetNotReturnAllMeta(),
@@ -608,6 +1100,10 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
 	}
+	preferredNodes := make(map[string]int64)
+	for k, v := range op.queryChannelsNode {
+		preferredNodes[k] = v
+	}
 	qt := &queryTask{
 		ctx:       op.traceCtx,
 		Condition: NewTaskCondition(op.traceCtx),
@@ -627,6 +1123,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		lb:             op.node.(*Proxy).lbPolicy,
 		shardclientMgr: op.node.(*Proxy).shardMgr,
 		channelsMvcc:   channelsMvcc,
+		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
 	}
@@ -644,6 +1141,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 type organizeOperator struct {
 	traceCtx           context.Context
 	primaryFieldSchema *schemapb.FieldSchema
+	schema             *schemapb.CollectionSchema
 	collectionID       int64
 }
 
@@ -655,6 +1153,7 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &organizeOperator{
 		traceCtx:           t.TraceCtx(),
 		primaryFieldSchema: pkField,
+		schema:             t.schema.CollectionSchema,
 		collectionID:       t.GetCollectionID(),
 	}, nil
 }
@@ -720,7 +1219,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 			allFieldData[idx] = emptyFields
 			continue
 		}
-		if fieldData, err := pickFieldData(ids, offsets, fields, op.collectionID); err != nil {
+		if fieldData, err := pickFieldData(ids, offsets, fields, op.schema, op.collectionID); err != nil {
 			return nil, err
 		} else {
 			allFieldData[idx] = fieldData
@@ -729,7 +1228,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 	return []any{allFieldData}, nil
 }
 
-func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, collectionID int64) ([]*schemapb.FieldData, error) {
+func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, schema *schemapb.CollectionSchema, collectionID int64) ([]*schemapb.FieldData, error) {
 	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
 	// We should reorganize query results to keep the order of original queried ids. For example:
 	// ===========================================
@@ -746,7 +1245,7 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
 	fieldsData := make([]*schemapb.FieldData, len(fields))
-	idxComputer := typeutil.NewFieldDataIdxComputer(fields)
+	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
@@ -790,8 +1289,9 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 		return []any{rankResult}, nil
 	}
 
-	// Build PK → (resultIdx, rowIdx) index across all sub-search results.
 	type pkLoc struct{ resultIdx, rowIdx int }
+
+	// Build PK -> (resultIdx, rowIdx) index across all sub-search results.
 	pkIndex := make(map[any]pkLoc)
 	for rIdx, result := range reducedResults {
 		ids := result.GetResults().GetIds()
@@ -916,8 +1416,12 @@ func newOrderByOperator(t *searchTask, _ map[string]any) (operator, error) {
 	var groupByFieldId int64 = -1
 	var groupSize int64 = 1
 	if len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
-		groupByFieldId = t.queryInfos[0].GetGroupByFieldId()
-		groupSize = t.queryInfos[0].GetGroupSize()
+		queryInfo := t.queryInfos[0]
+		groupByFieldId = queryInfo.GetGroupByFieldId()
+		if ids := queryInfo.GetGroupByFieldIds(); len(ids) > 0 {
+			groupByFieldId = ids[0]
+		}
+		groupSize = queryInfo.GetGroupSize()
 	}
 	return &orderByOperator{
 		orderByFields:  t.orderByFields,
@@ -1297,11 +1801,17 @@ func (op *orderByOperator) sortGroupsByOrderByFields(result *milvuspb.SearchResu
 		return nil
 	}
 
-	groupByValue := result.GetResults().GetGroupByFieldValue()
-	if groupByValue == nil {
+	// All internal pipeline stages emit to the plural channel. The task
+	// output boundary downgrades to singular for legacy-wire SDK clients,
+	// which runs after orderBy, so this reader sees plural only. orderBy
+	// inspects column 0 because orderBy + multi-field composite key is not
+	// a pipeline combination constructed today.
+	gbvs := result.GetResults().GetGroupByFieldValues()
+	if len(gbvs) == 0 {
 		// No group by field value, fall back to regular sort
 		return op.sortResultsByOrderByFields(result, indices)
 	}
+	groupByValue := gbvs[0]
 
 	// Find group boundaries by detecting when GroupByFieldValue changes
 	// Each group is represented as [startLocalIdx, endLocalIdx) - indices into the 'indices' slice
@@ -1549,18 +2059,99 @@ func (op *orderByOperator) reorderResults(result *milvuspb.SearchResults, indice
 		}
 	}
 
-	// Reorder group by field value if present
-	if groupByValue := results.GetGroupByFieldValue(); groupByValue != nil {
-		if err := reorderFieldData(groupByValue, indices); err != nil {
+	// Reorder every group-by column — all internal stages emit plural; the
+	// task output boundary handles legacy-wire singular downgrade after.
+	for _, gbv := range results.GetGroupByFieldValues() {
+		if err := reorderFieldData(gbv, indices); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func prepareNullableFieldDataReorder(field *schemapb.FieldData, indices []int) ([]bool, []int, int, error) {
+	validData := field.GetValidData()
+	if len(validData) == 0 {
+		return nil, nil, 0, nil
+	}
+
+	logicalToPhysical, validCount := typeutil.BuildNullableVectorDataIndices(validData)
+
+	newValidData := make([]bool, len(indices))
+	for newIdx, oldIdx := range indices {
+		if oldIdx < 0 || oldIdx >= len(validData) {
+			return nil, nil, 0, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: index %d out of bounds for ValidData of field %s (len=%d)", oldIdx, field.GetFieldName(), len(validData)))
+		}
+		newValidData[newIdx] = validData[oldIdx]
+	}
+	return newValidData, logicalToPhysical, validCount, nil
+}
+
+func countValidRows(validData []bool) int {
+	validCount := 0
+	for _, valid := range validData {
+		if valid {
+			validCount++
+		}
+	}
+	return validCount
+}
+
+func reorderNullableFloatVectorData(field *schemapb.FieldData, data []float32, width int, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([]float32, error) {
+	expected := validCount * width
+	if len(data) != expected {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable FloatVector field %s has %d elements, expected compact %d (valid=%d, dim=%d)", field.GetFieldName(), len(data), expected, validCount, width))
+	}
+	newData := make([]float32, 0, countValidRows(newValidData)*width)
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		physicalIdx := logicalToPhysical[oldIdx]
+		srcStart := physicalIdx * width
+		newData = append(newData, data[srcStart:srcStart+width]...)
+	}
+	return newData, nil
+}
+
+func reorderNullableByteVectorData(field *schemapb.FieldData, typeName string, data []byte, width int, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([]byte, error) {
+	expected := validCount * width
+	if len(data) != expected {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable %s field %s has %d bytes, expected compact %d (valid=%d, width=%d)", typeName, field.GetFieldName(), len(data), expected, validCount, width))
+	}
+	newData := make([]byte, 0, countValidRows(newValidData)*width)
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		physicalIdx := logicalToPhysical[oldIdx]
+		srcStart := physicalIdx * width
+		newData = append(newData, data[srcStart:srcStart+width]...)
+	}
+	return newData, nil
+}
+
+func reorderNullableSparseVectorData(field *schemapb.FieldData, contents [][]byte, indices []int, newValidData []bool, logicalToPhysical []int, validCount int) ([][]byte, error) {
+	if len(contents) != validCount {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: nullable SparseFloatVector field %s has %d elements, expected compact %d", field.GetFieldName(), len(contents), validCount))
+	}
+	newContents := make([][]byte, 0, countValidRows(newValidData))
+	for _, oldIdx := range indices {
+		if !field.ValidData[oldIdx] {
+			continue
+		}
+		newContents = append(newContents, contents[logicalToPhysical[oldIdx]])
+	}
+	return newContents, nil
+}
+
 // reorderFieldData reorders field data based on indices
 func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 	n := len(indices)
+	newValidData, logicalToPhysical, validCount, err := prepareNullableFieldDataReorder(field, indices)
+	if err != nil {
+		return err
+	}
 	switch field.GetType() {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		if data := field.GetScalars().GetIntData(); data != nil && len(data.Data) > 0 {
@@ -1652,12 +2243,23 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_FloatVector:
 		vectors := field.GetVectors()
-		if vectors != nil && vectors.GetFloatVector() != nil {
+		if vectors != nil && (newValidData != nil || vectors.GetFloatVector() != nil) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for FloatVector field %s", dim, field.GetFieldName()))
 			}
-			data := vectors.GetFloatVector().GetData()
+			var data []float32
+			if vectors.GetFloatVector() != nil {
+				data = vectors.GetFloatVector().GetData()
+			}
+			if newValidData != nil {
+				newData, err := reorderNullableFloatVectorData(field, data, dim, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: newData}}
+				break
+			}
 			if len(data) != n*dim {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: FloatVector field %s has %d elements, expected %d (n=%d, dim=%d)", field.GetFieldName(), len(data), n*dim, n, dim))
 			}
@@ -1674,13 +2276,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_BinaryVector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetBinaryVector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetBinaryVector()) > 0) {
 			dim := int(vectors.GetDim())
 			bytesPerVector := dim / 8
 			if bytesPerVector <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for BinaryVector field %s", dim, field.GetFieldName()))
 			}
 			data := vectors.GetBinaryVector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "BinaryVector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_BinaryVector{BinaryVector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: BinaryVector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -1697,13 +2307,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_Float16Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetFloat16Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetFloat16Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for Float16Vector field %s", dim, field.GetFieldName()))
 			}
 			bytesPerVector := dim * 2 // 2 bytes per float16
 			data := vectors.GetFloat16Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "Float16Vector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Float16Vector{Float16Vector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: Float16Vector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -1720,13 +2338,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_BFloat16Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetBfloat16Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetBfloat16Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for BFloat16Vector field %s", dim, field.GetFieldName()))
 			}
 			bytesPerVector := dim * 2 // 2 bytes per bfloat16
 			data := vectors.GetBfloat16Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "BFloat16Vector", data, bytesPerVector, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: newData}
+				break
+			}
 			if len(data) != n*bytesPerVector {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: BFloat16Vector field %s has %d bytes, expected %d (n=%d, bytesPerVector=%d)", field.GetFieldName(), len(data), n*bytesPerVector, n, bytesPerVector))
 			}
@@ -1743,9 +2369,21 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_SparseFloatVector:
 		vectors := field.GetVectors()
-		if vectors != nil && vectors.GetSparseFloatVector() != nil {
+		if vectors != nil && (newValidData != nil || vectors.GetSparseFloatVector() != nil) {
 			sparseData := vectors.GetSparseFloatVector()
+			if sparseData == nil {
+				sparseData = &schemapb.SparseFloatArray{Dim: vectors.GetDim()}
+			}
 			contents := sparseData.GetContents()
+			if newValidData != nil {
+				newContents, err := reorderNullableSparseVectorData(field, contents, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				sparseData.Contents = newContents
+				vectors.Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: sparseData}
+				break
+			}
 			if len(contents) != n {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: SparseFloatVector field %s has %d elements, expected %d", field.GetFieldName(), len(contents), n))
 			}
@@ -1760,12 +2398,20 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 		}
 	case schemapb.DataType_Int8Vector:
 		vectors := field.GetVectors()
-		if vectors != nil && len(vectors.GetInt8Vector()) > 0 {
+		if vectors != nil && (newValidData != nil || len(vectors.GetInt8Vector()) > 0) {
 			dim := int(vectors.GetDim())
 			if dim <= 0 {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: invalid dimension %d for Int8Vector field %s", dim, field.GetFieldName()))
 			}
 			data := vectors.GetInt8Vector()
+			if newValidData != nil {
+				newData, err := reorderNullableByteVectorData(field, "Int8Vector", data, dim, indices, newValidData, logicalToPhysical, validCount)
+				if err != nil {
+					return err
+				}
+				vectors.Data = &schemapb.VectorField_Int8Vector{Int8Vector: newData}
+				break
+			}
 			if len(data) != n*dim {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: Int8Vector field %s has %d bytes, expected %d (n=%d, dim=%d)", field.GetFieldName(), len(data), n*dim, n, dim))
 			}
@@ -1785,14 +2431,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 	}
 
 	// Reorder valid data if present
-	if len(field.ValidData) > 0 {
-		newValidData := make([]bool, n)
-		for newIdx, oldIdx := range indices {
-			if oldIdx < 0 || oldIdx >= len(field.ValidData) {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("reorderFieldData: index %d out of bounds for ValidData of field %s (len=%d)", oldIdx, field.GetFieldName(), len(field.ValidData)))
-			}
-			newValidData[newIdx] = field.ValidData[oldIdx]
-		}
+	if newValidData != nil {
 		field.ValidData = newValidData
 	}
 	return nil
@@ -1911,6 +2550,26 @@ var highlightNode = &nodeDef{
 	inputs:  []string{"result"},
 	outputs: []string{pipelineOutput},
 	opName:  highlightOp,
+}
+
+var searchWithAggPipe = &pipelineDef{
+	name: "searchWithAgg",
+	nodes: []*nodeDef{
+		{
+			// searchReduceOp performs cross-shard composite-key group reduce
+			// (reduceSearchResultDataWithMultiGroupBy) before hierarchy compute.
+			name:    "reduce",
+			inputs:  []string{pipelineInput, pipelineStorageCost},
+			outputs: []string{"reduced", "metrics"},
+			opName:  searchReduceOp,
+		},
+		{
+			name:    "agg",
+			inputs:  []string{"reduced"},
+			outputs: []string{pipelineOutput},
+			opName:  aggOp,
+		},
+	},
 }
 
 var searchPipe = &pipelineDef{
@@ -2125,14 +2784,20 @@ var hybridSearchPipe = &pipelineDef{
 			opName:  hybridSearchReduceOp,
 		},
 		{
-			name:    "rerank",
+			name:    "element_best_collapse",
 			inputs:  []string{"reduced", "metrics"},
+			outputs: []string{"collapsed"},
+			opName:  elementBestCollapseOp,
+		},
+		{
+			name:    "rerank",
+			inputs:  []string{"collapsed", "metrics"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
 		{
 			name:    "assemble",
-			inputs:  []string{"reduced", "rank_result"},
+			inputs:  []string{"collapsed", "rank_result"},
 			outputs: []string{"result"},
 			opName:  hybridAssembleOp,
 		},
@@ -2149,8 +2814,14 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 			opName:  hybridSearchReduceOp,
 		},
 		{
+			name:    "element_best_collapse",
+			inputs:  []string{"reduced", "metrics"},
+			outputs: []string{"collapsed"},
+			opName:  elementBestCollapseOp,
+		},
+		{
 			name:    "merge_ids",
-			inputs:  []string{"reduced"},
+			inputs:  []string{"collapsed"},
 			outputs: []string{"ids"},
 			opName:  lambdaOp,
 			params: map[string]any{
@@ -2165,7 +2836,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		},
 		{
 			name:    "parse_ids",
-			inputs:  []string{"reduced"},
+			inputs:  []string{"collapsed"},
 			outputs: []string{"id_list"},
 			opName:  lambdaOp,
 			params: map[string]any{
@@ -2186,7 +2857,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		},
 		{
 			name:    "gen_rank_data",
-			inputs:  []string{"reduced", "organized_fields"},
+			inputs:  []string{"collapsed", "organized_fields"},
 			outputs: []string{"rank_data"},
 			opName:  lambdaOp,
 			params: map[string]any{
@@ -2250,8 +2921,14 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 			opName:  hybridSearchReduceOp,
 		},
 		{
-			name:    "rerank",
+			name:    "element_best_collapse",
 			inputs:  []string{"reduced", "metrics"},
+			outputs: []string{"collapsed"},
+			opName:  elementBestCollapseOp,
+		},
+		{
+			name:    "rerank",
+			inputs:  []string{"collapsed", "metrics"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -2365,6 +3042,10 @@ var searchWithOrderByPipe = &pipelineDef{
 }
 
 func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
+	if t.aggCtx != nil {
+		return newPipeline(searchWithAggPipe, t)
+	}
+
 	hasOrderBy := len(t.orderByFields) > 0
 
 	// Common search with order_by: reduce → requery → order_by
@@ -2407,6 +3088,10 @@ func newSearchPipeline(t *searchTask) (*pipeline, error) {
 	p, err := newBuiltInPipeline(t)
 	if err != nil {
 		return nil, err
+	}
+
+	if t.aggCtx != nil {
+		return p, nil
 	}
 
 	if t.highlighter != nil {

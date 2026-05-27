@@ -28,34 +28,45 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // delegator data related part
+
+// segmentEffectiveTs returns the timestamp for delete-buffer pin/ListAfter.
+// For import segments with commit_timestamp, only deletes from T_commit onwards
+// are applied via the buffer (pre-commit deletes are in the delta log or L0 path).
+func segmentEffectiveTs(info *querypb.SegmentLoadInfo) uint64 {
+	if ts := info.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return info.GetStartPosition().GetTimestamp()
+}
 
 // InsertData
 type InsertData struct {
@@ -134,6 +145,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			panic(err)
 		}
 		growing.UpdatePkCandidate(insertData.PrimaryKeys)
+
+		// record batch info for checkpoint tracking (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			endOffset := growing.RowNum()
+			sd.checkpointTracker.RecordBatch(
+				growing.ID(),
+				endOffset,
+				insertData.StartPosition,
+			)
+		}
 
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
@@ -223,6 +244,73 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
+}
+
+// ProcessManualFlush handles manual flush request for TEXT collections.
+// It triggers immediate flush of all unflushed data in Growing Segments.
+// This is called when user explicitly requests flush via collection.flush().
+func (sd *shardDelegator) ProcessManualFlush(ctx context.Context, flushTs uint64) error {
+	// Only process for TEXT collections that have GrowingFlushManager
+	if sd.growingFlushManager == nil || sd.checkpointTracker == nil {
+		return nil
+	}
+
+	log := sd.getLogger(ctx).With(zap.Uint64("flushTs", flushTs))
+	log.Info("processing manual flush for TEXT collection")
+
+	// Get all tracked segment IDs
+	segmentIDs := sd.checkpointTracker.GetSegmentIDs()
+	if len(segmentIDs) == 0 {
+		log.Debug("no segments to flush")
+		return nil
+	}
+
+	// Submit to the dynamic CGO pool to reuse the same concurrency control
+	// as other CGO operations (pool size = CPU cores).
+	pool := segments.GetDynamicPool()
+	futures := make([]*conc.Future[any], 0, len(segmentIDs))
+	for _, segID := range segmentIDs {
+		segment := sd.segmentManager.GetGrowing(segID)
+		if segment == nil {
+			continue
+		}
+
+		id := segID
+		future := pool.Submit(func() (any, error) {
+			if err := sd.growingFlushManager.ForceSyncAndSeal(ctx, id); err != nil {
+				log.Warn("failed to ForceSyncAndSeal during manual flush",
+					zap.Int64("segmentID", id),
+					zap.Error(err))
+				return nil, err
+			}
+			log.Info("ForceSyncAndSeal completed during manual flush",
+				zap.Int64("segmentID", id))
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	// wait for all flush tasks to complete and collect errors
+	conc.AwaitAll(futures...)
+	var firstErr error
+	failCount := 0
+	for _, f := range futures {
+		if _, err := f.Await(); err != nil {
+			failCount++
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if failCount > 0 {
+		log.Warn("manual flush completed with errors",
+			zap.Int("segmentCount", len(segmentIDs)),
+			zap.Int("failCount", failCount),
+			zap.Error(firstErr))
+		return fmt.Errorf("manual flush failed for %d/%d segments: %w", failCount, len(segmentIDs), firstErr)
+	}
+	log.Info("manual flush completed", zap.Int("segmentCount", len(segmentIDs)))
+	return nil
 }
 
 type BatchApplyRet = struct {
@@ -320,6 +408,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						// cancel other request
 						cancel()
 						return false, err
+					} else if grpcclient.IsServerIDMismatchErr(err) {
+						log.Warn("try to delete data on mismatched node, node has been replaced", zap.Error(err))
+						cancel()
+						return false, err
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 						log.Warn("try to delete data of released segment")
 						return false, nil
@@ -385,6 +477,23 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+
+	// initialize checkpoint tracking for recovered growing segments (TEXT collections only)
+	if sd.checkpointTracker != nil {
+		for _, segment := range loaded {
+			// the segment was recovered from binlog, so the current row count is the flushed offset
+			flushedOffset := segment.RowNum()
+			manifest := segment.LoadInfo().GetManifestPath()
+			if manifest == "" && flushedOffset > 0 {
+				return fmt.Errorf("recovered growing segment %d has %d flushed rows but no manifest path, cannot safely resume flush", segment.ID(), flushedOffset)
+			}
+			sd.checkpointTracker.InitSegmentWithManifest(segment.ID(), flushedOffset, manifest)
+			log.Info("initialized checkpoint tracker for recovered growing segment",
+				zap.Int64("segmentID", segment.ID()),
+				zap.Int64("flushedOffset", flushedOffset),
+				zap.String("manifest", manifest))
+		}
+	}
 
 	for _, segment := range loaded {
 		if sd.idfOracle != nil {
@@ -460,11 +569,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
 	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
 	for _, info := range req.GetInfos() {
-		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		sd.deleteBuffer.Pin(segmentEffectiveTs(info), info.GetSegmentID())
 	}
 	defer func() {
 		for _, info := range req.GetInfos() {
-			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+			sd.deleteBuffer.Unpin(segmentEffectiveTs(info), info.GetSegmentID())
 		}
 	}()
 
@@ -519,63 +628,84 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return nil
 	}
 
-	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
-	})
+	return sd.withPostLoadLimit(ctx, func() error {
+		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
+		})
 
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
-	if err != nil {
-		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-		return err
-	}
-
-	// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
-	err = sd.loadBM25Stats(ctx, infos, req)
-	if err != nil {
-		log.Warn("failed to load BM25 stats", zap.Error(err))
-		return err
-	}
-
-	// Build a map from segmentID to BloomFilterSet
-	bfMap := make(map[int64]pkoracle.Candidate)
-	for _, candidate := range candidates {
-		log.Info("loaded bloom filter set for sealed segment",
-			zap.Int64("segmentID", candidate.ID()),
-		)
-		bfMap[candidate.ID()] = candidate
-	}
-
-	// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
-	entries := make([]SegmentEntry, 0, len(infos))
-	for _, info := range infos {
-		entry := SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
-			Level:       info.GetLevel(),
-			Candidate:   bfMap[info.GetSegmentID()],
+		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
+		if err != nil {
+			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			return err
 		}
-		entries = append(entries, entry)
+
+		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
+		err = sd.loadBM25Stats(ctx, infos, req)
+		if err != nil {
+			log.Warn("failed to load BM25 stats", zap.Error(err))
+			return err
+		}
+
+		// Build a map from segmentID to BloomFilterSet
+		bfMap := make(map[int64]pkoracle.Candidate)
+		for _, candidate := range candidates {
+			log.Info("loaded bloom filter set for sealed segment",
+				zap.Int64("segmentID", candidate.ID()),
+			)
+			bfMap[candidate.ID()] = candidate
+		}
+
+		// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
+		entries := make([]SegmentEntry, 0, len(infos))
+		for _, info := range infos {
+			entries = append(entries, SegmentEntry{
+				SegmentID:   info.GetSegmentID(),
+				PartitionID: info.GetPartitionID(),
+				NodeID:      req.GetDstNodeID(),
+				Version:     req.GetVersion(),
+				Level:       info.GetLevel(),
+				Candidate:   bfMap[info.GetSegmentID()],
+			})
+		}
+
+		log.Debug("load delete...")
+		// loadStreamDelete now handles distribution add atomically in Phase 3
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
+			entries, req.GetLoadMeta().GetSchemaVersion())
+		if err != nil {
+			log.Warn("load stream delete failed", zap.Error(err))
+			// BM25 stats already loaded into idf oracle will be cleaned up
+			// automatically by SyncDistribution when the segment is not in target.
+			return err
+		}
+		log.Debug("load stream delete done")
+
+		return nil
+	})
+}
+
+func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error) error {
+	if sd.postLoadSem == nil {
+		return fn()
 	}
 
-	log.Debug("load delete...")
-	// loadStreamDelete now handles distribution add atomically in Phase 3
-	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-		entries, req.GetLoadMeta().GetSchemaVersion())
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
-		// BM25 stats already loaded into idf oracle will be cleaned up
-		// automatically by SyncDistribution when the segment is not in target.
+	start := time.Now()
+	if err := sd.postLoadSem.Acquire(ctx); err != nil {
 		return err
 	}
+	defer sd.postLoadSem.Release()
 
-	return nil
+	log.Ctx(ctx).Debug("delegator acquired post-load slot",
+		zap.Duration("wait", time.Since(start)),
+		zap.Int("capacity", sd.postLoadSem.Cap()),
+		zap.Int("current", sd.postLoadSem.Current()))
+
+	return fn()
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
 	if version < sd.schemaVersion {
 		return merr.WrapErrServiceInternal("schema version changed")
 	}
@@ -813,7 +943,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	sd.deleteMut.RLock()
 	snapshots := make([]segDeleteSnapshot, len(infos))
 	for i, info := range infos {
-		records := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		records := sd.deleteBuffer.ListAfter(segmentEffectiveTs(info))
 		// Copy the slice to safely use outside lock scope.
 		// ListAfter returns a new slice from doubleCacheBuffer, but we copy to
 		// ensure no dependency on internal buffer state that may change after unlock.
@@ -876,7 +1006,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
 		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
 		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
-		catchUpTs := info.GetStartPosition().GetTimestamp()
+		catchUpTs := segmentEffectiveTs(info)
 		if snapshots[i].snapshotMaxTs > 0 {
 			catchUpTs = snapshots[i].snapshotMaxTs + 1
 		}
@@ -979,6 +1109,52 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	// Note: Candidate cleanup is handled by RemoveDistributions above
 	// - Sealed segment candidates (BloomFilterSet) are refunded in RemoveDistributions
 	// - Growing segment candidates (LocalSegment) are managed by segmentManager.Release()
+	if len(growing) > 0 {
+		// For TEXT collections: best-effort flush before releasing growing segments.
+		// Flush failure does NOT block release because:
+		// 1. Data is still in WAL — channel checkpoint clamping ensures WAL won't
+		//    be truncated beyond unflushed growing segment data.
+		// 2. On recovery, WAL replays from the clamped checkpoint, restoring data.
+		// 3. Blocking release on flush failure would prevent QueryCoord balance
+		//    and QueryNode graceful shutdown.
+		if sd.growingFlushManager != nil && sd.checkpointTracker != nil {
+			for _, entry := range growing {
+				segID := entry.SegmentID
+				segment := sd.segmentManager.GetGrowing(segID)
+				if segment == nil {
+					continue
+				}
+
+				flushedOffset := sd.checkpointTracker.GetFlushedOffset(segID)
+				currentOffset := segment.RowNum()
+				if flushedOffset >= currentOffset {
+					continue
+				}
+
+				log := sd.getLogger(ctx).With(zap.Int64("segmentID", segID))
+				log.Info("best-effort flush before release",
+					zap.Int64("unflushedRows", currentOffset-flushedOffset))
+
+				if err := sd.growingFlushManager.ForceSync(ctx, segID); err != nil {
+					log.Warn("best-effort flush failed before release, data will be recovered from WAL",
+						zap.Error(err))
+				}
+			}
+		}
+
+		// clean up checkpoint tracking for released growing segments (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			for _, entry := range growing {
+				sd.checkpointTracker.RemoveSegment(entry.SegmentID)
+			}
+		}
+		// clean up sealed segment tracking to prevent memory leak (TEXT collections only)
+		if sd.growingFlushManager != nil {
+			for _, entry := range growing {
+				sd.growingFlushManager.RemoveSealedSegment(entry.SegmentID)
+			}
+		}
+	}
 
 	var releaseErr error
 	if !force {

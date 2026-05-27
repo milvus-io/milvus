@@ -8,7 +8,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
 type Backend interface {

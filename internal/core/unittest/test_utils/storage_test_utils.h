@@ -325,7 +325,7 @@ CheckGroupBySearchResult(const milvus::SearchResult& search_result,
                          int topK,
                          int nq,
                          bool strict) {
-    int size = search_result.group_by_values_.value().size();
+    int size = search_result.composite_group_by_values_.value().size();
     ASSERT_EQ(search_result.seg_offsets_.size(), size);
     ASSERT_EQ(search_result.distances_.size(), size);
     ASSERT_TRUE(search_result.seg_offsets_[0] != INVALID_SEG_OFFSET);

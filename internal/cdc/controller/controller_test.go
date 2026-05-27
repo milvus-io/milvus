@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/replication"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestController_StartAndStop_WithEvents(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 // NewNormalRateLimitState creates a new normal rate limit state.

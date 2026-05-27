@@ -27,12 +27,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // S3 snapshot storage path constants.
@@ -61,44 +61,80 @@ const (
 	// Increment when making incompatible schema changes.
 	// Version 0: Legacy snapshots without version field (treated as version 1)
 	// Version 1: Initial version with format-version field in metadata
-	SnapshotFormatVersion = 1
+	// Version 2: Adds index_store_path_version to vector/scalar index files
+	// Version 3: Adds commit_timestamp to ManifestEntry (import/CDC segments)
+	SnapshotFormatVersion = 3
 )
 
 var (
-	// manifestSchemaOnce ensures the Avro schema is parsed only once for performance optimization.
-	manifestSchemaOnce sync.Once
-	// manifestSchema holds the parsed Avro schema used for serializing/deserializing ManifestEntry records.
-	manifestSchema avro.Schema
-	// manifestSchemaErr stores any error that occurred during schema parsing.
-	manifestSchemaErr error
+	manifestSchemaV1Once sync.Once
+	manifestSchemaV1     avro.Schema
+	manifestSchemaV1Err  error
+
+	manifestSchemaV2Once sync.Once
+	manifestSchemaV2     avro.Schema
+	manifestSchemaV2Err  error
+
+	manifestSchemaV3Once sync.Once
+	manifestSchemaV3     avro.Schema
+	manifestSchemaV3Err  error
 )
 
-// getManifestSchema returns the cached Avro schema for manifest files.
-// The schema is parsed only once using sync.Once to avoid repeated parsing overhead.
-// This schema defines the structure of ManifestEntry records stored in Avro format.
+// getManifestSchema returns the cached Avro schema for writing new manifest files.
+// New writes always use the current schema version (V3).
 func getManifestSchema() (avro.Schema, error) {
-	manifestSchemaOnce.Do(func() {
-		manifestSchema, manifestSchemaErr = avro.Parse(getProperAvroSchema())
-	})
-	return manifestSchema, manifestSchemaErr
+	return getManifestSchemaV3()
 }
 
-// getManifestSchemaByVersion returns the Avro schema for the specified format version.
-// This function supports reading snapshots created with different schema versions.
+func getManifestSchemaV1() (avro.Schema, error) {
+	manifestSchemaV1Once.Do(func() {
+		manifestSchemaV1, manifestSchemaV1Err = avro.Parse(getAvroSchemaV1())
+	})
+	return manifestSchemaV1, manifestSchemaV1Err
+}
+
+func getManifestSchemaV2() (avro.Schema, error) {
+	manifestSchemaV2Once.Do(func() {
+		manifestSchemaV2, manifestSchemaV2Err = avro.Parse(getAvroSchemaV2())
+	})
+	return manifestSchemaV2, manifestSchemaV2Err
+}
+
+func getManifestSchemaV3() (avro.Schema, error) {
+	manifestSchemaV3Once.Do(func() {
+		manifestSchemaV3, manifestSchemaV3Err = avro.Parse(getAvroSchemaV3())
+	})
+	return manifestSchemaV3, manifestSchemaV3Err
+}
+
+// getManifestSchemaByVersion returns the Avro schema for the specified format
+// version. Avro binary is positional, so each on-disk version must be decoded
+// with the exact schema it was written with — a single "current" schema with
+// `default` fields is not enough to cover legacy bytes.
 //
 // Version mapping:
-//   - Version 0, 1: Current schema (getProperAvroSchema)
-//   - Version 2+: Future schemas (to be added when needed)
+//   - Version 0, 1: Legacy schema (no index_store_path_version, no commit_timestamp)
+//   - Version 2: Adds index_store_path_version
+//   - Version 3: Adds commit_timestamp (import/CDC segments)
+//   - Version 4+: Future schemas (to be added when needed)
 //
 // When adding a new schema version:
-//  1. Create a new schema function (e.g., getAvroSchemaV2)
-//  2. Add caching variables (schemaV2Once, schemaV2, schemaV2Err)
-//  3. Add case for the new version in this switch statement
+//  1. Create a new schema function (e.g., getAvroSchemaV4) that derives from
+//     the previous version's string.
+//  2. Add caching variables (schemaV4Once, schemaV4, schemaV4Err) and a
+//     getManifestSchemaV4 accessor.
+//  3. Add a case for the new version in this switch statement.
+//  4. Update getManifestSchema() to point at the new current version.
+//  5. Bump SnapshotFormatVersion.
 func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 	switch version {
 	case 0, 1:
-		// Version 0 (legacy) and 1 use the same schema
-		return getManifestSchema()
+		// Version 0 (legacy) and 1 use the same schema.
+		return getManifestSchemaV1()
+	case 2:
+		return getManifestSchemaV2()
+	case 3:
+		return getManifestSchemaV3()
 	default:
 		return nil, fmt.Errorf("unsupported manifest schema version: %d", version)
 	}
@@ -190,6 +226,11 @@ type ManifestEntry struct {
 	StorageVersion int64 `avro:"storage_version"`
 	// IsSorted indicates whether the segment data is sorted by primary key.
 	IsSorted bool `avro:"is_sorted"`
+	// CommitTimestamp mirrors SegmentInfo.commit_timestamp for import/CDC segments.
+	// Preserved so that GC, TTL, and MVCC protections survive snapshot/restore.
+	// Stored as int64 because Avro `long` is signed and hamba/avro/v2 rejects
+	// uint64 — the proto-side uint64 is converted at the boundary.
+	CommitTimestamp int64 `avro:"commit_timestamp"`
 }
 
 // AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format.
@@ -249,6 +290,8 @@ type AvroIndexFilePathInfo struct {
 	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 	// MemSize is the estimated memory consumption when loaded.
 	MemSize int64 `avro:"mem_size"`
+	// IndexStorePathVersion records the object-storage path layout used by these index files.
+	IndexStorePathVersion int32 `avro:"index_store_path_version"`
 }
 
 // AvroKeyValuePair represents commonpb.KeyValuePair in Avro-compatible format.
@@ -863,15 +906,16 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 
 	// Convert ManifestEntry record to protobuf SegmentDescription
 	segment := &datapb.SegmentDescription{
-		SegmentId:      record.SegmentID,
-		PartitionId:    record.PartitionID,
-		SegmentLevel:   datapb.SegmentLevel(record.SegmentLevel),
-		ChannelName:    record.ChannelName,
-		NumOfRows:      record.NumOfRows,
-		StartPosition:  convertAvroToMsgPosition(record.StartPosition),
-		DmlPosition:    convertAvroToMsgPosition(record.DmlPosition),
-		StorageVersion: record.StorageVersion,
-		IsSorted:       record.IsSorted,
+		SegmentId:       record.SegmentID,
+		PartitionId:     record.PartitionID,
+		SegmentLevel:    datapb.SegmentLevel(record.SegmentLevel),
+		ChannelName:     record.ChannelName,
+		NumOfRows:       record.NumOfRows,
+		StartPosition:   convertAvroToMsgPosition(record.StartPosition),
+		DmlPosition:     convertAvroToMsgPosition(record.DmlPosition),
+		StorageVersion:  record.StorageVersion,
+		IsSorted:        record.IsSorted,
+		CommitTimestamp: uint64(record.CommitTimestamp), // int64 -> uint64
 	}
 
 	// Convert binlog files (insert data)
@@ -1041,6 +1085,7 @@ func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestE
 		DmlPosition:       convertMsgPositionToAvro(segment.GetDmlPosition()),
 		StorageVersion:    segment.GetStorageVersion(),
 		IsSorted:          segment.GetIsSorted(),
+		CommitTimestamp:   int64(segment.GetCommitTimestamp()), // uint64 -> int64
 	}
 }
 
@@ -1083,6 +1128,7 @@ func convertIndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFi
 		CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 		MemSize:                   int64(info.GetMemSize()), // uint64 -> int64
+		IndexStorePathVersion:     int32(info.GetIndexStorePathVersion()),
 		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
 	}
 
@@ -1138,6 +1184,7 @@ func convertAvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.Ind
 		CurrentIndexVersion:       avroInfo.CurrentIndexVersion,
 		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
 		MemSize:                   uint64(avroInfo.MemSize), // int64 -> uint64
+		IndexStorePathVersion:     indexpb.IndexStorePathVersion(avroInfo.IndexStorePathVersion),
 	}
 
 	// Convert key-value parameters
@@ -1302,11 +1349,13 @@ func convertAvroToJSONKeyIndexMap(entries []AvroJSONKeyIndexEntry) map[int64]*da
 // Section 7: Avro Schema Definition
 // =============================================================================
 
-// getProperAvroSchema returns the Avro schema definition for ManifestEntry record.
-// This schema defines the complete structure of segment manifest files, including:
+// getAvroSchemaV2 returns the V2 Avro schema for ManifestEntry. This is the
+// canonical schema string from which V1 and V3 are derived.
+//
+// V2 covers:
 //   - Basic segment metadata (ID, partition, level, channel, row count)
 //   - Binlog file references (insert, delete, stats, BM25 stats)
-//   - Index file references (vector indexes, text indexes, JSON key indexes)
+//   - Index file references with index_store_path_version
 //   - Message queue positions (start and DML positions)
 //   - Storage version and sorting information
 //
@@ -1316,7 +1365,7 @@ func convertAvroToJSONKeyIndexMap(entries []AvroJSONKeyIndexEntry) map[int64]*da
 //   - Uses arrays instead of maps (Avro maps require string keys)
 //   - Nested record types are defined inline and referenced by name
 //   - All fields are required (no null unions for simplicity)
-func getProperAvroSchema() string {
+func getAvroSchemaV2() string {
 	return `{
 		"type": "record",
 		"name": "ManifestEntry",
@@ -1431,7 +1480,8 @@ func getProperAvroSchema() string {
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
 								{"name": "mem_size", "type": "long"},
-								{"name": "current_scalar_index_version", "type": "int", "default": 0}
+								{"name": "current_scalar_index_version", "type": "int", "default": 0},
+								{"name": "index_store_path_version", "type": "int", "default": 0}
 							]
 						}
 					}
@@ -1495,4 +1545,27 @@ func getProperAvroSchema() string {
 				}
 			]
 	}`
+}
+
+// getAvroSchemaV1 returns the V1 schema, derived from V2 by stripping
+// index_store_path_version. Legacy V1 manifests in the wild were written
+// without that field; Avro binary is positional, so V1 reads must use a
+// schema that omits it.
+func getAvroSchemaV1() string {
+	return strings.Replace(getAvroSchemaV2(),
+		`,
+								{"name": "index_store_path_version", "type": "int", "default": 0}`,
+		"",
+		1)
+}
+
+// getAvroSchemaV3 returns the V3 schema, derived from V2 by inserting
+// commit_timestamp after is_sorted. New writes use V3; legacy V2 manifests
+// are decoded with getAvroSchemaV2.
+func getAvroSchemaV3() string {
+	return strings.Replace(getAvroSchemaV2(),
+		`{"name": "is_sorted", "type": "boolean"},`,
+		`{"name": "is_sorted", "type": "boolean"},
+				{"name": "commit_timestamp", "type": "long", "default": 0},`,
+		1)
 }

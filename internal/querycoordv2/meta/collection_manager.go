@@ -29,16 +29,16 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/eventlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Collection struct {
@@ -185,6 +185,9 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	}
 
 	for collection, partitions := range partitions {
+		var partitionsToSave []*Partition
+		var partitionsToCache []*Partition
+		released := false
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
 			if partition.GetStatus() != querypb.LoadStatus_Loaded {
@@ -193,25 +196,35 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 					ctxLog.Info("recover loading partition times reach limit, release collection",
 						zap.Int64("collectionID", collection),
 						zap.Int32("recoverTimes", partition.RecoverTimes))
+					released = true
 					break
 				}
 
 				partition.RecoverTimes += 1
-				m.putPartition(ctx, []*Partition{
-					{
-						PartitionLoadInfo: partition,
-						CreatedAt:         time.Now(),
-					},
-				}, true)
+				partitionsToSave = append(partitionsToSave, &Partition{
+					PartitionLoadInfo: partition,
+					CreatedAt:         time.Now(),
+				})
 				continue
 			}
 
-			m.putPartition(ctx, []*Partition{
-				{
-					PartitionLoadInfo: partition,
-					CreatedAt:         time.Now(),
-				},
-			}, false)
+			partitionsToCache = append(partitionsToCache, &Partition{
+				PartitionLoadInfo: partition,
+				CreatedAt:         time.Now(),
+			})
+		}
+		if released {
+			continue
+		}
+		if len(partitionsToSave) > 0 {
+			if err := m.putPartition(ctx, partitionsToSave, true); err != nil {
+				return err
+			}
+		}
+		if len(partitionsToCache) > 0 {
+			if err := m.putPartition(ctx, partitionsToCache, false); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -423,6 +436,13 @@ func (m *CollectionManager) GetAllPartitions(ctx context.Context) []*Partition {
 	return lo.Values(m.partitions)
 }
 
+func (m *CollectionManager) GetPartitionIDsByCollection(ctx context.Context, collectionID typeutil.UniqueID) []int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	return m.collectionPartitions[collectionID].Collect()
+}
+
 func (m *CollectionManager) GetPartitionsByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Partition {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
@@ -490,6 +510,13 @@ func (m *CollectionManager) PutPartitionWithoutSave(ctx context.Context, partiti
 }
 
 func (m *CollectionManager) putPartition(ctx context.Context, partitions []*Partition, withSave bool) error {
+	// Check all partitions' collections exist (prevent orphan partitions)
+	for _, partition := range partitions {
+		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
+			return merr.WrapErrCollectionNotLoaded(partition.GetCollectionID())
+		}
+	}
+
 	if withSave {
 		loadInfos := lo.Map(partitions, func(partition *Partition, _ int) *querypb.PartitionLoadInfo {
 			return partition.PartitionLoadInfo

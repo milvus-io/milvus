@@ -16,14 +16,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type vecIndexChecker struct {
@@ -49,6 +49,20 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 	} else if typeutil.IsSparseFloatVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, SparseMetrics) {
 			return fmt.Errorf("metric type not found or not supported, supported: %v", SparseMetrics)
+		}
+		// Validate inverted_index_algo if provided. This check is done in Go because
+		// the C++ knowhere library no longer validates this parameter (removed in knowhere fd532fb).
+		if algo, ok := params[SparseInvertedIndexAlgo]; ok {
+			validAlgo := false
+			for _, a := range SparseInvertedIndexAlgos {
+				if a == algo {
+					validAlgo = true
+					break
+				}
+			}
+			if !validAlgo {
+				return fmt.Errorf("sparse inverted index algo %s not found or not supported, supported: %v", algo, SparseInvertedIndexAlgos)
+			}
 		}
 	} else if typeutil.IsBinaryVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, BinaryVectorMetrics) {

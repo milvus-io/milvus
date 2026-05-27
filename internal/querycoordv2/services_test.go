@@ -30,10 +30,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
@@ -60,23 +60,23 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ServiceSuite struct {
@@ -368,7 +368,10 @@ func (suite *ServiceSuite) TestShowCollections() {
 	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 	resp, err = server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), resp.GetStatus().GetCode())
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceMemoryLimitExceeded.Error())
 	meta.GlobalFailedLoadCache.Remove(collection)
 	err = suite.meta.PutCollection(ctx, colBak)
 	suite.NoError(err)
@@ -1472,8 +1475,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 	defer func() {
 		for _, collection := range suite.collections {
 			replicas := suite.meta.GetByCollection(ctx, collection)
-			suite.meta.RemoveNode(ctx, replicas[0].GetID(), srcNode)
-			suite.meta.RemoveNode(ctx, replicas[0].GetID(), dstNode)
+			suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), srcNode)
+			suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), dstNode)
 		}
 		suite.nodeMgr.Remove(1001)
 		suite.nodeMgr.Remove(1002)
@@ -1616,7 +1619,7 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 		suite.nodeMgr.Remove(10)
-		suite.meta.RemoveNode(ctx, replicas[0].GetID(), 10)
+		suite.meta.RemoveNode(ctx, collection, replicas[0].GetID(), 10)
 	}
 }
 
@@ -1909,6 +1912,49 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	suite.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded))
+}
+
+func (suite *ServiceSuite) TestGetShardLeadersWithUnserviceableShards() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	for _, collection := range suite.collections {
+		// Mirror the state PutCollection writes during a replica-count change:
+		// Status=Loading, LoadPercentage=0, even though existing replicas still hold data.
+		suite.updateCollectionStatus(ctx, collection, querypb.LoadStatus_Loading)
+		suite.updateChannelDist(ctx, collection)
+		suite.fetchHeartbeats(time.Now())
+
+		// Strict path (WithUnserviceableShards=false) still rejects as before.
+		strictReq := &querypb.GetShardLeadersRequest{CollectionID: collection}
+		strictResp, err := server.GetShardLeaders(ctx, strictReq)
+		suite.NoError(err)
+		suite.True(errors.Is(merr.Error(strictResp.GetStatus()), merr.ErrCollectionNotFullyLoaded))
+
+		// Relaxed path (WithUnserviceableShards=true) now skips checkLoadStatus
+		// and returns the current shard leaders so the proxy can route by Serviceable.
+		relaxedReq := &querypb.GetShardLeadersRequest{
+			CollectionID:            collection,
+			WithUnserviceableShards: true,
+		}
+		relaxedResp, err := server.GetShardLeaders(ctx, relaxedReq)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, relaxedResp.GetStatus().GetErrorCode())
+		suite.Len(relaxedResp.GetShards(), len(suite.channels[collection]))
+		for _, shard := range relaxedResp.GetShards() {
+			suite.Len(shard.GetServiceable(), len(shard.GetNodeIds()))
+		}
+	}
+
+	// Existence check still fires even when WithUnserviceableShards=true.
+	ghostReq := &querypb.GetShardLeadersRequest{
+		CollectionID:            -1,
+		WithUnserviceableShards: true,
+	}
+	ghostResp, err := server.GetShardLeaders(ctx, ghostReq)
+	suite.NoError(err)
+	suite.True(errors.Is(merr.Error(ghostResp.GetStatus()), merr.ErrCollectionNotLoaded))
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {

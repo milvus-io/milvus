@@ -58,7 +58,7 @@ print_error() {
 MIN_CMAKE_VERSION="3.26"
 MIN_GO_VERSION="1.21"
 CONAN_VERSION="2.25.1"
-RUST_VERSION="1.89"
+RUST_VERSION="1.92"
 
 #######################################
 # Check if a command exists
@@ -117,13 +117,29 @@ install_cmake_linux() {
 #######################################
 install_conan() {
     print_info "Installing Conan ${CONAN_VERSION}..."
+
+    local pip_cmd=""
     if command_exists pip3; then
-        pip3 install --user conan==${CONAN_VERSION}
+        pip_cmd="pip3"
     elif command_exists pip; then
-        pip install --user conan==${CONAN_VERSION}
+        pip_cmd="pip"
     else
         print_error "pip not found. Please install Python 3 with pip."
         exit 1
+    fi
+
+    # Try direct user install first (works on Ubuntu 20.04/22.04)
+    if $pip_cmd install --user "conan==${CONAN_VERSION}" 2>/dev/null; then
+        :
+    else
+        # Ubuntu 24.04+ enforces PEP 668 — use an isolated venv instead
+        print_info "System pip blocked (PEP 668). Installing Conan in isolated venv..."
+        local venv_dir="${HOME}/.venv/conan"
+        python3 -m venv "$venv_dir"
+        "$venv_dir/bin/pip" install "conan==${CONAN_VERSION}"
+        # Expose the binary via ~/.local/bin
+        mkdir -p "${HOME}/.local/bin"
+        ln -sf "$venv_dir/bin/conan" "${HOME}/.local/bin/conan"
     fi
 
     # Add local bin to PATH if not already there
@@ -263,7 +279,8 @@ install_ubuntu_deps() {
         libopenblas-dev libgoogle-perftools-dev
     )
 
-    # Version-specific GCC and clang-format
+    # Version-specific GCC and clang-format. CI runs the cpp format checker on
+    # ubuntu22.04 with clang-format-15, so 22.04 must install that exact version.
     local gcc_packages=()
     local clang_format_package=""
 
@@ -274,11 +291,11 @@ install_ubuntu_deps() {
             ;;
         22.04)
             gcc_packages=(g++ gcc gfortran g++-11 gcc-11)
-            clang_format_package="clang-format-14 clang-tidy-14"
+            clang_format_package="clang-format-15 clang-tidy-15"
             ;;
         24.04)
             gcc_packages=(g++ gcc gfortran g++-13 gcc-13)
-            clang_format_package="clang-format-17 clang-tidy-17"
+            clang_format_package="clang-format-18 clang-tidy-18"
             ;;
         *)
             print_warn "Ubuntu ${ubuntu_version} not explicitly supported, using default packages"

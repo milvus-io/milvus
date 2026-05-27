@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type (
@@ -68,6 +68,15 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 	}
 
 	return resp
+}
+
+func (w *walAccesserImpl) appendReplicateMessageToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+	guard, err := w.getProducer(msg.VChannel()).BeginProduce(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	resp := producer.BatchCommitProduce(ctx, guard)
+	return resp.Responses[0].AppendResult, resp.Responses[0].Error
 }
 
 // dispatchMessages dispatches the messages into different vchannel.

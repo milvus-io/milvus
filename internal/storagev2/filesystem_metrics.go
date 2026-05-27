@@ -28,14 +28,16 @@ import "C"
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"unsafe"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // FilesystemMetrics holds the 8 filesystem metrics retrieved from the default filesystem
@@ -50,51 +52,15 @@ type FilesystemMetrics struct {
 	MultiPartUploadFinished int64
 }
 
-// GetCachedFilesystemMetrics retrieves metrics from a cached filesystem.
-// If key is empty, returns metrics from the singleton filesystem.
-// If key is provided, looks up the filesystem in the cache by that key.
-// The key format must match what's used by the C++ cache (from ArrowFileSystemConfig::GetCacheKey):
-// - Local storage (type="local"): root_path
-// - Object storage (type="minio", "s3", "aws", "gcp", etc.): address/bucket_name
-func GetCachedFilesystemMetrics(key string) (*FilesystemMetrics, error) {
-	var cFilesystem C.FileSystemHandle
-
-	if key == "" {
-		result := C.loon_get_filesystem_singleton_handle(&cFilesystem)
-		if err := HandleLoonFFIResult(result); err != nil {
-			return nil, fmt.Errorf("failed to get filesystem singleton: %w", err)
-		}
-	} else {
-		cKey := C.CString(key)
-		defer C.free(unsafe.Pointer(cKey))
-		keyLen := C.uint32_t(len(key))
-
-		// Create an empty properties struct - this is a cache lookup only
-		var properties C.LoonProperties
-		properties.properties = nil
-		properties.count = 0
-
-		result := C.loon_filesystem_get(&properties, cKey, keyLen, &cFilesystem)
-		if err := HandleLoonFFIResult(result); err != nil {
-			return nil, fmt.Errorf("failed to get cached filesystem for key %q: %w", key, err)
-		}
-	}
-
-	return getMetricsFromHandle(cFilesystem)
-}
-
 // getMetricsFromHandle retrieves metrics from a filesystem handle
 func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, error) {
-	// Get metrics from the filesystem
 	var cMetrics C.LoonFilesystemMetricsSnapshot
 	metricsResult := C.loon_filesystem_get_metrics(cFilesystem, &cMetrics)
 	if err := HandleLoonFFIResult(metricsResult); err != nil {
-		// Clean up filesystem handle
 		C.loon_filesystem_destroy(cFilesystem)
 		return nil, fmt.Errorf("failed to get filesystem metrics: %w", err)
 	}
 
-	// Extract the 8 metrics from C struct
 	fsMetrics := &FilesystemMetrics{
 		ReadCount:               int64(cMetrics.read_count),
 		WriteCount:              int64(cMetrics.write_count),
@@ -106,10 +72,161 @@ func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, e
 		MultiPartUploadFinished: int64(cMetrics.multi_part_upload_finished),
 	}
 
-	// Clean up C resources
 	C.loon_filesystem_destroy(cFilesystem)
-
 	return fsMetrics, nil
+}
+
+// Property keys exported by milvus-storage/ffi_c.h.
+var (
+	propAddress             = C.GoString(C.loon_properties_fs_address)
+	propBucketName          = C.GoString(C.loon_properties_fs_bucket_name)
+	propAccessKeyID         = C.GoString(C.loon_properties_fs_access_key_id)
+	propAccessKeyValue      = C.GoString(C.loon_properties_fs_access_key_value)
+	propRootPath            = C.GoString(C.loon_properties_fs_root_path)
+	propStorageType         = C.GoString(C.loon_properties_fs_storage_type)
+	propCloudProvider       = C.GoString(C.loon_properties_fs_cloud_provider)
+	propIAMEndpoint         = C.GoString(C.loon_properties_fs_iam_endpoint)
+	propLogLevel            = C.GoString(C.loon_properties_fs_log_level)
+	propRegion              = C.GoString(C.loon_properties_fs_region)
+	propSSLCACert           = C.GoString(C.loon_properties_fs_ssl_ca_cert)
+	propGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
+	propUseSSL              = C.GoString(C.loon_properties_fs_use_ssl)
+	propUseIAM              = C.GoString(C.loon_properties_fs_use_iam)
+	propUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
+	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
+	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
+	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
+)
+
+// makePropertiesFromConfig builds C.LoonProperties from a StorageConfig.
+// Mirrors packed.MakePropertiesFromStorageConfig (cgo types not shareable across packages).
+func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonProperties, error) {
+	var keys []string
+	var values []string
+
+	if addr := storageConfig.GetAddress(); addr != "" {
+		if !storageConfig.GetUseSSL() && !strings.Contains(addr, "://") {
+			addr = "http://" + addr
+		}
+		keys = append(keys, propAddress)
+		values = append(values, addr)
+	}
+	if v := storageConfig.GetBucketName(); v != "" {
+		keys = append(keys, propBucketName)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetAccessKeyID(); v != "" {
+		keys = append(keys, propAccessKeyID)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetSecretAccessKey(); v != "" {
+		keys = append(keys, propAccessKeyValue)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetRootPath(); v != "" {
+		keys = append(keys, propRootPath)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetStorageType(); v != "" {
+		keys = append(keys, propStorageType)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetCloudProvider(); v != "" {
+		keys = append(keys, propCloudProvider)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetIAMEndpoint(); v != "" {
+		keys = append(keys, propIAMEndpoint)
+		values = append(values, v)
+	}
+	keys = append(keys, propLogLevel)
+	values = append(values, "warn")
+	if v := storageConfig.GetRegion(); v != "" {
+		keys = append(keys, propRegion)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetSslCACert(); v != "" {
+		keys = append(keys, propSSLCACert)
+		values = append(values, v)
+	}
+	if v := storageConfig.GetGcpCredentialJSON(); v != "" {
+		keys = append(keys, propGCPCredentialJSON)
+		values = append(values, v)
+	}
+
+	keys = append(keys, propUseSSL)
+	values = append(values, strconv.FormatBool(storageConfig.GetUseSSL()))
+	keys = append(keys, propUseIAM)
+	values = append(values, strconv.FormatBool(storageConfig.GetUseIAM()))
+	keys = append(keys, propUseVirtualHost)
+	values = append(values, strconv.FormatBool(storageConfig.GetUseVirtualHost()))
+	keys = append(keys, propUseCustomPartUpload)
+	values = append(values, "true")
+
+	keys = append(keys, propRequestTimeoutMS)
+	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+
+	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
+		keys = append(keys, propTLSMinVersion)
+		values = append(values, v)
+	}
+	keys = append(keys, propUseCRC32CChecksum)
+	values = append(values, strconv.FormatBool(storageConfig.GetUseCrc32CChecksum()))
+
+	count := len(keys)
+	if count == 0 {
+		return C.LoonProperties{}, nil
+	}
+
+	cKeys := make([]*C.char, count)
+	cValues := make([]*C.char, count)
+	for i := 0; i < count; i++ {
+		cKeys[i] = C.CString(keys[i])
+		cValues[i] = C.CString(values[i])
+	}
+	defer func() {
+		for i := 0; i < count; i++ {
+			C.free(unsafe.Pointer(cKeys[i]))
+			C.free(unsafe.Pointer(cValues[i]))
+		}
+	}()
+
+	var props C.LoonProperties
+	result := C.loon_properties_create(
+		(**C.char)(unsafe.Pointer(&cKeys[0])),
+		(**C.char)(unsafe.Pointer(&cValues[0])),
+		C.size_t(count),
+		&props,
+	)
+
+	if err := HandleLoonFFIResult(result); err != nil {
+		return C.LoonProperties{}, fmt.Errorf("failed to create properties: %w", err)
+	}
+
+	return props, nil
+}
+
+// GetFilesystemMetricsWithConfig retrieves metrics from a cached filesystem
+// using full storage config properties for proper cache resolution.
+func GetFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
+	if storageConfig == nil {
+		return nil, fmt.Errorf("storageConfig is required")
+	}
+
+	props, err := makePropertiesFromConfig(storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_properties_free(&props)
+
+	var cFilesystem C.FileSystemHandle
+	result := C.loon_filesystem_get(&props, nil, 0, &cFilesystem)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get cached filesystem: %w", err)
+	}
+
+	return getMetricsFromHandle(cFilesystem)
 }
 
 // HandleLoonFFIResult handles the result from loon FFI calls
@@ -127,9 +244,6 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 }
 
 // GetFilesystemKeyFromStorageConfig extracts filesystem cache key from StorageConfig.
-// Must match the key format used by C++ ArrowFileSystemConfig::GetCacheKey():
-// - Local storage (type="local"): root_path
-// - Object storage (type="minio", "s3", "aws", "gcp", etc.): address/bucket_name
 func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) string {
 	if storageConfig == nil {
 		return ""
@@ -140,7 +254,6 @@ func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) str
 		return storageConfig.GetRootPath()
 	}
 
-	// Object storage (minio, s3, aws, gcp, etc.)
 	address := storageConfig.GetAddress()
 	bucketName := storageConfig.GetBucketName()
 	if address == "" || bucketName == "" {
@@ -150,21 +263,16 @@ func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) str
 }
 
 // PublishDefaultFilesystemMetrics retrieves and publishes metrics from the default filesystem.
-// It builds a StorageConfig using the same logic as compaction.CreateStorageConfig() to ensure
-// the cache key matches the filesystem used by compaction and other components.
 func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
-	// Build storage config matching compaction.CreateStorageConfig() logic
 	params := paramtable.Get()
 	var storageConfig *indexpb.StorageConfig
 
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		// For local storage, use LocalStorageCfg.Path as RootPath (same as compaction.CreateStorageConfig)
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
 		}
 	} else {
-		// For remote storage, use full MinioCfg (same as compaction.CreateStorageConfig)
 		storageConfig = &indexpb.StorageConfig{
 			Address:           params.MinioCfg.Address.GetValue(),
 			AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
@@ -190,19 +298,13 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 
 // PublishFilesystemMetricsWithConfig retrieves and publishes filesystem metrics using storage config.
 func PublishFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
-	key := GetFilesystemKeyFromStorageConfig(storageConfig)
-	return PublishCachedFilesystemMetrics(key)
-}
-
-// PublishCachedFilesystemMetrics retrieves and publishes metrics from a cached filesystem.
-func PublishCachedFilesystemMetrics(key string) (*FilesystemMetrics, error) {
-	metricSnapshot, err := GetCachedFilesystemMetrics(key)
+	metricSnapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
 	if err != nil {
-		log.Warn("failed to get cached filesystem metrics", zap.String("key", key), zap.Error(err))
+		log.Warn("failed to get filesystem metrics with config", zap.Error(err))
 		return nil, err
 	}
 
-	fsKey := key
+	fsKey := GetFilesystemKeyFromStorageConfig(storageConfig)
 	if fsKey == "" {
 		fsKey = "default"
 	}
@@ -217,6 +319,5 @@ func PublishCachedFilesystemMetrics(key string) (*FilesystemMetrics, error) {
 		metricSnapshot.MultiPartUploadCreated,
 		metricSnapshot.MultiPartUploadFinished,
 	)
-
 	return metricSnapshot, nil
 }

@@ -25,25 +25,25 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // serverID return the session serverID
@@ -180,6 +180,36 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		// set nested path as json path
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
+
+		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index
+		// engine version >= MinScalarIndexVersionForJsonPathMultiType.
+		//
+		// For AutoIndex requests, transparently downgrade the requested type
+		// to INVERTED if the cluster version is too low — this keeps AutoIndex
+		// creating *some* usable index during rolling upgrade instead of
+		// failing outright. For explicit user requests, return an error.
+		indexType := common.GetIndexType(req.GetIndexParams())
+		if indexType == indexparamcheck.IndexSTLSORT ||
+			indexType == indexparamcheck.IndexBitmap ||
+			indexType == indexparamcheck.IndexHybrid {
+			resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
+			if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+				if req.GetIsAutoIndex() {
+					log.Info("downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
+						zap.String("requestedType", indexType),
+						zap.Int32("resolvedVersion", resolved),
+						zap.Int32("requiredVersion", common.MinScalarIndexVersionForJsonPathMultiType))
+					setIndexParam(req.GetIndexParams(), common.IndexTypeKey,
+						indexparamcheck.IndexINVERTED)
+				} else {
+					err := merr.WrapErrParameterInvalidMsg(
+						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
+						indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+					log.Warn("scalar index engine version too low for JSON path index", zap.Error(err))
+					return merr.Status(err), nil
+				}
+			}
+		}
 	}
 
 	if req.GetIndexName() == "" {
@@ -269,12 +299,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
 		UserIndexParams: req.GetUserIndexParams(),
+		// MinSchemaVersion prevents building an index on a function-output column (e.g. BM25 sparse
+		// vector) before backfill has written that column into old segments.  The inspector skips any
+		// segment whose SchemaVersion is still below this value.
+		MinSchemaVersion: schema.GetVersion(),
 	}
 	// Validate the index params.
 	if err := ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
+	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -286,7 +323,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	); err != nil {
 		log.Error("CreateIndex fail", zap.Error(err))
@@ -295,7 +332,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	log.Info("CreateIndex successfully",
 		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
-		zap.Int64("IndexID", index.IndexID))
+		zap.Int64("IndexID", index.IndexID), zap.Int32("MinSchemaVersion", index.MinSchemaVersion),
+		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
@@ -1076,8 +1114,11 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					indexFilePaths := metautil.BuildSegmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
-						segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
+						segIdx.IndexStorePathVersion, segIdx.CollectionID,
+						segIdx.PartitionID, segIdx.SegmentID,
+						segIdx.BuildID, segIdx.IndexVersion)
+					indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					// respect segment-based index type
@@ -1106,6 +1147,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							NumRows:                   segIdx.NumRows,
 							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 						})
 				}
 			}

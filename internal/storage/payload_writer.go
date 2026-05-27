@@ -32,11 +32,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/storage/compress" // register a custom zstd codec here, to avoid to much memory usage when serializing.
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ PayloadWriterInterface = (*NativePayloadWriter)(nil)
@@ -122,7 +123,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		w.arrowType = arrow.ListOf(elemType)
 		w.builder = array.NewListBuilder(memory.DefaultAllocator, elemType)
 	} else {
-		if w.nullable && typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
+		if w.nullable && typeutil.IsSupportedNullableVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
 			w.arrowType = &arrow.BinaryType{}
 			w.builder = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else {
@@ -662,6 +663,13 @@ func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool)
 	return nil
 }
 
+func validateNullableVectorValidData(validData []bool) (int, error) {
+	if len(validData) == 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("validData is required for nullable vector payload")
+	}
+	return int(funcutil.CountValidRows(validData)), nil
+}
+
 func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished binary vector payload")
@@ -669,13 +677,11 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, val
 
 	byteLength := dim / 8
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -730,13 +736,11 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, v
 	}
 
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * dim
 		if len(data) != expectedDataLen {
@@ -806,13 +810,11 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, va
 
 	byteLength := dim * 2
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -868,13 +870,11 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, v
 
 	byteLength := dim * 2
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -929,13 +929,11 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 	}
 
 	var numRows int
-	if w.nullable && len(data.ValidData) > 0 {
+	if w.nullable {
 		numRows = len(data.ValidData)
-		validCount := 0
-		for _, valid := range data.ValidData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(data.ValidData)
+		if err != nil {
+			return err
 		}
 		if len(data.Contents) != validCount {
 			msg := fmt.Sprintf("when nullable, Contents length(%d) must equal to valid count(%d)", len(data.Contents), validCount)
@@ -974,13 +972,11 @@ func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, valid
 	}
 
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * dim
 		if len(data) != expectedDataLen {
@@ -1051,7 +1047,7 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 			[]string{"elementType", "dim"},
 			[]string{fmt.Sprintf("%d", int32(*w.elementType)), fmt.Sprintf("%d", w.dim.GetValue())},
 		)
-	} else if w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType) {
+	} else if w.nullable && typeutil.IsSupportedNullableVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType) {
 		metadata = arrow.NewMetadata(
 			[]string{"dim"},
 			[]string{fmt.Sprintf("%d", w.dim.GetValue())},
@@ -1079,7 +1075,7 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 
 	arrowWriterProps := pqarrow.DefaultWriterProps()
 	if w.dataType == schemapb.DataType_ArrayOfVector ||
-		(w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType)) {
+		(w.nullable && typeutil.IsSupportedNullableVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType)) {
 		// Store metadata in the Arrow writer properties
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),
@@ -1222,19 +1218,22 @@ func (w *NativePayloadWriter) addFloatVectorArrayToPayload(builder *array.ListBu
 			return merr.WrapErrParameterInvalidMsg("expected FloatVector but got different type")
 		}
 
+		floatData := vectorField.GetFloatVector().GetData()
+
+		numVectors, err := validateVectorArrayElementCount(len(floatData), int(data.Dim))
+		if err != nil {
+			return err
+		}
+
 		// Start a new list for this row
 		builder.Append(true)
 
-		floatData := vectorField.GetFloatVector().GetData()
-
-		dim := vectorField.GetDim()
-		numVectors := len(floatData) / int(dim)
 		for i := 0; i < numVectors; i++ {
-			start := i * int(dim)
-			end := start + int(dim)
+			start := i * int(data.Dim)
+			end := start + int(data.Dim)
 			vectorSlice := floatData[start:end]
 
-			bytes := make([]byte, dim*4)
+			bytes := make([]byte, data.Dim*4)
 			for j, f := range vectorSlice {
 				binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 			}
@@ -1260,12 +1259,15 @@ func (w *NativePayloadWriter) addBinaryVectorArrayToPayload(builder *array.ListB
 			return merr.WrapErrParameterInvalidMsg("expected BinaryVector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		binaryData := vectorField.GetBinaryVector()
 		byteWidth := (data.Dim + 7) / 8
-		numVectors := len(binaryData) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(binaryData), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1291,12 +1293,15 @@ func (w *NativePayloadWriter) addFloat16VectorArrayToPayload(builder *array.List
 			return merr.WrapErrParameterInvalidMsg("expected Float16Vector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		float16Data := vectorField.GetFloat16Vector()
 		byteWidth := data.Dim * 2
-		numVectors := len(float16Data) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(float16Data), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1322,12 +1327,15 @@ func (w *NativePayloadWriter) addBFloat16VectorArrayToPayload(builder *array.Lis
 			return merr.WrapErrParameterInvalidMsg("expected BFloat16Vector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		bfloat16Data := vectorField.GetBfloat16Vector()
 		byteWidth := data.Dim * 2
-		numVectors := len(bfloat16Data) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(bfloat16Data), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1353,11 +1361,14 @@ func (w *NativePayloadWriter) addInt8VectorArrayToPayload(builder *array.ListBui
 			return merr.WrapErrParameterInvalidMsg("expected Int8Vector but got different type")
 		}
 
+		int8Data := vectorField.GetInt8Vector()
+		numVectors, err := validateVectorArrayElementCount(len(int8Data), int(data.Dim))
+		if err != nil {
+			return err
+		}
+
 		// Start a new list for this row
 		builder.Append(true)
-
-		int8Data := vectorField.GetInt8Vector()
-		numVectors := len(int8Data) / int(data.Dim)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(data.Dim)

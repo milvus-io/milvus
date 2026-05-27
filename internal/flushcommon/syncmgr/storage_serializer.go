@@ -23,12 +23,12 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type storageV1Serializer struct {
@@ -62,6 +62,9 @@ func NewStorageSerializer(metacache metacache.MetaCache, schema *schemapb.Collec
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*storage.Blob), nil
+	}
+	if err := storage.ValidateStorageV1InsertWritableSchema(s.schema); err != nil {
+		return nil, err
 	}
 	log := log.Ctx(ctx)
 	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData...)

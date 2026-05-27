@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <utility>
@@ -101,6 +102,40 @@ BuildVectorArrayListArray(const std::vector<int>& vectors_per_row,
     return std::static_pointer_cast<arrow::ListArray>(result);
 }
 
+std::shared_ptr<arrow::ListArray>
+BuildNullableFloatVectorArrayListArray(
+    const std::vector<std::optional<int>>& vectors_per_row, int dim) {
+    auto value_type = arrow::fixed_size_binary(dim * sizeof(float));
+    arrow::ListBuilder list_builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::FixedSizeBinaryBuilder>(value_type));
+    auto& fsb_builder = dynamic_cast<arrow::FixedSizeBinaryBuilder&>(
+        *list_builder.value_builder());
+
+    float value = 1.0F;
+    for (const auto& vector_count : vectors_per_row) {
+        if (!vector_count.has_value()) {
+            EXPECT_TRUE(list_builder.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(list_builder.Append().ok());
+        for (int vec = 0; vec < vector_count.value(); ++vec) {
+            std::vector<float> vector_data(dim);
+            for (int d = 0; d < dim; ++d) {
+                vector_data[d] = value++;
+            }
+            EXPECT_TRUE(fsb_builder
+                            .Append(reinterpret_cast<const uint8_t*>(
+                                vector_data.data()))
+                            .ok());
+        }
+    }
+
+    std::shared_ptr<arrow::Array> result;
+    EXPECT_TRUE(list_builder.Finish(&result).ok());
+    return std::static_pointer_cast<arrow::ListArray>(result);
+}
+
 // Test parameter structure for parameterized tests
 struct VectorArrayWriterTestParam {
     DataType data_type;
@@ -139,7 +174,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, BasicNoSlice) {
 
     arrow::ArrayVector vec{list_array};
 
-    VectorArrayChunkWriter writer(dim(), data_type());
+    VectorArrayChunkWriter writer(dim(), data_type(), false);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
     // Expected size:
@@ -159,7 +194,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, BasicNoSlice) {
     // Create chunk from target data
     auto* data = target->release();
     auto chunk = std::make_unique<VectorArrayChunk>(
-        dim(), row_count, data, calculated_size, data_type(), nullptr);
+        dim(), row_count, data, calculated_size, data_type(), nullptr, false);
     ASSERT_NE(chunk, nullptr);
     EXPECT_EQ(chunk->RowNums(), 5);
 }
@@ -191,7 +226,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SlicedListArray) {
 
     arrow::ArrayVector vec{sliced_array};
 
-    VectorArrayChunkWriter writer(dim(), data_type());
+    VectorArrayChunkWriter writer(dim(), data_type(), false);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
     // Expected size with the fix:
@@ -211,7 +246,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SlicedListArray) {
     // Create chunk from target data
     auto* data = target->release();
     auto chunk = std::make_unique<VectorArrayChunk>(
-        dim(), row_count, data, calculated_size, data_type(), nullptr);
+        dim(), row_count, data, calculated_size, data_type(), nullptr, false);
     ASSERT_NE(chunk, nullptr);
     EXPECT_EQ(chunk->RowNums(), 4);
 }
@@ -245,7 +280,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, MultipleSlicedArrays) {
 
     arrow::ArrayVector vec{sliced1, sliced2};
 
-    VectorArrayChunkWriter writer(dim(), data_type());
+    VectorArrayChunkWriter writer(dim(), data_type(), false);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
     int expected_data_size = expected_vectors * byte_width();
@@ -261,7 +296,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, MultipleSlicedArrays) {
     // Create chunk from target data
     auto* data = target->release();
     auto chunk = std::make_unique<VectorArrayChunk>(
-        dim(), row_count, data, calculated_size, data_type(), nullptr);
+        dim(), row_count, data, calculated_size, data_type(), nullptr, false);
     ASSERT_NE(chunk, nullptr);
     EXPECT_EQ(chunk->RowNums(), expected_rows);
 }
@@ -280,7 +315,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SliceFromBeginning) {
 
     arrow::ArrayVector vec{sliced};
 
-    VectorArrayChunkWriter writer(dim(), data_type());
+    VectorArrayChunkWriter writer(dim(), data_type(), false);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
     int expected_data_size = 5 * byte_width();
@@ -304,7 +339,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SliceToEnd) {
 
     arrow::ArrayVector vec{sliced};
 
-    VectorArrayChunkWriter writer(dim(), data_type());
+    VectorArrayChunkWriter writer(dim(), data_type(), false);
     auto [calculated_size, row_count] = writer.calculate_size(vec);
 
     int expected_data_size = 6 * byte_width();
@@ -343,7 +378,7 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SizeConsistencyWithSlice) {
 
         arrow::ArrayVector vec{sliced};
 
-        VectorArrayChunkWriter writer(test_dim, data_type());
+        VectorArrayChunkWriter writer(test_dim, data_type(), false);
         auto [calculated_size, row_count] = writer.calculate_size(vec);
         EXPECT_EQ(row_count, length);
 
@@ -354,12 +389,58 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SizeConsistencyWithSlice) {
 
         // Create chunk from target data
         auto* data = target->release();
-        auto chunk = std::make_unique<VectorArrayChunk>(
-            test_dim, row_count, data, calculated_size, data_type(), nullptr);
+        auto chunk = std::make_unique<VectorArrayChunk>(test_dim,
+                                                        row_count,
+                                                        data,
+                                                        calculated_size,
+                                                        data_type(),
+                                                        nullptr,
+                                                        false);
         ASSERT_NE(chunk, nullptr)
             << "Failed for slice(" << offset << ", " << length << ")";
         EXPECT_EQ(chunk->RowNums(), length);
     }
+}
+
+TEST(VectorArrayChunkWriterTest, NullableRowsRoundTripThroughChunkViews) {
+    constexpr int dim = 2;
+    auto list_array =
+        BuildNullableFloatVectorArrayListArray({1, std::nullopt, 2}, dim);
+    ASSERT_EQ(list_array->length(), 3);
+    ASSERT_EQ(list_array->null_count(), 1);
+
+    arrow::ArrayVector vec{list_array};
+    VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT, true);
+    auto [calculated_size, row_count] = writer.calculate_size(vec);
+
+    const int expected_valid_rows = 2;
+    const int expected_vectors = 3;
+    const int expected_size =
+        (row_count + 7) / 8 + sizeof(uint32_t) * (expected_valid_rows * 2 + 1) +
+        expected_vectors * dim * sizeof(float) + MMAP_ARRAY_PADDING;
+    EXPECT_EQ(calculated_size, expected_size);
+    EXPECT_EQ(row_count, 3);
+
+    auto target = std::make_shared<MemChunkTarget>(calculated_size);
+    writer.write_to_target(vec, target);
+
+    auto* data = target->release();
+    VectorArrayChunk chunk(dim,
+                           row_count,
+                           data,
+                           calculated_size,
+                           DataType::VECTOR_FLOAT,
+                           nullptr,
+                           true);
+    auto [views, valid] = chunk.Views();
+    ASSERT_EQ(views.size(), 3);
+    ASSERT_EQ(valid.size(), 3);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_FALSE(valid[1]);
+    EXPECT_TRUE(valid[2]);
+    EXPECT_EQ(views[0].length(), 1);
+    EXPECT_EQ(views[1].length(), 0);
+    EXPECT_EQ(views[2].length(), 2);
 }
 
 // Instantiate parameterized tests for all vector types

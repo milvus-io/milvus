@@ -28,22 +28,16 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-)
-
-const (
-	// TODO: sheep, make these parameters configurable
-	pendingMessageQueueLength  = 128
-	pendingMessageQueueMaxSize = 128 * 1024 * 1024
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var ErrReplicationRemoved = errors.New("replication removed")
@@ -68,8 +62,8 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 	ctx1 = contextutil.WithClusterID(ctx1, channel.Value.GetTargetCluster().GetClusterId())
 
 	options := MsgQueueOptions{
-		Capacity: pendingMessageQueueLength,
-		MaxSize:  pendingMessageQueueMaxSize,
+		Capacity: paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueLength.GetAsInt(),
+		MaxSize:  paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueMaxSize.GetAsInt(),
 	}
 	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{

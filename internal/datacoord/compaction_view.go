@@ -21,10 +21,10 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type CompactionView interface {
@@ -36,6 +36,12 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 	ForceTriggerAll() ([]CompactionView, string)
 	GetTriggerID() int64
+	// IsInlineExecutable reports whether this view should be applied directly inside
+	// datacoord by CompactionTriggerManager rather than dispatched as a compaction
+	// task to the inspector. Inline views consume no inspector slot and do not depend
+	// on a free queue, so they must not be gated by inspector pressure.
+	// Default: false (most views are real compaction work).
+	IsInlineExecutable() bool
 }
 
 type FullViews struct {

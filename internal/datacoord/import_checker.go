@@ -28,12 +28,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type ImportChecker interface {
@@ -454,9 +454,15 @@ func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs 
 		return segment.GetIsImporting()
 	})
 
+	if len(isImportingSegments) == 0 {
+		return false
+	}
+
+	// TODO: CommitTimestamp will be assigned by the 2PC commit flow (see companion PR).
 	for _, segmentID := range isImportingSegments {
-		op := UpdateIsImporting(segmentID, false)
-		err := c.meta.UpdateSegmentsInfo(c.ctx, op)
+		err := c.meta.UpdateSegmentsInfo(c.ctx,
+			UpdateIsImporting(segmentID, false),
+		)
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return true

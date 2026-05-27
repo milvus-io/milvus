@@ -3,14 +3,16 @@ package storage
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestInsertDataSuite(t *testing.T) {
@@ -131,15 +133,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(161, s.iDataEmpty.GetMemorySize())
+		s.Equal(161+1, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(535, s.iDataOneRow.GetMemorySize())
+		s.Equal(535+1, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(734, s.iDataTwoRows.GetMemorySize())
+		s.Equal(734+1, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -171,7 +173,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0+9)
 	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 1)
-	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0)
+	// +1 byte: Nullable flag (VectorArrayFieldData has no L2PMapping under Plan B)
+	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+1)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 9)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 9)
@@ -193,7 +196,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28+9)
 	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8+9)
 	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+1)
-	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4)
+	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+1)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 17)
@@ -214,7 +217,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54+9)
 	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12+9)
 	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+1)
-	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4)
+	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4+1)
 }
 
 func (s *InsertDataSuite) TestGetRowSize() {
@@ -271,7 +274,7 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(161, s.iDataEmpty.GetMemorySize())
+	s.Equal(161+1, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
 		RowIDField:                     int64(3),
@@ -475,4 +478,207 @@ func (s *ArrayFieldDataSuite) TestArrayFieldData() {
 	s.Equal(126, insertData.GetMemorySize())
 	s.False(insertData.IsEmpty())
 	s.Equal(115, insertData.GetRowSize(0))
+}
+
+func makeFloatVec(dim int, vals ...float32) *schemapb.VectorField {
+	return &schemapb.VectorField{
+		Dim: int64(dim),
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: vals},
+		},
+	}
+}
+
+func TestNullableVectorAppendRowsRejectsNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	sparseRows := &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim: 8,
+			Contents: [][]byte{
+				typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1.0}),
+				typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2.0}),
+				typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3.0}),
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		fieldData FieldData
+		rows      any
+	}{
+		{
+			name:      "binary vector",
+			fieldData: &BinaryVectorFieldData{Dim: 8, Nullable: true},
+			rows:      []byte{0x01, 0x02, 0x03},
+		},
+		{
+			name:      "float vector",
+			fieldData: &FloatVectorFieldData{Dim: 2, Nullable: true},
+			rows:      []float32{1, 2, 3, 4, 5, 6},
+		},
+		{
+			name:      "float16 vector",
+			fieldData: &Float16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "bfloat16 vector",
+			fieldData: &BFloat16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "sparse vector",
+			fieldData: &SparseFloatVectorFieldData{Nullable: true},
+			rows:      sparseRows,
+		},
+		{
+			name:      "int8 vector",
+			fieldData: &Int8VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []int8{1, 2, 3, 4, 5, 6},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fieldData.AppendRows(tt.rows, validData)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+			assert.Equal(t, 0, tt.fieldData.RowNum())
+			assert.Empty(t, nullableVectorValidDataForTest(tt.fieldData))
+		})
+	}
+}
+
+func nullableVectorValidDataForTest(fieldData FieldData) []bool {
+	switch data := fieldData.(type) {
+	case *BinaryVectorFieldData:
+		return data.ValidData
+	case *FloatVectorFieldData:
+		return data.ValidData
+	case *Float16VectorFieldData:
+		return data.ValidData
+	case *BFloat16VectorFieldData:
+		return data.ValidData
+	case *SparseFloatVectorFieldData:
+		return data.ValidData
+	case *Int8VectorFieldData:
+		return data.ValidData
+	default:
+		return nil
+	}
+}
+
+func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	vec2 := makeFloatVec(4, 5, 6, 7, 8)
+
+	require.NoError(t, fd.AppendRow(vec0))
+	require.NoError(t, fd.AppendRow(nil))
+	require.NoError(t, fd.AppendRow(vec2))
+
+	assert.Equal(t, 3, fd.RowNum(), "RowNum should count all rows including null placeholders")
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense; null rows hold empty placeholders")
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+	assert.True(t, fd.GetNullable())
+
+	assert.Equal(t, vec0, fd.GetRow(0))
+	assert.Nil(t, fd.GetRow(1), "null row should return nil despite placeholder in Data")
+	assert.Equal(t, vec2, fd.GetRow(2))
+}
+
+func TestVectorArrayFieldData_NonNullable(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		Nullable:    false,
+	}
+
+	vec := makeFloatVec(4, 1, 2, 3, 4)
+	require.NoError(t, fd.AppendRow(vec))
+
+	assert.Equal(t, 1, fd.RowNum())
+	assert.False(t, fd.GetNullable())
+	assert.Nil(t, fd.GetValidData())
+	assert.Equal(t, vec, fd.GetRow(0))
+}
+
+func TestVectorArrayFieldData_AppendValidDataRows(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data: []*schemapb.VectorField{
+			makeFloatVec(4, 1, 2, 3, 4),
+			makeFloatVec(4, 5, 6, 7, 8),
+		},
+		Nullable: true,
+	}
+
+	err := fd.AppendValidDataRows([]bool{true, false, true})
+	require.NoError(t, err)
+
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+
+	assert.NoError(t, fd.AppendValidDataRows(nil))
+	assert.Error(t, fd.AppendValidDataRows("bad"))
+}
+
+func TestVectorArrayFieldData_GetMemorySize(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+		ValidData:   []bool{true, false},
+		Nullable:    true,
+	}
+
+	assert.Greater(t, fd.GetMemorySize(), 0)
+}
+
+func TestVectorArrayFieldData_AllNull(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, fd.AppendRow(nil))
+	}
+
+	assert.Equal(t, 3, fd.RowNum())
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense, null rows hold placeholders")
+	for i := 0; i < 3; i++ {
+		assert.Nil(t, fd.GetRow(i))
+	}
+}
+
+func TestNewFieldData_NullableArrayOfVector(t *testing.T) {
+	schema := &schemapb.FieldSchema{
+		FieldID:     100,
+		Name:        "vec_arr",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		Nullable:    true,
+		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+	fd, err := NewFieldData(schemapb.DataType_ArrayOfVector, schema, 10)
+	require.NoError(t, err)
+
+	vafd, ok := fd.(*VectorArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, vafd.Nullable)
+	assert.NotNil(t, vafd.ValidData)
+	assert.Equal(t, int64(4), vafd.Dim)
 }

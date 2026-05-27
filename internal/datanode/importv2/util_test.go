@@ -22,13 +22,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func Test_AppendSystemFieldsData(t *testing.T) {
@@ -531,6 +531,12 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			dataType: schemapb.DataType_Int8Vector,
 			nullable: true,
 		},
+		{
+			name:     "array of vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_ArrayOfVector,
+			nullable: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -551,6 +557,11 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			if tt.dataType == schemapb.DataType_Array {
 				fieldSchema.ElementType = schemapb.DataType_Int64
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
+			} else if tt.dataType == schemapb.DataType_ArrayOfVector {
+				fieldSchema.ElementType = schemapb.DataType_FloatVector
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams,
+					&commonpb.KeyValuePair{Key: common.DimKey, Value: "8"},
+					&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
 			} else if tt.dataType == schemapb.DataType_VarChar {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
 			} else if isVectorType && tt.dataType != schemapb.DataType_SparseFloatVector {

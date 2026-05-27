@@ -26,23 +26,23 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -97,11 +97,10 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			}
 			err := meta.GlobalFailedLoadCache.Get(collectionID)
 			if err != nil {
-				msg := "show collection failed"
-				log.Warn(msg, zap.Error(err))
-				status := merr.Status(errors.Wrap(err, msg))
+				err = merr.WrapErrCollectionNotLoaded(collectionID, err.Error())
+				log.Warn("show collection failed", zap.Error(err))
 				return &querypb.ShowCollectionsResponse{
-					Status: status,
+					Status: merr.Status(err),
 				}, nil
 			}
 
@@ -483,7 +482,25 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	}
 
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
-	s.jobScheduler.Add(syncJob)
+	go func() {
+		defer func() {
+			syncJob.PostExecute()
+			syncJob.Done()
+		}()
+
+		err := syncJob.PreExecute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+		err = syncJob.Execute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+	}()
 	err := syncJob.Wait()
 	if err != nil {
 		log.Warn(failedMsg, zap.Error(err))
@@ -814,7 +831,16 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}, nil
 	}
 
-	leaders, err := utils.GetShardLeaders(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, req.GetCollectionID(), req.GetWithUnserviceableShards())
+	leaders, err := utils.GetShardLeadersWithReplicaFilter(ctx,
+		s.meta,
+		s.targetMgr,
+		s.dist,
+		s.nodeMgr,
+		req.GetCollectionID(),
+		req.GetWithUnserviceableShards(),
+		func(replica *meta.Replica) bool {
+			return replica.IsQueryVisible()
+		})
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Status(err),
 		Shards: leaders,

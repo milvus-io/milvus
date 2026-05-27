@@ -14,7 +14,7 @@ package indexparamcheck
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 // TODO: add more test cases which `IndexChecker.CheckTrain` return false,

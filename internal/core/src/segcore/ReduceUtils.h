@@ -21,9 +21,9 @@
 namespace milvus::segcore {
 
 void
-AssembleGroupByValues(
+AssembleCompositeGroupByValues(
     std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
-    const std::vector<GroupByValueType>& group_by_vals,
+    const std::vector<CompositeGroupKey>& composite_group_by_vals,
     milvus::query::Plan* plan);
 
 }

@@ -171,6 +171,10 @@ InterimSealedIndexTranslator::get_cells(
     }
 
     auto num_chunk = vec_data_->num_chunks();
+    // Interim index is a scan-the-world consumer: needs full valid_data_.
+    if (vec_data_->IsNullable() && vec_data_->GetValidData().empty()) {
+        vec_data_->BuildValidRowIds(ctx);
+    }
     const auto& offset_mapping = vec_data_->GetOffsetMapping();
     bool nullable = offset_mapping.IsEnabled();
     const auto& valid_count_per_chunk =

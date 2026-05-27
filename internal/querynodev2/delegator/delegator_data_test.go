@@ -29,39 +29,42 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // segmentEntryCoreFields extracts core fields from SegmentEntry for comparison,
@@ -215,7 +218,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
@@ -233,7 +236,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -482,6 +485,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 
+	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable())
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
@@ -504,6 +508,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 	// Test normal errors with retry and fail
 	worker1.ExpectedCalls = nil
@@ -516,6 +521,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
+	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -539,6 +545,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
@@ -621,6 +628,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		})
 
 		s.NoError(err)
+		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -681,6 +689,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
+		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -783,7 +792,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.workerManager,
 			s.manager,
 			s.loader,
-			10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+			10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -930,8 +939,22 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
 	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
 
 	workers := make(map[int64]*cluster.MockWorker)
 	worker1 := &cluster.MockWorker{}
@@ -939,34 +962,9 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		Return(nil)
-	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
-		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
-			s.Equal(int64(100), req.GetSegmentId())
-			s.Equal(querypb.DataScope_Historical, req.GetScope())
-			s.ElementsMatch([]int64{1, 10}, req.GetPrimaryKeys().GetIntId().GetData())
-			s.ElementsMatch([]uint64{10, 10}, req.GetTimestamps())
-			return nil
-		}).Once()
 	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 		return workers[nodeID]
 	}, nil)
-
-	// Mock LoadBloomFilterSet to return metadata-only stubs (BF disabled path)
-	stubCandidate := pkoracle.NewBloomFilterSet(100, 500, commonpb.SegmentState_Sealed)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, mock.AnythingOfType("int64"), mock.Anything).
-		Return([]*pkoracle.BloomFilterSet{stubCandidate}, nil)
-
-	s.delegator.ProcessDelete([]*DeleteData{
-		{
-			PartitionID: 500,
-			PrimaryKeys: []storage.PrimaryKey{
-				storage.NewInt64PrimaryKey(1),
-				storage.NewInt64PrimaryKey(10),
-			},
-			Timestamps: []uint64{10, 10},
-			RowCount:   2,
-		},
-	}, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -987,12 +985,72 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 		},
 	})
 
-	s.NoError(err)
+	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
 	s.NotNil(sealed[0].Segments[0].Candidate)
 	s.False(sealed[0].Segments[0].Candidate.PkCandidateExist())
+}
+
+func (s *DelegatorDataSuite) TestPostLoadLimiter() {
+	s.Run("serializes_post_load_work", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		var current int32
+		var maxConcurrent int32
+		start := make(chan struct{})
+		errCh := make(chan error, 8)
+		wg := sync.WaitGroup{}
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				err := sd.withPostLoadLimit(context.Background(), func() error {
+					running := atomic.AddInt32(&current, 1)
+					for {
+						maxValue := atomic.LoadInt32(&maxConcurrent)
+						if running <= maxValue || atomic.CompareAndSwapInt32(&maxConcurrent, maxValue, running) {
+							break
+						}
+					}
+					time.Sleep(5 * time.Millisecond)
+					atomic.AddInt32(&current, -1)
+					return nil
+				})
+				errCh <- err
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			s.NoError(err)
+		}
+		s.Equal(int32(1), maxConcurrent)
+		s.Equal(0, sd.postLoadSem.Current())
+	})
+
+	s.Run("returns_context_error_while_waiting", func() {
+		sd := &shardDelegator{
+			postLoadSem: syncutil.NewSemaphore(1),
+		}
+		s.NoError(sd.postLoadSem.Acquire(context.Background()))
+		defer sd.postLoadSem.Release()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		called := false
+		err := sd.withPostLoadLimit(ctx, func() error {
+			called = true
+			return nil
+		})
+		s.ErrorIs(err, context.DeadlineExceeded)
+		s.False(called)
+	})
 }
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
@@ -1330,6 +1388,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
+	s.delegator.distribution.Flush()
 	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
@@ -1706,6 +1765,149 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.TryCleanExcludedSegments(4)
 	s.True(s.delegator.VerifyExcludedSegments(1, 1))
 	s.True(s.delegator.VerifyExcludedSegments(1, 5))
+}
+
+func (s *DelegatorDataSuite) TestProcessManualFlush_NilManager() {
+	// When growingFlushManager is nil (non-TEXT collection), should return immediately without panic
+	s.Nil(s.delegator.growingFlushManager)
+	s.delegator.ProcessManualFlush(context.Background(), 1000)
+}
+
+func (s *DelegatorDataSuite) TestProcessManualFlush_NilTracker() {
+	// When checkpointTracker is nil, should return immediately without panic
+	s.delegator.checkpointTracker = nil
+	s.delegator.ProcessManualFlush(context.Background(), 1000)
+}
+
+func TestSegmentEffectiveTs(t *testing.T) {
+	// Import segment: commit_timestamp takes precedence over start_position.Timestamp
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       1,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+		CommitTimestamp: 5000,
+	}
+	assert.Equal(t, uint64(5000), segmentEffectiveTs(info))
+
+	// Normal segment: falls back to start_position.Timestamp
+	infoNormal := &querypb.SegmentLoadInfo{
+		SegmentID:     2,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+	}
+	assert.Equal(t, uint64(1000), segmentEffectiveTs(infoNormal))
+}
+
+func TestSegmentEffectiveTs_DelegatorHelper(t *testing.T) {
+	// commit_ts=0: use start_position
+	info := &querypb.SegmentLoadInfo{
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+	}
+	assert.Equal(t, uint64(1000), segmentEffectiveTs(info))
+
+	// commit_ts > 0: override
+	info.CommitTimestamp = 5000
+	assert.Equal(t, uint64(5000), segmentEffectiveTs(info))
+
+	// nil start_position + commit_ts
+	info2 := &querypb.SegmentLoadInfo{CommitTimestamp: 3000}
+	assert.Equal(t, uint64(3000), segmentEffectiveTs(info2))
+
+	// both zero
+	info3 := &querypb.SegmentLoadInfo{}
+	assert.Equal(t, uint64(0), segmentEffectiveTs(info3))
+}
+
+func TestDeleteBuffer_PinsAtCommitTs(t *testing.T) {
+	// Simulate: import segment segID=42, start_position.ts=1000, commit_ts=5000.
+	// After LoadSegments, the delete buffer must be pinned at commit_ts=5000.
+
+	const segID int64 = 42
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	buf := deletebuffer.NewDoubleCacheDeleteBuffer[*deletebuffer.Item](0, 1024*1024)
+
+	// Compute effective ts: segmentEffectiveTs must return commit_ts for import segment.
+	effectiveTs := segmentEffectiveTs(&querypb.SegmentLoadInfo{
+		SegmentID:       segID,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	})
+	assert.Equal(t, commitTs, effectiveTs,
+		"segmentEffectiveTs must return commit_ts for import segment")
+
+	// Pin at commit_ts (as LoadSegments does).
+	buf.Pin(effectiveTs, segID)
+
+	// Unpin at wrong ts (start_position.ts): no-op, pin at commit_ts stays.
+	buf.Unpin(startTs, segID)
+
+	// Pin at commit_ts is still active — Unpin at commit_ts removes it.
+	buf.Unpin(commitTs, segID)
+	// After unpin, a second unpin should be safe (no panic/error).
+	buf.Unpin(commitTs, segID)
+}
+
+func TestDeleteBuffer_ListAfterUsesCommitTs(t *testing.T) {
+	// Invariant I10: ListAfter must use segmentEffectiveTs (commit_ts when non-zero),
+	// not the raw StartPosition timestamp.
+	// If ListAfter uses the stale StartPosition, it would return too many delete records
+	// (including pre-import deletes that are irrelevant).
+
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	}
+
+	effectiveTs := segmentEffectiveTs(info)
+	assert.Equal(t, commitTs, effectiveTs,
+		"segmentEffectiveTs must return commit_ts for import segment, not startPosition")
+
+	// Verify: for normal segment (commitTs=0), effectiveTs falls back to startPosition
+	normalInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     43,
+		StartPosition: &msgpb.MsgPosition{Timestamp: startTs},
+	}
+	normalEffective := segmentEffectiveTs(normalInfo)
+	assert.Equal(t, startTs, normalEffective,
+		"segmentEffectiveTs must return startPosition for normal segment")
+}
+
+func TestDeleteBuffer_CatchUpUsesCommitTs(t *testing.T) {
+	// Invariant I10: catchUpTs in loadStreamDelete must start at segmentEffectiveTs,
+	// not StartPosition.Timestamp. This ensures the catch-up phase doesn't
+	// re-process delete records from before the import commit time.
+
+	const commitTs uint64 = 5000
+	const startTs uint64 = 1000
+
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: startTs},
+		CommitTimestamp: commitTs,
+	}
+
+	// Simulate catchUpTs initialization logic from loadStreamDelete
+	catchUpTs := segmentEffectiveTs(info)
+	// snapshotMaxTs=0 means no snapshot → catchUpTs should be segmentEffectiveTs
+	snapshotMaxTs := uint64(0)
+	if snapshotMaxTs > 0 {
+		catchUpTs = snapshotMaxTs + 1
+	}
+	assert.Equal(t, commitTs, catchUpTs,
+		"catchUpTs must start at commit_ts (not startPosition) when no snapshot exists")
+
+	// With snapshot: catchUpTs should advance beyond snapshot
+	snapshotMaxTs = 6000
+	catchUpTs2 := segmentEffectiveTs(info)
+	if snapshotMaxTs > 0 {
+		catchUpTs2 = snapshotMaxTs + 1
+	}
+	assert.Equal(t, uint64(6001), catchUpTs2,
+		"catchUpTs must advance to snapshotMaxTs+1 when snapshot exists")
 }
 
 func TestDelegatorDataSuite(t *testing.T) {

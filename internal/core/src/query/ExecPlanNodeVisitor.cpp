@@ -346,8 +346,10 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 "Element Level Find", tracer::GetRootSpan(), true);
             auto array_offsets = query_context->get_array_offsets();
             auto [doc_offsets, element_indices, has_more] =
-                segment->find_first_n_element(
-                    node.limit_, view, array_offsets.get());
+                segment->find_first_n_element(node.limit_,
+                                              view,
+                                              array_offsets.get(),
+                                              node.query_iterator_cursor_);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
             tmp_retrieve_result.has_more_result = has_more;
@@ -442,6 +444,11 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            if (enable_expr_cache_) {
+                query_context->set_enable_expr_cache(true);
+                query_context->set_enable_sub_expr_cache_write(false);
+            }
+
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
@@ -491,6 +498,10 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
+    if (enable_expr_cache_) {
+        query_context->set_enable_expr_cache(true);
+        query_context->set_enable_sub_expr_cache_write(false);
+    }
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);

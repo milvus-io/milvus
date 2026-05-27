@@ -31,8 +31,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
@@ -44,19 +44,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	_ "github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ Task = (*statsTask)(nil)
@@ -227,7 +227,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime)
+	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime, 0)
 
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
@@ -580,6 +580,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			for _, info := range indexStats.GetSerializedIndexInfos() {
 				uploaded[info.FileName] = info.FileSize
 			}
+			// TextMatch upload returns relative filenames. Store full paths in
+			// metadata/task results for mixed-version compatibility.
+			statsFiles := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
@@ -587,7 +590,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 				FieldID:                   field.GetFieldID(),
 				Version:                   version,
 				BuildID:                   taskID,
-				Files:                     lo.Keys(uploaded),
+				Files:                     statsFiles,
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(st.req.GetCurrentScalarIndexVersion()),
@@ -597,7 +600,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			log.Info("field enable match, create text index done",
 				zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
 				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", lo.Keys(uploaded)),
+				zap.Strings("files", statsFiles),
 			)
 			return nil
 		})
@@ -608,24 +611,10 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	}
 
 	// When manifest_path is set, register text index stats in manifest.
-	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
-	// before registering with manifest (loon library expects absolute paths).
-	// Use a separate copy for manifest so the original stats retain relative paths
-	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
+	// TextStatsLogs already carries full object keys for mixed-version compatibility;
+	// AddStatsToManifest stores the manifest-relative representation at commit time.
 	if st.manifestPath != "" && len(textIndexLogs) > 0 {
-		manifestStats := make(map[int64]*datapb.TextIndexStats, len(textIndexLogs))
-		for fieldID, stats := range textIndexLogs {
-			cloned := proto.Clone(stats).(*datapb.TextIndexStats)
-			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "text_index", stats.GetFieldID())
-			if err != nil {
-				return err
-			}
-			for i, f := range cloned.GetFiles() {
-				cloned.Files[i] = basePath + "/" + f
-			}
-			manifestStats[fieldID] = cloned
-		}
-		statEntries := packed.TextIndexStatEntries(manifestStats, st.req.GetCurrentScalarIndexVersion())
+		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
@@ -742,7 +731,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 				JSONStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
 				JSONStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
-			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_key_index", field.GetFieldID())
+			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_stats", field.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -794,7 +783,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
 			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
-			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_key_index", stats.GetFieldID())
+			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_stats", stats.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -851,7 +840,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 		return metautil.BuildTextIndexPrefix(rootPath,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
-	case "json_key_index":
+	case "json_stats":
 		return metautil.BuildJSONKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil

@@ -5,12 +5,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestFilterZeroValuesFromSlice(t *testing.T) {
@@ -595,4 +595,44 @@ func TestVirtualPKRoundTrip(t *testing.T) {
 		assert.True(t, IsVirtualPKFromSegment(virtualPK, tc.segmentID),
 			"IsVirtualPKFromSegment should return true for input segmentID=%d", tc.segmentID)
 	}
+}
+
+func TestIsExternalCollectionLazyLoad(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("all_external_fields_disable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_field",
+					ExternalField: "source_col",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("non_external_fields_ignored", func(t *testing.T) {
+		// Fields without ExternalField are skipped
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "normal_field"},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("external_field_not_disable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_field",
+					ExternalField: "source_col",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupSync}},
+				},
+			},
+		}
+		assert.False(t, isExternalCollectionLazyLoad(schema))
+	})
 }

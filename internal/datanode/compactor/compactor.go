@@ -17,9 +17,9 @@
 package compactor
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 //go:generate mockery --name=Compactor --structname=MockCompactor --output=./  --filename=mock_compactor.go --with-expecter --inpackage

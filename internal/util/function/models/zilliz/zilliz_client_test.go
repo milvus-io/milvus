@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/modelservicepb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb"
 )
 
 const bufSize = 1024 * 1024

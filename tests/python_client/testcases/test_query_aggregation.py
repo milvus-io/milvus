@@ -12,15 +12,15 @@ PR: #44394
 Issue: #36380
 """
 
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
 from common import common_func as cf
-from utils.util_log import test_log as log
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
+from utils.util_log import test_log as log
 
 prefix = "query_aggregation"
 default_nb = 3000
@@ -152,12 +152,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Create index on vectowr field
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=self.vector_field_name,
-            metric_type="L2",
-            index_type="FLAT",
-            params={}
-        )
+        index_params.add_index(field_name=self.vector_field_name, metric_type="L2", index_type="FLAT", params={})
         self.create_index(client, self.collection_name, index_params=index_params)
 
         # Load collection
@@ -188,23 +183,22 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(c2)"]
+            output_fields=[self.c1_field_name, "count(c2)"],
         )
 
         # Should return all 7 groups
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Calculate ground truth
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            count_c2=(self.c2_field_name, "count")
-        ).reset_index()
+        ground_truth = self.datas.groupby(self.c1_field_name).agg(count_c2=(self.c2_field_name, "count")).reset_index()
 
         # Verify each group's count
         for result in results:
             c1_value = result[self.c1_field_name]
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
-            assert result["count(c2)"] == expected["count_c2"], \
+            assert result["count(c2)"] == expected["count_c2"], (
                 f"COUNT mismatch for c1={c1_value}: {result['count(c2)']} != {expected['count_c2']}"
+            )
 
         log.info(f"test_basic_group_by_count_no_filter_no_limit passed: {len(results)} groups verified")
 
@@ -224,27 +218,30 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(c2)", "sum(c3)"]
+            output_fields=[self.c1_field_name, "count(c2)", "sum(c3)"],
         )
 
         # Verify number of groups
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Calculate ground truth
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            count_c2=(self.c2_field_name, "count"),
-            sum_c3=(self.c3_field_name, "sum")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"), sum_c3=(self.c3_field_name, "sum"))
+            .reset_index()
+        )
 
         # Verify each group's aggregation values
         for result in results:
             c1_value = result[self.c1_field_name]
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
-            assert result["count(c2)"] == expected["count_c2"], \
+            assert result["count(c2)"] == expected["count_c2"], (
                 f"COUNT mismatch for c1={c1_value}: {result['count(c2)']} != {expected['count_c2']}"
-            assert result["sum(c3)"] == expected["sum_c3"], \
+            )
+            assert result["sum(c3)"] == expected["sum_c3"], (
                 f"SUM mismatch for c1={c1_value}: {result['sum(c3)']} != {expected['sum_c3']}"
+            )
 
         log.info(f"test_single_column_group_by_count_sum passed: {len(results)} groups verified")
 
@@ -264,7 +261,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name, self.c6_field_name],
-            output_fields=[self.c1_field_name, self.c6_field_name, "min(c2)", "max(c2)"]
+            output_fields=[self.c1_field_name, self.c6_field_name, "min(c2)", "max(c2)"],
         )
 
         # Verify number of groups (should be up to 49, but actual may be less)
@@ -272,24 +269,22 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         log.info(f"Got {len(results)} groups from multi-column GROUP BY")
 
         # Calculate ground truth
-        ground_truth = self.datas.groupby([self.c1_field_name, self.c6_field_name]).agg(
-            min_c2=(self.c2_field_name, "min"),
-            max_c2=(self.c2_field_name, "max")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby([self.c1_field_name, self.c6_field_name])
+            .agg(min_c2=(self.c2_field_name, "min"), max_c2=(self.c2_field_name, "max"))
+            .reset_index()
+        )
 
         # Verify each group's aggregation values
         for result in results:
             c1_value = result[self.c1_field_name]
             c6_value = result[self.c6_field_name]
             expected = ground_truth[
-                (ground_truth[self.c1_field_name] == c1_value) &
-                (ground_truth[self.c6_field_name] == c6_value)
+                (ground_truth[self.c1_field_name] == c1_value) & (ground_truth[self.c6_field_name] == c6_value)
             ].iloc[0]
 
-            assert result["min(c2)"] == expected["min_c2"], \
-                f"MIN mismatch for c1={c1_value}, c6={c6_value}"
-            assert result["max(c2)"] == expected["max_c2"], \
-                f"MAX mismatch for c1={c1_value}, c6={c6_value}"
+            assert result["min(c2)"] == expected["min_c2"], f"MIN mismatch for c1={c1_value}, c6={c6_value}"
+            assert result["max(c2)"] == expected["max_c2"], f"MAX mismatch for c1={c1_value}, c6={c6_value}"
 
         log.info(f"test_multi_column_group_by_min_max passed: {len(results)} groups verified")
 
@@ -308,17 +303,21 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"]
+            output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"],
         )
 
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Calculate ground truth
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            avg_c2=(self.c2_field_name, "mean"),
-            avg_c3=(self.c3_field_name, "mean"),
-            avg_c4=(self.c4_field_name, "mean")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(
+                avg_c2=(self.c2_field_name, "mean"),
+                avg_c3=(self.c3_field_name, "mean"),
+                avg_c4=(self.c4_field_name, "mean"),
+            )
+            .reset_index()
+        )
 
         # Verify AVG values and check they are float/double type
         for result in results:
@@ -326,20 +325,16 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
             # AVG should return float type
-            assert isinstance(result["avg(c2)"], (float, np.floating)), \
+            assert isinstance(result["avg(c2)"], (float, np.floating)), (
                 f"avg(c2) should be float type, got {type(result['avg(c2)'])}"
-            assert isinstance(result["avg(c3)"], (float, np.floating)), \
-                f"avg(c3) should be float type"
-            assert isinstance(result["avg(c4)"], (float, np.floating)), \
-                f"avg(c4) should be float type"
+            )
+            assert isinstance(result["avg(c3)"], (float, np.floating)), "avg(c3) should be float type"
+            assert isinstance(result["avg(c4)"], (float, np.floating)), "avg(c4) should be float type"
 
             # Verify values (allow small floating point errors)
-            assert abs(result["avg(c2)"] - expected["avg_c2"]) < 0.01, \
-                f"AVG(c2) mismatch for c1={c1_value}"
-            assert abs(result["avg(c3)"] - expected["avg_c3"]) < 0.01, \
-                f"AVG(c3) mismatch for c1={c1_value}"
-            assert abs(result["avg(c4)"] - expected["avg_c4"]) < 0.01, \
-                f"AVG(c4) mismatch for c1={c1_value}"
+            assert abs(result["avg(c2)"] - expected["avg_c2"]) < 0.01, f"AVG(c2) mismatch for c1={c1_value}"
+            assert abs(result["avg(c3)"] - expected["avg_c3"]) < 0.01, f"AVG(c3) mismatch for c1={c1_value}"
+            assert abs(result["avg(c4)"] - expected["avg_c4"]) < 0.01, f"AVG(c4) mismatch for c1={c1_value}"
 
         log.info("test_single_group_by_multiple_aggregations passed")
 
@@ -357,29 +352,27 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             self.collection_name,
             filter="c2 < 10",
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(c2)", "max(c3)"]
+            output_fields=[self.c1_field_name, "count(c2)", "max(c3)"],
         )
 
         # Filter data first
         filtered_data = self.datas[self.datas[self.c2_field_name] < 10]
-        ground_truth = filtered_data.groupby(self.c1_field_name).agg(
-            count_c2=(self.c2_field_name, "count"),
-            max_c3=(self.c3_field_name, "max")
-        ).reset_index()
+        ground_truth = (
+            filtered_data.groupby(self.c1_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"), max_c3=(self.c3_field_name, "max"))
+            .reset_index()
+        )
 
         # Number of groups may be less than 7 if some groups have no data after filter
         assert len(results) <= 7, f"Expected at most 7 groups, got {len(results)}"
-        assert len(results) == len(ground_truth), \
-            f"Group count mismatch: {len(results)} != {len(ground_truth)}"
+        assert len(results) == len(ground_truth), f"Group count mismatch: {len(results)} != {len(ground_truth)}"
 
         for result in results:
             c1_value = result[self.c1_field_name]
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
-            assert result["count(c2)"] == expected["count_c2"], \
-                f"COUNT mismatch for c1={c1_value} with filter"
-            assert result["max(c3)"] == expected["max_c3"], \
-                f"MAX mismatch for c1={c1_value} with filter"
+            assert result["count(c2)"] == expected["count_c2"], f"COUNT mismatch for c1={c1_value} with filter"
+            assert result["max(c3)"] == expected["max_c3"], f"MAX mismatch for c1={c1_value} with filter"
 
         log.info(f"test_group_by_with_filter passed: {len(results)} groups after filtering")
 
@@ -404,7 +397,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "avg(c2)"],
-            limit=limit
+            limit=limit,
         )
         assert len(results) <= limit, f"Expected at most {limit} groups, got {len(results)}"
 
@@ -417,7 +410,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="c2 >= 50",
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "count(c2)", "avg(c2)"],
-            limit=2
+            limit=2,
         )
 
         # Verify limit
@@ -426,10 +419,9 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         # Verify aggregations are from filtered data (c2 >= 50)
         for result in results_filtered:
             # avg should be >= 50 since we filtered c2 >= 50
-            assert result["avg(c2)"] >= 50, \
-                f"avg(c2) should be >= 50 after filter, got {result['avg(c2)']}"
+            assert result["avg(c2)"] >= 50, f"avg(c2) should be >= 50 after filter, got {result['avg(c2)']}"
 
-        log.info(f"test_group_by_with_limit passed: limit and filter+limit scenarios verified")
+        log.info("test_group_by_with_limit passed: limit and filter+limit scenarios verified")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_varchar_min_max(self):
@@ -446,26 +438,25 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "min(c6)", "max(c6)"]
+            output_fields=[self.c1_field_name, "min(c6)", "max(c6)"],
         )
 
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Calculate ground truth
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            min_c6=(self.c6_field_name, "min"),
-            max_c6=(self.c6_field_name, "max")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(min_c6=(self.c6_field_name, "min"), max_c6=(self.c6_field_name, "max"))
+            .reset_index()
+        )
 
         for result in results:
             c1_value = result[self.c1_field_name]
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
             # Verify values (lexicographical order)
-            assert result["min(c6)"] == expected["min_c6"], \
-                f"MIN(c6) mismatch for c1={c1_value}"
-            assert result["max(c6)"] == expected["max_c6"], \
-                f"MAX(c6) mismatch for c1={c1_value}"
+            assert result["min(c6)"] == expected["min_c6"], f"MIN(c6) mismatch for c1={c1_value}"
+            assert result["max(c6)"] == expected["max_c6"], f"MAX(c6) mismatch for c1={c1_value}"
 
             # Verify type is string
             assert isinstance(result["min(c6)"], str), "min(c6) should return string"
@@ -488,24 +479,23 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(ts)", "max(ts)"]
+            output_fields=[self.c1_field_name, "count(ts)", "max(ts)"],
         )
 
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            count_ts=(self.ts_field_name, "count"),
-            max_ts=(self.ts_field_name, "max")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(count_ts=(self.ts_field_name, "count"), max_ts=(self.ts_field_name, "max"))
+            .reset_index()
+        )
 
         for result in results:
             c1_value = result[self.c1_field_name]
             expected = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
-            assert result["count(ts)"] == expected["count_ts"], \
-                f"COUNT(ts) mismatch for c1={c1_value}"
-            assert result["max(ts)"] == expected["max_ts"], \
-                f"MAX(ts) mismatch for c1={c1_value}"
+            assert result["count(ts)"] == expected["count_ts"], f"COUNT(ts) mismatch for c1={c1_value}"
+            assert result["max(ts)"] == expected["max_ts"], f"MAX(ts) mismatch for c1={c1_value}"
 
         log.info("test_timestamp_aggregation passed")
 
@@ -525,7 +515,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "sum(c2)"]
+            output_fields=[self.c1_field_name, "sum(c2)"],
         )
 
         # Test integer SUM (Int32)
@@ -535,7 +525,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "sum(c3)"]
+            output_fields=[self.c1_field_name, "sum(c3)"],
         )
 
         # Test float SUM (Double)
@@ -545,24 +535,27 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "sum(c4)"]
+            output_fields=[self.c1_field_name, "sum(c4)"],
         )
 
         # Verify return types
         for result in results_int16:
             # Int16 SUM should return int64
-            assert isinstance(result["sum(c2)"], (int, np.integer)), \
+            assert isinstance(result["sum(c2)"], (int, np.integer)), (
                 f"sum(c2) should return int type, got {type(result['sum(c2)'])}"
+            )
 
         for result in results_int32:
             # Int32 SUM should return int64
-            assert isinstance(result["sum(c3)"], (int, np.integer)), \
+            assert isinstance(result["sum(c3)"], (int, np.integer)), (
                 f"sum(c3) should return int type, got {type(result['sum(c3)'])}"
+            )
 
         for result in results_double:
             # Double SUM should return double
-            assert isinstance(result["sum(c4)"], (float, np.floating)), \
+            assert isinstance(result["sum(c4)"], (float, np.floating)), (
                 f"sum(c4) should return float type, got {type(result['sum(c4)'])}"
+            )
 
         log.info("test_different_sum_return_types passed")
 
@@ -581,17 +574,20 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"]
+            output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"],
         )
 
         for result in results:
             # All AVG should return float/double type
-            assert isinstance(result["avg(c2)"], (float, np.floating)), \
+            assert isinstance(result["avg(c2)"], (float, np.floating)), (
                 f"avg(c2) should return float, got {type(result['avg(c2)'])}"
-            assert isinstance(result["avg(c3)"], (float, np.floating)), \
+            )
+            assert isinstance(result["avg(c3)"], (float, np.floating)), (
                 f"avg(c3) should return float, got {type(result['avg(c3)'])}"
-            assert isinstance(result["avg(c4)"], (float, np.floating)), \
+            )
+            assert isinstance(result["avg(c4)"], (float, np.floating)), (
                 f"avg(c4) should return float, got {type(result['avg(c4)'])}"
+            )
 
         log.info("test_avg_return_type passed")
 
@@ -609,7 +605,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             self.collection_name,
             filter="c2 > 10000",
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(c2)"]
+            output_fields=[self.c1_field_name, "count(c2)"],
         )
 
         # Should return empty result set
@@ -629,10 +625,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Most basic global aggregation: no GROUP BY, no filter, no limit
         results, _ = self.query(
-            client,
-            self.collection_name,
-            group_by_fields=[],
-            output_fields=["count(c2)", "sum(c2)", "avg(c3)"]
+            client, self.collection_name, group_by_fields=[], output_fields=["count(c2)", "sum(c2)", "avg(c3)"]
         )
 
         # Should return exactly 1 row
@@ -645,12 +638,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         expected_avg = self.datas[self.c3_field_name].mean()
 
         result = results[0]
-        assert result["count(c2)"] == expected_count, \
+        assert result["count(c2)"] == expected_count, (
             f"Global count mismatch: {result['count(c2)']} != {expected_count}"
-        assert result["sum(c2)"] == expected_sum, \
-            f"Global sum mismatch: {result['sum(c2)']} != {expected_sum}"
-        assert abs(result["avg(c3)"] - expected_avg) < 0.01, \
+        )
+        assert result["sum(c2)"] == expected_sum, f"Global sum mismatch: {result['sum(c2)']} != {expected_sum}"
+        assert abs(result["avg(c3)"] - expected_avg) < 0.01, (
             f"Global avg mismatch: {result['avg(c3)']} != {expected_avg}"
+        )
 
         log.info("test_global_aggregation_no_filter_no_limit passed")
 
@@ -672,7 +666,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             self.collection_name,
             filter="c2 >= 0",
             group_by_fields=[],
-            output_fields=["count(c2)", "sum(c2)", "avg(c3)"]
+            output_fields=["count(c2)", "sum(c2)", "avg(c3)"],
         )
 
         # Should return 1 row
@@ -686,12 +680,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         expected_avg = filtered_data[self.c3_field_name].mean()
 
         result = results[0]
-        assert result["count(c2)"] == expected_count, \
+        assert result["count(c2)"] == expected_count, (
             f"Global count mismatch: {result['count(c2)']} != {expected_count}"
-        assert result["sum(c2)"] == expected_sum, \
-            f"Global sum mismatch: {result['sum(c2)']} != {expected_sum}"
-        assert abs(result["avg(c3)"] - expected_avg) < 0.01, \
+        )
+        assert result["sum(c2)"] == expected_sum, f"Global sum mismatch: {result['sum(c2)']} != {expected_sum}"
+        assert abs(result["avg(c3)"] - expected_avg) < 0.01, (
             f"Global avg mismatch: {result['avg(c3)']} != {expected_avg}"
+        )
 
         log.info("test_global_aggregation_no_group_by passed")
 
@@ -707,21 +702,16 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # count(*) without GROUP BY should return total entity count
-        results, _ = self.query(
-            client,
-            self.collection_name,
-            filter="",
-            group_by_fields=[],
-            output_fields=["count(*)"]
-        )
+        results, _ = self.query(client, self.collection_name, filter="", group_by_fields=[], output_fields=["count(*)"])
 
         # Should return 1 row with total count
         assert len(results) == 1, f"Expected 1 row for count(*), got {len(results)}"
 
         # count(*) should equal total number of entities (3000)
         expected_count = len(self.datas)  # 3000
-        assert results[0]["count(*)"] == expected_count, \
+        assert results[0]["count(*)"] == expected_count, (
             f"count(*) mismatch: {results[0]['count(*)']} != {expected_count}"
+        )
 
         log.info("test_count_star_without_group_by passed")
 
@@ -739,37 +729,28 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Get count(*) - counts all entities
         results_star, _ = self.query(
-            client,
-            self.collection_name,
-            filter="",
-            group_by_fields=[],
-            output_fields=["count(*)"]
+            client, self.collection_name, filter="", group_by_fields=[], output_fields=["count(*)"]
         )
         count_star = results_star[0]["count(*)"]
 
         # Get count(c2) - excludes NULL values
         results_field, _ = self.query(
-            client,
-            self.collection_name,
-            filter="",
-            group_by_fields=[],
-            output_fields=["count(c2)"]
+            client, self.collection_name, filter="", group_by_fields=[], output_fields=["count(c2)"]
         )
         count_field = results_field[0]["count(c2)"]
 
         # Verify count(*) equals total entities
         expected_total = len(self.datas)  # 3000
-        assert count_star == expected_total, \
-            f"count(*) should equal total entities: {count_star} != {expected_total}"
+        assert count_star == expected_total, f"count(*) should equal total entities: {count_star} != {expected_total}"
 
         # Verify count(c2) excludes NULL (should be less than count(*))
         expected_non_null = self.datas[self.c2_field_name].count()  # ~2550
-        assert count_field == expected_non_null, \
-            f"count(c2) should exclude NULL: {count_field} != {expected_non_null}"
+        assert count_field == expected_non_null, f"count(c2) should exclude NULL: {count_field} != {expected_non_null}"
 
         # Verify count(*) > count(field) for nullable field
-        assert count_star > count_field, \
+        assert count_star > count_field, (
             f"count(*) should be greater than count(nullable_field): {count_star} <= {count_field}"
+        )
 
         log.info(f"count(*) = {count_star}, count(c2) = {count_field}, difference = {count_star - count_field}")
         log.info("test_count_star_vs_count_field passed")
@@ -788,11 +769,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Query count(*) and count(nullable_field) together in a single request
         results_together, _ = self.query(
-            client,
-            self.collection_name,
-            filter="",
-            group_by_fields=[],
-            output_fields=["count(*)", "count(c2)"]
+            client, self.collection_name, filter="", group_by_fields=[], output_fields=["count(*)", "count(c2)"]
         )
         count_star = results_together[0]["count(*)"]
         count_field = results_together[0]["count(c2)"]
@@ -801,16 +778,19 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         expected_non_null = self.datas[self.c2_field_name].count()
 
         # count(*) must return total entities, not non-NULL count
-        assert count_star == expected_total, \
+        assert count_star == expected_total, (
             f"count(*) should equal total entities when queried together: {count_star} != {expected_total}"
+        )
 
         # count(c2) must return non-NULL count
-        assert count_field == expected_non_null, \
+        assert count_field == expected_non_null, (
             f"count(c2) should exclude NULL when queried together: {count_field} != {expected_non_null}"
+        )
 
         # count(*) must be greater than count(nullable_field)
-        assert count_star > count_field, \
+        assert count_star > count_field, (
             f"count(*) should be greater than count(nullable_field): {count_star} <= {count_field}"
+        )
 
         log.info(f"Together: count(*) = {count_star}, count(c2) = {count_field}")
         log.info("test_count_star_and_count_field_together passed")
@@ -831,19 +811,20 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(*)"]
+            output_fields=[self.c1_field_name, "count(*)"],
         )
 
         # Should return 7 groups (unique values of c1)
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Verify count(*) for each group against pandas ground truth
-        ground_truth = self.datas.groupby(self.c1_field_name).size().reset_index(name='count_star')
+        ground_truth = self.datas.groupby(self.c1_field_name).size().reset_index(name="count_star")
         for result in results:
             c1_value = result[self.c1_field_name]
-            expected_count = int(ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]['count_star'])
-            assert result["count(*)"] == expected_count, \
+            expected_count = int(ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]["count_star"])
+            assert result["count(*)"] == expected_count, (
                 f"count(*) mismatch for c1={c1_value}: {result['count(*)']} != {expected_count}"
+            )
 
         log.info("test_count_star_with_group_by passed")
 
@@ -863,28 +844,30 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(*)", "count(c2)"]
+            output_fields=[self.c1_field_name, "count(*)", "count(c2)"],
         )
 
         assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
 
         # Ground truth from pandas
-        ground_truth = self.datas.groupby(self.c1_field_name).agg(
-            count_star=(self.c1_field_name, 'size'),
-            count_c2=(self.c2_field_name, 'count')
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c1_field_name)
+            .agg(count_star=(self.c1_field_name, "size"), count_c2=(self.c2_field_name, "count"))
+            .reset_index()
+        )
 
         for result in results:
             c1_value = result[self.c1_field_name]
             gt = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
 
-            assert result["count(*)"] == int(gt["count_star"]), \
+            assert result["count(*)"] == int(gt["count_star"]), (
                 f"count(*) mismatch for c1={c1_value}: {result['count(*)']} != {gt['count_star']}"
-            assert result["count(c2)"] == int(gt["count_c2"]), \
+            )
+            assert result["count(c2)"] == int(gt["count_c2"]), (
                 f"count(c2) mismatch for c1={c1_value}: {result['count(c2)']} != {gt['count_c2']}"
+            )
             # count(*) must be >= count(nullable_field)
-            assert result["count(*)"] >= result["count(c2)"], \
-                f"count(*) should be >= count(c2) for c1={c1_value}"
+            assert result["count(*)"] >= result["count(c2)"], f"count(*) should be >= count(c2) for c1={c1_value}"
 
         log.info("test_count_star_and_count_field_with_group_by passed")
 
@@ -933,32 +916,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             ["c1", "CoUnT(c2)", "sUm(c2)", "mIn(c2)", "MaX(c2)", "AvG(c3)"],
         ]
 
-        expected_group_a = {
-            "c1": "A",
-            "count": 2,
-            "sum": 30,
-            "min": 10,
-            "max": 20,
-            "avg": 2.0
-        }
+        expected_group_a = {"c1": "A", "count": 2, "sum": 30, "min": 10, "max": 20, "avg": 2.0}
 
-        expected_group_b = {
-            "c1": "B",
-            "count": 1,
-            "sum": 30,
-            "min": 30,
-            "max": 30,
-            "avg": 3.5
-        }
+        expected_group_b = {"c1": "B", "count": 1, "sum": 30, "min": 30, "max": 30, "avg": 3.5}
 
         for idx, output_fields in enumerate(test_cases):
             results, _ = self.query(
-                client,
-                collection_name,
-                filter="",
-                limit=100,
-                group_by_fields=["c1"],
-                output_fields=output_fields
+                client, collection_name, filter="", limit=100, group_by_fields=["c1"], output_fields=output_fields
             )
 
             # Verify results
@@ -976,28 +940,18 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             avg_key = output_fields[5]
 
             # Verify Group A
-            assert group_a[count_key] == expected_group_a["count"], \
-                f"Test case {idx}: Group A count mismatch"
-            assert group_a[sum_key] == expected_group_a["sum"], \
-                f"Test case {idx}: Group A sum mismatch"
-            assert group_a[min_key] == expected_group_a["min"], \
-                f"Test case {idx}: Group A min mismatch"
-            assert group_a[max_key] == expected_group_a["max"], \
-                f"Test case {idx}: Group A max mismatch"
-            assert abs(group_a[avg_key] - expected_group_a["avg"]) < 0.01, \
-                f"Test case {idx}: Group A avg mismatch"
+            assert group_a[count_key] == expected_group_a["count"], f"Test case {idx}: Group A count mismatch"
+            assert group_a[sum_key] == expected_group_a["sum"], f"Test case {idx}: Group A sum mismatch"
+            assert group_a[min_key] == expected_group_a["min"], f"Test case {idx}: Group A min mismatch"
+            assert group_a[max_key] == expected_group_a["max"], f"Test case {idx}: Group A max mismatch"
+            assert abs(group_a[avg_key] - expected_group_a["avg"]) < 0.01, f"Test case {idx}: Group A avg mismatch"
 
             # Verify Group B
-            assert group_b[count_key] == expected_group_b["count"], \
-                f"Test case {idx}: Group B count mismatch"
-            assert group_b[sum_key] == expected_group_b["sum"], \
-                f"Test case {idx}: Group B sum mismatch"
-            assert group_b[min_key] == expected_group_b["min"], \
-                f"Test case {idx}: Group B min mismatch"
-            assert group_b[max_key] == expected_group_b["max"], \
-                f"Test case {idx}: Group B max mismatch"
-            assert abs(group_b[avg_key] - expected_group_b["avg"]) < 0.01, \
-                f"Test case {idx}: Group B avg mismatch"
+            assert group_b[count_key] == expected_group_b["count"], f"Test case {idx}: Group B count mismatch"
+            assert group_b[sum_key] == expected_group_b["sum"], f"Test case {idx}: Group B sum mismatch"
+            assert group_b[min_key] == expected_group_b["min"], f"Test case {idx}: Group B min mismatch"
+            assert group_b[max_key] == expected_group_b["max"], f"Test case {idx}: Group B max mismatch"
+            assert abs(group_b[avg_key] - expected_group_b["avg"]) < 0.01, f"Test case {idx}: Group B avg mismatch"
 
             log.info(f"Test case {idx} with {output_fields[1]} passed")
 
@@ -1020,14 +974,15 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c7_field_name],
-            output_fields=[self.c7_field_name, "count(c2)", "sum(c3)"]
+            output_fields=[self.c7_field_name, "count(c2)", "sum(c3)"],
         )
 
         # Verify against ground truth
-        ground_truth = self.datas.groupby(self.c7_field_name).agg(
-            count_c2=(self.c2_field_name, "count"),
-            sum_c3=(self.c3_field_name, "sum")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c7_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"), sum_c3=(self.c3_field_name, "sum"))
+            .reset_index()
+        )
 
         # Should have 5 groups (unique INT8 values: 1, 2, 3, 4, 5)
         assert len(results) == 5, f"Expected 5 groups for INT8 field, got {len(results)}"
@@ -1036,10 +991,12 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         for result in results:
             c7_value = result[self.c7_field_name]
             expected = ground_truth[ground_truth[self.c7_field_name] == c7_value].iloc[0]
-            assert result["count(c2)"] == expected["count_c2"], \
+            assert result["count(c2)"] == expected["count_c2"], (
                 f"INT8 group {c7_value}: count mismatch, expected {expected['count_c2']}, got {result['count(c2)']}"
-            assert result["sum(c3)"] == expected["sum_c3"], \
+            )
+            assert result["sum(c3)"] == expected["sum_c3"], (
                 f"INT8 group {c7_value}: sum mismatch, expected {expected['sum_c3']}, got {result['sum(c3)']}"
+            )
 
         log.info("test_group_by_int8_field passed")
 
@@ -1059,14 +1016,15 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c8_field_name],
-            output_fields=[self.c8_field_name, "count(c2)", "avg(c4)"]
+            output_fields=[self.c8_field_name, "count(c2)", "avg(c4)"],
         )
 
         # Verify against ground truth
-        ground_truth = self.datas.groupby(self.c8_field_name).agg(
-            count_c2=(self.c2_field_name, "count"),
-            avg_c4=(self.c4_field_name, "mean")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c8_field_name)
+            .agg(count_c2=(self.c2_field_name, "count"), avg_c4=(self.c4_field_name, "mean"))
+            .reset_index()
+        )
 
         # Should have 5 groups (unique INT64 values: 100, 200, 300, 400, 500)
         assert len(results) == 5, f"Expected 5 groups for INT64 field, got {len(results)}"
@@ -1075,10 +1033,12 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         for result in results:
             c8_value = result[self.c8_field_name]
             expected = ground_truth[ground_truth[self.c8_field_name] == c8_value].iloc[0]
-            assert result["count(c2)"] == expected["count_c2"], \
+            assert result["count(c2)"] == expected["count_c2"], (
                 f"INT64 group {c8_value}: count mismatch, expected {expected['count_c2']}, got {result['count(c2)']}"
-            assert abs(result["avg(c4)"] - expected["avg_c4"]) < 0.01, \
+            )
+            assert abs(result["avg(c4)"] - expected["avg_c4"]) < 0.01, (
                 f"INT64 group {c8_value}: avg mismatch, expected {expected['avg_c4']}, got {result['avg(c4)']}"
+            )
 
         log.info("test_group_by_int64_field passed")
 
@@ -1105,7 +1065,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c1_field_name],
             output_fields=["count(c2)"],  # Missing c1 - should error
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_group_by_field_not_in_output_fields passed")
@@ -1120,7 +1080,10 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Try to group by vector field - should fail with invalid parameter error
-        error = {ct.err_code: 1100, ct.err_msg: f"group by field {self.vector_field_name} has unsupported data type FloatVector"}
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"group by field {self.vector_field_name} has unsupported data type FloatVector",
+        }
         self.query(
             client,
             self.collection_name,
@@ -1129,7 +1092,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.vector_field_name],
             output_fields=[self.vector_field_name, "count(c1)"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_unsupported_vector_field passed")
@@ -1144,7 +1107,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Try SUM on VarChar field
-        error = {ct.err_code: 65535, ct.err_msg: f"aggregation operator sum does not support data type VarChar"}
+        error = {ct.err_code: 65535, ct.err_msg: "aggregation operator sum does not support data type VarChar"}
         self.query(
             client,
             self.collection_name,
@@ -1153,7 +1116,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, f"sum({self.c6_field_name})"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_unsupported_aggregation_function_varchar passed")
@@ -1175,9 +1138,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, self.c3_field_name, "count(c2)"],  # c3 is neither group_by field nor aggregation
+            output_fields=[
+                self.c1_field_name,
+                self.c3_field_name,
+                "count(c2)",
+            ],  # c3 is neither group_by field nor aggregation
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_mixed_aggregation_and_non_aggregation_fields passed")
@@ -1202,7 +1169,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "median(c2)"],  # Unsupported function
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         # Test case 2: Malformed syntax (missing closing parenthesis)
@@ -1214,7 +1181,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "count(c2"],  # Missing closing parenthesis
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         # Test case 3: Empty function call
@@ -1226,7 +1193,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "count()"],  # Empty parameter
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_invalid_aggregation_function_syntax passed")
@@ -1251,7 +1218,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c9_field_name],
             output_fields=[self.c9_field_name, "count(c1)"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_unsupported_float_type_for_groupby passed")
@@ -1276,7 +1243,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             group_by_fields=[self.c4_field_name],
             output_fields=[self.c4_field_name, "count(c1)"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         log.info("test_unsupported_double_type_for_groupby passed")
@@ -1294,10 +1261,12 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         results, _ = self.query(
-            client, self.collection_name,
-            filter="", limit=100,
+            client,
+            self.collection_name,
+            filter="",
+            limit=100,
             group_by_fields=[self.c10_field_name],
-            output_fields=[self.c10_field_name, "count(c3)", "sum(c3)"]
+            output_fields=[self.c10_field_name, "count(c3)", "sum(c3)"],
         )
 
         group_values = [r[self.c10_field_name] for r in results]
@@ -1306,24 +1275,28 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Core assertion: non-NULL groups must return actual values (not all NULLs)
         expected_groups = sorted(["P", "Q", "R", "S", "T_v", "U_v", "V_v"])
-        assert non_null_groups == expected_groups, \
+        assert non_null_groups == expected_groups, (
             f"Expected groups {expected_groups}, got {non_null_groups}. Bug #47350 may not be fixed!"
+        )
         assert len(null_groups) == 1, f"Expected exactly 1 NULL group, got {len(null_groups)}"
 
         # Verify aggregation values against pandas ground truth
-        ground_truth = self.datas.groupby(self.c10_field_name).agg(
-            count_c3=(self.c3_field_name, "count"),
-            sum_c3=(self.c3_field_name, "sum")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c10_field_name)
+            .agg(count_c3=(self.c3_field_name, "count"), sum_c3=(self.c3_field_name, "sum"))
+            .reset_index()
+        )
 
         for result in results:
             if result[self.c10_field_name] is None:
                 continue
             expected = ground_truth[ground_truth[self.c10_field_name] == result[self.c10_field_name]].iloc[0]
-            assert result["count(c3)"] == expected["count_c3"], \
+            assert result["count(c3)"] == expected["count_c3"], (
                 f"COUNT mismatch for {self.c10_field_name}={result[self.c10_field_name]}"
-            assert result["sum(c3)"] == expected["sum_c3"], \
+            )
+            assert result["sum(c3)"] == expected["sum_c3"], (
                 f"SUM mismatch for {self.c10_field_name}={result[self.c10_field_name]}"
+            )
 
         log.info("test_group_by_nullable_varchar_field passed")
 
@@ -1340,10 +1313,12 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         results, _ = self.query(
-            client, self.collection_name,
-            filter="", limit=100,
+            client,
+            self.collection_name,
+            filter="",
+            limit=100,
             group_by_fields=[self.c11_field_name],
-            output_fields=[self.c11_field_name, "count(c3)", "sum(c3)"]
+            output_fields=[self.c11_field_name, "count(c3)", "sum(c3)"],
         )
 
         group_values = [r[self.c11_field_name] for r in results]
@@ -1351,24 +1326,28 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         null_groups = [v for v in group_values if v is None]
 
         expected_groups = sorted([10, 20, 30, 40, 50])
-        assert non_null_groups == expected_groups, \
+        assert non_null_groups == expected_groups, (
             f"Expected INT16 groups {expected_groups}, got {non_null_groups}. Bug #47350 may not be fixed!"
+        )
         assert len(null_groups) == 1, f"Expected 1 NULL group, got {len(null_groups)}"
 
         # Verify aggregation against pandas
-        ground_truth = self.datas.groupby(self.c11_field_name).agg(
-            count_c3=(self.c3_field_name, "count"),
-            sum_c3=(self.c3_field_name, "sum")
-        ).reset_index()
+        ground_truth = (
+            self.datas.groupby(self.c11_field_name)
+            .agg(count_c3=(self.c3_field_name, "count"), sum_c3=(self.c3_field_name, "sum"))
+            .reset_index()
+        )
 
         for result in results:
             if result[self.c11_field_name] is None:
                 continue
             expected = ground_truth[ground_truth[self.c11_field_name] == result[self.c11_field_name]].iloc[0]
-            assert result["count(c3)"] == expected["count_c3"], \
+            assert result["count(c3)"] == expected["count_c3"], (
                 f"COUNT mismatch for {self.c11_field_name}={result[self.c11_field_name]}"
-            assert result["sum(c3)"] == expected["sum_c3"], \
+            )
+            assert result["sum(c3)"] == expected["sum_c3"], (
                 f"SUM mismatch for {self.c11_field_name}={result[self.c11_field_name]}"
+            )
 
         log.info("test_group_by_nullable_int16_field passed")
 
@@ -1385,10 +1364,12 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         results, _ = self.query(
-            client, self.collection_name,
-            filter="", limit=100,
+            client,
+            self.collection_name,
+            filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name, self.c10_field_name],
-            output_fields=[self.c1_field_name, self.c10_field_name, "count(c3)", "sum(c3)"]
+            output_fields=[self.c1_field_name, self.c10_field_name, "count(c3)", "sum(c3)"],
         )
 
         assert len(results) > 0, "Expected at least 1 group"
@@ -1398,37 +1379,41 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         # Verify non-nullable column always has actual values
         for r in results:
-            assert r[self.c1_field_name] in expected_c1_values, \
+            assert r[self.c1_field_name] in expected_c1_values, (
                 f"Non-nullable GROUP BY field '{self.c1_field_name}' has unexpected value: {r[self.c1_field_name]}"
+            )
 
         # Verify nullable column has actual values for non-NULL groups
         c10_values = [r[self.c10_field_name] for r in results]
         non_null_c10 = set(v for v in c10_values if v is not None)
         has_null_c10 = None in c10_values
 
-        assert non_null_c10 == expected_c10_values, \
-            f"Expected c10 values {expected_c10_values}, got {non_null_c10}"
+        assert non_null_c10 == expected_c10_values, f"Expected c10 values {expected_c10_values}, got {non_null_c10}"
         assert has_null_c10, "Expected at least one NULL group for nullable c10 since ~15% of data is NULL"
 
         # Verify aggregation against pandas (for non-null c10 groups only)
         non_null_df = self.datas[self.datas[self.c10_field_name].notna()]
-        ground_truth = non_null_df.groupby([self.c1_field_name, self.c10_field_name]).agg(
-            count_c3=(self.c3_field_name, "count"),
-            sum_c3=(self.c3_field_name, "sum")
-        ).reset_index()
+        ground_truth = (
+            non_null_df.groupby([self.c1_field_name, self.c10_field_name])
+            .agg(count_c3=(self.c3_field_name, "count"), sum_c3=(self.c3_field_name, "sum"))
+            .reset_index()
+        )
 
         for result in results:
             if result[self.c10_field_name] is None:
                 continue
-            mask = (ground_truth[self.c1_field_name] == result[self.c1_field_name]) & \
-                   (ground_truth[self.c10_field_name] == result[self.c10_field_name])
+            mask = (ground_truth[self.c1_field_name] == result[self.c1_field_name]) & (
+                ground_truth[self.c10_field_name] == result[self.c10_field_name]
+            )
             if mask.sum() == 0:
                 continue
             expected = ground_truth[mask].iloc[0]
-            assert result["count(c3)"] == expected["count_c3"], \
+            assert result["count(c3)"] == expected["count_c3"], (
                 f"COUNT mismatch for c1={result[self.c1_field_name]}, c10={result[self.c10_field_name]}"
-            assert result["sum(c3)"] == expected["sum_c3"], \
+            )
+            assert result["sum(c3)"] == expected["sum_c3"], (
                 f"SUM mismatch for c1={result[self.c1_field_name]}, c10={result[self.c10_field_name]}"
+            )
 
         log.info("test_multi_column_group_by_with_nullable_field passed")
 
@@ -1445,11 +1430,13 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
         search_vec = [[float(x) for x in np.random.random(8)]]
         search_res = self.search(
-            client, self.collection_name,
-            data=search_vec, limit=20,
+            client,
+            self.collection_name,
+            data=search_vec,
+            limit=20,
             group_by_field=self.c10_field_name,
             output_fields=[self.c10_field_name],
-            search_params={"metric_type": "L2"}
+            search_params={"metric_type": "L2"},
         )[0]
 
         # search_res is SearchResult; search_res[0] is Hits for nq=0
@@ -1458,8 +1445,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         non_null_groups = [v for v in group_values if v is not None]
 
         # Core assertion: search GROUP BY returns actual values
-        assert len(non_null_groups) > 0, \
-            "All search GROUP BY values are NULL - bug #47350 may not be fixed!"
+        assert len(non_null_groups) > 0, "All search GROUP BY values are NULL - bug #47350 may not be fixed!"
 
         # Verify actual group values are from expected set
         expected_groups = {"P", "Q", "R", "S", "T_v", "U_v", "V_v"}
@@ -1467,8 +1453,9 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             assert v in expected_groups, f"Unexpected group value: {v}"
 
         # Verify group uniqueness (each group appears at most once)
-        assert len(group_values) == len(set(str(v) for v in group_values)), \
+        assert len(group_values) == len(set(str(v) for v in group_values)), (
             f"Duplicate group values in search results: {group_values}"
+        )
 
         log.info("test_search_group_by_nullable_field passed")
 
@@ -1522,7 +1509,7 @@ class TestQueryAggregationIndependentV2(TestMilvusClientV2Base):
             group_by_fields=["json_field"],
             output_fields=["json_field", "count(c1)"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         self.drop_collection(client, collection_name)
@@ -1565,8 +1552,100 @@ class TestQueryAggregationIndependentV2(TestMilvusClientV2Base):
             group_by_fields=["array_field"],
             output_fields=["array_field", "count(c1)"],
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         self.drop_collection(client, collection_name)
         log.info("test_unsupported_array_type passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_high_cardinality_group_by(self):
+        """
+        target: test GROUP BY on high-cardinality field (>2000 unique values)
+                on both growing segment (before flush) and sealed segment (after flush)
+        method: 1. insert 3000 rows with 2500 unique group keys
+                2. query GROUP BY before flush (growing segment)
+                3. flush, then query GROUP BY again (sealed segment)
+                4. verify correctness in both cases
+        expected: returns correct number of unique groups with correct aggregation values
+        verified fix for: issue #47569 (HashTable slots overflow)
+        Note: Original HashTable had fixed 2048 slots with 7/8 load factor,
+              limiting GROUP BY to at most 1792 unique groups before crash.
+              PR #48174 added dynamic rehash to fix this.
+        """
+        client = self._client()
+
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("high_card", DataType.INT64)
+        schema.add_field("value", DataType.INT64)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=8)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        np.random.seed(19530)
+        nb = 3000
+        num_unique = 2500  # well above the original 1792 limit
+        rows = []
+        for i in range(nb):
+            rows.append(
+                {
+                    "high_card": int(np.random.randint(0, num_unique)),
+                    "value": int(np.random.randint(1, 100)),
+                    "vec": [float(x) for x in np.random.random(8)],
+                }
+            )
+        self.insert(client, collection_name, data=rows)
+        # NO flush yet — data in growing segment
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vec", metric_type="L2", index_type="FLAT", params={})
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
+        df = pd.DataFrame(rows)
+        expected_groups = df["high_card"].nunique()
+        ground_truth = df.groupby("high_card").agg(count_val=("value", "count"), sum_val=("value", "sum")).reset_index()
+
+        # Phase 1: query on growing segment (before flush)
+        results, _ = self.query(
+            client,
+            collection_name,
+            filter="",
+            limit=num_unique + 100,
+            group_by_fields=["high_card"],
+            output_fields=["high_card", "count(value)", "sum(value)"],
+        )
+        group_keys = [r["high_card"] for r in results]
+        assert len(group_keys) == len(set(group_keys)), "Duplicate group keys on growing segment"
+        assert len(results) == expected_groups, (
+            f"Growing segment: expected {expected_groups} groups, got {len(results)}"
+        )
+        log.info(f"Growing segment: {len(results)} groups, all unique")
+
+        # Phase 2: flush and query on sealed segment
+        self.flush(client, collection_name)
+        results, _ = self.query(
+            client,
+            collection_name,
+            filter="",
+            limit=num_unique + 100,
+            group_by_fields=["high_card"],
+            output_fields=["high_card", "count(value)", "sum(value)"],
+        )
+        group_keys = [r["high_card"] for r in results]
+        assert len(group_keys) == len(set(group_keys)), "Duplicate group keys on sealed segment"
+        assert len(results) == expected_groups, f"Sealed segment: expected {expected_groups} groups, got {len(results)}"
+
+        # Verify aggregation correctness (spot check first 50)
+        for result in results[:50]:
+            hk = result["high_card"]
+            expected = ground_truth[ground_truth["high_card"] == hk].iloc[0]
+            assert result["count(value)"] == expected["count_val"], f"COUNT mismatch for high_card={hk}"
+            assert result["sum(value)"] == expected["sum_val"], f"SUM mismatch for high_card={hk}"
+
+        self.drop_collection(client, collection_name)
+        log.info(
+            f"test_high_cardinality_group_by passed: {len(results)} groups verified on both growing and sealed segments"
+        )

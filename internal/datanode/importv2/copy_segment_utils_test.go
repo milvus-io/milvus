@@ -25,11 +25,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func TestGenerateTargetPath(t *testing.T) {
@@ -75,6 +76,12 @@ func TestGenerateTargetPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "external component in regular binlog root is not external table",
+			sourcePath: "files/external/insert_log/111/222/333/100/log1.log",
+			wantPath:   "files/external/insert_log/444/555/666/100/log1.log",
+			wantErr:    false,
+		},
+		{
 			name:       "invalid path - no log type",
 			sourcePath: "files/111/222/333/100/log1.log",
 			wantPath:   "",
@@ -101,7 +108,32 @@ func TestGenerateTargetPath(t *testing.T) {
 	}
 }
 
-func TestGenerateTargetIndexPath(t *testing.T) {
+func TestGenerateMappingsFromFiles_ExternalTable(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 1),
+		IsExternalCollection: true,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+	files := &SegmentFiles{
+		InsertBinlogs: []string{"files/insert_log/111/222/333/_metadata/manifest.json"},
+	}
+
+	mappings, err := generateMappingsFromFiles(files, source, target)
+	assert.NoError(t, err)
+	assert.Equal(t,
+		"files/insert_log/444/555/666/_metadata/manifest.json",
+		mappings["files/insert_log/111/222/333/_metadata/manifest.json"])
+}
+
+func TestGenerateTargetLOBPath(t *testing.T) {
 	source := &datapb.CopySegmentSource{
 		CollectionId: 111,
 		PartitionId:  222,
@@ -116,16 +148,171 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 	tests := []struct {
 		name       string
 		sourcePath string
-		indexType  string
 		wantPath   string
 		wantErr    bool
 	}{
 		{
-			name:       "vector scalar index path",
-			sourcePath: "files/index_files/1001/1/222/333/scalar_index",
-			indexType:  IndexTypeVectorScalar,
-			wantPath:   "files/index_files/1001/1/555/666/scalar_index",
+			name:       "standard LOB file path",
+			sourcePath: "files/insert_log/111/222/lobs/100/_data/abc123.vx",
+			wantPath:   "files/insert_log/444/555/lobs/100/_data/abc123.vx",
 			wantErr:    false,
+		},
+		{
+			name:       "LOB file with nested field path",
+			sourcePath: "root/data/insert_log/111/222/lobs/200/_data/xyz.vx",
+			wantPath:   "root/data/insert_log/444/555/lobs/200/_data/xyz.vx",
+			wantErr:    false,
+		},
+		{
+			name:       "invalid path - no insert_log",
+			sourcePath: "files/other/111/222/lobs/100/_data/abc.vx",
+			wantPath:   "",
+			wantErr:    true,
+		},
+		{
+			name:       "invalid path - too short after insert_log",
+			sourcePath: "files/insert_log/111",
+			wantPath:   "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath, err := generateTargetLOBPath(tt.sourcePath, source, target)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantPath, gotPath)
+			}
+		})
+	}
+}
+
+func TestLobFileInfosToPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		infos    []packed.LobFileInfo
+		expected []string
+	}{
+		{
+			name:     "empty input",
+			infos:    nil,
+			expected: []string{},
+		},
+		{
+			name: "single LOB file - absolute path preserved",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/abc.vx", FieldID: 300, TotalRows: 1000, ValidRows: 900},
+			},
+			expected: []string{"root/insert_log/100/200/lobs/300/_data/abc.vx"},
+		},
+		{
+			name: "multiple LOB files from same segment",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/file1.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+				{Path: "root/insert_log/100/200/lobs/300/_data/file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 400},
+				{Path: "root/insert_log/100/200/lobs/301/_data/file3.vx", FieldID: 301, TotalRows: 200, ValidRows: 200},
+			},
+			expected: []string{
+				"root/insert_log/100/200/lobs/300/_data/file1.vx",
+				"root/insert_log/100/200/lobs/300/_data/file2.vx",
+				"root/insert_log/100/200/lobs/301/_data/file3.vx",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lobFileInfosToPaths(tt.infos)
+			if len(tt.expected) == 0 {
+				assert.Empty(t, result)
+			} else {
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestCollectSegmentFiles_LOBFromManifest verifies that LOB file collection
+// reads from the segment manifest (not the partition directory), ensuring
+// only this segment's LOB files are collected.
+func TestCollectSegmentFiles_LOBFromManifest(t *testing.T) {
+	// This segment owns only 2 LOB files
+	segmentLobFiles := []packed.LobFileInfo{
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", FieldID: 300, TotalRows: 1000, ValidRows: 1000},
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+	}
+
+	// Mock CreateStorageConfig to avoid paramtable dependency
+	mocker0 := mockey.Mock(compaction.CreateStorageConfig).Return(&indexpb.StorageConfig{}).Build()
+	defer mocker0.UnPatch()
+
+	// Mock GetManifestLobFiles to return only this segment's LOB files
+	mocker1 := mockey.Mock(packed.GetManifestLobFiles).Return(segmentLobFiles, nil).Build()
+	defer mocker1.UnPatch()
+
+	// Mock UnmarshalManifestPath
+	mocker2 := mockey.Mock(packed.UnmarshalManifestPath).Return("root/insert_log/100/200/1001", int64(1), nil).Build()
+	defer mocker2.UnPatch()
+
+	// Mock listAllFiles for insert binlogs (via WalkWithPrefix)
+	mocker3 := mockey.Mock(listAllFiles).Return(
+		[]string{"root/insert_log/100/200/1001/_data/cg0.parquet"}, nil).Build()
+	defer mocker3.UnPatch()
+
+	source := &datapb.CopySegmentSource{
+		SegmentId:      1001,
+		CollectionId:   100,
+		PartitionId:    200,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   `{"basePath":"root/insert_log/100/200/1001","version":1}`,
+	}
+
+	files, err := collectSegmentFiles(context.Background(), nil, source)
+	assert.NoError(t, err)
+	assert.NotNil(t, files)
+
+	// Verify LOB files come from manifest, not from directory listing.
+	// GetManifestLobFiles returns absolute paths (after ToAbsolutePaths in C++),
+	// so lobFileInfosToPaths uses them directly.
+	assert.Equal(t, 2, len(files.LobFiles))
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", files.LobFiles[0])
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", files.LobFiles[1])
+
+	// Key invariant: only this segment's files are returned.
+	// The old code used listAllFiles(partition/lobs/) which would have also
+	// returned seg2_file3.vx, seg2_file4.vx from other segments.
+}
+
+func TestGenerateTargetIndexPath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	tests := []struct {
+		name        string
+		sourcePath  string
+		indexType   string
+		pathVersion indexpb.IndexStorePathVersion
+		wantPath    string
+		wantErr     bool
+	}{
+		{
+			name:        "vector scalar index path v0 format",
+			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			indexType:   IndexTypeVectorScalarV0,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			wantPath:    "files/index_files/1001/1/555/666/scalar_index",
+			wantErr:     false,
 		},
 		{
 			name:       "text index path",
@@ -158,14 +345,14 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 		{
 			name:       "invalid - keyword not found",
 			sourcePath: "files/other_index/111/222/333/100/index",
-			indexType:  IndexTypeVectorScalar,
+			indexType:  IndexTypeVectorScalarV0,
 			wantPath:   "",
 			wantErr:    true,
 		},
 		{
 			name:       "invalid - path too short",
 			sourcePath: "files/index_files/111",
-			indexType:  IndexTypeVectorScalar,
+			indexType:  IndexTypeVectorScalarV0,
 			wantPath:   "",
 			wantErr:    true,
 		},
@@ -176,11 +363,19 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			wantPath:   "",
 			wantErr:    true,
 		},
+		{
+			name:        "vector scalar index path v1 format",
+			sourcePath:  "files/index_v1/111/222/333/1001/1/scalar_index",
+			indexType:   IndexTypeVectorScalarV0,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			wantPath:    "files/index_v1/444/555/666/1001/1/scalar_index",
+			wantErr:     false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPath, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType)
+			gotPath, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType, tt.pathVersion)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -189,6 +384,105 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateTargetIndexPath_BuildIDMapping verifies that NewBuildIds mapping
+// is applied at the correct offset for each index path format.
+// Regression test: v1 VectorScalar places buildID at offset 4 (not 1).
+func TestGenerateTargetIndexPath_BuildIDMapping(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001},
+	}
+
+	tests := []struct {
+		name        string
+		sourcePath  string
+		indexType   string
+		pathVersion indexpb.IndexStorePathVersion
+		wantPath    string
+	}{
+		{
+			name:        "v0 vector scalar maps buildID at offset 1",
+			sourcePath:  "files/index_files/1001/1/222/333/scalar_index",
+			indexType:   IndexTypeVectorScalarV0,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			wantPath:    "files/index_files/2001/1/555/666/scalar_index",
+		},
+		{
+			name:        "v1 vector scalar maps buildID at offset 4",
+			sourcePath:  "files/index_v1/111/222/333/1001/1/scalar_index",
+			indexType:   IndexTypeVectorScalarV0,
+			pathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			wantPath:    "files/index_v1/444/555/666/2001/1/scalar_index",
+		},
+		{
+			name:       "text index maps buildID at offset 1",
+			sourcePath: "files/text_log/1001/1/111/222/333/100/idx",
+			indexType:  IndexTypeText,
+			wantPath:   "files/text_log/2001/1/444/555/666/100/idx",
+		},
+		{
+			name:       "json stats maps buildID at offset 2",
+			sourcePath: "files/json_stats/2/1001/1/111/222/333/100/shared_key_index/idx",
+			indexType:  IndexTypeJSONStats,
+			wantPath:   "files/json_stats/2/2001/1/444/555/666/100/shared_key_index/idx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType, tt.pathVersion)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantPath, got)
+		})
+	}
+}
+
+func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				BuildID:               1001,
+				IndexVersion:          1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+			},
+			{
+				BuildID:               1002,
+				IndexVersion:          1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFilePaths:        []string{"files/index_v1/111/222/333/1002/1/v1_file"},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
+	}
+	files := &SegmentFiles{
+		VectorScalarIndex: []string{
+			"files/index_files/1001/1/222/333/v0_file",
+			"files/index_v1/111/222/333/1002/1/v1_file",
+		},
+	}
+
+	mappings, err := generateMappingsFromFiles(files, source, target)
+	assert.NoError(t, err)
+	assert.Equal(t, "files/index_files/2001/1/555/666/v0_file", mappings["files/index_files/1001/1/222/333/v0_file"])
+	assert.Equal(t, "files/index_v1/444/555/666/2002/1/v1_file", mappings["files/index_v1/111/222/333/1002/1/v1_file"])
 }
 
 func TestTransformFieldBinlogs(t *testing.T) {
@@ -227,7 +521,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	}
 
 	t.Run("count rows for insert logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3000), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -247,7 +541,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	})
 
 	t.Run("no row counting for stats logs", func(t *testing.T) {
-		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false)
+		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), totalRows)
 		assert.Equal(t, 2, len(result))
@@ -265,7 +559,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false)
+		result, _, err := transformFieldBinlogs(srcWithEmpty, mappings, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(result))
 	})
@@ -282,7 +576,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 				},
 			},
 		}
-		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true)
+		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no mapping found")
 		assert.Nil(t, result)
@@ -536,6 +830,51 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	})
 }
 
+func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				FieldID:               100,
+				IndexID:               10,
+				BuildID:               1001,
+				IndexName:             "idx_v0",
+				IndexVersion:          1,
+				SerializedSize:        1024,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+			},
+			{
+				FieldID:               101,
+				IndexID:               11,
+				BuildID:               1002,
+				IndexName:             "idx_v1",
+				IndexVersion:          1,
+				SerializedSize:        2048,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFilePaths:        []string{"files/index_v1/111/222/333/1002/1/v1_file"},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
+	}
+	mappings := map[string]string{
+		"files/index_files/1001/1/222/333/v0_file":  "files/index_files/2001/1/555/666/v0_file",
+		"files/index_v1/111/222/333/1002/1/v1_file": "files/index_v1/444/555/666/2002/1/v1_file",
+	}
+
+	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+}
+
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
 		mCopy := mockey.Mock(copyFile).Return(nil).Build()
@@ -647,13 +986,13 @@ func TestGenerateTargetIndexPath_PathTooShort(t *testing.T) {
 		{
 			name:      "vector scalar path exactly at keyword",
 			path:      "files/index_files",
-			indexType: IndexTypeVectorScalar,
+			indexType: IndexTypeVectorScalarV0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := generateTargetIndexPath(tt.path, source, target, tt.indexType)
+			_, err := generateTargetIndexPath(tt.path, source, target, tt.indexType, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid")
 		})
@@ -675,7 +1014,7 @@ func TestGenerateTargetIndexPath_VectorScalarPreservesIDs(t *testing.T) {
 	// Verify buildID (1001) and indexVersion (1) are preserved, NOT replaced
 	// partitionID (222->555) and segmentID (333->666) ARE replaced
 	// collectionID is NOT in path at all
-	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalar)
+	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalarV0, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	assert.NoError(t, err)
 	assert.Equal(t, "files/index_files/1001/1/555/666/HNSW_SQ_3", result)
 
@@ -938,7 +1277,7 @@ func TestBuildIndexInfoFromSource_UnmappedPaths(t *testing.T) {
 }
 
 func TestTransformFieldBinlogs_NilInput(t *testing.T) {
-	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true)
+	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), totalRows)
 	assert.Equal(t, 0, len(result))
@@ -962,7 +1301,7 @@ func TestTransformFieldBinlogs_MultipleBinlogsPerField(t *testing.T) {
 		},
 	}
 
-	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(600), totalRows)
 	assert.Equal(t, 1, len(result))
@@ -985,7 +1324,7 @@ func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
 		},
 	}
 
-	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no mapping found for source path")
 }
@@ -1194,12 +1533,6 @@ func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
 }
 
 func TestTransformManifestPath(t *testing.T) {
-	source := &datapb.CopySegmentSource{
-		SegmentId:    449104621518610065,
-		CollectionId: 449104612037410004,
-		PartitionId:  449104621518610066,
-	}
-
 	target := &datapb.CopySegmentTarget{
 		SegmentId:    2001,
 		CollectionId: 111,
@@ -1211,6 +1544,7 @@ func TestTransformManifestPath(t *testing.T) {
 		2,
 	)
 
+	source := &datapb.CopySegmentSource{}
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.NoError(t, err)
 
@@ -1220,6 +1554,165 @@ func TestTransformManifestPath(t *testing.T) {
 	assert.Contains(t, basePath, "111")
 	assert.Contains(t, basePath, "222")
 	assert.Contains(t, basePath, "2001")
+}
+
+func TestTransformManifestPath_ExternalTable(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		SegmentId:    666,
+		CollectionId: 444,
+		PartitionId:  555,
+	}
+
+	sourceManifest := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	assert.NoError(t, err)
+
+	basePath, version, err := packed.UnmarshalManifestPath(targetManifest)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), version)
+	assert.Equal(t, "files/insert_log/444/555/666", basePath)
+}
+
+func TestTransformManifestPath_LegacyExternalTableLayoutUnsupported(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		SegmentId:    666,
+		CollectionId: 444,
+		PartitionId:  555,
+	}
+
+	sourceManifest := packed.MarshalManifestPath("external/111/segments/333", 2)
+	source := &datapb.CopySegmentSource{IsExternalCollection: true}
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	assert.Error(t, err)
+	assert.Empty(t, targetManifest)
+	assert.Contains(t, err.Error(), "invalid binlog path structure")
+}
+
+func TestTransformFieldBinlogs_SkipsPathMappingForExternalTable(t *testing.T) {
+	src := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:      10,
+					EntriesNum: 123,
+					MemorySize: 456,
+					LogSize:    456,
+				},
+			},
+		},
+	}
+	got, totalRows, err := transformFieldBinlogs(src, nil, true, true)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), totalRows)
+	assert.Len(t, got, 1)
+	assert.Equal(t, int64(100), got[0].GetFieldID())
+	assert.Len(t, got[0].GetBinlogs(), 1)
+	assert.Empty(t, got[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(10), got[0].GetBinlogs()[0].GetLogID())
+	assert.Equal(t, int64(123), got[0].GetBinlogs()[0].GetEntriesNum())
+	assert.Equal(t, int64(456), got[0].GetBinlogs()[0].GetMemorySize())
+}
+
+func TestTransformFieldBinlogs_SkipsEmptyPathForInternalTable(t *testing.T) {
+	src := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{LogID: 10, EntriesNum: 123},
+			},
+		},
+	}
+
+	got, totalRows, err := transformFieldBinlogs(src, nil, false, false)
+	assert.NoError(t, err)
+	assert.Zero(t, totalRows)
+	assert.Empty(t, got)
+}
+
+func TestGenerateSegmentInfoFromSource_PreservesExternalTableBinlogMetadata(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 2),
+		IsExternalCollection: true,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 123, MemorySize: 456},
+				},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	segmentInfo, err := generateSegmentInfoFromSource(source, target, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), segmentInfo.GetImportedRows())
+	assert.Len(t, segmentInfo.GetBinlogs(), 1)
+	assert.Empty(t, segmentInfo.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:         111,
+		PartitionId:          222,
+		SegmentId:            333,
+		StorageVersion:       storage.StorageV3,
+		ManifestPath:         packed.MarshalManifestPath("files/insert_log/111/222/333", 2),
+		IsExternalCollection: true,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 123, MemorySize: 456},
+				},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	mList := mockey.Mock(listAllFiles).Return([]string{
+		"files/insert_log/111/222/333/_data/0",
+		"files/insert_log/111/222/333/_metadata/manifest.json",
+	}, nil).Build()
+	defer mList.UnPatch()
+
+	copied := make(map[string]string)
+	mCopy := mockey.Mock(copyFile).
+		To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
+			copied[src] = dst
+			return nil
+		}).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(123), result.GetImportedRows())
+	assert.Equal(t, packed.MarshalManifestPath("files/insert_log/444/555/666", 2), result.GetManifestPath())
+	assert.Len(t, result.GetBinlogs(), 1)
+	assert.Empty(t, result.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, "files/insert_log/444/555/666/_data/0", copied["files/insert_log/111/222/333/_data/0"])
+	assert.Equal(t, "files/insert_log/444/555/666/_metadata/manifest.json", copied["files/insert_log/111/222/333/_metadata/manifest.json"])
+	assert.ElementsMatch(t, []string{
+		"files/insert_log/444/555/666/_data/0",
+		"files/insert_log/444/555/666/_metadata/manifest.json",
+	}, copiedFiles)
 }
 
 func TestCollectSegmentFiles_WithManifest(t *testing.T) {
@@ -1830,8 +2323,8 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 			"files/insert_log/111/222/333/_metadata/manifest.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/tokenizer.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/index.data",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_0",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_1",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_0",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_1",
 		}, nil
 	}).Build()
 	defer mList.UnPatch()

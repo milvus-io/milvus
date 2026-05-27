@@ -19,15 +19,15 @@ package taskcommon
 type Type = string
 
 const (
-	TypeNone           Type = "None"
-	PreImport          Type = "PreImport"
-	Import             Type = "Import"
-	Compaction         Type = "Compaction"
-	Index              Type = "Index"
-	Stats              Type = "Stats"
-	Analyze            Type = "Analyze"
-	ExternalCollection Type = "ExternalCollection"
-	CopySegment        Type = "CopySegment"
+	TypeNone                  Type = "None"
+	PreImport                 Type = "PreImport"
+	Import                    Type = "Import"
+	Compaction                Type = "Compaction"
+	Index                     Type = "Index"
+	Stats                     Type = "Stats"
+	Analyze                   Type = "Analyze"
+	RefreshExternalCollection Type = "RefreshExternalCollection"
+	CopySegment               Type = "CopySegment"
 )
 
 var TypeList = []Type{
@@ -37,6 +37,6 @@ var TypeList = []Type{
 	Index,
 	Stats,
 	Analyze,
-	ExternalCollection,
+	RefreshExternalCollection,
 	CopySegment,
 }

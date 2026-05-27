@@ -88,6 +88,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         }
     }
 
+    for (const auto& function : schema_proto.functions()) {
+        if (function.type() != milvus::proto::schema::BM25) {
+            continue;
+        }
+        for (const auto output_field_id : function.output_field_ids()) {
+            schema->bm25_function_output_fields_.emplace(output_field_id);
+        }
+    }
+
     std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
         GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
@@ -232,33 +241,16 @@ Schema::AbsentFields(Schema& old_schema) const {
     return std::make_unique<std::vector<FieldMeta>>(std::move(result));
 }
 
-const ArrowSchemaPtr
-Schema::BuildReaderArrowSchema() const {
-    if (!is_external_collection()) {
-        return ConvertToArrowSchema();
-    }
-    // External collections: build a filtered schema containing only
-    // external fields. System fields (RowID, Timestamp) and virtual PK
-    // don't exist in the parquet files.
-    arrow::FieldVector external_fields;
-    for (const auto& [field_id, meta] : fields_) {
-        if (!meta.is_external_field()) {
-            continue;
+std::shared_ptr<std::vector<std::string>>
+Schema::GetExternalColumnNames() const {
+    auto columns = std::make_shared<std::vector<std::string>>();
+    for (const auto& field_id : field_ids_) {
+        auto it = fields_.find(field_id);
+        if (it != fields_.end() && it->second.is_external_field()) {
+            columns->push_back(it->second.get_external_field());
         }
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-        auto arrow_data_type = GetArrowDataType(meta.get_data_type(), dim);
-        auto arrow_field = std::make_shared<arrow::Field>(
-            meta.get_external_field(),
-            arrow_data_type,
-            meta.is_nullable(),
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(meta.get_id().get())}));
-        external_fields.push_back(arrow_field);
     }
-    return arrow::schema(external_fields);
+    return columns;
 }
 
 FieldId

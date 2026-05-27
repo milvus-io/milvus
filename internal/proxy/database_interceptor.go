@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 // DatabaseInterceptor fill dbname into request based on kv pair <"dbname": "xx"> in header
@@ -302,6 +302,11 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.AddCollectionFieldRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.AddCollectionStructFieldRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}

@@ -19,7 +19,7 @@ package milvusclient
 import (
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 type LoadCollectionOption interface {

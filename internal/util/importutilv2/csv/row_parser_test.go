@@ -24,11 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RowParserSuite struct {
@@ -678,6 +678,103 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "_ valid parse", content: suite.genAllTypesRowData("x", "2")})
 }
 
+func (suite *RowParserSuite) TestNullableStructArrayNullKey() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = suite.nullKey
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	row, err := parser.Parse(rowContent)
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayNullKey() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = suite.nullKey
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	_, err = parser.Parse(rowContent)
+	suite.Error(err)
+}
+
+func (suite *RowParserSuite) TestNullableStructArrayJSONNull() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = "null"
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	row, err := parser.Parse(rowContent)
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayJSONNull() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = "null"
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	_, err = parser.Parse(rowContent)
+	suite.Error(err)
+}
+
+func (suite *RowParserSuite) TestMissingStructArrayColumn() {
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2", structArray.GetName())
+	header, _ := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.Error(err)
+	suite.Nil(parser)
+
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+	parser, err = NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+	suite.NotNil(parser)
+}
+
 func (suite *RowParserSuite) runParseError(c *testCase) {
 	t := suite.T()
 	t.Helper()
@@ -854,4 +951,40 @@ func (suite *RowParserSuite) TestFunctionOutputField() {
 
 func TestCsvRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
+}
+
+func TestParseTextFieldValue(t *testing.T) {
+	// TEXT fields should be parsed as strings without maxLength validation.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				// no TypeParams — TEXT has no max_length
+			},
+		},
+	}
+
+	header := []string{"text_field"}
+	parser, err := NewRowParser(schema, header, "")
+	assert.NoError(t, err)
+
+	// Parse a row with a very long TEXT value (no maxLength constraint)
+	longText := strings.Repeat("hello world ", 1000)
+	result, err := parser.Parse([]string{longText})
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify TEXT field value
+	val, ok := result[int64(101)]
+	assert.True(t, ok)
+	assert.Equal(t, longText, val)
 }

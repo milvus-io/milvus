@@ -26,19 +26,19 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Response response interface for verification
@@ -246,6 +246,48 @@ func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datap
 		}
 	}
 	return currentBinlogs
+}
+
+// filterDuplicateFieldBinlogs removes FieldBinlog entries from newLogs whose (fieldID, logID)
+// pairs already exist in existingLogs. Used to make crash-replay idempotent when the same
+// set of binlog results may be applied twice (e.g. backfill task completion after a datacoord
+// restart between the etcd write and the task state transition).
+func filterDuplicateFieldBinlogs(existingLogs, newLogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if len(existingLogs) == 0 || len(newLogs) == 0 {
+		return newLogs
+	}
+	existing := make(map[int64]map[int64]struct{}, len(existingLogs))
+	for _, fb := range existingLogs {
+		logIDs, ok := existing[fb.GetFieldID()]
+		if !ok {
+			logIDs = make(map[int64]struct{})
+			existing[fb.GetFieldID()] = logIDs
+		}
+		for _, b := range fb.GetBinlogs() {
+			logIDs[b.GetLogID()] = struct{}{}
+		}
+	}
+	result := make([]*datapb.FieldBinlog, 0, len(newLogs))
+	for _, fb := range newLogs {
+		existingSet, hasField := existing[fb.GetFieldID()]
+		if !hasField {
+			result = append(result, fb)
+			continue
+		}
+		filteredBinlogs := make([]*datapb.Binlog, 0, len(fb.GetBinlogs()))
+		for _, b := range fb.GetBinlogs() {
+			if _, dup := existingSet[b.GetLogID()]; !dup {
+				filteredBinlogs = append(filteredBinlogs, b)
+			}
+		}
+		if len(filteredBinlogs) > 0 {
+			result = append(result, &datapb.FieldBinlog{
+				FieldID: fb.GetFieldID(),
+				Binlogs: filteredBinlogs,
+			})
+		}
+	}
+	return result
 }
 
 func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {

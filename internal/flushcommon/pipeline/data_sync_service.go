@@ -35,15 +35,15 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // DataSyncService controls a flowgraph for a specific collection
@@ -285,6 +285,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	dmStreamNode := newDmInputNode(config, input)
 	nodeList = append(nodeList, dmStreamNode)
 
+	// 1.ddNode
 	ddNode := newDDNode(
 		params.Ctx,
 		collectionID,
@@ -296,20 +297,21 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	)
 	nodeList = append(nodeList, ddNode)
 
-	if len(info.GetSchema().GetFunctions()) > 0 {
-		emNode, err := newEmbeddingNode(channelName, config.metacache)
-		if err != nil {
-			return nil, err
-		}
-		nodeList = append(nodeList, emNode)
+	// 2.embeddingNode(maybe no function)
+	emNode, err := newEmbeddingNode(channelName, config.metacache)
+	if err != nil {
+		return nil, err
 	}
+	nodeList = append(nodeList, emNode)
 
+	// 3.writeNode
 	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
 	nodeList = append(nodeList, writeNode)
 
+	// 4.ttNode
 	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 

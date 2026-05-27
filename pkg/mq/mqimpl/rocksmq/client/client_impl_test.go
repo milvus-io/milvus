@@ -21,12 +21,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
-	server2 "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
+	server2 "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var rmqPath = "/tmp/rocksmq_client"

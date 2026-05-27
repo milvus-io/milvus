@@ -25,24 +25,24 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type upsertTask struct {
@@ -71,6 +71,7 @@ type upsertTask struct {
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
+	schemaVersion   int32
 
 	// write after read, generate write part by queryPreExecute
 	node types.ProxyComponent
@@ -345,21 +346,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Two nullable data formats are supported:
-	//
-	//	COMPRESSED FORMAT (SDK format, before validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 2] + ValidData=[true, false, true]
-	//		- Data array contains only non-null values (compressed)
-	//		- ValidData array tracks null positions for all rows
-	//
-	//	FULL FORMAT (Milvus internal format, after validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 0, 2] + ValidData=[true, false, true]
-	//		- Data array contains values for all rows (nulls filled with zero/default)
-	//		- ValidData array still tracks null positions
-	//
-	// Note: we will unify the nullable format to FULL FORMAT before executing the merge logic
+	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
+	// must remain compact: ValidData tracks logical rows, and vector data stores
+	// only valid rows.
 	insertIdxInUpsert := make([]int, 0)
 	updateIdxInUpsert := make([]int, 0)
 	// 1. split upsert data into insert and update by query result
@@ -389,6 +378,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
 		})
+		// fieldOpMap resolves per-field FieldPartialUpdateOp directives
+		// attached to UpsertRequest.field_ops. Empty / missing entries
+		// fall back to REPLACE.
+		fieldOpMap := buildFieldOpMap(it.req)
 
 		// Build mapping from existing primary keys to their positions in query result
 		// This ensures we can correctly locate data even if query results are not in the same order as request
@@ -429,7 +422,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
-			isNullableVector := len(existField.GetValidData()) > 0 && typeutil.IsVectorType(existField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
 			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
 			existSrcIndices := make([]int64, len(updateIdxInUpsert))
 			for i, existIdx := range existIndices {
@@ -459,8 +452,25 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 					for i := range dstIndices {
 						dstIndices[i] = int64(i)
 					}
-					if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
-						return err
+					// Resolve the field-level op; REPLACE is the default
+					// and is equivalent to the legacy merge path.
+					op := schemapb.FieldPartialUpdateOp_REPLACE
+					if fieldOpMap != nil {
+						if resolved, ok := fieldOpMap[existField.GetFieldName()]; ok {
+							op = resolved
+						}
+					}
+					if op == schemapb.FieldPartialUpdateOp_REPLACE {
+						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
+							return err
+						}
+					} else {
+						maxCap := readMaxCapacity(fieldSchema)
+						if err := typeutil.UpdateArrayFieldByColumnWithOp(
+							dstField, upsertField, dstIndices, upsertSrcIndices, op, maxCap,
+						); err != nil {
+							return err
+						}
 					}
 				}
 			} else {
@@ -517,7 +527,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 		// Process insert data by column (field), similar to update path
 		for _, srcField := range insertWithNullField {
-			isNullableVector := len(srcField.GetValidData()) > 0 && typeutil.IsVectorType(srcField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(srcField)
 			srcComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{srcField})
 
 			// Find or create destination field in it.insertFieldData
@@ -740,7 +750,8 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 	return nil
 }
 
-// GenNullableFieldData generates nullable field data in FULL FORMAT
+// GenNullableFieldData generates all-null nullable field data.
+// Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
 	switch field.DataType {
 	case schemapb.DataType_Bool:
@@ -1168,7 +1179,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
@@ -1273,10 +1284,27 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+	it.schemaVersion = schema.Version
+
+	// Validate any FieldPartialUpdateOp directives attached to FieldData.
+	// A non-REPLACE op implicitly promotes the request to partial_update=true
+	// so users do not need to set both fields explicitly.
+	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	if err != nil {
+		log.Warn("validate field partial update ops failed", zap.Error(err))
+		return err
+	}
+	if nonReplaceSeen && !it.req.GetPartialUpdate() {
+		it.req.PartialUpdate = true
+	}
 
 	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
 	if err != nil {
 		return err
+	}
+
+	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("partial upsert is not supported for collections with struct array fields")
 	}
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)

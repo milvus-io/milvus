@@ -572,6 +572,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataStringImpl(DataType data_type,
+                                 bool nullable,
+                                 FixedVector<std::string>&& data)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, std::move(data)) {
+    }
+
     int64_t
     DataSize() const override {
         int64_t data_size = 0;
@@ -592,6 +599,21 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     }
 
     void
+    FillFieldData(const std::shared_ptr<arrow::Array> array) override {
+        AssertInfo(
+            array->type()->id() == arrow::Type::type::STRING ||
+                array->type()->id() == arrow::Type::type::BINARY,
+            "inconsistent data type, expected: STRING or BINARY, got: {}",
+            array->type()->ToString());
+        if (array->type()->id() == arrow::Type::type::STRING) {
+            return FillFieldData(
+                std::dynamic_pointer_cast<arrow::StringArray>(array));
+        }
+        return FillFieldData(
+            std::dynamic_pointer_cast<arrow::BinaryArray>(array));
+    }
+
+    void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) override {
         auto n = array->length();
         if (n == 0) {
@@ -599,6 +621,37 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
         }
 
         std::lock_guard lck(tell_mutex_);
+        null_count_ += array->null_count();
+        if (length_ + n > get_num_rows()) {
+            resize_field_data(length_ + n);
+        }
+
+        for (int64_t i = 0; i < n; ++i) {
+            data_[length_ + i] = std::string(array->GetView(i));
+        }
+        if (IsNullable()) {
+            auto valid_data = array->null_bitmap_data();
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
+            }
+        }
+        length_ += n;
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
+        auto n = array->length();
+        if (n == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        null_count_ += array->null_count();
         if (length_ + n > get_num_rows()) {
             resize_field_data(length_ + n);
         }
@@ -700,6 +753,12 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                                bool nullable,
                                int64_t total_num_rows = 0)
         : FieldDataImpl<Json, true>(1, data_type, nullable, total_num_rows) {
+    }
+
+    explicit FieldDataJsonImpl(DataType data_type,
+                               bool nullable,
+                               FixedVector<Json>&& data)
+        : FieldDataImpl<Json, true>(1, data_type, nullable, std::move(data)) {
     }
 
     int64_t

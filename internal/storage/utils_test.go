@@ -28,14 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -1255,6 +1255,235 @@ func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	makeSchema := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: "nullable_vector_compact",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: dataType,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: dim},
+					},
+				},
+			},
+		}
+	}
+	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "pk",
+						FieldId:   100,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+								},
+							},
+						},
+					},
+					{
+						Type:      dataType,
+						FieldName: "vec",
+						FieldId:   101,
+						ValidData: validData,
+						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
+					},
+				},
+				NumRows: 3,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		dataType schemapb.DataType
+		dim      string
+		vectors  *schemapb.VectorField
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}},
+			}},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      "8",
+			vectors:  &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}}},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}},
+		},
+		{
+			name:     "sparse vector",
+			dataType: schemapb.DataType_SparseFloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{
+				SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{
+					typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+					typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+					typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3}),
+				}},
+			}},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := makeMsg(tt.dataType, tt.vectors)
+			schema := makeSchema(tt.dataType, tt.dim)
+
+			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+
+			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+		})
+	}
+}
+
+func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *testing.T) {
+	makeSchema := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: "nullable_vector_partial_row",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: dataType,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: dim},
+					},
+				},
+			},
+		}
+	}
+	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "pk",
+						FieldId:   100,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+								},
+							},
+						},
+					},
+					{
+						Type:      dataType,
+						FieldName: "vec",
+						FieldId:   101,
+						ValidData: []bool{true, false},
+						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
+					},
+				},
+				NumRows: 2,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		dataType schemapb.DataType
+		dim      string
+		vectors  *schemapb.VectorField
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}},
+			}},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      "16",
+			vectors:  &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}}},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5}}},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5}}},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := makeMsg(tt.dataType, tt.vectors)
+			schema := makeSchema(tt.dataType, tt.dim)
+
+			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+			require.Error(t, err)
+
+			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			require.Error(t, err)
+		})
 	}
 }
 
@@ -2834,4 +3063,108 @@ func TestInsertDataWithStructAndMissingField(t *testing.T) {
 	for _, valid := range int64Field.ValidData {
 		assert.False(t, valid, "nullable field should have all null values")
 	}
+}
+
+func TestMergeVectorArrayField(t *testing.T) {
+	t.Run("nullable merge", func(t *testing.T) {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+
+		// Plan B: dense layout — Data length equals ValidData length; null rows hold empty placeholders.
+		nullPlaceholder := &schemapb.VectorField{
+			Dim:  4,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+		}
+		field1 := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4), nullPlaceholder},
+			ValidData:   []bool{true, false},
+			Nullable:    true,
+		}
+
+		field2 := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{nullPlaceholder, makeFloatVec(4, 5, 6, 7, 8)},
+			ValidData:   []bool{false, true},
+			Nullable:    true,
+		}
+
+		MergeFieldData(data, 100, field1)
+		MergeFieldData(data, 100, field2)
+
+		merged := data.Data[100].(*VectorArrayFieldData)
+		assert.Equal(t, 4, len(merged.Data))
+		assert.Equal(t, []bool{true, false, false, true}, merged.ValidData)
+		assert.True(t, merged.Nullable)
+	})
+
+	t.Run("non-nullable merge", func(t *testing.T) {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+
+		field := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+			Nullable:    false,
+		}
+
+		MergeFieldData(data, 100, field)
+
+		merged := data.Data[100].(*VectorArrayFieldData)
+		assert.Equal(t, 1, len(merged.Data))
+		assert.Nil(t, merged.ValidData)
+	})
+}
+
+func TestMergeInsertDataNullableSparseAllNullPreservesValidData(t *testing.T) {
+	buffer := &InsertData{Data: make(map[FieldID]FieldData)}
+	allNull := &InsertData{Data: map[FieldID]FieldData{
+		100: &SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{Dim: 8},
+			ValidData:        []bool{false, false},
+			Nullable:         true,
+		},
+	}}
+
+	MergeInsertData(buffer, allNull)
+
+	merged := buffer.Data[100].(*SparseFloatVectorFieldData)
+	require.True(t, merged.Nullable)
+	require.Equal(t, []bool{false, false}, merged.ValidData)
+	require.Empty(t, merged.Contents)
+	require.Equal(t, 2, merged.RowNum())
+}
+
+func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
+	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	nullPlaceholder := &schemapb.VectorField{
+		Dim:  4,
+		Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+	}
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Dim:         4,
+				ElementType: schemapb.DataType_FloatVector,
+				Data:        []*schemapb.VectorField{vec0, nullPlaceholder},
+				ValidData:   []bool{true, false},
+				Nullable:    true,
+			},
+		},
+	}
+
+	record, err := TransferInsertDataToInsertRecord(insertData)
+	require.NoError(t, err)
+
+	found := false
+	for _, fd := range record.FieldsData {
+		if fd.FieldId == 100 {
+			found = true
+			assert.Equal(t, []bool{true, false}, fd.GetValidData())
+			assert.NotNil(t, fd.GetVectors().GetVectorArray())
+			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))
+		}
+	}
+	assert.True(t, found)
 }

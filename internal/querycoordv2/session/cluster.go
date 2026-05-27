@@ -26,14 +26,14 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var ErrNodeNotFound = errors.New("NodeNotFound")
@@ -134,7 +134,7 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
-		req := proto.Clone(req).(*querypb.LoadSegmentsRequest)
+		req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
 	})

@@ -32,8 +32,8 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -49,20 +49,21 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Only for re-export
@@ -881,4 +882,64 @@ func (s *Server) watchLoadConfigChanges() {
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
 	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// CheckAllReplicasServiceable returns an error if any replica has a non-serviceable
+// shard leader for any channel in the collection's current target. Unlike
+// CalculateLoadPercentage (which reads the CollectionObserver's periodically-persisted
+// snapshot), this performs a live check against the distribution manager and so
+// reflects the real-time serviceability after scale-up / scale-down.
+func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID int64) error {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	if len(replicas) == 0 {
+		return errors.New("no replica found")
+	}
+	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Replica) error {
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
+	if len(channels) == 0 {
+		return errors.New("no channels in current target")
+	}
+	for channelName := range channels {
+		leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
+		if leader == nil || leader.View == nil {
+			return fmt.Errorf("replica %d (rg=%s): no leader for channel %s",
+				replica.GetID(), replica.GetResourceGroup(), channelName)
+		}
+		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
+			return fmt.Errorf("replica %d (rg=%s) channel %s not serviceable: %w",
+				replica.GetID(), replica.GetResourceGroup(), channelName, err)
+		}
+	}
+	return nil
+}
+
+// GetLeakedResourcesByCollection returns the number of segments and channels still held by
+// querynodes that are NOT part of any current replica of the collection. A non-zero result
+// means physical resources have not been fully released yet (e.g., during scale-down a
+// decommissioned replica's querynode may still hold segments while release RPCs are in flight).
+func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionID int64) (leakedSegments, leakedChannels int) {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	validNodes := typeutil.NewUniqueSet()
+	for _, r := range replicas {
+		validNodes.Insert(r.GetNodes()...)
+	}
+	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
+		if !validNodes.Contain(seg.Node) {
+			leakedSegments++
+		}
+	}
+	for _, ch := range s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)) {
+		if !validNodes.Contain(ch.Node) {
+			leakedChannels++
+		}
+	}
+	return leakedSegments, leakedChannels
 }

@@ -17,7 +17,7 @@
 package milvusclient
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 // RefreshExternalCollectionOption is the interface for RefreshExternalCollection options.

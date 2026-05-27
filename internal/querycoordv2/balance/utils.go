@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 const (
@@ -193,7 +193,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	// 3. print stopping nodes channel distribution
 	distInfo += "[stoppingNodesChannelDist:"
 	for stoppingNodeID := range stoppingNodesSegments {
-		stoppingNodeChannels := channelManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(stoppingNodeID))
+		stoppingNodeChannels := channelManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(stoppingNodeID))
 		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", stoppingNodeID, len(stoppingNodeChannels))
 		distInfo += "channels:["
 		for _, stoppingChan := range stoppingNodeChannels {
@@ -206,7 +206,7 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	// 4. print normal nodes channel distribution
 	distInfo += "[normalNodesChannelDist:"
 	for normalNodeID := range nodeSegments {
-		normalNodeChannels := channelManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(normalNodeID))
+		normalNodeChannels := channelManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(normalNodeID))
 		distInfo += fmt.Sprintf("[nodeID:%d, count:%d,", normalNodeID, len(normalNodeChannels))
 		distInfo += "channels:["
 		for _, normalNodeChan := range normalNodeChannels {

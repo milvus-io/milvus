@@ -12,8 +12,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
@@ -290,9 +290,12 @@ func TestConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 	assert.Eventually(t, func() bool {
-		stat := futureManager.Stat()
-		fmt.Printf("active count: %d\n", stat.ActiveCount)
-		return stat.ActiveCount == 0
+		totalActive := int64(0)
+		for _, m := range futureManagers {
+			totalActive += m.Stat().ActiveCount
+		}
+		fmt.Printf("active count: %d\n", totalActive)
+		return totalActive == 0
 	}, 5*time.Second, 100*time.Millisecond)
 	runtime.GC()
 }

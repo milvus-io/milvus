@@ -8,8 +8,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
 // IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
@@ -33,6 +35,7 @@ type IndexEngineVersionManager interface {
 	AddNode(session *sessionutil.Session)
 	RemoveNode(session *sessionutil.Session)
 	Update(session *sessionutil.Session)
+	GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion
 
 	// Vector index version methods (from knowhere library)
 	GetCurrentIndexEngineVersion() int32
@@ -119,6 +122,21 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 	defer m.mu.Unlock()
 
 	m.addOrUpdate(session)
+}
+
+func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.sessionVersion) == 0 {
+		return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	}
+	for _, version := range m.sessionVersion {
+		if version.LT(common.Version) {
+			return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+		}
+	}
+	return indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
@@ -257,11 +275,15 @@ func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
 
 	maximum := int32(math.MaxInt32)
 	for _, version := range m.scalarIndexVersions {
-		if version.MaximumIndexVersion == 0 {
+		// Old QueryNodes do not report MaximumIndexVersion. In that case, use
+		// CurrentIndexVersion as the conservative upper bound; maxVersion should
+		// never be lower than the current version that the node already supports.
+		maxVersion := max(version.CurrentIndexVersion, version.MaximumIndexVersion)
+		if maxVersion == 0 {
 			continue
 		}
-		if version.MaximumIndexVersion < maximum {
-			maximum = version.MaximumIndexVersion
+		if maxVersion < maximum {
+			maximum = maxVersion
 		}
 	}
 	return maximum

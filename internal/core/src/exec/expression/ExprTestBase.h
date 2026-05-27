@@ -45,7 +45,7 @@
 #include "folly/CancellationToken.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/BitmapIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/Types.h"

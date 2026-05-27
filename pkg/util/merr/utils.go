@@ -24,11 +24,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const InputErrorFlagKey string = "is_input_error"
@@ -57,8 +57,9 @@ func Code(err error) int32 {
 }
 
 func IsRetryableErr(err error) bool {
-	if err, ok := err.(milvusError); ok {
-		return err.retriable
+	var milvusErr milvusError
+	if errors.As(err, &milvusErr) {
+		return milvusErr.retriable
 	}
 
 	return false
@@ -175,7 +176,7 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 
 func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
-	case ErrServiceNotReady.code():
+	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code():
 		return commonpb.ErrorCode_NotReadyServe
 
 	case ErrCollectionNotFound.code():
@@ -199,7 +200,7 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrServiceDiskLimitExceeded.code():
 		return commonpb.ErrorCode_DiskQuotaExhausted
 
-	case ErrServiceTimeTickLongDelay.code():
+	case ErrServiceTimeTickLongDelay.code(), ErrChannelTSafeStalled.code():
 		return commonpb.ErrorCode_TimeTickLongDelay
 
 	case ErrServiceRateLimit.code():
@@ -584,6 +585,14 @@ func WrapErrCollectionSchemaMisMatch(collection any, msg ...string) error {
 	return err
 }
 
+func WrapErrCollectionSchemaVersionNotReady(collection any, consistentSegments, totalSegments int) error {
+	return wrapFieldsWithDesc(
+		ErrCollectionSchemaVersionNotReady,
+		fmt.Sprintf("%d/%d segments are consistent, required 100%%", consistentSegments, totalSegments),
+		value("collection", collection),
+	)
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),
@@ -748,6 +757,10 @@ func WrapErrChannelNotFound(name string, msg ...string) error {
 
 func WrapErrChannelCPExceededMaxLag(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelCPExceededMaxLag, name, msg...)
+}
+
+func WrapErrChannelTSafeStalled(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelTSafeStalled, name, msg...)
 }
 
 func WrapErrChannelLack(name string, msg ...string) error {

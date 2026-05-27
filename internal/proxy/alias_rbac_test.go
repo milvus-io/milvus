@@ -24,11 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Tests for ResolveCollectionAlias in MetaCache and resolveCollectionAlias helper.
@@ -385,8 +385,10 @@ func TestRemoveCollectionByID_CleansUpAliases(t *testing.T) {
 				"alias3": {collectionName: "other_collection", cachedAt: time.Now()},
 			},
 		},
-		collectionCacheVersion: make(map[UniqueID]uint64),
-		sfGlobal:               conc.Singleflight[*collectionInfo]{},
+		collectionCacheVersion:  make(map[UniqueID]uint64),
+		sfGlobal:                conc.Singleflight[*collectionInfo]{},
+		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
+		partitionCache:          NewVersionCache[string, *partitionInfo](),
 	}
 
 	// Remove collection by ID
@@ -457,6 +459,8 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 		dbInfo: map[string]*databaseInfo{
 			"mydb": {},
 		},
+		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
+		partitionCache:          NewVersionCache[string, *partitionInfo](),
 	}
 
 	cache.RemoveDatabase(ctx, "mydb")

@@ -26,11 +26,11 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 var ClusterPrefix atomic.String
@@ -127,14 +127,21 @@ func getLengthFromTemplateValue(tv *schemapb.TemplateValue) int {
 }
 
 func listToString(strs []string) string {
-	result := "["
+	if len(strs) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
 	for i, str := range strs {
 		if i != 0 {
-			result += ", "
+			b.WriteString(", ")
 		}
-		result += "\"" + str + "\""
+		b.WriteByte('"')
+		b.WriteString(str)
+		b.WriteByte('"')
 	}
-	return result + "]"
+	b.WriteByte(']')
+	return b.String()
 }
 
 func kvsToString(kvs []*commonpb.KeyValuePair) string {
