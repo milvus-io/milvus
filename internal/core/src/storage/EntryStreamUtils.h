@@ -63,8 +63,7 @@ class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
     GetScalarIndexStreamBudget() {
-        static TransientMemoryBudget instance(
-            DefaultScalarIndexSliceBudgetBytes());
+        static TransientMemoryBudget instance;
         return instance;
     }
 
@@ -105,16 +104,19 @@ class TransientMemoryBudget {
 
     size_t
     CapacityBytes() const {
-        return capacity_bytes_;
+        return ScalarIndexStreamBudgetBytes();
+    }
+
+    void
+    NotifyCapacityUpdated() {
+        cv_.notify_all();
     }
 
  private:
-    explicit TransientMemoryBudget(size_t capacity_bytes)
-        : capacity_bytes_(std::max<size_t>(capacity_bytes, 1)) {
-    }
+    TransientMemoryBudget() = default;
 
     static size_t
-    DefaultScalarIndexSliceBudgetBytes() {
+    ScalarIndexStreamBudgetBytes() {
         auto core_num = std::max(1, milvus::CPU_NUM);
         auto capacity =
             static_cast<size_t>(core_num * ScalarIndexStreamBudgetRatio()) *
@@ -124,17 +126,17 @@ class TransientMemoryBudget {
 
     bool
     CanAcquireLocked(size_t bytes) const {
-        if (bytes > capacity_bytes_) {
+        auto capacity_bytes = CapacityBytes();
+        if (bytes > capacity_bytes) {
             return inflight_bytes_ == 0;
         }
-        return inflight_bytes_ <= capacity_bytes_ &&
-               bytes <= capacity_bytes_ - inflight_bytes_;
+        return inflight_bytes_ <= capacity_bytes &&
+               bytes <= capacity_bytes - inflight_bytes_;
     }
 
     std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
-    size_t capacity_bytes_;
 };
 
 }  // namespace milvus::storage

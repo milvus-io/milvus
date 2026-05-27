@@ -22,6 +22,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "storage/EntryStreamUtils.h"
 #include "tantivy-binding.h"
 
 namespace milvus {
@@ -58,6 +59,8 @@ SetScalarIndexEntryStreamBudgetRatio(const double ratio) {
         return;
     }
     SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.store(ratio);
+    storage::TransientMemoryBudget::GetScalarIndexStreamBudget()
+        .NotifyCapacityUpdated();
     LOG_INFO("set scalar index entry stream budget ratio: {}",
              SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load());
 }

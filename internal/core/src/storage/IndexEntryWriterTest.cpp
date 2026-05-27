@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +56,14 @@ class IndexEntryStreamConfigGuard {
  private:
     double budget_ratio_;
 };
+
+size_t
+ExpectedScalarIndexStreamBudgetBytes(double ratio) {
+    auto slice_size = DefaultStreamSliceSize();
+    auto core_num = std::max(1, milvus::CPU_NUM);
+    auto capacity = static_cast<size_t>(core_num * ratio) * slice_size;
+    return std::max(capacity, slice_size);
+}
 
 // Simple XOR-based mock cipher for testing (NOT for production use!)
 class MockEncryptor : public plugin::IEncryptor {
@@ -1090,6 +1099,15 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
     ASSERT_DOUBLE_EQ(ScalarIndexStreamBudgetRatio(), 2.5);
+    ASSERT_EQ(
+        TransientMemoryBudget::GetScalarIndexStreamBudget().CapacityBytes(),
+        ExpectedScalarIndexStreamBudgetBytes(2.5));
+
+    milvus::SetScalarIndexEntryStreamBudgetRatio(3.5);
+    ASSERT_DOUBLE_EQ(ScalarIndexStreamBudgetRatio(), 3.5);
+    ASSERT_EQ(
+        TransientMemoryBudget::GetScalarIndexStreamBudget().CapacityBytes(),
+        ExpectedScalarIndexStreamBudgetBytes(3.5));
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t entry_size = 2 * slice_size + 17;

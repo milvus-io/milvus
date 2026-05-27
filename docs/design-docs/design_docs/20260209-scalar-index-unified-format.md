@@ -409,7 +409,7 @@ Streaming load configuration:
 
 | Parameter | Key | Default | Description |
 |-----------|-----|---------|-------------|
-| `ScalarIndexEntryStreamBudgetRatio` | `common.indexEntryStream.scalarIndexBudgetRatio` | `3.0` | Scalar index stream transient memory budget multiplier, relative to CPU core count. |
+| `ScalarIndexEntryStreamBudgetRatio` | `common.indexEntryStream.scalarIndexBudgetRatio` | `3.0` | Dynamic scalar index stream transient memory budget multiplier, relative to CPU core count. |
 
 The default scalar stream budget is:
 
