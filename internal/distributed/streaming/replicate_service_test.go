@@ -724,7 +724,17 @@ func TestReplicateService_AlterConfigPChannelIncreasing(t *testing.T) {
 				},
 			},
 		), nil)
-		as.EXPECT().GetLatestAssignments(mock.Anything).Return(nil, errors.New("not needed")).Maybe()
+		as.EXPECT().GetLatestAssignments(mock.Anything).Return(&types.VersionedStreamingNodeAssignments{
+			Assignments: map[int64]types.StreamingNodeAssignment{
+				1: {
+					Channels: map[string]types.PChannelInfo{
+						"by-dev-rootcoord-dml_0": {Name: "by-dev-rootcoord-dml_0", Term: 1, AccessMode: types.AccessModeRW},
+						"by-dev-rootcoord-dml_1": {Name: "by-dev-rootcoord-dml_1", Term: 1, AccessMode: types.AccessModeRW},
+						"by-dev-rootcoord-dml_2": {Name: "by-dev-rootcoord-dml_2", Term: 1, AccessMode: types.AccessModeRW},
+					},
+				},
+			},
+		}, nil).Maybe()
 
 		rs := &replicateService{
 			walAccesserImpl: &walAccesserImpl{
@@ -771,6 +781,10 @@ func TestReplicateService_AlterConfigPChannelIncreasing(t *testing.T) {
 			cfg := alter.Header().GetReplicateConfiguration()
 			assert.Len(t, cfg.GetClusters(), 1, "rewritten config must contain only the current cluster")
 			assert.Equal(t, "by-dev", cfg.GetClusters()[0].GetClusterId())
+			assert.Equal(t,
+				[]string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+				cfg.GetClusters()[0].GetPchannels(),
+				"rewritten config must use the receiver's latest local pchannels")
 			assert.Empty(t, cfg.GetCrossClusterTopology(), "rewritten config must have no topology")
 
 			bh := mm.BroadcastHeader()
