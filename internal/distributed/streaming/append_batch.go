@@ -23,14 +23,14 @@ type appendBatchConfig struct {
 }
 
 func newAppendBatchConfigFromParams() appendBatchConfig {
-	params := paramtable.Get().StreamingCfg
+	params := paramtable.Get()
 	return appendBatchConfig{
-		SmallMessageThreshold: int(params.WALAppendBatchSmallMessageThreshold.GetAsSize()),
-		MaxBatchSize:          int(params.WALAppendBatchMaxSize.GetAsSize()),
-		MaxMessageCount:       params.WALAppendBatchMaxMessageCount.GetAsInt(),
-		MaxDelay:              params.WALAppendBatchMaxDelay.GetAsDurationByParse(),
-		CooldownThreshold:     params.WALAppendBatchCooldownThreshold.GetAsInt(),
-		CooldownDuration:      params.WALAppendBatchCooldownDuration.GetAsDurationByParse(),
+		SmallMessageThreshold: int(params.StreamingCfg.WALAppendBatchSmallMessageThreshold.GetAsSize()),
+		MaxBatchSize:          int(params.StreamingCfg.WALAppendBatchMaxSize.GetAsSize()),
+		MaxMessageCount:       params.StreamingCfg.WALAppendBatchMaxMessageCount.GetAsInt(),
+		MaxDelay:              params.StreamingCfg.WALAppendBatchMaxDelay.GetAsDurationByParse(),
+		CooldownThreshold:     params.StreamingCfg.WALAppendBatchCooldownThreshold.GetAsInt(),
+		CooldownDuration:      params.StreamingCfg.WALAppendBatchCooldownDuration.GetAsDurationByParse(),
 	}
 }
 
@@ -200,38 +200,26 @@ func (b *appendBatcher) observeFlush(reqCount int) {
 }
 
 func batchContext(reqs []*appendBatchRequest) (context.Context, context.CancelFunc) {
-	var earliest time.Time
-	hasDeadline := false
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	active := len(reqs)
+	mu := sync.Mutex{}
+	stops := make([]func() bool, 0, len(reqs))
 	for _, req := range reqs {
-		deadline, ok := req.ctx.Deadline()
-		if !ok {
-			continue
-		}
-		if !hasDeadline || deadline.Before(earliest) {
-			earliest = deadline
-			hasDeadline = true
-		}
-	}
-	var (
-		ctx    context.Context
-		cancel context.CancelFunc
-	)
-	if !hasDeadline {
-		ctx, cancel = context.WithCancel(context.Background())
-	} else {
-		ctx, cancel = context.WithDeadline(context.Background(), earliest)
-	}
-	for _, req := range reqs {
-		reqCtx := req.ctx
-		go func() {
-			select {
-			case <-reqCtx.Done():
-				cancel()
-			case <-ctx.Done():
+		stops = append(stops, context.AfterFunc(req.ctx, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			active--
+			if active == 0 {
+				cancelCtx()
 			}
-		}()
+		}))
 	}
-	return ctx, cancel
+	return ctx, func() {
+		for _, stop := range stops {
+			stop()
+		}
+		cancelCtx()
+	}
 }
 
 func messagesEstimateSize(msgs ...message.MutableMessage) int {
