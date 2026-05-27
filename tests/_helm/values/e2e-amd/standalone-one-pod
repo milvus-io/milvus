@@ -36,6 +36,8 @@ extraConfigFiles:
       storage:
         # enable storage v3
         useLoonFFI: true
+    dataCoord:
+      targetVecIndexVersion: 10
     queryNode:
       segcore:
         exprEvalBatchSize: 512
