@@ -434,6 +434,15 @@ ChunkedSegmentSealedImpl::init_storage_v1_pk_index(
                        field_id.get());
             insert_record_.insert_pks(data_type, column.get());
             insert_record_.seal_pks();
+            size_t pk_index_size = insert_record_.pk2offset_->memory_size();
+            stats_.mem_size += pk_index_size;
+            LOG_INFO(
+                "Adding pk to offset index with size {} for segment {} , "
+                "mem_size= "
+                "{}",
+                pk_index_size,
+                id_,
+                stats_.mem_size.load());
         }
     }
 }
@@ -449,6 +458,19 @@ ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
     std::unique_ptr<Translator<storagev2translator::PkIndexCell>> translator =
         std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
+    size_t pk_index_size = 0;
+    ResourceUsage expected_total_size;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        expected_total_size += translator->estimated_byte_size_of_cell(i).first;
+    }
+    pk_index_size = expected_total_size.memory_bytes;
+    stats_.mem_size += pk_index_size;
+    LOG_INFO(
+        "Adding pk to offset index with size {} for segment {} , mem_size= "
+        "{}",
+        pk_index_size,
+        id_,
+        stats_.mem_size.load());
     *pk_index_slot_.wlock() =
         Manager::GetInstance().CreateCacheSlot(std::move(translator));
 }
@@ -4662,22 +4684,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         } else {
             init_storage_v1_pk_index(field_id, column, data_type, is_replace);
         }
-    }
-    if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
-        AssertInfo(field_id.get() != -1, "Primary key is -1");
-        AssertInfo(insert_record_.empty_pks(),
-                   "primary key records already exists, current field id {}",
-                   field_id.get());
-        insert_record_.insert_pks(data_type, column.get());
-        insert_record_.seal_pks();
-        size_t pk_index_size = insert_record_.pk2offset_->memory_size();
-        stats_.mem_size += pk_index_size;
-        LOG_INFO(
-            "Adding pk to offset index with size {} for segment {} , mem_size= "
-            "{}",
-            pk_index_size,
-            id_,
-            stats_.mem_size.load());
     }
 
     // now interim index does not touch column warmup
