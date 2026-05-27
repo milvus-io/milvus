@@ -242,7 +242,8 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
         return iterators;
     };
 
-    if (IsAllNullNullable(offset_mapping_)) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping)) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -299,7 +300,8 @@ template <typename T>
 BinarySet
 VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
-    bool all_null_nullable = IsAllNullNullable(offset_mapping_);
+    const auto& offset_mapping = GetOffsetMapping();
+    bool all_null_nullable = IsAllNullNullable(offset_mapping);
     if (IsEmptyEmbListIndex()) {
         AppendEmptyEmbListOffsetsToBinarySet(
             GetDim(), empty_emb_list_offsets_, ret);
@@ -311,7 +313,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
                       KnowhereStatusString(stat));
     }
 
-    AppendValidDataToBinarySet(offset_mapping_, ret);
+    AppendValidDataToBinarySet(offset_mapping, ret);
     Disassemble(ret);
 
     return ret;
@@ -724,7 +726,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -809,7 +812,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorMemIndex<T>::HasRawData() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -818,7 +822,8 @@ VectorMemIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorMemIndex<T>::IsIndexRefineEnabled() const {
-    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+    const auto& offset_mapping = GetOffsetMapping();
+    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();

@@ -526,7 +526,7 @@ class ConcurrentVectorImpl : public VectorBase {
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 
     const bool use_mapping_storage_;
-    milvus::OffsetMapping offset_mapping_;
+    milvus::GrowingOffsetMapping offset_mapping_;
 };
 
 template <typename Type>
