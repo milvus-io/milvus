@@ -30,6 +30,10 @@ import (
 	"strings"
 	"unsafe"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -105,6 +109,58 @@ func ResolveArrowIOThreadPoolCapacity() int {
 		threads = maxCap
 	}
 	return threads
+}
+
+// RegisterArrowIOThreadPoolWatchers wires hot-reload of arrow IO pool capacity
+// to paramtable updates on the two coefficient/maxCapacity keys. `source` is
+// included in the log entry so log lines from different components (e.g.
+// "querynode" vs "datanode" in standalone, where both register the same keys)
+// remain distinguishable.
+func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(key string) func(*config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newThreads := ResolveArrowIOThreadPoolCapacity()
+			UpdateArrowIOThreadPoolCapacity(newThreads)
+			log.Info("arrow io thread pool capacity updated",
+				zap.String("source", source),
+				zap.String("trigger", key),
+				zap.Int("threads", newThreads))
+		}
+	}
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+			handler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+			handler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+}
+
+// RegisterArrowReaderConfigWatchers wires hot-reload of arrow parquet reader
+// range-coalescing limits to paramtable updates on the two hole/range size
+// keys. `source` is included in the log entry for the same reason as in
+// RegisterArrowIOThreadPoolWatchers.
+func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(evt *config.Event) {
+		if !evt.HasUpdated {
+			return
+		}
+		if err := InitArrowReaderConfig(pt); err != nil {
+			log.Warn("failed to reconfigure arrow reader params",
+				zap.String("source", source), zap.Error(err))
+			return
+		}
+		log.Info("arrow reader params reconfigured",
+			zap.String("source", source),
+			zap.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			zap.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+	}
+	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))
+	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
