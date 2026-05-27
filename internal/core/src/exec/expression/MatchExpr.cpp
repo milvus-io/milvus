@@ -276,6 +276,9 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     VectorPtr match_result;
     if (elem_count > 0) {
         inputs_[0]->Eval(eval_ctx, match_result);
+    } else if (!has_offset_input_) {
+        // Keep element-level child expressions aligned across all-empty batches.
+        inputs_[0]->MoveCursor();
     }
     if (match_result == nullptr) {
         AssertInfo(elem_count == 0,
