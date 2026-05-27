@@ -6845,6 +6845,14 @@ type streamingConfig struct {
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 
+	// append batch
+	WALAppendBatchSmallMessageThreshold ParamItem `refreshable:"true"`
+	WALAppendBatchMaxSize               ParamItem `refreshable:"true"`
+	WALAppendBatchMaxMessageCount       ParamItem `refreshable:"true"`
+	WALAppendBatchMaxDelay              ParamItem `refreshable:"true"`
+	WALAppendBatchCooldownThreshold     ParamItem `refreshable:"true"`
+	WALAppendBatchCooldownDuration      ParamItem `refreshable:"true"`
+
 	// read ahead buffer size
 	WALReadAheadBufferLength ParamItem `refreshable:"true"`
 
@@ -7146,6 +7154,60 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.WALAppendBatchSmallMessageThreshold = ParamItem{
+		Key:          "streaming.walAppendBatch.smallMessageThreshold",
+		Version:      "3.0.0",
+		Doc:          "The max total estimated size of one vchannel DML message group eligible for client-side append batching.",
+		DefaultValue: "64k",
+		Export:       false,
+	}
+	p.WALAppendBatchSmallMessageThreshold.Init(base.mgr)
+
+	p.WALAppendBatchMaxSize = ParamItem{
+		Key:          "streaming.walAppendBatch.maxSize",
+		Version:      "3.0.0",
+		Doc:          "The max accumulated estimated size that triggers a client-side vchannel append batch flush.",
+		DefaultValue: "1m",
+		Export:       false,
+	}
+	p.WALAppendBatchMaxSize.Init(base.mgr)
+
+	p.WALAppendBatchMaxMessageCount = ParamItem{
+		Key:          "streaming.walAppendBatch.maxMessageCount",
+		Version:      "3.0.0",
+		Doc:          "The max accumulated message count that triggers a client-side vchannel append batch flush.",
+		DefaultValue: "64",
+		Export:       false,
+	}
+	p.WALAppendBatchMaxMessageCount.Init(base.mgr)
+
+	p.WALAppendBatchMaxDelay = ParamItem{
+		Key:          "streaming.walAppendBatch.maxDelay",
+		Version:      "3.0.0",
+		Doc:          "The max duration a client-side vchannel append batch can wait before flushing.",
+		DefaultValue: "5ms",
+		Export:       false,
+	}
+	p.WALAppendBatchMaxDelay.Init(base.mgr)
+
+	p.WALAppendBatchCooldownThreshold = ParamItem{
+		Key:          "streaming.walAppendBatch.cooldownThreshold",
+		Version:      "3.0.0",
+		Doc:          "The consecutive timer flush count with only one DML message before client-side append batching enters cooldown.",
+		DefaultValue: "3",
+		Export:       false,
+	}
+	p.WALAppendBatchCooldownThreshold.Init(base.mgr)
+
+	p.WALAppendBatchCooldownDuration = ParamItem{
+		Key:          "streaming.walAppendBatch.cooldownDuration",
+		Version:      "3.0.0",
+		Doc:          "The cooldown duration after client-side append batching repeatedly flushes only one DML message.",
+		DefaultValue: "10s",
+		Export:       false,
+	}
+	p.WALAppendBatchCooldownDuration.Init(base.mgr)
 
 	p.WALReadAheadBufferLength = ParamItem{
 		Key:     "streaming.walReadAheadBuffer.length",
