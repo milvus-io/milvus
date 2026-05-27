@@ -836,7 +836,7 @@ func (m *meta) SetStatesBatch(ctx context.Context, segmentIDs []UniqueID, target
 
 	metricMutation.commit()
 	for _, cs := range clonedSegments {
-		m.segments.SetSegment(cs.SegmentInfo.GetID(), cs)
+		m.segments.SetSegment(cs.GetID(), cs)
 	}
 
 	log.Info("meta update: setting states batch - complete",

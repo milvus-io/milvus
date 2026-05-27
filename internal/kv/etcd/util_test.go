@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -53,18 +54,44 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 	badPredicate := predicates.NewMockPredicate(s.T())
 	badPredicate.EXPECT().Target().Return(0)
 
+	badType := predicates.NewMockPredicate(s.T())
+	badType.EXPECT().Target().Return(predicates.PredTargetValue)
+	badType.EXPECT().Type().Return(0)
+
 	cases := []testCase{
 		{tag: "normal_value_equal", input: []predicates.Predicate{predicates.ValueEqual("a", "b")}, expectSucceed: true},
+		{tag: "key_not_exists", input: []predicates.Predicate{predicates.KeyNotExists("a")}, expectSucceed: true},
+		{tag: "mod_revision_equal", input: []predicates.Predicate{predicates.ModRevisionEqual("a", 42)}, expectSucceed: true},
+		{tag: "mixed", input: []predicates.Predicate{predicates.ValueEqual("a", "b"), predicates.KeyNotExists("c"), predicates.ModRevisionEqual("d", 7)}, expectSucceed: true},
 		{tag: "empty_input", input: nil, expectSucceed: true},
-		{tag: "bad_predicates", input: []predicates.Predicate{badPredicate}, expectSucceed: false},
+		{tag: "bad_target", input: []predicates.Predicate{badPredicate}, expectSucceed: false},
+		{tag: "bad_type", input: []predicates.Predicate{badType}, expectSucceed: false},
 	}
 
 	for _, tc := range cases {
 		s.Run(tc.tag, func() {
-			result, err := parsePredicates("", tc.input...)
+			result, err := parsePredicates("/root", tc.input...)
 			if tc.expectSucceed {
 				s.NoError(err)
 				s.Equal(len(tc.input), len(result))
+				for i, pred := range tc.input {
+					var expected clientv3.Cmp
+					switch pred.Target() {
+					case predicates.PredTargetValue:
+						expected = clientv3.Compare(clientv3.Value("/root/"+pred.Key()), "=", pred.TargetValue())
+					case predicates.PredTargetCreateRevision:
+						expected = clientv3.Compare(clientv3.CreateRevision("/root/"+pred.Key()), "=", pred.TargetValue())
+					case predicates.PredTargetModRevision:
+						expected = clientv3.Compare(clientv3.ModRevision("/root/"+pred.Key()), "=", pred.TargetValue())
+					}
+					s.Equal(expected.Target, result[i].Target)
+					s.Equal(expected.Result, result[i].Result)
+					// Key must carry the full rooted path or CAS lookups silently miss.
+					s.Equal(expected.Key, result[i].Key)
+					// TargetUnion carries the actual CAS value (revision number, value bytes);
+					// a hardcoded zero here would silently break OCC.
+					s.Equal(expected.TargetUnion, result[i].TargetUnion)
+				}
 			} else {
 				s.Error(err)
 			}

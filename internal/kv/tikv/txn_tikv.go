@@ -468,9 +468,7 @@ func (kv *txnTiKV) evaluatePredicates(ctx context.Context, txn *transaction.KVTx
 			if errors.Is(err, tikverr.ErrNotExist) {
 				break
 			}
-			if err != nil {
-				return errors.Wrap(err, fmt.Sprintf("failed to check key existence (%s)", pred.Key()))
-			}
+			return errors.Wrap(err, fmt.Sprintf("failed to check key existence (%s)", pred.Key()))
 		case predicates.PredTargetModRevision:
 			return errors.Wrapf(merr.ErrOperationNotSupported, "TiKV does not support mod revision predicates")
 		default:
