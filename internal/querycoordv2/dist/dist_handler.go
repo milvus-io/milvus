@@ -68,6 +68,21 @@ func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
 	log.Info("start dist handler")
+
+	var loopWG sync.WaitGroup
+	loopWG.Add(2)
+	go func() {
+		defer loopWG.Done()
+		dh.startPullDistLoop(ctx)
+	}()
+	go func() {
+		defer loopWG.Done()
+		dh.startDispatchLoop(ctx)
+	}()
+	loopWG.Wait()
+}
+
+func (dh *distHandler) startPullDistLoop(ctx context.Context) {
 	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(distInterval)
 	defer ticker.Stop()
@@ -75,13 +90,13 @@ func (dh *distHandler) start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("close dist handler due to context done")
+			log.Ctx(ctx).Info("close dist pull loop due to context done", zap.Int64("nodeID", dh.nodeID))
 			return
 		case <-dh.c:
-			log.Info("close dist handler")
+			log.Ctx(ctx).Info("close dist pull loop", zap.Int64("nodeID", dh.nodeID))
 			return
 		case <-ticker.C:
-			dh.pullDist(ctx, &failures, true)
+			dh.pullDist(ctx, &failures, false)
 			// only reset when interval updated
 			newDistInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 			if newDistInterval != distInterval {
@@ -91,6 +106,33 @@ func (dh *distHandler) start(ctx context.Context) {
 				default:
 				}
 				ticker.Reset(distInterval)
+			}
+		}
+	}
+}
+
+func (dh *distHandler) startDispatchLoop(ctx context.Context) {
+	dispatchInterval := Params.QueryCoordCfg.DispatchInterval.GetAsDuration(time.Millisecond)
+	ticker := time.NewTicker(dispatchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Ctx(ctx).Info("close dist dispatch loop due to context done", zap.Int64("nodeID", dh.nodeID))
+			return
+		case <-dh.c:
+			log.Ctx(ctx).Info("close dist dispatch loop", zap.Int64("nodeID", dh.nodeID))
+			return
+		case <-ticker.C:
+			dh.scheduler.Dispatch(dh.nodeID)
+			newDispatchInterval := Params.QueryCoordCfg.DispatchInterval.GetAsDuration(time.Millisecond)
+			if newDispatchInterval != dispatchInterval {
+				dispatchInterval = newDispatchInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(dispatchInterval)
 			}
 		}
 	}
