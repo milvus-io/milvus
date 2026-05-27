@@ -1419,6 +1419,28 @@ func WrapErrInconsistentRequery(msg ...string) error {
 	return err
 }
 
+// WrapErrQueryPlanMsg creates a new ErrQueryPlan (code 2201) with a detail
+// message. Use this when query plan parsing/validation fails and there is no
+// underlying Go error to wrap.
+func WrapErrQueryPlanMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return errors.Wrap(ErrQueryPlan, detail)
+}
+
+// WrapErrQueryPlan wraps an existing underlying error with ErrQueryPlan
+// (code 2201), preserving the inner error chain so callers can still match
+// upstream sentinels via errors.Is/As.
+func WrapErrQueryPlan(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrQueryPlanMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrQueryPlan,
+	}
+}
+
 func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
 	return wrapFields(ErrKMSKeyRevoked,
 		value("dbID", dbID),

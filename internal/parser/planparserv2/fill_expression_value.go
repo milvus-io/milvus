@@ -1,12 +1,9 @@
 package planparserv2
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,18 +48,18 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		}
 		return nil
 	default:
-		return fmt.Errorf("this expression no need to fill placeholder with expr type: %T", e)
+		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
 }
 
 func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*planpb.GenericValue) error {
 	value, ok := templateValues[expr.GetTemplateVariableName()]
 	if !ok && expr.GetValues() == nil {
-		return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
+		return merr.WrapErrQueryPlanMsg("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
 	}
 
 	if value == nil || value.GetArrayVal() == nil {
-		return fmt.Errorf("the value of term expression template variable {%s} is not array", expr.GetTemplateVariableName())
+		return merr.WrapErrQueryPlanMsg("the value of term expression template variable {%s} is not array", expr.GetTemplateVariableName())
 	}
 	dataType := expr.GetColumnInfo().GetDataType()
 	if typeutil.IsArrayType(dataType) {
@@ -102,15 +99,15 @@ func isRegexMatchOp(op planpb.OpType) bool {
 func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues map[string]*planpb.GenericValue) error {
 	value, ok := templateValues[expr.GetTemplateVariableName()]
 	if !ok {
-		return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
+		return merr.WrapErrQueryPlanMsg("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
 	}
 	if value == nil {
-		return fmt.Errorf("the value of expression template variable {%s} is nil", expr.GetTemplateVariableName())
+		return merr.WrapErrQueryPlanMsg("the value of expression template variable {%s} is nil", expr.GetTemplateVariableName())
 	}
 
 	if isLikeMatchOp(expr.GetOp()) {
 		if !IsString(value) {
-			return fmt.Errorf("the value of like expression template variable {%s} is not string", expr.GetTemplateVariableName())
+			return merr.WrapErrQueryPlanMsg("the value of like expression template variable {%s} is not string", expr.GetTemplateVariableName())
 		}
 		op, operand, err := translatePatternMatch(value.GetStringVal())
 		if err != nil {
@@ -123,7 +120,7 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 
 	if isRegexMatchOp(expr.GetOp()) {
 		if !IsString(value) {
-			return fmt.Errorf("the value of regex expression template variable {%s} is not string", expr.GetTemplateVariableName())
+			return merr.WrapErrQueryPlanMsg("the value of regex expression template variable {%s} is not string", expr.GetTemplateVariableName())
 		}
 		op, operand, err := validateAndOptimizeRegexPattern(value.GetStringVal())
 		if err != nil {
@@ -154,10 +151,10 @@ func FillGISFunctionFilterExpressionValue(expr *planpb.GISFunctionFilterExpr, te
 	templateVariableName := expr.GetWktString()
 	value, ok := templateValues[templateVariableName]
 	if !ok {
-		return fmt.Errorf("the value of expression template variable name {%s} is not found", templateVariableName)
+		return merr.WrapErrQueryPlanMsg("the value of expression template variable name {%s} is not found", templateVariableName)
 	}
 	if value == nil || !IsString(value) {
-		return fmt.Errorf("the value of GIS WKT template variable {%s} is not string", templateVariableName)
+		return merr.WrapErrQueryPlanMsg("the value of GIS WKT template variable {%s} is not string", templateVariableName)
 	}
 
 	wktString := value.GetStringVal()
@@ -185,7 +182,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 	if lowerValue == nil || expr.GetLowerTemplateVariableName() != "" {
 		lowerValue, ok = templateValues[expr.GetLowerTemplateVariableName()]
 		if !ok {
-			return fmt.Errorf("the lower value of expression template variable name {%s} is not found", expr.GetLowerTemplateVariableName())
+			return merr.WrapErrQueryPlanMsg("the lower value of expression template variable name {%s} is not found", expr.GetLowerTemplateVariableName())
 		}
 		castedLowerValue, err := castValue(dataType, lowerValue)
 		if err != nil {
@@ -198,7 +195,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 	if upperValue == nil || expr.GetUpperTemplateVariableName() != "" {
 		upperValue, ok = templateValues[expr.GetUpperTemplateVariableName()]
 		if !ok {
-			return fmt.Errorf("the upper value of expression template variable name {%s} is not found", expr.GetUpperTemplateVariableName())
+			return merr.WrapErrQueryPlanMsg("the upper value of expression template variable name {%s} is not found", expr.GetUpperTemplateVariableName())
 		}
 
 		castedUpperValue, err := castValue(dataType, upperValue)
@@ -228,11 +225,11 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 
 	if !expr.GetLowerInclusive() || !expr.GetUpperInclusive() {
 		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-			return errors.New("invalid range: lowerbound is greater than upperbound")
+			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 		}
 	} else {
 		if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-			return errors.New("invalid range: lowerbound is greater than upperbound")
+			return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 		}
 	}
 
@@ -251,7 +248,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		if operand == nil || expr.GetOperandTemplateVariableName() != "" {
 			operand, ok = templateValues[expr.GetOperandTemplateVariableName()]
 			if !ok {
-				return fmt.Errorf("the right operand value of expression template variable name {%s} is not found", expr.GetOperandTemplateVariableName())
+				return merr.WrapErrQueryPlanMsg("the right operand value of expression template variable name {%s} is not found", expr.GetOperandTemplateVariableName())
 			}
 		}
 
@@ -267,7 +264,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		}
 
 		if operand.GetArrayVal() != nil {
-			return errors.New("can not comparisons array directly")
+			return merr.WrapErrQueryPlanMsg("can not comparisons array directly")
 		}
 
 		dataType, err = getTargetType(lDataType, rDataType)
@@ -284,7 +281,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		if expr.ArithOp == planpb.ArithOpType_Div || expr.ArithOp == planpb.ArithOpType_Mod {
 			if (IsInteger(castedOperand) && castedOperand.GetInt64Val() == 0) ||
 				(IsFloating(castedOperand) && castedOperand.GetFloatVal() == 0) {
-				return errors.New("division or modulus by zero")
+				return merr.WrapErrQueryPlanMsg("division or modulus by zero")
 			}
 		}
 
@@ -295,7 +292,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 	if expr.GetValue() == nil || expr.GetValueTemplateVariableName() != "" {
 		value, ok = templateValues[expr.GetValueTemplateVariableName()]
 		if !ok {
-			return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetValueTemplateVariableName())
+			return merr.WrapErrQueryPlanMsg("the value of expression template variable name {%s} is not found", expr.GetValueTemplateVariableName())
 		}
 	}
 	castedValue, err := castValue(dataType, value)
@@ -313,7 +310,7 @@ func FillJSONContainsExpressionValue(expr *planpb.JSONContainsExpr, templateValu
 	}
 	value, ok := templateValues[expr.GetTemplateVariableName()]
 	if !ok {
-		return fmt.Errorf("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
+		return merr.WrapErrQueryPlanMsg("the value of expression template variable name {%s} is not found", expr.GetTemplateVariableName())
 	}
 	if err := checkContainsElement(toColumnExpr(expr.GetColumnInfo()), expr.GetOp(), value); err != nil {
 		return err
