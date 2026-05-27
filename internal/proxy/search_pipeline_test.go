@@ -368,6 +368,19 @@ func (s *SearchPipelineSuite) TestHybridAssembleOpPicksFieldsFromCollapsedSubRes
 	s.Equal([]int64{30, 10}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderUsesAscendingRowsAndPreservesOutputOrder() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	calls := make([]int64, 0, len(rowIdxs))
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		calls = append(calls, rowIdx)
+		return []int64{rowIdx + 100}
+	})
+
+	s.Equal([]int64{1, 2, 4, 5}, calls)
+	s.Equal([][]int64{{105}, {101}, {104}, {102}}, fieldIdxs)
+}
+
 func (s *SearchPipelineSuite) TestRequeryOp() {
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "int64", 20)
 	f1.FieldId = 101

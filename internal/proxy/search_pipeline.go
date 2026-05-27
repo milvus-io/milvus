@@ -318,6 +318,30 @@ type bestElementHit struct {
 	order  int
 }
 
+type rowIdxComputeItem struct {
+	outputIdx int
+	rowIdx    int64
+}
+
+func computeFieldIdxsByOriginalOrder(rowIdxs []int64, compute func(int64) []int64) [][]int64 {
+	items := make([]rowIdxComputeItem, 0, len(rowIdxs))
+	for i, rowIdx := range rowIdxs {
+		items = append(items, rowIdxComputeItem{
+			outputIdx: i,
+			rowIdx:    rowIdx,
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].rowIdx < items[j].rowIdx
+	})
+
+	fieldIdxsByOutput := make([][]int64, len(rowIdxs))
+	for _, item := range items {
+		fieldIdxsByOutput[item.outputIdx] = append([]int64(nil), compute(item.rowIdx)...)
+	}
+	return fieldIdxsByOutput
+}
+
 func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, largerScoreIsBetter bool) (*milvuspb.SearchResults, error) {
 	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
 		return result, nil
@@ -418,7 +442,17 @@ func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, large
 		if int64(len(hits)) > output.TopK {
 			output.TopK = int64(len(hits))
 		}
-		for _, hit := range hits {
+
+		var fieldIdxsByOutput [][]int64
+		if len(data.GetFieldsData()) > 0 {
+			rowIdxs := make([]int64, 0, len(hits))
+			for _, hit := range hits {
+				rowIdxs = append(rowIdxs, hit.rowIdx)
+			}
+			fieldIdxsByOutput = computeFieldIdxsByOriginalOrder(rowIdxs, idxComputer.Compute)
+		}
+
+		for i, hit := range hits {
 			typeutil.AppendIDs(output.Ids, data.GetIds(), int(hit.rowIdx))
 			output.Scores = append(output.Scores, data.GetScores()[hit.rowIdx])
 			if len(data.GetDistances()) > 0 {
@@ -428,8 +462,7 @@ func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, large
 				output.Recalls = append(output.Recalls, data.GetRecalls()[hit.rowIdx])
 			}
 			if len(data.GetFieldsData()) > 0 {
-				fieldIdxs := idxComputer.Compute(hit.rowIdx)
-				typeutil.AppendFieldData(output.FieldsData, data.GetFieldsData(), hit.rowIdx, fieldIdxs...)
+				typeutil.AppendFieldData(output.FieldsData, data.GetFieldsData(), hit.rowIdx, fieldIdxsByOutput[i]...)
 			}
 		}
 		offset += topk
@@ -758,15 +791,21 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// ===========================================
 	fieldsData := make([]*schemapb.FieldData, len(fields))
 	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
-	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
+
+	size := typeutil.GetSizeOfIDs(ids)
+	rowIdxs := make([]int64, 0, size)
+	for i := 0; i < size; i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
 			return nil, merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(pkOffset), collectionID))
 		}
-		rowIdx := int64(pkOffset[id])
-		fieldIdxs := idxComputer.Compute(rowIdx)
-		typeutil.AppendFieldData(fieldsData, fields, rowIdx, fieldIdxs...)
+		rowIdxs = append(rowIdxs, int64(pkOffset[id]))
+	}
+
+	fieldIdxsByOutput := computeFieldIdxsByOriginalOrder(rowIdxs, idxComputer.Compute)
+	for i, rowIdx := range rowIdxs {
+		typeutil.AppendFieldData(fieldsData, fields, rowIdx, fieldIdxsByOutput[i]...)
 	}
 
 	return fieldsData, nil
@@ -821,6 +860,7 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 		return []any{rankResult}, nil
 	}
 
+	locs := make([]pkLoc, numReranked)
 	computers := make([]*typeutil.FieldDataIdxComputer, len(reducedResults))
 	for i, result := range reducedResults {
 		if len(result.GetResults().GetFieldsData()) > 0 {
@@ -828,7 +868,7 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 		}
 	}
 
-	fieldsData := make([]*schemapb.FieldData, len(templateFields))
+	itemsByResult := make([][]rowIdxComputeItem, len(reducedResults))
 	for i := 0; i < numReranked; i++ {
 		pk := typeutil.GetPK(rerankedIDs, int64(i))
 		loc, ok := pkIndex[pk]
@@ -841,9 +881,32 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 				"hybrid assemble: sub-result[%d] has empty FieldsData but contributed reranked id %v; collection=%d",
 				loc.resultIdx, pk, op.collectionID))
 		}
+		locs[i] = loc
+		itemsByResult[loc.resultIdx] = append(itemsByResult[loc.resultIdx], rowIdxComputeItem{
+			outputIdx: i,
+			rowIdx:    int64(loc.rowIdx),
+		})
+	}
+
+	fieldIdxsByOutput := make([][]int64, numReranked)
+	for resultIdx, items := range itemsByResult {
+		if len(items) == 0 {
+			continue
+		}
+		rowIdxs := make([]int64, 0, len(items))
+		for _, item := range items {
+			rowIdxs = append(rowIdxs, item.rowIdx)
+		}
+		fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, computers[resultIdx].Compute)
+		for i, item := range items {
+			fieldIdxsByOutput[item.outputIdx] = fieldIdxs[i]
+		}
+	}
+
+	fieldsData := make([]*schemapb.FieldData, len(templateFields))
+	for i, loc := range locs {
 		srcFields := reducedResults[loc.resultIdx].GetResults().GetFieldsData()
-		fieldIdxs := computers[loc.resultIdx].Compute(int64(loc.rowIdx))
-		typeutil.AppendFieldData(fieldsData, srcFields, int64(loc.rowIdx), fieldIdxs...)
+		typeutil.AppendFieldData(fieldsData, srcFields, int64(loc.rowIdx), fieldIdxsByOutput[i]...)
 	}
 
 	rankResult.Results.FieldsData = fieldsData
