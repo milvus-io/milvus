@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
+	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -101,39 +102,6 @@ func TestWAL(t *testing.T) {
 	result, err := w.RawAppend(ctx, newInsertMessage(vChannel1))
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-
-	// Test committed txn.
-	txn, err := w.Txn(ctx, TxnOption{
-		VChannel:  vChannel1,
-		Keepalive: 10 * time.Second,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, txn)
-
-	err = txn.Append(ctx, newInsertMessage(vChannel1))
-	assert.NoError(t, err)
-	err = txn.Append(ctx, newInsertMessage(vChannel1))
-	assert.NoError(t, err)
-
-	result, err = txn.Commit(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-
-	// Test rollback txn.
-	txn, err = w.Txn(ctx, TxnOption{
-		VChannel:  vChannel1,
-		Keepalive: 10 * time.Second,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, txn)
-
-	err = txn.Append(ctx, newInsertMessage(vChannel1))
-	assert.NoError(t, err)
-	err = txn.Append(ctx, newInsertMessage(vChannel1))
-	assert.NoError(t, err)
-
-	err = txn.Rollback(ctx)
-	assert.NoError(t, err)
 
 	resp := w.AppendMessages(ctx,
 		newInsertMessage(vChannel1),
@@ -229,6 +197,424 @@ func newInsertMessage(vChannel string) message.MutableMessage {
 		WithVChannel(vChannel).
 		WithHeader(&message.InsertMessageHeader{}).
 		WithBody(&msgpb.InsertRequest{}).
+		BuildMutable()
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
+func TestAppendMessagesOrderConsistency(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	// Create mock producers for each vchannel that return different message IDs
+	// to verify the order of responses matches the order of inputs.
+	producers := make(map[string]*mock_producer.MockProducer)
+	messageIDCounter := atomic.NewInt64(0)
+
+	for _, vchannel := range []string{vChannel1, vChannel2, vChannel3} {
+		p := mock_producer.NewMockProducer(t)
+		available := make(chan struct{})
+		p.EXPECT().IsAvailable().Return(true).Maybe()
+		p.EXPECT().Available().Return(available).Maybe()
+		p.EXPECT().Close().Return().Maybe()
+		p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+				id := messageIDCounter.Inc()
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(id),
+					TimeTick:  uint64(id),
+					TxnCtx: &message.TxnContext{
+						TxnID:     message.TxnID(id),
+						Keepalive: 10 * time.Second,
+					},
+				}, nil
+			}).Maybe()
+		producers[vchannel] = p
+	}
+
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, opts *streamingnodehandler.ProducerOptions) (streamingnodehandler.Producer, error) {
+			return producers[opts.PChannel], nil
+		})
+
+	// Test case 1: Messages interleaved across multiple vchannels
+	// The order should be preserved in the response
+	msgs := []message.MutableMessage{
+		newInsertMessage(vChannel1), // idx 0
+		newInsertMessage(vChannel2), // idx 1
+		newInsertMessage(vChannel1), // idx 2
+		newInsertMessage(vChannel3), // idx 3
+		newInsertMessage(vChannel2), // idx 4
+		newInsertMessage(vChannel3), // idx 5
+		newInsertMessage(vChannel1), // idx 6
+	}
+
+	resp := w.AppendMessages(ctx, msgs...)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Len(t, resp.Responses, len(msgs))
+
+	// Verify that messages from the same vchannel have the same response
+	// (because they are processed as a transaction per vchannel)
+	// vChannel1: indices 0, 2, 6 should have the same result
+	assert.Equal(t, resp.Responses[0].AppendResult.MessageID, resp.Responses[2].AppendResult.MessageID)
+	assert.Equal(t, resp.Responses[0].AppendResult.MessageID, resp.Responses[6].AppendResult.MessageID)
+
+	// vChannel2: indices 1, 4 should have the same result
+	assert.Equal(t, resp.Responses[1].AppendResult.MessageID, resp.Responses[4].AppendResult.MessageID)
+
+	// vChannel3: indices 3, 5 should have the same result
+	assert.Equal(t, resp.Responses[3].AppendResult.MessageID, resp.Responses[5].AppendResult.MessageID)
+
+	// Different vchannels should have different results
+	assert.NotEqual(t, resp.Responses[0].AppendResult.MessageID, resp.Responses[1].AppendResult.MessageID)
+	assert.NotEqual(t, resp.Responses[0].AppendResult.MessageID, resp.Responses[3].AppendResult.MessageID)
+	assert.NotEqual(t, resp.Responses[1].AppendResult.MessageID, resp.Responses[3].AppendResult.MessageID)
+
+	// Test case 2: All messages from the same vchannel
+	messageIDCounter.Store(0)
+	msgs2 := []message.MutableMessage{
+		newInsertMessage(vChannel1),
+		newInsertMessage(vChannel1),
+		newInsertMessage(vChannel1),
+	}
+
+	resp2 := w.AppendMessages(ctx, msgs2...)
+	assert.NoError(t, resp2.UnwrapFirstError())
+	assert.Len(t, resp2.Responses, len(msgs2))
+
+	// All responses should be the same (same vchannel -> same transaction result)
+	assert.Equal(t, resp2.Responses[0].AppendResult.MessageID, resp2.Responses[1].AppendResult.MessageID)
+	assert.Equal(t, resp2.Responses[0].AppendResult.MessageID, resp2.Responses[2].AppendResult.MessageID)
+
+	// Test case 3: Single message
+	resp3 := w.AppendMessages(ctx, newInsertMessage(vChannel2))
+	assert.NoError(t, resp3.UnwrapFirstError())
+	assert.Len(t, resp3.Responses, 1)
+	assert.NotNil(t, resp3.Responses[0].AppendResult)
+}
+
+func TestAppendMessagesBatchSmallDMLAcrossCalls(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          messagesEstimateSize(msg1, msg2),
+		MaxMessageCount:       64,
+		MaxDelay:              time.Second,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+
+	var mu sync.Mutex
+	appendTypes := make([]message.MessageType, 0, 4)
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			mu.Lock()
+			appendTypes = append(appendTypes, mm.MessageType())
+			mu.Unlock()
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(4)
+
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	respCh := make(chan AppendResponses, 2)
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg1)
+	}()
+	assert.Never(t, func() bool {
+		return len(respCh) > 0
+	}, 50*time.Millisecond, 10*time.Millisecond)
+
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg2)
+	}()
+
+	resp1 := <-respCh
+	resp2 := <-respCh
+	assert.NoError(t, resp1.UnwrapFirstError())
+	assert.NoError(t, resp2.UnwrapFirstError())
+	assert.Len(t, resp1.Responses, 1)
+	assert.Len(t, resp2.Responses, 1)
+	assert.Equal(t, resp1.Responses[0].AppendResult.MessageID, resp2.Responses[0].AppendResult.MessageID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.ElementsMatch(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeInsert,
+		message.MessageTypeInsert,
+		message.MessageTypeCommitTxn,
+	}, appendTypes)
+}
+
+func TestAppendMessagesBatchCooldownAfterSingleMessageFlush(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg := newInsertMessageWithCollectionName(vChannel1, "payload")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
+		MaxDelay:              100 * time.Millisecond,
+		CooldownThreshold:     1,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+	}, nil).Twice()
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	start := time.Now()
+	resp := w.AppendMessages(ctx, msg)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.GreaterOrEqual(t, time.Since(start), w.appendBatchConfig.MaxDelay)
+	assert.True(t, w.getAppendBatcher(vChannel1).inCooldown(time.Now()))
+
+	start = time.Now()
+	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Less(t, time.Since(start), w.appendBatchConfig.MaxDelay/2)
+}
+
+func TestAppendMessagesBatchCooldownAfterSingleRequestFlush(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1, msg2) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
+		MaxDelay:              100 * time.Millisecond,
+		CooldownThreshold:     1,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(5)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	start := time.Now()
+	resp := w.AppendMessages(ctx, msg1, msg2)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.GreaterOrEqual(t, time.Since(start), w.appendBatchConfig.MaxDelay)
+	assert.True(t, w.getAppendBatcher(vChannel1).inCooldown(time.Now()))
+
+	start = time.Now()
+	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Less(t, time.Since(start), w.appendBatchConfig.MaxDelay/2)
+}
+
+func TestAppendMessagesBatchAllOrNothing(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
+		MaxDelay:              time.Second,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(4)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	start := time.Now()
+	resp := w.AppendMessages(ctx, msg1, msg2)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Less(t, time.Since(start), w.appendBatchConfig.MaxDelay/2)
+}
+
+func TestAppendMessagesBatchThresholdIsPerVChannel(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel2, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          messagesEstimateSize(msg1, msg2),
+		MaxMessageCount:       64,
+		MaxDelay:              time.Second,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.MatchedBy(func(m message.MutableMessage) bool {
+		return m.MessageType() == message.MessageTypeInsert
+	})).Return(&types.AppendResult{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+	}, nil).Twice()
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	respCh := make(chan AppendResponses, 1)
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg1, msg2)
+	}()
+	assert.Never(t, func() bool {
+		return len(respCh) > 0
+	}, 50*time.Millisecond, 10*time.Millisecond)
+
+	resp := <-respCh
+	assert.NoError(t, resp.UnwrapFirstError())
+}
+
+func TestAppendMessagesBatchFlushByMessageCount(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       2,
+		MaxDelay:              time.Second,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(4)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	respCh := make(chan AppendResponses, 2)
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg1)
+	}()
+	assert.Never(t, func() bool {
+		return len(respCh) > 0
+	}, 50*time.Millisecond, 10*time.Millisecond)
+
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg2)
+	}()
+
+	resp1 := <-respCh
+	resp2 := <-respCh
+	assert.NoError(t, resp1.UnwrapFirstError())
+	assert.NoError(t, resp2.UnwrapFirstError())
+}
+
+func newInsertMessageWithCollectionName(vChannel string, collectionName string) message.MutableMessage {
+	msg, err := message.NewInsertMessageBuilderV1().
+		WithVChannel(vChannel).
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{
+			CollectionName: collectionName,
+		}).
 		BuildMutable()
 	if err != nil {
 		panic(err)
