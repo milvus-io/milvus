@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -480,11 +481,11 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
-				if callCount == 1 {
+				n := callCount.Add(1)
+				if n == 1 {
 					// First call should be filter stage with FilterOnly=true
 					s.True(req.GetFilterOnly(), "First call should have FilterOnly=true")
 					s.True(req.GetEnableExprCache(), "First call should have EnableExprCache=true")
@@ -531,7 +532,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.False(fallback)
 		s.NotNil(results)
 		// Should have called SearchSegments twice: once for filter stage, once for vector search
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
 	})
 
 	s.Run("incomplete_filter_counts_fallback_restores_enable_expr_cache", func() {
@@ -619,11 +620,11 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
-				if callCount == 2 {
+				n := callCount.Add(1)
+				if n == 2 {
 					optimizedPlan := &planpb.PlanNode{}
 					err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), optimizedPlan)
 					s.Require().NoError(err)
@@ -684,7 +685,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
 		s.True(hookCalled, "QueryHook.Run should have been called by the optimizer")
 		mockHook.AssertExpectations(s.T())
 	})
@@ -990,10 +991,10 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
+				callCount.Add(1)
 				// All calls in two-stage search should have EnableExprCache=true
 				s.True(req.GetEnableExprCache(), "EnableExprCache should be true for all two-stage search calls")
 			}).Return(&internalpb.SearchResults{
@@ -1038,7 +1039,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		// Should have called SearchSegments 3 times:
 		// filter stage: 1 call for sealed only (growing not included in filter stage)
 		// search stage: 1 call for sealed + 1 call for growing = 2
-		s.Equal(3, callCount)
+		s.Equal(int32(3), callCount.Load())
 	})
 }
 
