@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,10 +38,30 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 		vchannel string
 		indexes  []int
 	}
+	type batchTask struct {
+		indexes []int
+		respCh  <-chan types.AppendResponse
+	}
+	type pendingBatchTask struct {
+		vchannel string
+		indexes  []int
+		msgs     []message.MutableMessage
+	}
 	tasks := make([]vchannelTask, 0, len(dispatchedMessages))
+	pendingBatchTasks := make([]pendingBatchTask, 0, len(dispatchedMessages))
+	batchTasks := make([]batchTask, 0, len(dispatchedMessages))
 	guards := make([]*producer.ProduceGuard, 0, len(dispatchedMessages))
 	resp := types.NewAppendResponseN(len(msgs))
+	shouldBatch := w.shouldBatchAppendMessages(dispatchedMessages)
 	for vchannel, vchannelMsgs := range dispatchedMessages {
+		if shouldBatch {
+			pendingBatchTasks = append(pendingBatchTasks, pendingBatchTask{
+				vchannel: vchannel,
+				indexes:  indexes[vchannel],
+				msgs:     vchannelMsgs,
+			})
+			continue
+		}
 		g, err := w.getProducer(vchannel).BeginProduce(ctx, vchannelMsgs...)
 		if err != nil {
 			for _, guard := range guards {
@@ -56,6 +77,13 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 		})
 	}
 
+	for _, task := range pendingBatchTasks {
+		batchTasks = append(batchTasks, batchTask{
+			indexes: task.indexes,
+			respCh:  w.getAppendBatcher(task.vchannel).submit(ctx, task.msgs...),
+		})
+	}
+
 	// Batch commit and get responses per vchannel.
 	guardResps := producer.BatchCommitProduce(ctx, guards...)
 
@@ -67,7 +95,84 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 		}
 	}
 
+	for _, task := range batchTasks {
+		var batchResp types.AppendResponse
+		select {
+		case batchResp = <-task.respCh:
+		case <-ctx.Done():
+			batchResp = types.AppendResponse{Error: ctx.Err()}
+		}
+		for _, origIdx := range task.indexes {
+			resp.FillResponseAtIdx(batchResp, origIdx)
+		}
+	}
+
 	return resp
+}
+
+func (w *walAccesserImpl) shouldBatchAppendMessages(dispatchedMessages map[string][]message.MutableMessage) bool {
+	if !w.appendBatchConfig.enabled() {
+		return false
+	}
+	if len(dispatchedMessages) == 0 {
+		return false
+	}
+	for vchannel, msgs := range dispatchedMessages {
+		if !w.shouldBatchAppendVChannelMessages(vchannel, msgs...) {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
+	if w.getAppendBatcher(vchannel).inCooldown(time.Now()) {
+		return false
+	}
+	for _, msg := range msgs {
+		if !msg.MessageType().IsDMLMessageType() {
+			return false
+		}
+	}
+	return len(msgs) > 0 && messagesEstimateSize(msgs...) < w.appendBatchConfig.SmallMessageThreshold
+}
+
+func (w *walAccesserImpl) appendVChannelMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponse {
+	guard, err := w.getProducer(msgs[0].VChannel()).BeginProduce(ctx, msgs...)
+	if err != nil {
+		return types.AppendResponse{Error: err}
+	}
+	resp := producer.BatchCommitProduce(ctx, guard)
+	return resp.Responses[0]
+}
+
+func (w *walAccesserImpl) getAppendBatcher(vchannel string) *appendBatcher {
+	w.appendBatcherMutex.Lock()
+	defer w.appendBatcherMutex.Unlock()
+
+	if w.appendBatchers == nil {
+		w.appendBatchers = make(map[string]*appendBatcher)
+	}
+	if batcher, ok := w.appendBatchers[vchannel]; ok {
+		return batcher
+	}
+	batcher := newAppendBatcher(w.appendBatchConfig, w.appendVChannelMessages)
+	w.appendBatchers[vchannel] = batcher
+	return batcher
+}
+
+func (w *walAccesserImpl) closeAppendBatchers() {
+	w.appendBatcherMutex.Lock()
+	batchers := make([]*appendBatcher, 0, len(w.appendBatchers))
+	for _, batcher := range w.appendBatchers {
+		batchers = append(batchers, batcher)
+	}
+	w.appendBatchers = make(map[string]*appendBatcher)
+	w.appendBatcherMutex.Unlock()
+
+	for _, batcher := range batchers {
+		batcher.close()
+	}
 }
 
 func (w *walAccesserImpl) appendReplicateMessageToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {

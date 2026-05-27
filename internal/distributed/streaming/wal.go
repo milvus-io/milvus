@@ -35,6 +35,9 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		handlerClient:        handlerClient,
 		producerMutex:        sync.Mutex{},
 		producers:            make(map[string]*producer.ResumableProducer),
+		appendBatcherMutex:   sync.Mutex{},
+		appendBatchers:       make(map[string]*appendBatcher),
+		appendBatchConfig:    newAppendBatchConfigFromParams(),
 
 		// TODO: optimize the pool size, use the streaming api but not goroutines.
 		appendExecutionPool:   conc.NewPool[struct{}](0),
@@ -58,6 +61,9 @@ type walAccesserImpl struct {
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer
+	appendBatcherMutex    sync.Mutex
+	appendBatchers        map[string]*appendBatcher
+	appendBatchConfig     appendBatchConfig
 	appendExecutionPool   *conc.Pool[struct{}]
 	dispatchExecutionPool *conc.Pool[struct{}]
 
@@ -141,6 +147,8 @@ func (w *walAccesserImpl) Broadcast() Broadcast {
 func (w *walAccesserImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
+
+	w.closeAppendBatchers()
 
 	w.producerMutex.Lock()
 	for _, p := range w.producers {
