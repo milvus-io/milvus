@@ -275,14 +275,6 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     VectorPtr match_result;
     if (elem_count > 0) {
-        if (!has_offset_input_) {
-            element_offsets_storage.reserve(elem_count);
-            for (int64_t i = 0; i < elem_count; ++i) {
-                element_offsets_storage.emplace_back(
-                    static_cast<int32_t>(elem_start + i));
-            }
-            eval_ctx.set_offset_input(&element_offsets_storage);
-        }
         inputs_[0]->Eval(eval_ctx, match_result);
     }
     if (match_result == nullptr) {
