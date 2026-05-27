@@ -259,7 +259,7 @@ func TestInternalCollectionTakeOutputFields(t *testing.T) {
 	vectors := make([]entity.Vector, 0, queryRes.ResultCount)
 	for _, vec := range queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data() {
 		require.Len(t, vec, internalTakeDim)
-		vectors = append(vectors, entity.FloatVector(vec))
+		vectors = append(vectors, vec)
 	}
 
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, 3, vectors).

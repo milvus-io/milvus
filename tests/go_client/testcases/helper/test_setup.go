@@ -127,11 +127,17 @@ func teardown() {
 // derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
 func managementBaseURL() string {
 	host := ""
-	if u, err := url.Parse(*addr); err == nil {
+	rawAddr := *addr
+	if u, err := url.Parse(rawAddr); err == nil {
 		host = u.Hostname()
 	}
+	if host == "" && rawAddr != "" && !strings.Contains(rawAddr, "://") {
+		if u, err := url.Parse("http://" + rawAddr); err == nil {
+			host = u.Hostname()
+		}
+	}
 	if host == "" {
-		host = *addr
+		host = rawAddr
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		} else if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
@@ -142,7 +148,7 @@ func managementBaseURL() string {
 	if host == "" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:9091", host)
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, "9091"))
 }
 
 // AlterServerConfig changes a Milvus server config via the management HTTP API.

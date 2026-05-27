@@ -1,12 +1,12 @@
 package helper
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,10 +55,16 @@ func TestManagementBaseURL(t *testing.T) {
 		require.Equal(t, "http://localhost:9091", managementBaseURL())
 	})
 
-	t.Run("falls back to localhost on address without host", func(t *testing.T) {
+	t.Run("uses host from address without scheme", func(t *testing.T) {
 		withTestAddr(t, "localhost:19530")
 
 		require.Equal(t, "http://localhost:9091", managementBaseURL())
+	})
+
+	t.Run("uses ci service host from address without scheme", func(t *testing.T) {
+		withTestAddr(t, "gosdk-4823-milvus.jenkins-milvus-ci:19530")
+
+		require.Equal(t, "http://gosdk-4823-milvus.jenkins-milvus-ci:9091", managementBaseURL())
 	})
 }
 
