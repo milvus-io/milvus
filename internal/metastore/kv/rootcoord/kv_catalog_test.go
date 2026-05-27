@@ -2810,6 +2810,9 @@ func TestRBACGrantLegacyGranteeIDCompatibility(t *testing.T) {
 		return grant.GetGrantor().GetPrivilege().GetName()
 	}))
 	assertPolicyPrivileges([]string{"Load", "Release"})
+	legacyKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, legacyID))
+	require.NoError(t, err)
+	assert.Empty(t, legacyKeys)
 
 	revokeGrant := &milvuspb.GrantEntity{
 		Role:       &milvuspb.RoleEntity{Name: roleName},
@@ -2828,6 +2831,285 @@ func TestRBACGrantLegacyGranteeIDCompatibility(t *testing.T) {
 	require.Len(t, grants, 1)
 	assert.Equal(t, "Release", grants[0].GetGrantor().GetPrivilege().GetName())
 	assertPolicyPrivileges([]string{"Release"})
+}
+
+func TestRBACGrantSharedLegacyGranteeIDMigrationFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectName := "shared-legacy-collection"
+	objectType := commonpb.ObjectType_Collection.String()
+	donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	sharedLegacyID := crypto.MD5(donorKey)
+	donorPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		donorKey:          sharedLegacyID,
+		victimKey:         sharedLegacyID,
+		donorPrivilegeKey: "donor-user",
+	}))
+
+	victimListEntity := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "victim-role"},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+	}
+	victimGrants, err := c.ListGrant(ctx, util.DefaultTenant, victimListEntity)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Empty(t, victimGrants)
+	policies, err := c.ListPolicy(ctx, util.DefaultTenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Empty(t, policies)
+
+	err = c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "victim-role"},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "victim-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+
+	storedID, err := metaKV.Load(ctx, victimKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, storedID)
+
+	victimFullID := crypto.GranteeID(victimKey)
+	victimFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, victimFullID))
+	require.NoError(t, err)
+	assert.Empty(t, victimFullIDKeys)
+
+	donorUser, err := metaKV.Load(ctx, donorPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "donor-user", donorUser)
+}
+
+func TestRBACGrantMigrationIgnoresUnreferencedComputedLegacyID(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/unreferenced-computed-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	roleName := "custom-id-role"
+	objectName := "custom-id-collection"
+	objectType := commonpb.ObjectType_Collection.String()
+	granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	storedLegacyID := "0123456789abcdef"
+	computedLegacyID := crypto.MD5(granteeKey)
+	require.NotEqual(t, storedLegacyID, computedLegacyID)
+
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		granteeKey: storedLegacyID,
+		buildGranteeIDKey(computedLegacyID, "PrivilegeInsert"): "donor-user",
+	}))
+
+	listEntity := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+	}
+	grants, err := c.ListGrant(ctx, util.DefaultTenant, listEntity)
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "victim-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant))
+
+	newID := crypto.GranteeID(granteeKey)
+	fullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, newID))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{fmt.Sprintf("%s/%s/%s", rootPath, GranteeIDPrefix, newID) + "/PrivilegeLoad"}, fullIDKeys)
+
+	orphanUser, err := metaKV.Load(ctx, buildGranteeIDKey(computedLegacyID, "PrivilegeInsert"))
+	require.NoError(t, err)
+	assert.Equal(t, "donor-user", orphanUser)
+}
+
+func TestRBACGrantDeleteSharedLegacyGranteeIDKeepsSurvivorSubtree(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/delete-shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectType := commonpb.ObjectType_Collection.String()
+	victimRole := "victim-role"
+	survivorRole := "survivor-role"
+	victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, victimRole, objectType, funcutil.CombineObjectName(util.DefaultDBName, "victim-col"))
+	survivorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, survivorRole, objectType, funcutil.CombineObjectName(util.DefaultDBName, "survivor-col"))
+	sharedLegacyID := crypto.MD5(victimKey)
+	sharedPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		victimKey:          sharedLegacyID,
+		survivorKey:        sharedLegacyID,
+		sharedPrivilegeKey: "shared-user",
+	}))
+
+	require.NoError(t, c.DeleteGrant(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: victimRole}))
+
+	_, err := metaKV.Load(ctx, victimKey)
+	require.Error(t, err)
+	survivorID, err := metaKV.Load(ctx, survivorKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, survivorID)
+	sharedUser, err := metaKV.Load(ctx, sharedPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "shared-user", sharedUser)
+}
+
+func TestRBACGrantDeleteCollectionSharedLegacyGranteeIDKeepsSurvivorSubtree(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/delete-collection-shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectType := commonpb.ObjectType_Collection.String()
+	droppedKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "dropped-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, "dropped-col"))
+	survivorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "survivor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, "survivor-col"))
+	sharedLegacyID := crypto.MD5(droppedKey)
+	sharedPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		droppedKey:         sharedLegacyID,
+		survivorKey:        sharedLegacyID,
+		sharedPrivilegeKey: "shared-user",
+	}))
+
+	require.NoError(t, c.DeleteGrantByCollectionName(ctx, util.DefaultTenant, util.DefaultDBName, "dropped-col"))
+
+	_, err := metaKV.Load(ctx, droppedKey)
+	require.Error(t, err)
+	survivorID, err := metaKV.Load(ctx, survivorKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, survivorID)
+	sharedUser, err := metaKV.Load(ctx, sharedPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "shared-user", sharedUser)
+}
+
+func TestRBACGrantSharedLegacyGranteeIDListGrantFallbacksFailClosed(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+
+	testCases := []struct {
+		name     string
+		unsafeDB string
+	}{
+		{
+			name:     "legacy no db key",
+			unsafeDB: "",
+		},
+		{
+			name:     "wildcard db key",
+			unsafeDB: util.AnyWord,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			objectName := strings.ReplaceAll(test.name, " ", "-")
+			rootPath := fmt.Sprintf("/test/rbac/shared-legacy-fallback-%s-%d", objectName, rand.Int())
+			metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+			defer metaKV.RemoveWithPrefix(ctx, "")
+			defer metaKV.Close()
+			c := NewCatalog(metaKV)
+
+			roleName := "victim-role"
+			objectType := commonpb.ObjectType_Collection.String()
+			donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+			sharedLegacyID := crypto.MD5(donorKey)
+			var unsafeKey string
+			if test.unsafeDB == "" {
+				unsafeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, objectName)
+			} else {
+				unsafeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(test.unsafeDB, objectName))
+			}
+			exactKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+			exactID := crypto.GranteeID(exactKey)
+
+			require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+				donorKey:  sharedLegacyID,
+				unsafeKey: sharedLegacyID,
+				buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"): "donor-user",
+				exactKey: exactID,
+				buildGranteeIDKey(exactID, "PrivilegeLoad"): "victim-user",
+			}))
+
+			grants, err := c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: roleName},
+				Object:     &milvuspb.ObjectEntity{Name: objectType},
+				ObjectName: objectName,
+				DbName:     util.DefaultDBName,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "shared legacy grantee id")
+			assert.Empty(t, grants)
+		})
+	}
 }
 
 func TestRBAC_Backup(t *testing.T) {
@@ -3934,6 +4216,53 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 
 		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
 		assert.NoError(t, err)
+	})
+
+	t.Run("shared legacy grantee id removes old parent without copying privileges", func(t *testing.T) {
+		etcdCli, _ := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		rootPath := fmt.Sprintf("/test/rbac/rename-shared-legacy-grantee-id-%d", rand.Int())
+		metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer metaKV.RemoveWithPrefix(ctx, "")
+		defer metaKV.Close()
+		c := NewCatalog(metaKV)
+
+		donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", "Collection", funcutil.CombineObjectName("default", "old_col"))
+		victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", "Collection", funcutil.CombineObjectName("default", "old_col"))
+		sharedLegacyID := crypto.MD5(donorKey)
+		require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+			donorKey:  sharedLegacyID,
+			victimKey: sharedLegacyID,
+			buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"): "donor-user",
+		}))
+
+		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		require.NoError(t, err)
+
+		donorNewKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", "Collection", funcutil.CombineObjectName("default", "new_col"))
+		donorNewID := crypto.GranteeID(donorNewKey)
+		victimNewKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", "Collection", funcutil.CombineObjectName("default", "new_col"))
+		victimNewID := crypto.GranteeID(victimNewKey)
+		donorFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, donorNewID))
+		require.NoError(t, err)
+		assert.Empty(t, donorFullIDKeys)
+		victimFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, victimNewID))
+		require.NoError(t, err)
+		assert.Empty(t, victimFullIDKeys)
+
+		_, err = metaKV.Load(ctx, donorKey)
+		require.Error(t, err)
+		_, err = metaKV.Load(ctx, victimKey)
+		require.Error(t, err)
+		sharedUser, err := metaKV.Load(ctx, buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"))
+		require.NoError(t, err)
+		assert.Equal(t, "donor-user", sharedUser)
 	})
 
 	t.Run("save error", func(t *testing.T) {
