@@ -22,6 +22,38 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func checkElementIndices(subSearchResultData []*schemapb.SearchResultData) (bool, error) {
+	if len(subSearchResultData) == 0 {
+		return false, nil
+	}
+
+	hasElementIndices := false
+	for _, data := range subSearchResultData {
+		if data.GetElementIndices() != nil {
+			hasElementIndices = true
+			break
+		}
+	}
+	if !hasElementIndices {
+		return false, nil
+	}
+
+	for i, data := range subSearchResultData {
+		if data.GetElementIndices() == nil {
+			if ids := data.GetIds(); ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
+				data.ElementIndices = &schemapb.LongArray{Data: []int64{}}
+				continue
+			}
+			return false, fmt.Errorf("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
+		}
+		if len(data.GetElementIndices().GetData()) != len(data.GetScores()) {
+			return false, fmt.Errorf("invalid element-level search result: element indices length %d does not match scores length %d",
+				len(data.GetElementIndices().GetData()), len(data.GetScores()))
+		}
+	}
+	return true, nil
+}
+
 func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, reduceInfo *reduce.ResultInfo) (*milvuspb.SearchResults, error) {
 	if reduceInfo.GetGroupByFieldId() > 0 {
 		if reduceInfo.GetIsAdvance() {
@@ -113,6 +145,13 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
 		return ret, nil
 	}
+	hasElementIndices, err := checkElementIndices(subSearchResultData)
+	if err != nil {
+		return ret, err
+	}
+	if hasElementIndices {
+		ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, limit)}
+	}
 
 	var (
 		subSearchNum = len(subSearchResultData)
@@ -150,6 +189,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				gpFieldBuilder.Add(groupByVal)
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if hasElementIndices {
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, subData.GetElementIndices().GetData()[innerIdx])
+				}
 				dataCount += 1
 			}
 		}
@@ -215,6 +257,13 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+	hasElementIndices, err := checkElementIndices(subSearchResultData)
+	if err != nil {
+		return ret, err
+	}
+	if hasElementIndices {
+		ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, groupBound)}
 	}
 
 	// Find the first non-empty FieldsData as template
@@ -314,6 +363,9 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				}
 				typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 				ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
+				if hasElementIndices {
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, subResData.GetElementIndices().GetData()[groupEntity.resultIdx])
+				}
 				gpFieldBuilder.Add(groupVal)
 			}
 		}
@@ -374,6 +426,13 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+	hasElementIndices, err := checkElementIndices(subSearchResultData)
+	if err != nil {
+		return ret, err
+	}
+	if hasElementIndices {
+		ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, limit)}
 	}
 
 	// Find the first non-empty FieldsData as template
@@ -450,6 +509,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				}
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if hasElementIndices {
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, subSearchResultData[subSearchIdx].GetElementIndices().GetData()[resultDataIdx])
+				}
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {

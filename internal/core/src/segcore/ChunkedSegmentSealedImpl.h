@@ -25,6 +25,7 @@
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "folly/Synchronized.h"
@@ -170,6 +171,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetNgramIndexForJson(milvus::OpContext* op_ctx,
                          FieldId field_id,
                          const std::string& nested_path) const override;
+
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override;
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -1123,6 +1127,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    mutable std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
+        array_offsets_map_;
+    std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
+        struct_to_array_offsets_;
 };
 
 inline SegmentSealedUPtr

@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include "VectorSearchNode.h"
+#include "common/ArrayOffsets.h"
 #include "common/Tracer.h"
+#include "common/Vector.h"
 #include "fmt/format.h"
 
 #include "monitor/Monitor.h"
@@ -23,11 +25,12 @@ namespace milvus {
 namespace exec {
 
 static milvus::SearchResult
-empty_search_result(int64_t num_queries) {
+empty_search_result(int64_t num_queries, bool element_level) {
     milvus::SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
     final_result.total_data_cnt_ = 0;
+    final_result.element_level_ = element_level;
     return final_result;
 }
 
@@ -80,23 +83,48 @@ PhyVectorSearchNode::GetOutput() {
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
+    int64_t data_cnt = active_count_;
+    std::shared_ptr<const IArrayOffsets> array_offsets = nullptr;
+    if (ph.element_level_) {
+        array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
+        AssertInfo(array_offsets != nullptr, "Array offsets not available");
+        query_context_->set_array_offsets(array_offsets);
+        search_info_.array_offsets_ = array_offsets;
+
+        if (!query_context_->bitset_is_element_level()) {
+            auto col_input = GetColumnVector(input_);
+            TargetBitmapView view(col_input->GetRawData(), col_input->size());
+            TargetBitmapView valid_view(col_input->GetValidRawData(),
+                                        col_input->size());
+
+            auto [element_bitset, valid_element_bitset] =
+                array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
+            data_cnt = element_bitset.size();
+            query_context_->set_active_element_count(data_cnt);
+
+            std::vector<VectorPtr> col_res;
+            col_res.push_back(std::make_shared<ColumnVector>(
+                std::move(element_bitset), std::move(valid_element_bitset)));
+            input_ = std::make_shared<RowVector>(col_res);
+        }
+    }
+
     auto col_input = GetColumnVector(input_);
 
     // Prepare BitsetView for search.
-    // Fast path: all_rows_visible → empty BitsetView
+    // Fast path: all_rows_visible + non-element-level -> empty BitsetView
     //            (IDSelectorAll in Knowhere, skips per-vector bit test).
     // Normal path: build BitsetView from the bitmap produced upstream.
     milvus::BitsetView search_view;
-    int64_t data_cnt = active_count_;
 
-    if (query_context_->get_all_rows_visible()) {
+    if (query_context_->get_all_rows_visible() && !ph.element_level_) {
         // search_view stays default-constructed (empty)
     } else {
         TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
         if (view.all()) {
             query_context_->set_search_result(
-                std::move(empty_search_result(num_queries)));
+                std::move(empty_search_result(num_queries, ph.element_level_)));
             return input_;
         }
 
@@ -119,6 +147,7 @@ PhyVectorSearchNode::GetOutput() {
                             search_result);
 
     search_result.total_data_cnt_ = data_cnt;
+    search_result.element_level_ = ph.element_level_;
 
     span.GetSpan()->SetAttribute(
         "result_count", static_cast<int>(search_result.seg_offsets_.size()));

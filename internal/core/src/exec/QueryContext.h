@@ -28,6 +28,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
+#include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
 
@@ -304,6 +305,36 @@ class QueryContext : public Context {
     }
 
     void
+    set_array_offsets(std::shared_ptr<const IArrayOffsets> offsets) {
+        array_offsets_ = std::move(offsets);
+    }
+
+    std::shared_ptr<const IArrayOffsets>
+    get_array_offsets() const {
+        return array_offsets_;
+    }
+
+    void
+    set_active_element_count(int64_t count) {
+        active_element_count_ = count;
+    }
+
+    int64_t
+    get_active_element_count() const {
+        return active_element_count_;
+    }
+
+    void
+    set_bitset_is_element_level(bool is_element_level) {
+        bitset_is_element_level_ = is_element_level;
+    }
+
+    bool
+    bitset_is_element_level() const {
+        return bitset_is_element_level_;
+    }
+
+    void
     set_all_rows_visible(bool v) {
         all_rows_visible_ = v;
     }
@@ -341,6 +372,10 @@ class QueryContext : public Context {
     int32_t consistency_level_ = 0;
 
     query::PlanOptions plan_options_;
+
+    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    int64_t active_element_count_{0};
+    bool bitset_is_element_level_{false};
 
     // Set by MvccNode when no filtering is needed (sealed, no filter,
     // no deletes, no TTL). VectorSearchNode checks this to pass empty

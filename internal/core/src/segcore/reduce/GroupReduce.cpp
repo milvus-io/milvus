@@ -58,6 +58,9 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
                "primary_keys_.size:{}",
                search_result->group_by_values_.value().size(),
                search_result->primary_keys_.size());
+    CheckElementIndicesSize(search_result,
+                            search_result->primary_keys_.size(),
+                            "group refresh search result");
 
     uint32_t size = 0;
     for (int j = 0; j < total_nq_; j++) {
@@ -67,6 +70,10 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     std::vector<float> distances(size);
     std::vector<int64_t> seg_offsets(size);
     std::vector<GroupByValueType> group_by_values(size);
+    std::vector<int32_t> element_indices;
+    if (search_result->element_level_) {
+        element_indices.resize(size);
+    }
 
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
@@ -77,6 +84,10 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
             seg_offsets[index] = search_result->seg_offsets_[offset];
             group_by_values[index] =
                 std::move(search_result->group_by_values_.value()[offset]);
+            if (search_result->element_level_) {
+                element_indices[index] =
+                    search_result->element_indices_[offset];
+            }
             index++;
             real_topks[j]++;
         }
@@ -85,6 +96,9 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     search_result->distances_.swap(distances);
     search_result->seg_offsets_.swap(seg_offsets);
     search_result->group_by_values_.value().swap(group_by_values);
+    if (search_result->element_level_) {
+        search_result->element_indices_.swap(element_indices);
+    }
     AssertInfo(search_result->primary_keys_.size() ==
                    search_result->group_by_values_.value().size(),
                "Wrong size for group_by_values size after refresh:{}, "
@@ -98,6 +112,9 @@ void
 GroupReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     //do nothing, for group-by reduce, as we calculate prefix_sum for nq when doing group by and no padding invalid results
     //so there's no need to filter search_result
+    CheckElementIndicesSize(search_result,
+                            search_result->seg_offsets_.size(),
+                            "group filter invalid result");
 }
 
 int64_t
@@ -109,6 +126,7 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         SearchResultPairComparator>
         heap;
     pk_set_.clear();
+    element_result_set_.clear();
     pairs_.clear();
     pairs_.reserve(num_segments_);
     for (int i = 0; i < num_segments_; i++) {
@@ -149,15 +167,41 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     auto start = offset;
     std::unordered_map<GroupByValueType, int64_t> group_by_map;
 
-    auto should_filtered = [&](const PkType& pk,
+    auto should_filtered = [&](const SearchResultPair& result,
                                const GroupByValueType& group_by_val) {
-        if (pk_set_.count(pk) != 0)
+        auto search_result = result.search_result_;
+        ElementSearchResultKey element_key{result.primary_key_, -1};
+        if (search_result->element_level_) {
+            AssertInfo(result.offset_ >= 0 &&
+                           static_cast<size_t>(result.offset_) <
+                               search_result->element_indices_.size(),
+                       "invalid element-level search result offset {}, "
+                       "element_indices size {}",
+                       result.offset_,
+                       search_result->element_indices_.size());
+            element_key.element_index =
+                search_result->element_indices_[result.offset_];
+            if (element_result_set_.count(element_key) != 0) {
+                return true;
+            }
+        } else if (pk_set_.count(result.primary_key_) != 0) {
             return true;
-        if (group_by_map.size() >= topk &&
-            group_by_map.count(group_by_val) == 0)
+        }
+
+        auto [it, inserted] = group_by_map.try_emplace(group_by_val, 0);
+        if (inserted && static_cast<int64_t>(group_by_map.size()) > topk) {
+            group_by_map.erase(it);
             return true;
-        if (group_by_map[group_by_val] >= group_size)
+        }
+        if (it->second >= group_size) {
             return true;
+        }
+        it->second += 1;
+        if (search_result->element_level_) {
+            element_result_set_.insert(std::move(element_key));
+        } else {
+            pk_set_.insert(result.primary_key_);
+        }
         return false;
     };
 
@@ -173,11 +217,9 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         auto group_by_val = pilot->group_by_value_.value();
 
         //judge filter
-        if (!should_filtered(pk, group_by_val)) {
+        if (!should_filtered(*pilot, group_by_val)) {
             pilot->search_result_->result_offsets_.push_back(offset++);
             final_search_records_[index][qi].push_back(pilot->offset_);
-            pk_set_.insert(pk);
-            group_by_map[group_by_val] += 1;
         } else {
             filtered_count++;
         }

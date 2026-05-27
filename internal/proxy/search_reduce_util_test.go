@@ -61,6 +61,88 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult() {
 	}
 }
 
+func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultElementIndices() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(3)
+	offset := int64(0)
+
+	searchResultData1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+			},
+		},
+		Scores:         []float32{0.9, 0.7},
+		Topks:          []int64{2},
+		NumQueries:     nq,
+		TopK:           topK,
+		FieldsData:     []*schemapb.FieldData{},
+		ElementIndices: &schemapb.LongArray{Data: []int64{0, 1}},
+	}
+
+	searchResultData2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{3}},
+			},
+		},
+		Scores:         []float32{0.8},
+		Topks:          []int64{1},
+		NumQueries:     nq,
+		TopK:           topK,
+		FieldsData:     []*schemapb.FieldData{},
+		ElementIndices: &schemapb.LongArray{Data: []int64{2}},
+	}
+
+	results, err := reduceSearchResultDataNoGroupBy(ctx,
+		[]*schemapb.SearchResultData{searchResultData1, searchResultData2},
+		nq, topK, "MAX_SIM", schemapb.DataType_Int64, offset)
+	struts.NoError(err)
+	struts.Equal([]int64{1, 3, 2}, results.Results.GetIds().GetIntId().GetData())
+	struts.Equal([]int64{0, 2, 1}, results.Results.GetElementIndices().GetData())
+
+	searchResultData2.ElementIndices = &schemapb.LongArray{Data: []int64{}}
+	_, err = reduceSearchResultDataNoGroupBy(ctx,
+		[]*schemapb.SearchResultData{searchResultData1, searchResultData2},
+		nq, topK, "MAX_SIM", schemapb.DataType_Int64, offset)
+	struts.Error(err)
+
+	emptySearchResultData := &schemapb.SearchResultData{
+		Ids:        nil,
+		Scores:     []float32{},
+		Topks:      []int64{0},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+	searchResultData2 = &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{3}},
+			},
+		},
+		Scores:         []float32{0.8},
+		Topks:          []int64{1},
+		NumQueries:     nq,
+		TopK:           topK,
+		FieldsData:     []*schemapb.FieldData{},
+		ElementIndices: &schemapb.LongArray{Data: []int64{2}},
+	}
+	results, err = reduceSearchResultDataNoGroupBy(ctx,
+		[]*schemapb.SearchResultData{emptySearchResultData, searchResultData2},
+		nq, topK, "MAX_SIM", schemapb.DataType_Int64, offset)
+	struts.NoError(err)
+	struts.Equal([]int64{3}, results.Results.GetIds().GetIntId().GetData())
+	struts.Equal([]int64{2}, results.Results.GetElementIndices().GetData())
+
+	searchResultData2.ElementIndices = nil
+	_, err = reduceSearchResultDataNoGroupBy(ctx,
+		[]*schemapb.SearchResultData{searchResultData1, searchResultData2},
+		nq, topK, "MAX_SIM", schemapb.DataType_Int64, offset)
+	struts.ErrorContains(err, "misses element indices")
+}
+
 func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithEmtpyGroupData() {
 	nq := int64(1)
 	topk := int64(1)

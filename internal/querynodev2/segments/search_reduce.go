@@ -21,6 +21,58 @@ type SearchReduce interface {
 
 type SearchCommonReduce struct{}
 
+type elementSearchResultKey struct {
+	pk           interface{}
+	elementIndex int64
+}
+
+func checkElementIndices(searchResultData []*schemapb.SearchResultData) (bool, error) {
+	if len(searchResultData) == 0 {
+		return false, nil
+	}
+
+	hasElementIndices := false
+	for _, data := range searchResultData {
+		if data.GetElementIndices() != nil {
+			hasElementIndices = true
+			break
+		}
+	}
+	if !hasElementIndices {
+		return false, nil
+	}
+
+	for i, data := range searchResultData {
+		if data.GetElementIndices() == nil {
+			if ids := data.GetIds(); ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
+				data.ElementIndices = &schemapb.LongArray{Data: []int64{}}
+				continue
+			}
+			return false, fmt.Errorf("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
+		}
+		if len(data.GetElementIndices().GetData()) != len(data.GetScores()) {
+			return false, fmt.Errorf("invalid element-level search result: element indices length %d does not match scores length %d",
+				len(data.GetElementIndices().GetData()), len(data.GetScores()))
+		}
+	}
+	return true, nil
+}
+
+func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, id interface{}, hasElementIndices bool) (interface{}, error) {
+	if !hasElementIndices {
+		return id, nil
+	}
+
+	elementIndices := data.GetElementIndices()
+	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
+		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+	}
+	return elementSearchResultKey{
+		pk:           id,
+		elementIndex: elementIndices.GetData()[idx],
+	}, nil
+}
+
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
@@ -43,6 +95,13 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		Scores:     make([]float32, 0),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0),
+	}
+	hasElementIndices, err := checkElementIndices(searchResultData)
+	if err != nil {
+		return nil, err
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0)}
 	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
@@ -77,13 +136,20 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			score := searchResultData[sel].Scores[idx]
 
 			// remove duplicates
-			if _, ok := idSet[id]; !ok {
+			key, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := idSet[key]; !ok {
 				fieldsData := searchResultData[sel].FieldsData
 				fieldIdxs := idxComputers[sel].Compute(idx)
 				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
 				typeutil.AppendPKs(ret.Ids, id)
 				ret.Scores = append(ret.Scores, score)
-				idSet[id] = struct{}{}
+				if hasElementIndices {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].GetElementIndices().GetData()[idx])
+				}
+				idSet[key] = struct{}{}
 				j++
 			} else {
 				// skip entity with same id
@@ -133,6 +199,13 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0),
 	}
+	hasElementIndices, err := checkElementIndices(searchResultData)
+	if err != nil {
+		return nil, err
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0)}
+	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
 	groupByValIterator := make([]func(int) any, len(searchResultData))
@@ -180,7 +253,11 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
-			if _, ok := idSet[id]; !ok {
+			key, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := idSet[key]; !ok {
 				groupCount := groupByValueMap[groupByVal]
 				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
@@ -194,9 +271,12 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
 					typeutil.AppendPKs(ret.Ids, id)
 					ret.Scores = append(ret.Scores, score)
+					if hasElementIndices {
+						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].GetElementIndices().GetData()[idx])
+					}
 					gpFieldBuilder.Add(groupByVal)
 					groupByValueMap[groupByVal] += 1
-					idSet[id] = struct{}{}
+					idSet[key] = struct{}{}
 					j++
 				}
 			} else {

@@ -17,6 +17,7 @@
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "knowhere/comp/index_param.h"
+#include "query/Plan.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
@@ -993,8 +994,8 @@ TEST(GrowingTest, SearchVectorArray) {
                                   "MAX_SIM",    // metric_type
                                   R"({"nprobe": 10})",  // search_params
                                   3);                   // round_decimal
-    auto plan =
-        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_str.data(), plan_str.size());
 
     // Use CreatePlaceholderGroupFromBlob for VectorArray
     auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
@@ -1007,6 +1008,93 @@ TEST(GrowingTest, SearchVectorArray) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto sr_parsed = SearchResultToJson(*sr);
     std::cout << sr_parsed.dump(1) << std::endl;
+}
+
+TEST(Growing, ReopenKeepsStructArrayOffsets) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto array_vec = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::L2);
+    schema->AddDebugArrayField("structA[price_array]", DataType::INT32, false);
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    int64_t row_count = 16;
+    int array_len = 3;
+    auto dataset = DataGen(schema, row_count, 42, 0, 1, array_len);
+    segment->PreInsert(row_count);
+    segment->Insert(0,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto offsets_before = growing->GetArrayOffsets(array_vec);
+    ASSERT_NE(offsets_before, nullptr);
+    EXPECT_EQ(offsets_before->GetRowCount(), row_count);
+    EXPECT_EQ(offsets_before->GetTotalElementCount(), row_count * array_len);
+
+    auto reopened_schema = std::make_shared<Schema>(*schema);
+    reopened_schema->set_schema_version(2);
+    growing->Reopen(reopened_schema);
+
+    auto offsets_after = growing->GetArrayOffsets(array_vec);
+    ASSERT_NE(offsets_after, nullptr);
+    EXPECT_EQ(offsets_after, offsets_before);
+    EXPECT_EQ(offsets_after->GetRowCount(), row_count);
+    EXPECT_EQ(offsets_after->GetTotalElementCount(), row_count * array_len);
+    EXPECT_EQ(offsets_after->ElementIDToRowID(5), std::make_pair(1, 2));
+}
+
+TEST(Growing, ElementLevelSearchVectorArrayCountsElements) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto array_vec = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::COSINE);
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t row_count = 32;
+    int array_len = 3;
+    auto dataset = DataGen(schema, row_count, 42, 0, 1, array_len);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(row_count);
+    segment->Insert(0,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "", "structA[array_vec]", 5, "COSINE", R"({"nprobe": 10})", 3);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_str.data(), plan_str.size());
+
+    int num_queries = 2;
+    auto query_vec = generate_float_vector(num_queries, dim);
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+    ASSERT_TRUE(sr->element_level_);
+    EXPECT_EQ(sr->total_data_cnt_, row_count * array_len);
+    ASSERT_EQ(sr->element_indices_.size(), sr->seg_offsets_.size());
+    for (auto elem_idx : sr->element_indices_) {
+        EXPECT_GE(elem_idx, 0);
+        EXPECT_LT(elem_idx, array_len);
+    }
 }
 
 // Resource tracking tests for growing segments

@@ -28,11 +28,12 @@
 namespace milvus::query {
 
 static SearchResult
-empty_search_result(int64_t num_queries) {
+empty_search_result(int64_t num_queries, bool element_level) {
     SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
     final_result.total_data_cnt_ = 0;
+    final_result.element_level_ = element_level;
     return final_result;
 }
 
@@ -56,7 +57,12 @@ ExecPlanNodeVisitor::ExecuteTask(
     for (;;) {
         auto result = task->Next();
         if (!result) {
-            Assert(processed_num == query_context->get_active_count());
+            if (query_context->get_active_element_count() > 0) {
+                Assert(processed_num ==
+                       query_context->get_active_element_count());
+            } else {
+                Assert(processed_num == query_context->get_active_count());
+            }
             break;
         }
         const auto& childrens = result->childrens();
@@ -166,8 +172,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
+        auto& ph = placeholder_group_->at(0);
         search_result_opt_ = std::move(
-            empty_search_result(placeholder_group_->at(0).num_of_queries_));
+            empty_search_result(ph.num_of_queries_, ph.element_level_));
         return;
     }
 
