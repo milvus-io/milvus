@@ -7151,7 +7151,7 @@ if this parameter <= 0, will set it as 10`,
 	p.StorageFormat = ParamItem{
 		Key:          "dataNode.storage.format",
 		Version:      "3.0.0",
-		DefaultValue: "vortex",
+		DefaultValue: "parquet",
 		Doc:          "storage format for insert data, options: [parquet, vortex]",
 		Export:       true,
 	}
