@@ -339,10 +339,9 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
             ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to Deserialize index: {}",
                       KnowhereStatusString(stat));
+        SetMemSize(index_.Size());
         SetDim(index_.Dim());
     }
-    SetMemSize(index_.Size());
-
     LoadValidDataFromBinarySet(binary_set, this);
 }
 
