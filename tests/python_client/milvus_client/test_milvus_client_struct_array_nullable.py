@@ -13,17 +13,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from check.param_check import compare_lists_with_epsilon_ignore_dict_order
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from deepdiff import DeepDiff
 from minio import Minio
 from minio.error import S3Error
-from pymilvus import DataType, MilvusClient
+from pymilvus import DataType
 from pymilvus.bulk_writer import (
-    BulkFileType,
-    LocalBulkWriter,
     bulk_import,
     get_import_progress,
 )
@@ -33,149 +29,11 @@ from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "struct_array"
 epsilon = 0.001
-default_nb = ct.default_nb
-default_nq = ct.default_nq
 default_dim = 128
-default_capacity = 100
-METRICS = ["MAX_SIM", "MAX_SIM_IP", "MAX_SIM_COSINE", "MAX_SIM_L2"]
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
-
-# EmbList index type configs: {index_type: {build_params, search_params}}
-EMB_LIST_INDEX_CONFIGS = {
-    "HNSW_SQ": {
-        "build_params": {"M": 16, "efConstruction": 200, "sq_type": "SQ8"},
-        "search_params": {"ef": 64},
-    },
-    "HNSW_PQ": {
-        "build_params": {"M": 16, "efConstruction": 200},
-        "search_params": {"ef": 64},
-    },
-    "HNSW_PRQ": {
-        "build_params": {"M": 16, "efConstruction": 200},
-        "search_params": {"ef": 64},
-    },
-    "IVF_FLAT": {
-        "build_params": {"nlist": 128},
-        "search_params": {"nprobe": 10},
-    },
-    "IVF_FLAT_CC": {
-        "build_params": {"nlist": 128},
-        "search_params": {"nprobe": 10},
-    },
-    "DISKANN": {
-        "build_params": {},
-        "search_params": {"search_list": 30},
-    },
-}
-EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
-
-# Supported vector types per emb list index type (for MaxSim metrics)
-EMB_LIST_VECTOR_TYPES = {
-    "HNSW": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-        DataType.INT8_VECTOR,
-        DataType.BINARY_VECTOR,
-    ],
-    "HNSW_SQ": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-        DataType.INT8_VECTOR,
-    ],
-    "HNSW_PQ": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-        DataType.INT8_VECTOR,
-    ],
-    "HNSW_PRQ": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-        DataType.INT8_VECTOR,
-    ],
-    "IVF_FLAT": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-    ],
-    "IVF_FLAT_CC": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-    ],
-    "DISKANN": [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-    ],
-}
 
 # Dim for emb list index tests (smaller for faster index building)
 EMB_LIST_DIM = 32
-
-# Metric type for binary vectors vs float vectors
-BINARY_METRIC = "MAX_SIM_HAMMING"
-FLOAT_METRIC = "MAX_SIM_COSINE"
-INT8_METRIC = "MAX_SIM_COSINE"
-
-EMB_LIST_STRATEGY_CONFIGS = {
-    "tokenann": {
-        "strategy_params": {
-            "emb_list_strategy": "tokenann",
-        },
-    },
-    "muvera": {
-        "strategy_params": {
-            "emb_list_strategy": "muvera",
-            "muvera_num_projections": 3,
-            "muvera_num_repeats": 5,
-            "muvera_seed": 42,
-        },
-    },
-    "lemur": {
-        "strategy_params": {
-            "emb_list_strategy": "lemur",
-            "lemur_hidden_dim": 32,
-            "lemur_num_train_samples": 1000,
-            "lemur_num_epochs": 2,
-            "lemur_batch_size": 16,
-            "lemur_learning_rate": 0.001,
-            "lemur_seed": 42,
-            "lemur_num_layers": 1,
-        },
-    },
-}
-
-EMB_LIST_STRATEGY_INDEX_CONFIGS = {
-    "HNSW": {
-        "build_params": {
-            "M": 16,
-            "efConstruction": 96,
-        },
-        "search_params": {"ef": 64, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
-    },
-    "DISKANN": {
-        "build_params": {},
-        "search_params": {"search_list": 30, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
-    },
-}
-EMB_LIST_STRATEGY_INDEX_CASES = [
-    ("tokenann", "HNSW"),
-    pytest.param(
-        "muvera",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: muvera+HNSW can fail to load emb-list index"),
-    ),
-    pytest.param(
-        "lemur",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: lemur+HNSW can fail to load emb-list index"),
-    ),
-    ("tokenann", "DISKANN"),
-]
 
 
 class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
@@ -2159,8 +2017,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="nullable ArrayOfVector sealed output still fails after #50020 when empty row precedes single-element row"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50068: nullable ArrayOfVector sealed output still fails after #50020 when empty row precedes single-element row",
+        strict=True,
     )
     def test_create_struct_array_field_with_vector_single_element_after_empty_sealed_output(self):
         """
@@ -2825,8 +2684,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(
-        reason="indexed sealed nullable ArrayOfVector output omits ValidData when present-row density is high"
+    @pytest.mark.xfail(
+        reason="known blocker: indexed sealed nullable ArrayOfVector output omits ValidData when present-row density is high",
+        strict=True,
     )
     def test_stress_nullable_struct_array_vector_field_query_search_iterators(self):
         """
@@ -3264,8 +3124,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
     )
     def test_create_struct_array_field_with_vector_element_search_flat(self):
         """
@@ -3367,8 +3228,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         self._assert_profile_equal(entity["profile"], rows[-1]["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
     )
     def test_create_struct_array_field_with_vector_element_search_missing_prefix(self):
         """
@@ -3836,8 +3698,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         self._assert_profile_equal(entity["profile"], non_empty_rows[-1]["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
     )
     def test_create_struct_array_field_with_vector_element_search_missing_prefix_flat(self):
         """
@@ -5462,8 +5325,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
     )
     def test_add_struct_array_field_with_vector_element_search_no_old_rows(self):
         """
@@ -5562,8 +5426,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         self._assert_profile_equal(entity["profile"], rows[-1]["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows"
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
     )
     def test_add_struct_array_field_with_vector_element_search_filter_new_rows(self):
         """
@@ -6685,8 +6550,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             self._assert_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(
-        reason="MATCH_ANY on dynamically added StructArray with old rows fails: MatchExpr expects ColumnVector"
+    @pytest.mark.xfail(
+        reason="known blocker: MATCH_ANY on dynamically added StructArray with old rows fails because MatchExpr expects ColumnVector",
+        strict=True,
     )
     def test_add_scalar_struct_array_field_match_family_query_search(self):
         """
@@ -10835,55 +10701,6 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         self.bucket_name = minio_bucket
         self.minio_endpoint = f"{minio_host}:9000"
 
-    def gen_file_with_local_bulk_writer(
-        self, schema, data: list[dict[str, Any]], file_type: str = "PARQUET"
-    ) -> tuple[str, dict]:
-        """
-        Generate import file using LocalBulkWriter from insert-format data
-
-        Args:
-            schema: Collection schema
-            data: List of dictionaries in insert format (same format as client.insert())
-            file_type: Output file type, "PARQUET" or "JSON"
-
-        Returns:
-            Tuple of (directory path containing generated files, original data dict for verification)
-        """
-        # Convert file_type string to BulkFileType enum
-        bulk_file_type = BulkFileType.PARQUET if file_type == "PARQUET" else BulkFileType.JSON
-
-        # Create LocalBulkWriter
-        writer = LocalBulkWriter(
-            schema=schema,
-            local_path=self.LOCAL_FILES_PATH,
-            segment_size=512 * 1024 * 1024,  # 512MB
-            file_type=bulk_file_type,
-        )
-
-        log.info(f"Creating {file_type} file using LocalBulkWriter with {len(data)} rows")
-
-        # Append each row using the same format as insert
-        for row in data:
-            writer.append_row(row)
-
-        # Commit to generate files
-        writer.commit()
-
-        # Get the generated file paths
-        batch_files = writer.batch_files
-        log.info(f"LocalBulkWriter generated files: {batch_files}")
-
-        # Extract data for verification (same format as other gen methods)
-        id_arr = [row["id"] for row in data]
-        float_vector_arr = [row["float_vector"] for row in data]
-        struct_arr = [row["struct_array"] for row in data]
-
-        return batch_files, {
-            "id": id_arr,
-            "float_vector": float_vector_arr,
-            "struct_array": struct_arr,
-        }
-
     def upload_to_minio(self, local_file_path: str) -> list[list[str]]:
         """
         Upload parquet file to MinIO
@@ -10983,72 +10800,6 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         log.info("Bulk import finished")
 
-    def verify_data(self, client: MilvusClient, collection_name: str, original_data: dict):
-        """
-        Verify imported data matches original data using compare_lists_with_epsilon_ignore_dict_order
-
-        Args:
-            client: MilvusClient instance
-            collection_name: Collection name
-            original_data: Original data dictionary for comparison
-        """
-        log.info("============= Verifying imported data ==============")
-
-        # Query all data from the collection
-        num_rows = len(original_data["id"])
-        log.info(f"Total rows to verify: {num_rows}")
-
-        results = client.query(
-            collection_name=collection_name,
-            filter=f"id >= {min(original_data['id'])}",
-            output_fields=["*"],
-            limit=num_rows + 100,  # Add buffer to ensure all data is retrieved
-        )
-
-        log.info(f"Query returned {len(results)} rows")
-
-        # Check if row count matches
-        if len(results) != num_rows:
-            assert False, f"Row count mismatch: expected {num_rows}, got {len(results)}"
-
-        # Convert original data to comparable format (list of dicts per row)
-        original_rows = []
-        for i in range(num_rows):
-            row_id = int(original_data["id"][i])
-            original_rows.append(
-                {
-                    "id": row_id,
-                    "float_vector": [float(x) for x in original_data["float_vector"][i]],
-                    "struct_array": original_data["struct_array"][i],
-                }
-            )
-
-        # Convert query results to comparable format
-        query_rows_formatted = []
-        for row in results:
-            formatted_row = {
-                "id": row["id"],
-                "float_vector": [float(x) for x in row["float_vector"]],
-                "struct_array": row["struct_array"],
-            }
-            query_rows_formatted.append(formatted_row)
-
-        # Use compare_lists_with_epsilon_ignore_dict_order for comparison
-        # This function handles floating-point tolerance and dict order
-        is_equal = compare_lists_with_epsilon_ignore_dict_order(original_rows, query_rows_formatted, epsilon=epsilon)
-
-        if not is_equal:
-            deepdiff = (
-                DeepDiff(
-                    original_rows,
-                    query_rows_formatted,
-                    ignore_order=True,
-                    significant_digits=3,
-                ),
-            )
-            log.info(f"DeepDiff: {deepdiff}")
-            assert False, "Data verification failed: original data and query results do not match"
-
     @staticmethod
     def _scalar_profile(row_id: int) -> list[dict[str, Any]]:
         return [
@@ -11147,7 +10898,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         source_by_id = {}
@@ -11245,7 +10997,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11405,7 +11158,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11552,8 +11306,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             self._assert_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(
-        reason="nullable scalar sub-field null values are rejected by JSON bulk import and PyMilvus row insert"
+    @pytest.mark.xfail(
+        reason="known blocker: nullable scalar sub-field null values inside StructArray are rejected by JSON bulk import and PyMilvus row insert",
+        strict=True,
     )
     def test_import_nullable_scalar_struct_array_subfield_null_json(self):
         """
@@ -11585,7 +11340,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         source_by_id = {}
@@ -11666,7 +11422,10 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             self._assert_nullable_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="nullable scalar sub-field null values are rejected by Parquet bulk import")
+    @pytest.mark.xfail(
+        reason="known blocker: nullable scalar sub-field null values inside StructArray are rejected by Parquet bulk import",
+        strict=True,
+    )
     def test_import_nullable_scalar_struct_array_subfield_null_parquet(self):
         """
         target: test Parquet bulk import for nullable scalar sub-fields inside a nullable Struct Array
@@ -11697,7 +11456,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -11799,8 +11559,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             self._assert_nullable_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(
-        reason="nullable scalar sub-field omission inside StructArray element is rejected by JSON bulk import and row insert"
+    @pytest.mark.xfail(
+        reason="known blocker: nullable scalar sub-field omission inside StructArray element is rejected by JSON bulk import and row insert",
+        strict=True,
     )
     def test_import_nullable_scalar_struct_array_subfield_omit_json(self):
         """
@@ -11832,7 +11593,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         source_by_id = {}
@@ -11920,7 +11682,10 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             self._assert_nullable_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="nullable scalar sub-field omitted from Parquet StructArray schema is rejected")
+    @pytest.mark.xfail(
+        reason="known blocker: nullable scalar sub-field omitted from Parquet StructArray schema is rejected",
+        strict=True,
+    )
     def test_import_nullable_scalar_struct_array_subfield_omit_parquet(self):
         """
         target: test Parquet bulk import with an omitted nullable scalar sub-field inside a nullable Struct Array
@@ -11951,7 +11716,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -12073,7 +11839,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         for row_id in range(entities):
@@ -12135,7 +11902,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         for row_id in range(entities):
@@ -12191,7 +11959,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13399,8 +13168,9 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             self._assert_scalar_profile_equal(entity["profile"], expected["profile"])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(
-        reason="nullable StructArray vector sub-field imported by JSON loses ArrayOfVector ValidData on output"
+    @pytest.mark.xfail(
+        reason="known blocker: nullable StructArray vector sub-field imported by JSON loses ArrayOfVector ValidData on output",
+        strict=True,
     )
     def test_import_nullable_struct_array_with_vector_json(self):
         """
@@ -13441,7 +13211,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             metric_type="MAX_SIM_COSINE",
             params=INDEX_PARAMS,
         )
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         rows = []
         source_by_id = {}
@@ -13536,7 +13307,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13650,7 +13422,8 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="normal_vector", index_type="FLAT", metric_type="L2")
-        client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        assert check
 
         ids = []
         vectors = []
