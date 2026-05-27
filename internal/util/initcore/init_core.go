@@ -524,12 +524,12 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.ScalarIndexEntryStreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			ratio, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {
 				return err
 			}
-			UpdateScalarIndexEntryStreamBudgetRatio(ratio)
+			UpdateStreamBudgetRatio(ratio)
 			return nil
 		})
 

@@ -32,7 +32,7 @@ void
 SetIndexSliceSize(const int64_t);
 
 void
-SetScalarIndexEntryStreamBudgetRatio(const double);
+SetStreamBudgetRatio(const double);
 
 void
 SetHighPriorityThreadCoreCoefficient(const float);

@@ -46,11 +46,11 @@ namespace {
 class IndexEntryStreamConfigGuard {
  public:
     IndexEntryStreamConfigGuard()
-        : budget_ratio_(milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load()) {
+        : budget_ratio_(milvus::ENTRY_STREAM_BUDGET_RATIO.load()) {
     }
 
     ~IndexEntryStreamConfigGuard() {
-        milvus::SetScalarIndexEntryStreamBudgetRatio(budget_ratio_);
+        milvus::SetStreamBudgetRatio(budget_ratio_);
     }
 
  private:
@@ -58,7 +58,7 @@ class IndexEntryStreamConfigGuard {
 };
 
 size_t
-ExpectedScalarIndexStreamBudgetBytes(double ratio) {
+ExpectedEntryStreamBudgetBytes(double ratio) {
     auto slice_size = DefaultStreamSliceSize();
     auto core_num = std::max(1, milvus::CPU_NUM);
     auto capacity = static_cast<size_t>(core_num * ratio) * slice_size;
@@ -1095,19 +1095,17 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamRejectsInvalidSliceSize) {
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     IndexEntryStreamConfigGuard guard;
-    milvus::SetScalarIndexEntryStreamBudgetRatio(2.5);
+    milvus::SetStreamBudgetRatio(2.5);
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
-    ASSERT_DOUBLE_EQ(ScalarIndexStreamBudgetRatio(), 2.5);
-    ASSERT_EQ(
-        TransientMemoryBudget::GetScalarIndexStreamBudget().CapacityBytes(),
-        ExpectedScalarIndexStreamBudgetBytes(2.5));
+    ASSERT_DOUBLE_EQ(StreamBudgetRatio(), 2.5);
+    ASSERT_EQ(TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes(),
+              ExpectedEntryStreamBudgetBytes(2.5));
 
-    milvus::SetScalarIndexEntryStreamBudgetRatio(3.5);
-    ASSERT_DOUBLE_EQ(ScalarIndexStreamBudgetRatio(), 3.5);
-    ASSERT_EQ(
-        TransientMemoryBudget::GetScalarIndexStreamBudget().CapacityBytes(),
-        ExpectedScalarIndexStreamBudgetBytes(3.5));
+    milvus::SetStreamBudgetRatio(3.5);
+    ASSERT_DOUBLE_EQ(StreamBudgetRatio(), 3.5);
+    ASSERT_EQ(TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes(),
+              ExpectedEntryStreamBudgetBytes(3.5));
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t entry_size = 2 * slice_size + 17;

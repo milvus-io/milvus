@@ -28,7 +28,7 @@
 namespace milvus {
 
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
-std::atomic<double> SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO(3.0);
+std::atomic<double> ENTRY_STREAM_BUDGET_RATIO(3.0);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
@@ -52,17 +52,16 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetScalarIndexEntryStreamBudgetRatio(const double ratio) {
+SetStreamBudgetRatio(const double ratio) {
     if (ratio <= 0) {
-        LOG_WARN("ignore invalid scalar index entry stream budget ratio: {}",
-                 ratio);
+        LOG_WARN("ignore invalid entry stream budget ratio: {}", ratio);
         return;
     }
-    SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.store(ratio);
-    storage::TransientMemoryBudget::GetScalarIndexStreamBudget()
+    ENTRY_STREAM_BUDGET_RATIO.store(ratio);
+    storage::TransientMemoryBudget::GetEntryStreamBudget()
         .NotifyCapacityUpdated();
-    LOG_INFO("set scalar index entry stream budget ratio: {}",
-             SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load());
+    LOG_INFO("set entry stream budget ratio: {}",
+             ENTRY_STREAM_BUDGET_RATIO.load());
 }
 
 void

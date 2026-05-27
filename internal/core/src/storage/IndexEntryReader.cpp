@@ -70,7 +70,7 @@ ReadOrderedEntryStream(
     }
 
     auto& pool = ThreadPools::GetThreadPool(priority);
-    auto& budget = TransientMemoryBudget::GetScalarIndexStreamBudget();
+    auto& budget = TransientMemoryBudget::GetEntryStreamBudget();
     size_t max_active_tasks =
         std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
 

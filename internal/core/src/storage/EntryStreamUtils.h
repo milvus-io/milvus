@@ -38,8 +38,8 @@ DefaultStreamSliceSize() {
 }
 
 inline double
-ScalarIndexStreamBudgetRatio() {
-    auto ratio = milvus::SCALAR_INDEX_ENTRY_STREAM_BUDGET_RATIO.load();
+StreamBudgetRatio() {
+    auto ratio = milvus::ENTRY_STREAM_BUDGET_RATIO.load();
     return ratio > 0 ? ratio : 1.0;
 }
 
@@ -62,7 +62,7 @@ struct StreamSliceResult {
 class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
-    GetScalarIndexStreamBudget() {
+    GetEntryStreamBudget() {
         static TransientMemoryBudget instance;
         return instance;
     }
@@ -104,7 +104,7 @@ class TransientMemoryBudget {
 
     size_t
     CapacityBytes() const {
-        return ScalarIndexStreamBudgetBytes();
+        return EntryStreamBudgetBytes();
     }
 
     void
@@ -116,11 +116,10 @@ class TransientMemoryBudget {
     TransientMemoryBudget() = default;
 
     static size_t
-    ScalarIndexStreamBudgetBytes() {
+    EntryStreamBudgetBytes() {
         auto core_num = std::max(1, milvus::CPU_NUM);
-        auto capacity =
-            static_cast<size_t>(core_num * ScalarIndexStreamBudgetRatio()) *
-            DefaultStreamSliceSize();
+        auto capacity = static_cast<size_t>(core_num * StreamBudgetRatio()) *
+                        DefaultStreamSliceSize();
         return std::max<size_t>(capacity, DefaultStreamSliceSize());
     }
 

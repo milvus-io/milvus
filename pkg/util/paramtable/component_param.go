@@ -41,7 +41,7 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize                      = 16
-	DefaultScalarIndexEntryStreamBudgetRatio   = 3.0
+	DefaultStreamBudgetRatio                   = 3.0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
@@ -228,7 +228,7 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	ScalarIndexEntryStreamBudgetRatio   ParamItem `refreshable:"true"`
+	StreamBudgetRatio                   ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -552,14 +552,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
-	p.ScalarIndexEntryStreamBudgetRatio = ParamItem{
-		Key:          "common.indexEntryStream.scalarIndexBudgetRatio",
+	p.StreamBudgetRatio = ParamItem{
+		Key:          "common.entryStream.streamBudgetRatio",
 		Version:      "3.0.0",
-		DefaultValue: fmt.Sprintf("%f", DefaultScalarIndexEntryStreamBudgetRatio),
-		Doc:          "Multiplier for scalar index stream transient memory budget, relative to CPU core count",
+		DefaultValue: fmt.Sprintf("%f", DefaultStreamBudgetRatio),
+		Doc:          "Multiplier for entry stream transient memory budget, relative to CPU core count",
 		Export:       true,
 	}
-	p.ScalarIndexEntryStreamBudgetRatio.Init(base.mgr)
+	p.StreamBudgetRatio.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
