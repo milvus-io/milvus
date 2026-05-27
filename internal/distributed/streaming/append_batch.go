@@ -16,6 +16,7 @@ import (
 type appendBatchConfig struct {
 	SmallMessageThreshold int
 	MaxBatchSize          int
+	MaxMessageCount       int
 	MaxDelay              time.Duration
 	CooldownThreshold     int
 	CooldownDuration      time.Duration
@@ -26,6 +27,7 @@ func newAppendBatchConfigFromParams() appendBatchConfig {
 	return appendBatchConfig{
 		SmallMessageThreshold: int(params.WALAppendBatchSmallMessageThreshold.GetAsSize()),
 		MaxBatchSize:          int(params.WALAppendBatchMaxSize.GetAsSize()),
+		MaxMessageCount:       params.WALAppendBatchMaxMessageCount.GetAsInt(),
 		MaxDelay:              params.WALAppendBatchMaxDelay.GetAsDurationByParse(),
 		CooldownThreshold:     params.WALAppendBatchCooldownThreshold.GetAsInt(),
 		CooldownDuration:      params.WALAppendBatchCooldownDuration.GetAsDurationByParse(),
@@ -33,7 +35,7 @@ func newAppendBatchConfigFromParams() appendBatchConfig {
 }
 
 func (c appendBatchConfig) enabled() bool {
-	return c.SmallMessageThreshold > 0 && c.MaxBatchSize > 0 && c.MaxDelay > 0
+	return c.SmallMessageThreshold > 0 && c.MaxBatchSize > 0 && c.MaxMessageCount > 0 && c.MaxDelay > 0
 }
 
 type appendBatchRequest struct {
@@ -49,10 +51,11 @@ type appendBatcher struct {
 	cfg      appendBatchConfig
 	appendFn func(context.Context, ...message.MutableMessage) types.AppendResponse
 
-	pending   []*appendBatchRequest
-	totalSize int
-	timer     *time.Timer
-	closed    bool
+	pending       []*appendBatchRequest
+	totalSize     int
+	totalMessages int
+	timer         *time.Timer
+	closed        bool
 
 	consecutiveSingleFlushes int
 	cooldownUntil            time.Time
@@ -93,9 +96,10 @@ func (b *appendBatcher) submit(ctx context.Context, msgs ...message.MutableMessa
 
 	b.pending = append(b.pending, req)
 	b.totalSize += req.size
-	if b.totalSize >= b.cfg.MaxBatchSize {
+	b.totalMessages += len(req.msgs)
+	if b.totalSize >= b.cfg.MaxBatchSize || b.totalMessages >= b.cfg.MaxMessageCount {
 		reqs := b.popPendingLocked()
-		go b.flush(reqs, false)
+		go b.flush(reqs)
 		return respCh
 	}
 	if b.timer == nil {
@@ -129,7 +133,7 @@ func (b *appendBatcher) flushByTimer() {
 	b.mu.Lock()
 	reqs := b.popPendingLocked()
 	b.mu.Unlock()
-	b.flush(reqs, true)
+	b.flush(reqs)
 }
 
 func (b *appendBatcher) popPendingLocked() []*appendBatchRequest {
@@ -140,10 +144,11 @@ func (b *appendBatcher) popPendingLocked() []*appendBatchRequest {
 	reqs := b.pending
 	b.pending = nil
 	b.totalSize = 0
+	b.totalMessages = 0
 	return reqs
 }
 
-func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
+func (b *appendBatcher) flush(reqs []*appendBatchRequest) {
 	if len(reqs) == 0 {
 		return
 	}
@@ -164,15 +169,10 @@ func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
 		return
 	}
 
-	b.observeFlush(fromTimer, len(active), len(msgs))
+	b.observeFlush(len(active))
 	ctx, cancel := batchContext(active)
-	trigger := "size"
-	if fromTimer {
-		trigger = "timer"
-	}
 	log.Ctx(ctx).Debug("wal append batch flush",
 		zap.String("vchannel", b.vchannel),
-		zap.String("trigger", trigger),
 		zap.Int("requestCount", len(active)),
 		zap.Int("messageCount", len(msgs)),
 		zap.Int("estimatedSize", size))
@@ -183,11 +183,11 @@ func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
 	}
 }
 
-func (b *appendBatcher) observeFlush(fromTimer bool, reqCount int, msgCount int) {
+func (b *appendBatcher) observeFlush(reqCount int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !fromTimer || reqCount > 1 || msgCount > 1 {
+	if reqCount > 1 {
 		b.consecutiveSingleFlushes = 0
 		return
 	}

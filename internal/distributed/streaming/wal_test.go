@@ -306,6 +306,7 @@ func TestAppendMessagesBatchSmallDMLAcrossCalls(t *testing.T) {
 	w.appendBatchConfig = appendBatchConfig{
 		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
 		MaxBatchSize:          messagesEstimateSize(msg1, msg2),
+		MaxMessageCount:       64,
 		MaxDelay:              time.Second,
 		CooldownThreshold:     10,
 		CooldownDuration:      time.Second,
@@ -381,6 +382,7 @@ func TestAppendMessagesBatchCooldownAfterSingleMessageFlush(t *testing.T) {
 	w.appendBatchConfig = appendBatchConfig{
 		SmallMessageThreshold: messagesEstimateSize(msg) + 1,
 		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
 		MaxDelay:              100 * time.Millisecond,
 		CooldownThreshold:     1,
 		CooldownDuration:      time.Second,
@@ -409,6 +411,58 @@ func TestAppendMessagesBatchCooldownAfterSingleMessageFlush(t *testing.T) {
 	assert.Less(t, time.Since(start), w.appendBatchConfig.MaxDelay/2)
 }
 
+func TestAppendMessagesBatchCooldownAfterSingleRequestFlush(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1, msg2) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
+		MaxDelay:              100 * time.Millisecond,
+		CooldownThreshold:     1,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(5)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	start := time.Now()
+	resp := w.AppendMessages(ctx, msg1, msg2)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.GreaterOrEqual(t, time.Since(start), w.appendBatchConfig.MaxDelay)
+	assert.True(t, w.getAppendBatcher(vChannel1).inCooldown(time.Now()))
+
+	start = time.Now()
+	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Less(t, time.Since(start), w.appendBatchConfig.MaxDelay/2)
+}
+
 func TestAppendMessagesBatchAllOrNothing(t *testing.T) {
 	ctx := context.Background()
 	w, _, _, handler := createMockWAL(t)
@@ -419,6 +473,7 @@ func TestAppendMessagesBatchAllOrNothing(t *testing.T) {
 	w.appendBatchConfig = appendBatchConfig{
 		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
 		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
 		MaxDelay:              time.Second,
 		CooldownThreshold:     10,
 		CooldownDuration:      time.Second,
@@ -464,6 +519,7 @@ func TestAppendMessagesBatchThresholdIsPerVChannel(t *testing.T) {
 	w.appendBatchConfig = appendBatchConfig{
 		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
 		MaxBatchSize:          messagesEstimateSize(msg1, msg2),
+		MaxMessageCount:       64,
 		MaxDelay:              time.Second,
 		CooldownThreshold:     10,
 		CooldownDuration:      time.Second,
@@ -492,6 +548,64 @@ func TestAppendMessagesBatchThresholdIsPerVChannel(t *testing.T) {
 
 	resp := <-respCh
 	assert.NoError(t, resp.UnwrapFirstError())
+}
+
+func TestAppendMessagesBatchFlushByMessageCount(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel1, "payload-2")
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       2,
+		MaxDelay:              time.Second,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeBeginTxn {
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1),
+					TimeTick:  10,
+					TxnCtx: &message.TxnContext{
+						TxnID:     1,
+						Keepalive: time.Second,
+					},
+				}, nil
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(2),
+				TimeTick:  20,
+			}, nil
+		}).Times(4)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	respCh := make(chan AppendResponses, 2)
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg1)
+	}()
+	assert.Never(t, func() bool {
+		return len(respCh) > 0
+	}, 50*time.Millisecond, 10*time.Millisecond)
+
+	go func() {
+		respCh <- w.AppendMessages(ctx, msg2)
+	}()
+
+	resp1 := <-respCh
+	resp2 := <-respCh
+	assert.NoError(t, resp1.UnwrapFirstError())
+	assert.NoError(t, resp2.UnwrapFirstError())
 }
 
 func newInsertMessageWithCollectionName(vChannel string, collectionName string) message.MutableMessage {
