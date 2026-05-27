@@ -30,8 +30,6 @@ from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "struct_array"
 epsilon = 0.001
-default_dim = 128
-INDEX_PARAMS = {"M": 16, "efConstruction": 200}
 
 # Dim for emb list index tests (smaller for faster index building)
 EMB_LIST_DIM = 32
@@ -46,9 +44,24 @@ class StructArrayNullableSchemaSpec:
     int_subfield: str
     tag_subfield: str
     vector_subfield: str
-    vector_dim: int = default_dim
-    struct_max_capacity: int = 4
-    tag_max_length: int = 128
+    pk_type: DataType
+    vector_type: DataType
+    tag_type: DataType
+    struct_type: DataType
+    struct_element_type: DataType
+    int_subfield_type: DataType
+    tag_subfield_type: DataType
+    vector_subfield_type: DataType
+    vector_dim: int
+    vector_subfield_dim: int
+    tag_max_length: int
+    struct_max_capacity: int
+    normal_vector_index_type: str
+    normal_vector_metric_type: str
+    struct_vector_index_type: str
+    struct_vector_metric_type: str
+    struct_vector_hnsw_m: int
+    struct_vector_hnsw_ef_construction: int
 
     @property
     def scalar_subfields(self) -> tuple[str, str]:
@@ -57,6 +70,37 @@ class StructArrayNullableSchemaSpec:
     @property
     def vector_subfields(self) -> tuple[str, str, str]:
         return (self.int_subfield, self.tag_subfield, self.vector_subfield)
+
+    @property
+    def struct_int_field(self) -> str:
+        return f"{self.struct_field}[{self.int_subfield}]"
+
+    @property
+    def struct_tag_field(self) -> str:
+        return f"{self.struct_field}[{self.tag_subfield}]"
+
+    @property
+    def struct_vector_field(self) -> str:
+        return f"{self.struct_field}[{self.vector_subfield}]"
+
+    @property
+    def all_rows_filter(self) -> str:
+        return f"{self.pk_field} >= 0"
+
+    @property
+    def normal_vector_search_params(self) -> dict[str, Any]:
+        return {"metric_type": self.normal_vector_metric_type, "params": {}}
+
+    @property
+    def struct_vector_search_params(self) -> dict[str, Any]:
+        return {"metric_type": self.struct_vector_metric_type}
+
+    @property
+    def struct_vector_index_params(self) -> dict[str, int]:
+        return {
+            "M": self.struct_vector_hnsw_m,
+            "efConstruction": self.struct_vector_hnsw_ef_construction,
+        }
 
 
 DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
@@ -67,7 +111,27 @@ DEFAULT_SCHEMA_SPEC = StructArrayNullableSchemaSpec(
     int_subfield="p_int",
     tag_subfield="p_tag",
     vector_subfield="p_vec",
+    pk_type=DataType.INT64,
+    vector_type=DataType.FLOAT_VECTOR,
+    tag_type=DataType.VARCHAR,
+    struct_type=DataType.ARRAY,
+    struct_element_type=DataType.STRUCT,
+    int_subfield_type=DataType.INT64,
+    tag_subfield_type=DataType.VARCHAR,
+    vector_subfield_type=DataType.FLOAT_VECTOR,
+    vector_dim=128,
+    vector_subfield_dim=128,
+    tag_max_length=128,
+    struct_max_capacity=4,
+    normal_vector_index_type="FLAT",
+    normal_vector_metric_type="L2",
+    struct_vector_index_type="HNSW",
+    struct_vector_metric_type="MAX_SIM_COSINE",
+    struct_vector_hnsw_m=16,
+    struct_vector_hnsw_ef_construction=200,
 )
+default_dim = DEFAULT_SCHEMA_SPEC.vector_dim
+INDEX_PARAMS = DEFAULT_SCHEMA_SPEC.struct_vector_index_params
 PK_FIELD = DEFAULT_SCHEMA_SPEC.pk_field
 VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.vector_field
 TAG_FIELD = DEFAULT_SCHEMA_SPEC.tag_field
@@ -75,16 +139,35 @@ STRUCT_FIELD = DEFAULT_SCHEMA_SPEC.struct_field
 INT_SUBFIELD = DEFAULT_SCHEMA_SPEC.int_subfield
 TAG_SUBFIELD = DEFAULT_SCHEMA_SPEC.tag_subfield
 VECTOR_SUBFIELD = DEFAULT_SCHEMA_SPEC.vector_subfield
-STRUCT_INT_FIELD = f"{STRUCT_FIELD}[{INT_SUBFIELD}]"
-STRUCT_TAG_FIELD = f"{STRUCT_FIELD}[{TAG_SUBFIELD}]"
-STRUCT_VECTOR_FIELD = f"{STRUCT_FIELD}[{VECTOR_SUBFIELD}]"
-ALL_ROWS_FILTER = f"{PK_FIELD} >= 0"
+PK_TYPE = DEFAULT_SCHEMA_SPEC.pk_type
+VECTOR_TYPE = DEFAULT_SCHEMA_SPEC.vector_type
+TAG_TYPE = DEFAULT_SCHEMA_SPEC.tag_type
+STRUCT_TYPE = DEFAULT_SCHEMA_SPEC.struct_type
+STRUCT_ELEMENT_TYPE = DEFAULT_SCHEMA_SPEC.struct_element_type
+INT_SUBFIELD_TYPE = DEFAULT_SCHEMA_SPEC.int_subfield_type
+TAG_SUBFIELD_TYPE = DEFAULT_SCHEMA_SPEC.tag_subfield_type
+VECTOR_SUBFIELD_TYPE = DEFAULT_SCHEMA_SPEC.vector_subfield_type
+VECTOR_DIM = DEFAULT_SCHEMA_SPEC.vector_dim
+VECTOR_SUBFIELD_DIM = DEFAULT_SCHEMA_SPEC.vector_subfield_dim
+TAG_MAX_LENGTH = DEFAULT_SCHEMA_SPEC.tag_max_length
+STRUCT_MAX_CAPACITY = DEFAULT_SCHEMA_SPEC.struct_max_capacity
+NORMAL_VECTOR_INDEX_TYPE = DEFAULT_SCHEMA_SPEC.normal_vector_index_type
+NORMAL_VECTOR_METRIC_TYPE = DEFAULT_SCHEMA_SPEC.normal_vector_metric_type
+STRUCT_VECTOR_INDEX_TYPE = DEFAULT_SCHEMA_SPEC.struct_vector_index_type
+STRUCT_VECTOR_METRIC_TYPE = DEFAULT_SCHEMA_SPEC.struct_vector_metric_type
+STRUCT_INT_FIELD = DEFAULT_SCHEMA_SPEC.struct_int_field
+STRUCT_TAG_FIELD = DEFAULT_SCHEMA_SPEC.struct_tag_field
+STRUCT_VECTOR_FIELD = DEFAULT_SCHEMA_SPEC.struct_vector_field
+ALL_ROWS_FILTER = DEFAULT_SCHEMA_SPEC.all_rows_filter
+NORMAL_VECTOR_SEARCH_PARAMS = DEFAULT_SCHEMA_SPEC.normal_vector_search_params
+STRUCT_VECTOR_SEARCH_PARAMS = DEFAULT_SCHEMA_SPEC.struct_vector_search_params
 OMITTED_FIELD = object()
 
 
 class StructArrayNullableTestMixin:
     @staticmethod
-    def _vector(seed: int, dim: int = default_dim) -> list[float]:
+    def _vector(seed: int, dim: int | None = None) -> list[float]:
+        dim = dim or DEFAULT_SCHEMA_SPEC.vector_dim
         return [float(seed) + float(i) / 1000 for i in range(dim)]
 
     @staticmethod
@@ -117,27 +200,28 @@ class StructArrayNullableTestMixin:
         include_struct: bool = False,
         include_vector_subfield: bool = False,
         normal_vector_dim: int | None = None,
-        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        struct_vector_type: DataType | None = None,
         struct_vector_dim: int | None = None,
         struct_nullable: bool = True,
     ) -> dict[str, Any]:
         normal_vector_dim = normal_vector_dim or spec.vector_dim
-        struct_vector_dim = struct_vector_dim or normal_vector_dim
+        struct_vector_type = struct_vector_type or spec.vector_subfield_type
+        struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
         fields = [
             {
                 "name": spec.pk_field,
-                "type": DataType.INT64,
+                "type": spec.pk_type,
                 "is_primary": True,
                 "auto_id": False,
             },
             {
                 "name": spec.vector_field,
-                "type": DataType.FLOAT_VECTOR,
+                "type": spec.vector_type,
                 "params": {"dim": normal_vector_dim},
             },
             {
                 "name": spec.tag_field,
-                "type": DataType.VARCHAR,
+                "type": spec.tag_type,
                 "params": {"max_length": spec.tag_max_length},
             },
         ]
@@ -149,10 +233,10 @@ class StructArrayNullableTestMixin:
         }
         if include_struct:
             struct_subfields = [
-                {"name": spec.int_subfield, "type": DataType.INT64, "nullable": True},
+                {"name": spec.int_subfield, "type": spec.int_subfield_type, "nullable": True},
                 {
                     "name": spec.tag_subfield,
-                    "type": DataType.VARCHAR,
+                    "type": spec.tag_subfield_type,
                     "params": {"max_length": spec.tag_max_length},
                     "nullable": True,
                 },
@@ -169,8 +253,8 @@ class StructArrayNullableTestMixin:
             fields.append(
                 {
                     "name": spec.struct_field,
-                    "type": DataType.ARRAY,
-                    "element_type": DataType.STRUCT,
+                    "type": spec.struct_type,
+                    "element_type": spec.struct_element_type,
                     "params": {"max_capacity": spec.struct_max_capacity},
                     "nullable": struct_nullable,
                     "struct_fields": struct_subfields,
@@ -192,12 +276,14 @@ class StructArrayNullableTestMixin:
         *,
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
         include_vector_subfield: bool = False,
-        vector_type: DataType = DataType.FLOAT_VECTOR,
-        vector_dim: int = default_dim,
+        vector_type: DataType | None = None,
+        vector_dim: int | None = None,
     ):
+        vector_type = vector_type or spec.vector_subfield_type
+        vector_dim = vector_dim or spec.vector_subfield_dim
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(spec.int_subfield, DataType.INT64)
-        struct_schema.add_field(spec.tag_subfield, DataType.VARCHAR, max_length=spec.tag_max_length)
+        struct_schema.add_field(spec.int_subfield, spec.int_subfield_type)
+        struct_schema.add_field(spec.tag_subfield, spec.tag_subfield_type, max_length=spec.tag_max_length)
         if include_vector_subfield:
             struct_schema.add_field(spec.vector_subfield, vector_type, dim=vector_dim)
         return struct_schema
@@ -210,19 +296,21 @@ class StructArrayNullableTestMixin:
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
         include_struct: bool = True,
         include_vector_subfield: bool = False,
-        normal_vector_dim: int = default_dim,
-        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        normal_vector_dim: int | None = None,
+        struct_vector_type: DataType | None = None,
         struct_vector_dim: int | None = None,
         include_tag_field: bool = True,
         enable_dynamic_field: bool = False,
     ):
+        normal_vector_dim = normal_vector_dim or spec.vector_dim
+        struct_vector_type = struct_vector_type or spec.vector_subfield_type
         schema = client.create_schema(auto_id=False, enable_dynamic_field=enable_dynamic_field)
-        schema.add_field(field_name=spec.pk_field, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=spec.vector_field, datatype=DataType.FLOAT_VECTOR, dim=normal_vector_dim)
+        schema.add_field(field_name=spec.pk_field, datatype=spec.pk_type, is_primary=True)
+        schema.add_field(field_name=spec.vector_field, datatype=spec.vector_type, dim=normal_vector_dim)
         if include_tag_field:
-            schema.add_field(field_name=spec.tag_field, datatype=DataType.VARCHAR, max_length=spec.tag_max_length)
+            schema.add_field(field_name=spec.tag_field, datatype=spec.tag_type, max_length=spec.tag_max_length)
         if include_struct:
-            struct_vector_dim = struct_vector_dim or normal_vector_dim
+            struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
             struct_schema = cls._create_struct_field_schema(
                 client,
                 spec=spec,
@@ -232,8 +320,8 @@ class StructArrayNullableTestMixin:
             )
             schema.add_field(
                 spec.struct_field,
-                datatype=DataType.ARRAY,
-                element_type=DataType.STRUCT,
+                datatype=spec.struct_type,
+                element_type=spec.struct_element_type,
                 struct_schema=struct_schema,
                 max_capacity=spec.struct_max_capacity,
                 nullable=True,
@@ -247,8 +335,8 @@ class StructArrayNullableTestMixin:
         *,
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
         include_vector_subfield: bool = False,
-        normal_vector_dim: int = default_dim,
-        struct_vector_type: DataType = DataType.FLOAT_VECTOR,
+        normal_vector_dim: int | None = None,
+        struct_vector_type: DataType | None = None,
         struct_vector_dim: int | None = None,
     ):
         schema = self._create_nullable_struct_array_schema(
@@ -260,7 +348,11 @@ class StructArrayNullableTestMixin:
             struct_vector_dim=struct_vector_dim,
         )
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=spec.vector_field, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=spec.vector_field,
+            index_type=spec.normal_vector_index_type,
+            metric_type=spec.normal_vector_metric_type,
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
         return schema
@@ -504,7 +596,8 @@ class StructArrayNullableTestMixin:
         )
 
     @staticmethod
-    def _unit_vector(axis: int, dim: int = default_dim) -> list[float]:
+    def _unit_vector(axis: int, dim: int | None = None) -> list[float]:
+        dim = dim or DEFAULT_SCHEMA_SPEC.vector_subfield_dim
         vector = [0.0 for _ in range(dim)]
         vector[axis % dim] = 1.0
         return vector
@@ -519,12 +612,12 @@ class StructArrayNullableTestMixin:
             {
                 spec.int_subfield: row_id * 10,
                 spec.tag_subfield: f"profile_{row_id}_0",
-                spec.vector_subfield: self._vector(row_id * 10),
+                spec.vector_subfield: self._vector(row_id * 10, spec.vector_subfield_dim),
             },
             {
                 spec.int_subfield: row_id * 10 + 1,
                 spec.tag_subfield: f"profile_{row_id}_1",
-                spec.vector_subfield: self._vector(row_id * 10 + 1),
+                spec.vector_subfield: self._vector(row_id * 10 + 1, spec.vector_subfield_dim),
             },
         ]
 
@@ -569,9 +662,10 @@ class StructArrayNullableTestMixin:
         *,
         spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
         expected_keys=None,
-        vector_type: DataType = DataType.FLOAT_VECTOR,
+        vector_type: DataType | None = None,
         exact_keys: bool = False,
     ):
+        vector_type = vector_type or spec.vector_subfield_type
         if expected is None:
             assert actual is None
             return
@@ -806,7 +900,11 @@ class StructArrayNullableTestMixin:
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=spec.vector_field, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=spec.vector_field,
+            index_type=spec.normal_vector_index_type,
+            metric_type=spec.normal_vector_metric_type,
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, spec.vector_field, timeout=300)
@@ -1124,18 +1222,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -1145,14 +1243,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert profile_field["nullable"] is True
         assert profile_field["type"] == DataType.ARRAY
         assert profile_field["element_type"] == DataType.STRUCT
-        assert profile_field["params"]["max_capacity"] == 4
+        assert profile_field["params"]["max_capacity"] == STRUCT_MAX_CAPACITY
         user_sub_fields = {field["name"]: field for field in profile_field["struct_fields"]}
         assert set(user_sub_fields) == {INT_SUBFIELD, TAG_SUBFIELD, VECTOR_SUBFIELD}
         assert user_sub_fields[INT_SUBFIELD]["type"] == DataType.INT64
         assert user_sub_fields[TAG_SUBFIELD]["type"] == DataType.VARCHAR
-        assert user_sub_fields[TAG_SUBFIELD]["params"]["max_length"] == 128
+        assert user_sub_fields[TAG_SUBFIELD]["params"]["max_length"] == TAG_MAX_LENGTH
         assert user_sub_fields[VECTOR_SUBFIELD]["type"] == DataType.FLOAT_VECTOR
-        assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == default_dim
+        assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
         raw_describe = client._get_connection().describe_collection(collection_name)
         raw_profile = next(field for field in raw_describe["struct_array_fields"] if field["name"] == STRUCT_FIELD)
@@ -1165,7 +1263,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert raw_sub_fields[INT_SUBFIELD]["element_type"] == DataType.INT64
         assert raw_sub_fields[TAG_SUBFIELD]["element_type"] == DataType.VARCHAR
         assert raw_sub_fields[VECTOR_SUBFIELD]["element_type"] == DataType.FLOAT_VECTOR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == default_dim
+        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_schema_nullable_propagation(self):
@@ -1179,19 +1277,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1204,14 +1302,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert profile_field["nullable"] is True
         assert profile_field["type"] == DataType.ARRAY
         assert profile_field["element_type"] == DataType.STRUCT
-        assert profile_field["params"]["max_capacity"] == 4
+        assert profile_field["params"]["max_capacity"] == STRUCT_MAX_CAPACITY
         user_sub_fields = {field["name"]: field for field in profile_field["struct_fields"]}
         assert set(user_sub_fields) == {INT_SUBFIELD, TAG_SUBFIELD, VECTOR_SUBFIELD}
         assert user_sub_fields[INT_SUBFIELD]["type"] == DataType.INT64
         assert user_sub_fields[TAG_SUBFIELD]["type"] == DataType.VARCHAR
-        assert user_sub_fields[TAG_SUBFIELD]["params"]["max_length"] == 128
+        assert user_sub_fields[TAG_SUBFIELD]["params"]["max_length"] == TAG_MAX_LENGTH
         assert user_sub_fields[VECTOR_SUBFIELD]["type"] == DataType.FLOAT_VECTOR
-        assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == default_dim
+        assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
         raw_describe = client._get_connection().describe_collection(collection_name)
         raw_profile = next(field for field in raw_describe["struct_array_fields"] if field["name"] == STRUCT_FIELD)
@@ -1224,7 +1322,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert raw_sub_fields[INT_SUBFIELD]["element_type"] == DataType.INT64
         assert raw_sub_fields[TAG_SUBFIELD]["element_type"] == DataType.VARCHAR
         assert raw_sub_fields[VECTOR_SUBFIELD]["element_type"] == DataType.FLOAT_VECTOR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == default_dim
+        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_omit_nullable_query_search(self):
@@ -1239,19 +1337,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1282,11 +1380,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -1344,7 +1444,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(2)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -1369,19 +1469,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1412,11 +1512,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -1474,7 +1576,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(3)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -1499,19 +1601,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1536,7 +1638,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -1599,7 +1703,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[non_null_to_null[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -1624,19 +1728,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1668,7 +1772,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -1709,19 +1815,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1753,7 +1859,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -1768,7 +1876,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[self._vector(4)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -1801,19 +1909,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -1886,7 +1994,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -2031,7 +2141,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_two_match_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=10,
@@ -2125,7 +2235,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(7004)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=search_expr,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(expected_search_ids),
@@ -2185,7 +2295,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[self._vector(7004)],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 filter=scoped_expr,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 limit=max(len(expected_ids), 1),
@@ -2266,7 +2376,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(7004)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=expr,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(expected_ids),
@@ -2292,20 +2402,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2326,11 +2436,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(rows)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -2360,7 +2472,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(1)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -2386,20 +2498,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2442,11 +2554,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -2492,7 +2606,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(3)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -2511,7 +2625,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_tensor],
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(non_empty_rows),
         )
@@ -2544,20 +2658,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         dim = 8
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=dim)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2591,11 +2705,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -2657,20 +2773,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         dim = EMB_LIST_DIM
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, vector_type, dim=dim)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2716,10 +2832,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         profile_metric = "MAX_SIM_HAMMING" if vector_type == DataType.BINARY_VECTOR else "MAX_SIM_COSINE"
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type=profile_metric,
             params=INDEX_PARAMS,
         )
@@ -2792,7 +2910,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_vector],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=top_k,
         )
@@ -2818,20 +2936,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2868,11 +2986,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -2918,20 +3038,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -2968,11 +3088,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -2991,7 +3113,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[self._vector(3)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -3025,19 +3147,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         entities = 10000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3096,7 +3218,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -3137,7 +3261,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -3178,7 +3302,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[search_row[VECTOR_FIELD]],
             batch_size=997,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -3214,20 +3338,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         entities = 10000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=dim)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3287,11 +3411,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -3335,7 +3461,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -3376,7 +3502,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[search_row[VECTOR_FIELD]],
             batch_size=997,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -3407,20 +3533,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3463,11 +3589,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -3487,7 +3615,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_tensor],
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(non_empty_rows),
         )
@@ -3515,7 +3643,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[search_tensor.to_flat_array()],
             batch_size=1,
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(non_empty_rows),
             is_embedding_list=True,
@@ -3536,20 +3664,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3592,10 +3720,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -3653,20 +3783,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3701,7 +3831,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(field_name=STRUCT_VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -3757,20 +3889,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3807,10 +3939,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -3871,20 +4005,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -3927,10 +4061,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -3992,20 +4128,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -4047,10 +4183,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -4110,20 +4248,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -4165,7 +4303,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(field_name=STRUCT_VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -4228,20 +4368,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
@@ -4278,7 +4418,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(field_name=STRUCT_VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -4337,9 +4479,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -4347,9 +4489,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        res, check = self.add_collection_struct_field(client, alias, STRUCT_FIELD, profile_schema, max_capacity=4)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        res, check = self.add_collection_struct_field(
+            client, alias, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
+        )
         assert check
 
         self.wait_schema_version_consistent(client, collection_name)
@@ -4377,7 +4521,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -4412,14 +4558,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         error = {
             ct.err_code: 1,
             ct.err_msg: "Adding struct field to existing collection requires nullable=True",
@@ -4429,7 +4575,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             STRUCT_FIELD,
             profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=False,
             check_task=CheckTasks.err_res,
             check_items=error,
@@ -4451,41 +4597,41 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
         duplicate_profile_schema = client.create_struct_field_schema()
-        duplicate_profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        duplicate_profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name profile"}
         self.add_collection_struct_field(
             client,
             collection_name,
             STRUCT_FIELD,
             duplicate_profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
 
         conflict_regular_field_schema = client.create_struct_field_schema()
-        conflict_regular_field_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        conflict_regular_field_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name normal_vector"}
         self.add_collection_struct_field(
             client,
             collection_name,
             VECTOR_FIELD,
             conflict_regular_field_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -4508,32 +4654,32 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         res, check = self.add_collection_struct_field(
             client,
             collection_name,
             STRUCT_FIELD,
             profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
         )
         assert check
 
         append_subfield_schema = client.create_struct_field_schema()
-        append_subfield_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        append_subfield_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name profile"}
         self.add_collection_struct_field(
             client,
             collection_name,
             STRUCT_FIELD,
             append_subfield_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -4554,15 +4700,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(INT_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(INT_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {
             ct.err_code: 1,
             ct.err_msg: "Duplicate field names in struct 'profile'",
@@ -4572,7 +4718,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             STRUCT_FIELD,
             profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -4604,8 +4750,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -4618,7 +4764,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             STRUCT_FIELD,
             profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -4651,8 +4797,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -4665,7 +4811,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             parent_name,
             profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -4687,9 +4833,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -4709,7 +4855,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -4766,15 +4914,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         def add_struct_field_task():
             task_client = self._client()
             profile_schema = task_client.create_struct_field_schema()
-            profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-            profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+            profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+            profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
             start_barrier.wait()
             result, task_check = self.add_collection_struct_field(
                 task_client,
                 collection_name,
                 STRUCT_FIELD,
                 profile_schema,
-                max_capacity=4,
+                max_capacity=STRUCT_MAX_CAPACITY,
             )
             assert task_check
             return "add", result
@@ -4906,7 +5054,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[post_add_rows[2][VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -4932,9 +5080,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -4954,7 +5102,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -4969,10 +5119,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5013,7 +5163,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(5)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
             limit=len(source_by_id),
         )
@@ -5037,9 +5187,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5059,7 +5209,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5074,10 +5226,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5138,7 +5290,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(5)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -5162,9 +5314,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5178,7 +5330,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5193,10 +5347,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5250,9 +5404,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5266,7 +5420,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5281,10 +5437,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5312,7 +5468,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[self._vector(7)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -5345,9 +5501,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5361,7 +5517,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5376,10 +5534,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5450,7 +5608,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(500)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -5477,9 +5635,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5493,7 +5651,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5508,10 +5668,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5568,7 +5728,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(6)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -5586,7 +5746,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(6)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 60)",
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=1,
@@ -5608,9 +5768,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5624,7 +5784,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5632,11 +5794,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5672,8 +5834,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -5696,7 +5858,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_tensor],
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(new_rows),
         )
@@ -5725,9 +5887,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5741,7 +5903,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -5756,11 +5920,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5816,8 +5980,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -5835,7 +5999,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_tensor],
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(new_rows),
         )
@@ -5869,19 +6033,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -5913,7 +6077,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(field_name=STRUCT_VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -5971,9 +6137,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -5992,7 +6158,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6000,11 +6168,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6097,9 +6265,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6118,7 +6286,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6126,11 +6296,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6186,7 +6356,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -6239,9 +6409,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6255,7 +6425,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6263,11 +6435,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6328,8 +6500,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -6347,7 +6519,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[search_tensor],
             anns_field=STRUCT_VECTOR_FIELD,
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params=STRUCT_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(non_empty_rows),
         )
@@ -6376,9 +6548,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6392,7 +6564,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6400,11 +6574,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6445,7 +6619,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(4)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_VECTOR_FIELD],
             limit=len(source_by_id),
         )
@@ -6470,9 +6644,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6486,7 +6660,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6501,11 +6677,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6546,7 +6722,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(5)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_VECTOR_FIELD],
             limit=len(source_by_id),
         )
@@ -6571,9 +6747,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6587,7 +6763,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6602,11 +6780,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6661,9 +6839,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6677,7 +6855,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6692,11 +6872,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6724,7 +6904,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             data=[self._vector(6)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -6757,9 +6937,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6773,7 +6953,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6781,11 +6963,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6821,7 +7003,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
             metric_type="COSINE",
             params=INDEX_PARAMS,
         )
@@ -6866,9 +7048,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6882,7 +7064,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6897,10 +7081,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -6942,7 +7126,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(6)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -6967,9 +7151,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -6983,7 +7167,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -6998,10 +7184,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -7072,7 +7258,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(5)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 40)",
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(new_ids),
@@ -7103,9 +7289,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -7122,7 +7308,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -7138,10 +7326,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -7362,7 +7550,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_two_match_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(match_any_ids),
@@ -7390,9 +7578,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -7406,7 +7594,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -7421,10 +7611,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -7505,7 +7695,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(6)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -7530,9 +7720,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -7546,7 +7736,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -7561,10 +7753,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -7654,7 +7846,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(7)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -7679,9 +7871,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -7701,7 +7893,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -7716,10 +7910,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -7878,7 +8072,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_non_empty_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -7904,9 +8098,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -7926,7 +8120,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -7941,11 +8137,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -8124,7 +8320,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_non_empty_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -8150,9 +8346,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -8172,7 +8368,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -8187,11 +8385,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -8350,7 +8548,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[non_empty_upserts[-1][VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -8375,9 +8573,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -8397,7 +8595,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -8412,10 +8612,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -8579,7 +8779,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_kept_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -8607,9 +8807,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -8629,7 +8829,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -8644,11 +8846,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -8834,7 +9036,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[growing_kept_profile_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -8862,9 +9064,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -8898,7 +9100,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -8915,10 +9119,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -9039,7 +9243,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -9103,9 +9307,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -9139,7 +9343,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -9156,11 +9362,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -9317,7 +9523,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -9379,9 +9585,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -9415,7 +9621,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -9432,10 +9640,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -9526,7 +9734,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -9569,9 +9777,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -9605,7 +9813,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -9622,11 +9832,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -9729,8 +9939,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
@@ -9802,7 +10012,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -9846,9 +10056,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -9882,7 +10092,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -9899,10 +10111,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -10092,7 +10304,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -10152,9 +10364,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -10188,7 +10400,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -10205,11 +10419,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -10424,7 +10638,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 collection_name,
                 data=[search_row[VECTOR_FIELD]],
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -10482,9 +10696,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -10518,7 +10732,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -10536,10 +10752,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -10626,7 +10842,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 data=[search_row[VECTOR_FIELD]],
                 batch_size=257,
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -10664,9 +10880,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_b = "partition_b"
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -10700,7 +10916,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -10718,11 +10936,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == 1
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -10797,7 +11015,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 data=[search_row[VECTOR_FIELD]],
                 batch_size=257,
                 anns_field=VECTOR_FIELD,
-                search_params={"metric_type": "L2", "params": {}},
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
                 partition_names=[partition_name],
                 limit=len(source_by_id),
@@ -10830,9 +11048,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -10846,7 +11064,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -10854,11 +11074,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -10900,7 +11120,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(4)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -10926,9 +11146,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -10942,7 +11162,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -10950,11 +11172,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -11010,7 +11232,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(4)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -11027,7 +11249,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(4)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 40)",
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=1,
@@ -11049,15 +11271,17 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -11070,11 +11294,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -11116,7 +11340,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(4)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -11140,9 +11364,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -11156,7 +11380,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
@@ -11171,11 +11397,11 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert res["insert_count"] == len(old_growing_rows)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
@@ -11217,7 +11443,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             collection_name,
             data=[self._vector(7)],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
             limit=len(source_by_id),
         )
@@ -11396,7 +11622,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -11524,7 +11750,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -11651,7 +11877,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -11682,24 +11908,26 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -11768,7 +11996,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -11798,24 +12026,26 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -11905,7 +12135,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -11935,24 +12165,26 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -12028,7 +12260,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -12058,24 +12290,26 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -12156,7 +12390,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -12182,23 +12416,25 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -12245,23 +12481,25 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -12302,23 +12540,25 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -12366,9 +12606,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -12391,16 +12631,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         import_rows = []
@@ -12451,7 +12693,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
@@ -12484,9 +12726,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_target_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -12528,16 +12770,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         import_rows = []
@@ -12621,7 +12865,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
@@ -12656,9 +12900,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_target_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -12700,16 +12944,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         ids = []
@@ -12814,7 +13060,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
@@ -12849,9 +13095,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_target_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -12893,16 +13139,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         import_rows = []
@@ -12979,7 +13227,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
@@ -13014,9 +13262,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_target_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -13058,16 +13306,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         ids = []
@@ -13154,7 +13404,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
@@ -13184,9 +13434,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -13209,16 +13459,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         ids = []
@@ -13290,7 +13542,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
@@ -13319,9 +13571,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -13344,16 +13596,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         import_rows = []
@@ -13397,7 +13651,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
@@ -13426,9 +13680,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         total_entities = old_entities + import_entities
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
@@ -13451,16 +13705,18 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
-            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=4
+            client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
         self.wait_schema_version_consistent(client, collection_name, timeout=30)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         client.create_index(collection_name=collection_name, index_params=index_params)
 
         ids = []
@@ -13514,7 +13770,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
@@ -13546,29 +13802,31 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
-        profile_schema.add_field(VECTOR_SUBFIELD, DataType.FLOAT_VECTOR, dim=default_dim)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
-            index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            index_type=STRUCT_VECTOR_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -13623,7 +13881,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -13649,24 +13907,26 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
             nullable=True,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
@@ -13739,7 +13999,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             collection_name=collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params={"metric_type": "L2", "params": {}},
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
@@ -13765,23 +14025,25 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name=TAG_FIELD, datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
         profile_schema = client.create_struct_field_schema()
-        profile_schema.add_field(INT_SUBFIELD, DataType.INT64)
-        profile_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=128)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
             STRUCT_FIELD,
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
             struct_schema=profile_schema,
-            max_capacity=4,
+            max_capacity=STRUCT_MAX_CAPACITY,
         )
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name=VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(
+            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+        )
         res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
