@@ -45,6 +45,7 @@ import (
 // and packedTextManifestWriter used for V3 storage writes.
 type manifestRecordWriter interface {
 	storage.RecordWriter
+	Abort() error
 	GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64
 	GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64
 	GetWrittenPaths(columnGroup typeutil.UniqueID) string
@@ -238,15 +239,29 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 	columnGroups := bw.columnGroups
 
 	var err error
-	doWrite := func(w manifestRecordWriter) error {
-		if err = w.Write(rec); err != nil {
-			if closeErr := w.Close(); closeErr != nil {
-				log.Error("failed to close writer after write failed", zap.Error(closeErr))
+	doWrite := func(w manifestRecordWriter) (err error) {
+		closed := false
+		defer func() {
+			if closed {
+				return
 			}
+			if abortErr := w.Abort(); abortErr != nil {
+				log.Error("failed to abort writer before close",
+					zap.Error(abortErr),
+					zap.NamedError("originalError", err))
+				if err == nil {
+					err = abortErr
+				}
+			}
+		}()
+
+		if err = w.Write(rec); err != nil {
 			return err
 		}
 		// close first the get stats & output
-		return w.Close()
+		err = w.Close()
+		closed = true
+		return err
 	}
 
 	var manifestPath string

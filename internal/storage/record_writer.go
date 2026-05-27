@@ -260,7 +260,10 @@ func (pw *packedRecordManifestWriter) GetWrittenRowNum() int64 {
 
 func (pw *packedRecordManifestWriter) Close() error {
 	if pw.writer != nil {
-		manifest, err := pw.writer.Close()
+		writer := pw.writer
+		pw.writer = nil
+
+		manifest, err := writer.Close()
 		if err != nil {
 			return err
 		}
@@ -270,6 +273,16 @@ func (pw *packedRecordManifestWriter) Close() error {
 		}
 	}
 	return nil
+}
+
+func (pw *packedRecordManifestWriter) Abort() error {
+	if pw.writer == nil {
+		return nil
+	}
+
+	writer := pw.writer
+	pw.writer = nil
+	return writer.Abort()
 }
 
 func NewPackedRecordManifestWriter(
@@ -421,8 +434,10 @@ func (pw *packedTextManifestWriter) GetWrittenRowNum() int64 {
 
 func (pw *packedTextManifestWriter) Close() error {
 	if pw.writer != nil {
-		defer pw.writer.Destroy()
-		result, err := pw.writer.Close()
+		writer := pw.writer
+		pw.writer = nil
+
+		result, err := writer.Close()
 		if err != nil {
 			return err
 		}
@@ -433,6 +448,16 @@ func (pw *packedTextManifestWriter) Close() error {
 		}
 	}
 	return nil
+}
+
+func (pw *packedTextManifestWriter) Abort() error {
+	if pw.writer == nil {
+		return nil
+	}
+
+	writer := pw.writer
+	pw.writer = nil
+	return writer.Abort()
 }
 
 // NewPackedTextManifestWriter creates a new writer that uses FFISegmentWriter with TEXT column support.

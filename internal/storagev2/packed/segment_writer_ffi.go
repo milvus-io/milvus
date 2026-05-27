@@ -133,14 +133,29 @@ func (w *FFISegmentWriter) Flush() error {
 	return HandleLoonFFIResult(result)
 }
 
+// Abort closes the underlying segment writer and releases resources without
+// registering the returned files in a manifest transaction.
+func (w *FFISegmentWriter) Abort() error {
+	defer w.Destroy()
+
+	var cOutput C.LoonSegmentWriteOutput
+	result := C.loon_segment_writer_close(w.handle, &cOutput)
+	defer freeSegmentWriteOutput(&cOutput)
+
+	return HandleLoonFFIResult(result)
+}
+
 // Close closes the writer and commits the manifest via Transaction.
 // Returns SegmentWriterResult with the committed manifest path.
 // Pattern matches FFIPackedWriter.Close(): C++ writer returns ColumnGroups + LobFiles,
 // Go layer handles Transaction begin → append_files → add_lob_files → commit.
 func (w *FFISegmentWriter) Close() (*SegmentWriterResult, error) {
+	defer w.Destroy()
+
 	var cOutput C.LoonSegmentWriteOutput
 
 	result := C.loon_segment_writer_close(w.handle, &cOutput)
+	defer freeSegmentWriteOutput(&cOutput)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
@@ -184,14 +199,22 @@ func (w *FFISegmentWriter) Close() (*SegmentWriterResult, error) {
 		return nil, err
 	}
 
-	// free C output (LOB file strings + array)
-	C.loon_segment_write_output_free(&cOutput)
-
 	return &SegmentWriterResult{
 		ManifestPath:     MarshalManifestPath(w.basePath, int64(cCommitVersion)),
 		CommittedVersion: int64(cCommitVersion),
 		RowsWritten:      rowsWritten,
 	}, nil
+}
+
+func freeSegmentWriteOutput(output *C.LoonSegmentWriteOutput) {
+	if output == nil {
+		return
+	}
+	if output.column_groups != nil {
+		C.loon_column_groups_destroy(output.column_groups)
+		output.column_groups = nil
+	}
+	C.loon_segment_write_output_free(output)
 }
 
 // Destroy destroys the writer and releases resources.
