@@ -47,9 +47,9 @@ const (
 	QueryViewState_QueryViewStateDropping QueryViewState = 6
 	// View is fully dropped and can be removed from persistent storage.
 	QueryViewState_QueryViewStateDropped QueryViewState = 7
-	// StreamingNode-only: WAL is recovering after SN crash.
-	// Not used by Coord or QueryNode. Maps to Up for Coord-visible state.
-	// See design doc Section 2.4.
+	// StreamingNode-only: WAL is recovering after SN crash before the local view can serve queries again.
+	// Not emitted by Coord or QueryNode; Coord treats it as Up because the view assignment is unchanged
+	// and the StreamingNode recovers the local state by replaying WAL.
 	QueryViewState_QueryViewStateUpRecovering QueryViewState = 8
 )
 
@@ -108,7 +108,8 @@ func (QueryViewState) EnumDescriptor() ([]byte, []int) {
 
 // DataVersion is the composite version of a data view.
 // Ordered by lexicographic order of (streaming_version, compact_version).
-// Collection-level versioning to support future shard splitting.
+// Intentionally collection-scoped: a flush or compaction in any shard advances the collection
+// data version so future shard splitting can reason against a single ordered storage view.
 type DataVersion struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1191,7 +1192,7 @@ func (*SyncCloseResponse) Descriptor() ([]byte, []int) {
 }
 
 // SyncDataViewRequest carries data view timetick information to streaming nodes.
-// Only used for unloaded collections; loaded collections sync timetick via SyncQueryView.
+// Only used for unloaded collections; loaded collections carry the timetick in QueryViewMeta via SyncQueryView.
 type SyncDataViewRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

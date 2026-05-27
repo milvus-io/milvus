@@ -11,7 +11,7 @@ service ViewSyncService {
     rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
     }
     // SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
-    // Applies to both loaded and unloaded collections.
+    // Only used for unloaded collections; loaded collections carry the timetick in QueryViewMeta via SyncQueryView.
     rpc SyncDataView(SyncDataViewRequest) returns (SyncDataViewResponse) {
     }
 }
@@ -22,7 +22,8 @@ service ViewSyncService {
 
 // DataVersion is the composite version of a data view.
 // Ordered by lexicographic order of (streaming_version, compact_version).
-// Collection-level versioning to support future shard splitting.
+// Intentionally collection-scoped: a flush or compaction in any shard advances the collection
+// data version so future shard splitting can reason against a single ordered storage view.
 message DataVersion {
     int64 streaming_version = 1;  // Incremented when a growing segment is flushed to sealed.
     int64 compact_version = 2;    // Incremented when segments are compacted.
@@ -81,9 +82,9 @@ enum QueryViewState {
     QueryViewStateDropping = 6;
     // View is fully dropped and can be removed from persistent storage.
     QueryViewStateDropped = 7;
-    // StreamingNode-only: WAL is recovering after SN crash.
-    // Not used by Coord or QueryNode. Maps to Up for Coord-visible state.
-    // See design doc Section 2.4.
+    // StreamingNode-only: WAL is recovering after SN crash before the local view can serve queries again.
+    // Not emitted by Coord or QueryNode; Coord treats it as Up because the view assignment is unchanged
+    // and the StreamingNode recovers the local state by replaying WAL.
     QueryViewStateUpRecovering = 8;
 }
 
@@ -205,7 +206,7 @@ message SyncCloseResponse {
 //
 
 // SyncDataViewRequest carries data view timetick information to streaming nodes.
-// Only used for unloaded collections; loaded collections sync timetick via SyncQueryView.
+// Only used for unloaded collections; loaded collections carry the timetick in QueryViewMeta via SyncQueryView.
 message SyncDataViewRequest {
     repeated DataViewShardTimeTick shards = 1;
 }

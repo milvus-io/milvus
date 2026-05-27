@@ -32,7 +32,7 @@ type ViewSyncServiceClient interface {
 	// The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
 	SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (ViewSyncService_SyncQueryViewClient, error)
 	// SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
-	// Applies to both loaded and unloaded collections.
+	// Only used for unloaded collections; loaded collections carry the timetick in QueryViewMeta via SyncQueryView.
 	SyncDataView(ctx context.Context, in *SyncDataViewRequest, opts ...grpc.CallOption) (*SyncDataViewResponse, error)
 }
 
@@ -93,7 +93,7 @@ type ViewSyncServiceServer interface {
 	// The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
 	SyncQueryView(ViewSyncService_SyncQueryViewServer) error
 	// SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
-	// Applies to both loaded and unloaded collections.
+	// Only used for unloaded collections; loaded collections carry the timetick in QueryViewMeta via SyncQueryView.
 	SyncDataView(context.Context, *SyncDataViewRequest) (*SyncDataViewResponse, error)
 }
 
