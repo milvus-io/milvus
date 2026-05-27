@@ -13,6 +13,18 @@ def pytest_addoption(parser):
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
     parser.addoption("--enable_import", action="store", type=bool, default=False, help="enable_import")
     parser.addoption(
+        "--search_consistency_level",
+        action="store",
+        default="",
+        help="consistency level for chaos search requests",
+    )
+    parser.addoption(
+        "--query_consistency_level",
+        action="store",
+        default="",
+        help="consistency level for chaos query requests",
+    )
+    parser.addoption(
         "--target_rgs",
         action="store",
         default="",
@@ -37,8 +49,20 @@ def pytest_addoption(parser):
         help="path to external ChaosMesh YAML template (overrides built-in config)",
     )
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
-    parser.addoption("--search_timeout", action="store", type=float, default=None, help="search API timeout in seconds")
-    parser.addoption("--query_timeout", action="store", type=float, default=None, help="query API timeout in seconds")
+    parser.addoption(
+        "--search_timeout",
+        action="store",
+        type=float,
+        default=None,
+        help="search API timeout in seconds for chaos client requests",
+    )
+    parser.addoption(
+        "--query_timeout",
+        action="store",
+        type=float,
+        default=None,
+        help="query API timeout in seconds for chaos client requests",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -47,11 +71,14 @@ def configure_client_timeouts(request):
 
     search_timeout = request.config.getoption("--search_timeout")
     query_timeout = request.config.getoption("--query_timeout")
-
-    if search_timeout is not None:
-        checker.search_timeout = search_timeout
-    if query_timeout is not None:
-        checker.query_timeout = query_timeout
+    search_consistency_level = request.config.getoption("--search_consistency_level")
+    query_consistency_level = request.config.getoption("--query_consistency_level")
+    checker.configure_request_options(
+        search_timeout_value=search_timeout,
+        query_timeout_value=query_timeout,
+        search_consistency_level_value=search_consistency_level,
+        query_consistency_level_value=query_consistency_level,
+    )
 
 
 @pytest.fixture
@@ -107,6 +134,26 @@ def wait_signal(request):
 @pytest.fixture
 def enable_import(request):
     return request.config.getoption("--enable_import")
+
+
+@pytest.fixture
+def search_timeout(request):
+    return request.config.getoption("--search_timeout")
+
+
+@pytest.fixture
+def query_timeout(request):
+    return request.config.getoption("--query_timeout")
+
+
+@pytest.fixture
+def search_consistency_level(request):
+    return request.config.getoption("--search_consistency_level")
+
+
+@pytest.fixture
+def query_consistency_level(request):
+    return request.config.getoption("--query_consistency_level")
 
 
 @pytest.fixture
