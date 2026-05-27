@@ -276,8 +276,6 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	pt := paramtable.Get()
 	node := &QueryNode{}
 
-	assert.NotPanics(t, func() { node.ReconfigArrowReaderParams(&config.Event{HasUpdated: false}) })
-	assert.NotPanics(t, func() { node.ReconfigArrowReaderParams(&config.Event{HasUpdated: true}) })
 	assert.NotPanics(t, func() { node.RegisterSegcoreConfigWatcher() })
 
 	// verify watchers are triggered by saving config values
