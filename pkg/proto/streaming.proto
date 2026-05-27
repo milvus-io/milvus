@@ -367,6 +367,10 @@ service StreamingNodeHandlerService {
     // Returns an empty list if no force promote has occurred.
     rpc GetSalvageCheckpoint(GetSalvageCheckpointRequest) returns (GetSalvageCheckpointResponse) {}
 
+    // GetGrowingFlushProgress returns the WriteBuffer-owned growing-source flush progress
+    // after the flusher has processed the requested fence timestamp.
+    rpc GetGrowingFlushProgress(GetGrowingFlushProgressRequest) returns (GetGrowingFlushProgressResponse) {}
+
     // Produce is a bi-directional streaming RPC to send messages to a channel.
     // All messages sent to a channel will be assigned a unique messageID.
     // The messageID is used to identify the message in the channel.
@@ -403,6 +407,33 @@ message GetSalvageCheckpointRequest {
 // GetSalvageCheckpointResponse is the response of GetSalvageCheckpoint service.
 message GetSalvageCheckpointResponse {
   repeated common.ReplicateCheckpoint checkpoints = 1;
+}
+
+enum GrowingFlushSourceMode {
+  GROWING_FLUSH_SOURCE_UNKNOWN = 0;
+  GROWING_FLUSH_SOURCE_WRITE_BUFFER = 1;
+  GROWING_FLUSH_SOURCE_GROWING = 2;
+}
+
+// GetGrowingFlushProgressRequest is the request of GetGrowingFlushProgress service.
+message GetGrowingFlushProgressRequest {
+  PChannelInfo pchannel = 1;
+  string vchannel = 2;
+  // Empty segment_ids means returning all tracked growing-source segments.
+  repeated int64 segment_ids = 3;
+  uint64 fence_ts = 4;
+}
+
+message GrowingFlushSegmentProgress {
+  int64 segment_id = 1;
+  int64 target_offset = 2;
+  bool has_growing_progress = 3;
+  GrowingFlushSourceMode source_mode = 4;
+}
+
+// GetGrowingFlushProgressResponse is the response of GetGrowingFlushProgress service.
+message GetGrowingFlushProgressResponse {
+  repeated GrowingFlushSegmentProgress progress = 1;
 }
 
 // ProduceRequest is the request of the Produce RPC.
@@ -713,6 +744,7 @@ enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_UNKNOWN = 0;  // should never used.
     SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
     SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
+    SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING = 3; // fenced by TEXT release, waiting for user flush/drop.
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.

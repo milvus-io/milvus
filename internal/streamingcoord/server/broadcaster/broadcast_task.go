@@ -105,6 +105,7 @@ type broadcastTask struct {
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask
 	dirty                    bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
+	abortErr                 error
 	done                     chan struct{}
 	allAcked                 chan struct{}
 	allAckedClosed           bool
@@ -379,12 +380,21 @@ func (b *broadcastTask) BlockUntilDone(ctx context.Context) (*types.BroadcastApp
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-b.done:
+		if err := b.getAbortErr(); err != nil {
+			return nil, err
+		}
 		_, result := b.BroadcastResult()
 		return &types.BroadcastAppendResult{
 			BroadcastID:   b.Header().BroadcastID,
 			AppendResults: result,
 		}, nil
 	}
+}
+
+func (b *broadcastTask) getAbortErr() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.abortErr
 }
 
 // BlockUntilAllAck blocks until all the vchannels are acked.
@@ -477,6 +487,30 @@ func (b *broadcastTask) DropTombstone(ctx context.Context) error {
 	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
 	b.dirty = true
 	return b.saveTaskIfDirty(ctx, b.Logger())
+}
+
+func (b *broadcastTask) MarkBroadcastAborted(ctx context.Context, abortErr error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+		b.abortErr = abortErr
+		close(b.done)
+		b.closeAllAcked()
+		b.dirty = true
+	}
+
+	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
+		return err
+	}
+
+	if b.guards != nil {
+		b.guards.Unlock()
+	}
+	if b.ackCallbackScheduler != nil && b.ackCallbackScheduler.tombstoneScheduler != nil {
+		b.ackCallbackScheduler.tombstoneScheduler.AddPending(b.header().BroadcastID)
+	}
+	return nil
 }
 
 // isAllDone check if all the vchannels are acked.

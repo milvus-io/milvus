@@ -1289,6 +1289,11 @@ func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int6
 	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
 }
 
+// WatchChannelCheckpoint waits until the specified channel checkpoints reach the target timestamps.
+func (s *mixCoordImpl) WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error {
+	return s.datacoordServer.WatchChannelCheckpoint(ctx, checkpointTs)
+}
+
 // ManualUpdateCurrentTarget manually update current target for TruncateCollection
 func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)

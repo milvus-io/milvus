@@ -51,7 +51,7 @@ func createTestBalanceChecker() *BalanceChecker {
 	targetMgr := meta.NewTargetManager(nil, nil)
 	nodeMgr := &session.NodeManager{}
 	dist := meta.NewDistributionManager(nodeMgr)
-	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil, nil)
 
 	// Initialize global assign policy factory for testing
 	assign.ResetGlobalAssignPolicyFactoryForTest()

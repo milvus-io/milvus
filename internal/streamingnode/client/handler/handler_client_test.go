@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
@@ -192,6 +193,72 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	cps, err = handler.GetSalvageCheckpoint(ctx, "pchannel")
 	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, cps)
+}
+
+func TestHandlerClient_GetGrowingFlushProgress(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	segmentIDs := []int64{1001, 1002}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	handlerServiceClient.EXPECT().GetGrowingFlushProgress(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *streamingpb.GetGrowingFlushProgressRequest, co ...grpc.CallOption) (*streamingpb.GetGrowingFlushProgressResponse, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, assignment.Node.ServerID, serverID)
+			assert.Equal(t, assignment.Channel.Name, req.GetPchannel().GetName())
+			assert.Equal(t, vchannel, req.GetVchannel())
+			assert.Equal(t, segmentIDs, req.GetSegmentIds())
+			assert.Equal(t, uint64(200), req.GetFenceTs())
+			return &streamingpb.GetGrowingFlushProgressResponse{
+				Progress: []*streamingpb.GrowingFlushSegmentProgress{
+					{
+						SegmentId:          1001,
+						TargetOffset:       10,
+						HasGrowingProgress: true,
+						SourceMode:         streamingpb.GrowingFlushSourceMode_GROWING_FLUSH_SOURCE_GROWING,
+					},
+					{
+						SegmentId:    1002,
+						SourceMode:   streamingpb.GrowingFlushSourceMode_GROWING_FLUSH_SOURCE_WRITE_BUFFER,
+						TargetOffset: 0,
+					},
+				},
+			}, nil
+		})
+	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	progress, err := handler.GetGrowingFlushProgress(context.Background(), vchannel, segmentIDs, 200)
+	assert.NoError(t, err)
+	assert.Len(t, progress, 2)
+	assert.Equal(t, int64(1001), progress[0].SegmentID)
+	assert.Equal(t, int64(10), progress[0].TargetOffset)
+	assert.True(t, progress[0].HasGrowingProgress)
+	assert.Equal(t, metacache.FlushSourceGrowing, progress[0].SourceMode)
+	assert.Equal(t, metacache.FlushSourceWriteBuffer, progress[1].SourceMode)
+
+	handler.Close()
+	progress, err = handler.GetGrowingFlushProgress(context.Background(), vchannel, segmentIDs, 200)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.Nil(t, progress)
 }
 
 func TestDial(t *testing.T) {

@@ -19,6 +19,8 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
@@ -28,13 +30,6 @@ import (
 )
 
 func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (collectionReleased bool, err error) {
-	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
-	if err != nil {
-		return false, err
-	}
-	defer broadcaster.Close()
-
-	// double check if the collection is already dropped
 	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
 	if err != nil {
 		return false, err
@@ -46,9 +41,42 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		return true, nil
 	}
 
-	// remove the partitions that should be released.
 	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	previousLength := len(partitionIDsSet)
+	for _, partitionID := range req.PartitionIDs {
+		partitionIDsSet.Remove(partitionID)
+	}
+
+	// no partition to be released, return success directly.
+	if len(partitionIDsSet) == previousLength {
+		return false, job.ErrIgnoredAlterLoadConfig
+	}
+
+	if err := s.drainGrowingSourceReleaseIfNeeded(ctx, coll); err != nil {
+		return false, errors.Wrap(err, "drain growing-source release")
+	}
+
+	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
+	if err != nil {
+		return false, err
+	}
+	defer broadcaster.Close()
+
+	// double check if the collection is already dropped
+	coll, err = s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		return false, err
+	}
+
+	currentLoadConfig = s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	if currentLoadConfig.Collection == nil {
+		// collection is not loaded, return success directly.
+		return true, nil
+	}
+
+	// remove the partitions that should be released.
+	partitionIDsSet = typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
+	previousLength = len(partitionIDsSet)
 	for _, partitionID := range req.PartitionIDs {
 		partitionIDsSet.Remove(partitionID)
 	}

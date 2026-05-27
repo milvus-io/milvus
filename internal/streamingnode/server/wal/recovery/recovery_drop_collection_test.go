@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -77,6 +78,11 @@ func addGrowingSegment(rs *recoveryStorageImpl, segmentID, collectionID, partiti
 		},
 		dirty: true,
 	}
+}
+
+func addHandoffPendingSegment(rs *recoveryStorageImpl, segmentID, collectionID, partitionID int64, vchannel string) {
+	addGrowingSegment(rs, segmentID, collectionID, partitionID, vchannel)
+	rs.segments[segmentID].meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING
 }
 
 // buildDropCollectionMsg builds a DropCollection immutable message.
@@ -201,6 +207,21 @@ func TestGetSnapshot_FiltersSegmentsWithDroppedPartition(t *testing.T) {
 	assert.Contains(t, snapshot.SegmentAssignments, int64(1001))
 	assert.Contains(t, snapshot.SegmentAssignments, int64(1002))
 	assert.NotContains(t, snapshot.SegmentAssignments, int64(1003))
+}
+
+func TestGetSnapshot_KeepsHandoffPendingSegments(t *testing.T) {
+	rs := newTestRecoveryStorage(t)
+
+	addActiveVChannel(rs, "v1", 100, []int64{200})
+	addHandoffPendingSegment(rs, 1001, 100, 200, "v1")
+
+	snapshot := rs.getSnapshot()
+
+	require.Contains(t, snapshot.SegmentAssignments, int64(1001))
+	assert.Equal(t,
+		streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING,
+		snapshot.SegmentAssignments[1001].GetState(),
+	)
 }
 
 func TestHandleCreateSegment_SkipsForDroppedVChannel(t *testing.T) {

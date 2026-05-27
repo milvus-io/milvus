@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -74,6 +75,68 @@ func (s *WriteBufferSuite) TestHasSegment() {
 	s.True(s.wb.HasSegment(segmentID))
 }
 
+func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
+	param := paramtable.Get()
+	param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
+	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
+	param.Save(param.CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer param.Reset(param.CommonCfg.EnableGrowingSourceFlush.Key)
+
+	s.Run("non_text_uses_v2_when_ffi_disabled", func() {
+		s.wb.useGrowingSourceFlush = false
+		s.False(s.wb.UseGrowingSourceFlush())
+		s.metacache.EXPECT().GetSegmentByID(int64(2001)).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV2 &&
+				info.GetManifestPath() == "" &&
+				info.GetSchemaVersion() == 11
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		s.wb.CreateNewGrowingSegment(10, 2001, nil, 11)
+	})
+
+	s.Run("text_forces_v3_manifest_when_ffi_disabled", func() {
+		s.wb.useGrowingSourceFlush = true
+		s.metacache.EXPECT().GetSegmentByID(int64(2002)).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV3 &&
+				info.GetManifestPath() != "" &&
+				info.GetSchemaVersion() == 12
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		s.wb.CreateNewGrowingSegment(10, 2002, nil, 12)
+	})
+
+	s.Run("text_schema_forces_v3_manifest_when_global_switch_disabled", func() {
+		textSchema := &schemapb.CollectionSchema{
+			Name: "wb_text_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+				{FieldID: 102, DataType: schemapb.DataType_Text, Name: "text"},
+			},
+		}
+		mc := metacache.NewMockMetaCache(s.T())
+		mc.EXPECT().GetSchema(mock.Anything).Return(textSchema).Maybe()
+		mc.EXPECT().Collection().Return(s.collID).Maybe()
+
+		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
+		s.Require().NoError(err)
+		s.True(wb.UseGrowingSourceFlush())
+
+		mc.EXPECT().GetSegmentByID(int64(2003)).Return(nil, false).Once()
+		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV3 &&
+				info.GetManifestPath() != "" &&
+				info.GetSchemaVersion() == 13
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		wb.CreateNewGrowingSegment(10, 2003, nil, 13)
+	})
+}
+
 func (s *WriteBufferSuite) TestFlushSegments() {
 	segmentID := int64(1001)
 
@@ -90,7 +153,7 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	segmentID := int64(1001)
 
 	s.Run("non_text_returns_error", func() {
-		s.wb.hasTextFields = false
+		s.wb.useGrowingSourceFlush = false
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 
 		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
@@ -98,9 +161,9 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	})
 
 	s.Run("text_skips_missing_segment", func() {
-		s.wb.hasTextFields = true
+		s.wb.useGrowingSourceFlush = true
 		defer func() {
-			s.wb.hasTextFields = false
+			s.wb.useGrowingSourceFlush = false
 		}()
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 

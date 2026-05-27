@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -157,6 +158,62 @@ func TestBroadcaster(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPendingBroadcastTaskStaleGrowingSourceReleaseFence(t *testing.T) {
+	paramtable.Init()
+	registry.ResetRegistration()
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	resource.InitForTest(resource.OptStreamingCatalog(meta))
+
+	t.Run("stale_growing_source_release_fence_aborts_task", func(t *testing.T) {
+		metrics := newBroadcasterMetrics()
+
+		msg := createManualFlushBroadcastMsg([]string{"v1"}, true).WithBroadcastID(1000)
+		task := newBroadcastTaskFromBroadcastMessage(msg, metrics, nil)
+		task.SetLogger(log.With())
+		pending := newPendingBroadcastTask(task)
+
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+				return types.AppendResponses{Responses: []types.AppendResponse{{
+					Error: status.NewUnrecoverableError("collection not found"),
+				}}}
+			})
+		streaming.SetWALForTest(mw)
+
+		err := pending.Execute(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, task.State())
+		_, err = task.BlockUntilDone(context.Background())
+		require.ErrorIs(t, err, errStaleGrowingSourceReleaseFence)
+	})
+
+	t.Run("normal_manual_flush_still_retries", func(t *testing.T) {
+		metrics := newBroadcasterMetrics()
+
+		msg := createManualFlushBroadcastMsg([]string{"v1"}, false).WithBroadcastID(1001)
+		task := newBroadcastTaskFromBroadcastMessage(msg, metrics, nil)
+		task.SetLogger(log.With())
+		pending := newPendingBroadcastTask(task)
+
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+				return types.AppendResponses{Responses: []types.AppendResponse{{
+					Error: status.NewUnrecoverableError("collection not found"),
+				}}}
+			})
+		streaming.SetWALForTest(mw)
+
+		err := pending.Execute(context.Background())
+		require.ErrorIs(t, err, errBroadcastTaskIsNotDone)
+		assert.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, task.State())
+		assert.Len(t, pending.pendingMessages, 1)
+	})
+}
+
 func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel string) {
 	for {
 		msg := message.NewDropCollectionMessageBuilderV1().
@@ -229,6 +286,21 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 		panic(err)
 	}
 	return msg.OverwriteBroadcastHeader(0, rks...)
+}
+
+func createManualFlushBroadcastMsg(vchannels []string, growingSourceReleaseFence bool) message.BroadcastMutableMessage {
+	builder := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&messagespb.ManualFlushMessageHeader{CollectionId: 100}).
+		WithBody(&messagespb.ManualFlushMessageBody{})
+	if growingSourceReleaseFence {
+		key, value := message.GrowingSourceReleaseFenceProperty()
+		builder = builder.WithProperty(key, value)
+	}
+	msg, err := builder.WithBroadcast(vchannels).BuildBroadcast()
+	if err != nil {
+		panic(err)
+	}
+	return msg.OverwriteBroadcastHeader(0)
 }
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {

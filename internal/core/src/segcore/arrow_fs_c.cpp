@@ -24,6 +24,16 @@ InitArrowFileSystem(CStorageConfig c_storage_config) {
                     "Failed to populate FilesystemCache: " +
                     result.status().ToString());
             }
+
+            auto config_result =
+                milvus_storage::FilesystemCache::resolve_config(*props, "");
+            if (!config_result.ok()) {
+                throw std::runtime_error(
+                    "Failed to resolve filesystem config: " +
+                    config_result.status().ToString());
+            }
+            milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(
+                config_result.ValueOrDie());
         }
 
         return milvus::SuccessCStatus();
@@ -34,5 +44,6 @@ InitArrowFileSystem(CStorageConfig c_storage_config) {
 
 void
 CleanArrowFileSystem() {
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
     milvus_storage::FilesystemCache::getInstance().clean();
 }

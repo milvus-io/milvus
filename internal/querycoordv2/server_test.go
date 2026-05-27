@@ -603,6 +603,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.broker,
 		suite.server.cluster,
 		suite.server.nodeMgr,
+		nil,
 	)
 
 	suite.server.distController = dist.NewDistController(
@@ -838,7 +839,7 @@ func TestHandleNodeDownMetricsCleanup(t *testing.T) {
 	ctx := context.Background()
 	server := &Server{
 		ctx:                 ctx,
-		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
+		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil, nil),
 		dist:                meta.NewDistributionManager(session.NewNodeManager()),
 		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),

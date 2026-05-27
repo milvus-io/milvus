@@ -26,11 +26,14 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -48,8 +51,9 @@ type TextColumnConfig struct {
 // writer is concerned only with file output; manifest-level concerns
 // (version, retry) live in CommitManifestUpdates.
 type SegmentWriterConfig struct {
-	SegmentPath string
-	TextColumns []TextColumnConfig
+	SegmentPath  string
+	TextColumns  []TextColumnConfig
+	ColumnGroups []storagecommon.ColumnGroup
 }
 
 // FFISegmentWriter wraps the C SegmentWriter handle for incremental writes.
@@ -76,8 +80,8 @@ func NewFFISegmentWriter(
 		return nil, fmt.Errorf("storageConfig must not be nil")
 	}
 
-	// create properties
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	extra := segmentWriterProperties(schema, config.ColumnGroups)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +103,26 @@ func NewFFISegmentWriter(
 		cProperties: cProperties,
 		schema:      schema,
 	}, nil
+}
+
+func segmentWriterProperties(schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup) map[string]string {
+	extra := map[string]string{
+		PropertyWriterFormat: "parquet",
+	}
+	if len(columnGroups) == 0 {
+		extra[PropertyWriterPolicy] = "single"
+		return extra
+	}
+
+	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
+		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
+			return schema.Field(index).Name
+		}), "|")
+	}), ",")
+
+	extra[PropertyWriterPolicy] = "schema_based"
+	extra[PropertyWriterSchemaBasedPattern] = pattern
+	return extra
 }
 
 // Write writes a record batch to the segment writer.

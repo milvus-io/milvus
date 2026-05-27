@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
@@ -62,6 +63,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type segmentDetacher interface {
+	Detach(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
+}
 
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
@@ -395,9 +400,16 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	if ok {
 		node.pipelineManager.Remove(req.GetChannelName())
 
+		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
+
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
+		if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
+			for _, segmentID := range preparedGrowingSourceSegments {
+				detacher.Detach(ctx, segmentID, querypb.DataScope_Streaming)
+			}
+		}
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
@@ -650,6 +662,14 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	log.Info("start to release segments")
 	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
+		if req.GetScope() == querypb.DataScope_Streaming &&
+			syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(req.GetShard(), id, req.GetCheckpoint().GetTimestamp()) {
+			if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
+				detacher.Detach(ctx, id, querypb.DataScope_Streaming)
+			}
+			syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(req.GetShard(), id)
+			continue
+		}
 		_, count := node.manager.Segment.Remove(ctx, id, req.GetScope())
 		sealedCount += count
 	}

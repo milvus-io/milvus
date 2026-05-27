@@ -239,7 +239,19 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
 	header := maunalFlushMsg.Header()
-	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	var segmentIDs []int64
+	var err error
+	if message.IsGrowingSourceReleaseFence(msg) {
+		handoffManager, ok := impl.shardManager.(interface {
+			HandoffAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error)
+		})
+		if !ok {
+			return nil, status.NewUnrecoverableError("shard manager does not support growing-source release handoff fence")
+		}
+		segmentIDs, err = handoffManager.HandoffAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	} else {
+		segmentIDs, err = impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	}
 	if err != nil {
 		return nil, status.NewUnrecoverableError(err.Error())
 	}

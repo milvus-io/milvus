@@ -311,6 +311,8 @@ type MixCoord interface {
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
+	WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error
+
 	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
 }
 

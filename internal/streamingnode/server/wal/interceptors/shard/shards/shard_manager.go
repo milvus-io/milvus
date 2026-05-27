@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/util/growingsource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -53,7 +54,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	// recover the collection infos
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
-	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
+	partitionToSegmentManagers, partitionToHandoffPending, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := resource.Resource().Logger().With(log.FieldComponent("shard-manager")).With(zap.Stringer("pchannel", param.ChannelInfo))
@@ -69,6 +70,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 			if managers, ok := partitionToSegmentManagers[uniqueKey]; ok {
 				segmentManagers = managers
 			}
+			handoffPending := partitionToHandoffPending[uniqueKey]
 			if _, ok := managers[uniqueKey]; ok {
 				panic("partition manager already exists when buildNewPartitionManagers in segment assignment service, there's a bug in system")
 			}
@@ -81,6 +83,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				collectionID,
 				partitionID,
 				segmentManagers,
+				handoffPending,
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
@@ -115,13 +118,15 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 // newSegmentAllocManagersFromRecovery creates new segment alloc managers from the recovery snapshot.
 func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInfos *recovery.RecoverySnapshot, collections map[int64]*CollectionInfo) (
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
+	map[PartitionUniqueKey]map[int64]struct{},
 	map[int64]stats.SegmentBelongs,
 ) {
 	// recover the segment infos from the streaming node segment assignment meta storage
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
+	partitionToHandoffPending := make(map[PartitionUniqueKey]map[int64]struct{})
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
+	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
 	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
 		coll, ok := collections[rawMeta.GetCollectionId()]
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
@@ -129,26 +134,40 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
 		}
-		if _, ok := growingBelongs[rawMeta.GetSegmentId()]; ok {
+		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
 		}
-		growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-			PChannel:     pchannel.Name,
-			VChannel:     m.GetVChannel(),
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-			SegmentID:    m.GetSegmentID(),
-		}
+		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
 		uniqueKey := PartitionUniqueKey{
 			CollectionID: rawMeta.GetCollectionId(),
 			PartitionID:  rawMeta.GetPartitionId(),
 		}
-		if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+		switch rawMeta.GetState() {
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
+			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
+				PChannel:     pchannel.Name,
+				VChannel:     m.GetVChannel(),
+				CollectionID: rawMeta.GetCollectionId(),
+				PartitionID:  rawMeta.GetPartitionId(),
+				SegmentID:    m.GetSegmentID(),
+			}
+			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
+				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+			}
+			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING:
+			if _, ok := partitionToHandoffPending[uniqueKey]; !ok {
+				partitionToHandoffPending[uniqueKey] = make(map[int64]struct{}, 2)
+			}
+			partitionToHandoffPending[uniqueKey][rawMeta.GetSegmentId()] = struct{}{}
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+			continue
+		default:
+			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
 		}
-		partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
 	}
-	return partitionToSegmentManagers, growingBelongs
+	return partitionToSegmentManagers, partitionToHandoffPending, growingBelongs
 }
 
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
@@ -210,6 +229,20 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 		return 0
 	}
 	return s.GetVersion()
+}
+
+func (c *CollectionInfo) UseGrowingSourceFlush() bool {
+	if c == nil || c.Schema == nil {
+		return false
+	}
+	return growingsource.UseGrowingSourceFlush(c.Schema.GetSchema())
+}
+
+func (c *CollectionInfo) HasTextField() bool {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
+		return false
+	}
+	return growingsource.HasTextField(c.Schema.GetSchema())
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {

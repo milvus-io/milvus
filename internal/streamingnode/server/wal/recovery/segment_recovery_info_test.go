@@ -77,9 +77,17 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 
+	ts += 1
+	info.ObserveHandoffPending(ts)
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	assert.NotNil(t, snapshot)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING, snapshot.State)
+	assert.False(t, shouldBeRemoved)
+	assert.False(t, info.dirty)
+
 	// insert may came from same txn with same txn.
 	info.ObserveInsert(ts, assign)
-	assert.True(t, info.dirty)
+	assert.False(t, info.dirty)
 
 	ts += 1
 	info.ObserveFlush(ts)

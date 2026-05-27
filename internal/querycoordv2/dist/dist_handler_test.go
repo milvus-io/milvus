@@ -249,7 +249,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 		nodeManager: nodeManager,
 		dist:        meta.NewDistributionManager(nodeManager),
 		target:      meta.NewTargetManager(nil, nil),
-		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
+		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil, nil),
 	}
 
 	// Act: Handle distribution response

@@ -210,6 +210,17 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     }
 }
 
+bool
+SchemaHasTextField(const Schema& schema) {
+    for ([[maybe_unused]] const auto& [field_id, field_meta] :
+         schema.get_fields()) {
+        if (field_meta.get_data_type() == DataType::TEXT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // anonymous namespace
 
 void
@@ -701,8 +712,12 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos,
                                   milvus::OpContext* op_ctx) {
     // Note: op_ctx is currently unused in growing segments but kept for interface consistency
     (void)op_ctx;
+    AssertInfo(
+        !(infos.storage_version == STORAGE_V2 && SchemaHasTextField(*schema_)),
+        "TEXT growing segment cannot be loaded from StorageV2 binlogs; "
+        "StorageV3 manifest is required");
     switch (infos.storage_version) {
-        case 2:
+        case STORAGE_V2:
             load_column_group_data_internal(infos);
             break;
         default:
@@ -2164,6 +2179,9 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     field_data_info.load_priority = load_info_.priority();
 
     auto manifest_path = load_info_.manifest_path();
+    AssertInfo(!(manifest_path.empty() && SchemaHasTextField(*schema_)),
+               "TEXT growing segment cannot be loaded without a StorageV3 "
+               "manifest");
     if (manifest_path != "") {
         LoadColumnsGroups(manifest_path);
         return;

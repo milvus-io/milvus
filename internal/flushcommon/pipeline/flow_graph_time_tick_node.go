@@ -84,8 +84,12 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 		}
 	}
 
-	// skip updating checkpoint for drop collection
-	// even if its the close msg
+	if fgMsg.IsCloseMsg() && ttn.dropMode.Load() {
+		return in
+	}
+
+	// Drop mode skips checkpoint updates, but the final close message must still
+	// propagate so the flowgraph worker can exit.
 	if ttn.dropMode.Load() {
 		log.RatedInfo(1.0, "ttnode in dropMode", zap.String("channel", ttn.vChannelName))
 		return []Msg{}

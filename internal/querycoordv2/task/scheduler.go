@@ -400,12 +400,13 @@ type taskScheduler struct {
 	executors   *ConcurrentMap[int64, *Executor] // NodeID -> Executor
 	idAllocator func() UniqueID
 
-	distMgr   *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr meta.TargetManagerInterface
-	broker    meta.Broker
-	cluster   session.Cluster
-	nodeMgr   *session.NodeManager
+	distMgr                     *meta.DistributionManager
+	meta                        *meta.Meta
+	targetMgr                   meta.TargetManagerInterface
+	broker                      meta.Broker
+	cluster                     session.Cluster
+	nodeMgr                     *session.NodeManager
+	growingSourceReleaseDrainer GrowingSourceReleaseDrainer
 
 	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
 	collKeyLock  *lock.KeyLock[int64] // guards Add()
@@ -430,6 +431,7 @@ func NewScheduler(ctx context.Context,
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	growingSourceReleaseDrainer GrowingSourceReleaseDrainer,
 ) *taskScheduler {
 	id := atomic.NewInt64(time.Now().UnixMilli())
 	return &taskScheduler{
@@ -439,12 +441,13 @@ func NewScheduler(ctx context.Context,
 			return id.Inc()
 		},
 
-		distMgr:   distMgr,
-		meta:      meta,
-		targetMgr: targetMgr,
-		broker:    broker,
-		cluster:   cluster,
-		nodeMgr:   nodeMgr,
+		distMgr:                     distMgr,
+		meta:                        meta,
+		targetMgr:                   targetMgr,
+		broker:                      broker,
+		cluster:                     cluster,
+		nodeMgr:                     nodeMgr,
+		growingSourceReleaseDrainer: growingSourceReleaseDrainer,
 
 		collKeyLock:      lock.NewKeyLock[int64](),
 		tasks:            NewConcurrentMap[UniqueID, struct{}](),
@@ -483,7 +486,8 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 		scheduler.broker,
 		scheduler.targetMgr,
 		scheduler.cluster,
-		scheduler.nodeMgr)
+		scheduler.nodeMgr,
+		scheduler.growingSourceReleaseDrainer)
 
 	if _, exist := scheduler.executors.GetOrInsert(nodeID, executor); exist {
 		return

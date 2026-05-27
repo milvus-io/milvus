@@ -21,9 +21,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/growingsource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -32,12 +34,6 @@ var errReleaseCollectionNotLoaded = errors.New("release collection not loaded")
 
 // broadcastDropLoadConfigCollectionV2ForReleaseCollection broadcasts the drop load config message for release collection.
 func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) error {
-	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
 	// double check if the collection is already dropped.
 	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
 	if err != nil {
@@ -47,6 +43,27 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 	if !s.meta.Exist(ctx, req.GetCollectionID()) {
 		return errReleaseCollectionNotLoaded
 	}
+
+	if err := s.drainGrowingSourceReleaseIfNeeded(ctx, coll); err != nil {
+		return errors.Wrap(err, "drain growing-source release")
+	}
+
+	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	// Re-check the collection after growing-source release drain acquires and releases its
+	// own broadcast lock.
+	coll, err = s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	if !s.meta.Exist(ctx, req.GetCollectionID()) {
+		return errReleaseCollectionNotLoaded
+	}
+
 	msg := message.NewDropLoadConfigMessageBuilderV2().
 		WithHeader(&message.DropLoadConfigMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -58,6 +75,28 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+func (s *Server) drainGrowingSourceReleaseIfNeeded(ctx context.Context, coll *milvuspb.DescribeCollectionResponse) error {
+	if !shouldUseGrowingSourceFlush(coll) {
+		return nil
+	}
+	if s.growingSourceReleaseDrainer == nil {
+		return errors.New("growing-source release drainer is not initialized")
+	}
+	_, err := s.growingSourceReleaseDrainer.DrainGrowingSourceReleaseChannels(
+		ctx,
+		coll.GetCollectionID(),
+		s.growingSourceReleaseDrainer.ReleaseDrainChannels(ctx, coll.GetCollectionID()),
+	)
+	return err
+}
+
+func shouldUseGrowingSourceFlush(coll *milvuspb.DescribeCollectionResponse) bool {
+	if coll == nil {
+		return false
+	}
+	return growingsource.UseGrowingSourceFlush(coll.GetSchema())
 }
 
 func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {

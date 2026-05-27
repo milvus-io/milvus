@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -84,6 +85,10 @@ type HandlerClient interface {
 	// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
 	// Returns an empty slice if no force promote has occurred.
 	GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error)
+
+	// GetGrowingFlushProgress returns growing-source progress after the
+	// StreamingNode flusher has processed up to fenceTs on the vchannel.
+	GetGrowingFlushProgress(ctx context.Context, vchannel string, segmentIDs []int64, fenceTs uint64) ([]writebuffer.GrowingFlushSegmentProgress, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

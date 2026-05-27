@@ -301,6 +301,7 @@ type commonConfig struct {
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
+	EnableGrowingSourceFlush             ParamItem `refreshable:"true"`
 
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
@@ -1065,6 +1066,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
+
+	p.EnableGrowingSourceFlush = ParamItem{
+		Key:          "common.storage.enableGrowingSourceFlush",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
+		Export:       true,
+	}
+	p.EnableGrowingSourceFlush.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -2669,16 +2679,17 @@ type queryCoordConfig struct {
 	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
 
-	SegmentCheckInterval       ParamItem `refreshable:"true"`
-	ChannelCheckInterval       ParamItem `refreshable:"true"`
-	BalanceCheckInterval       ParamItem `refreshable:"true"`
-	AutoBalanceInterval        ParamItem `refreshable:"true"`
-	IndexCheckInterval         ParamItem `refreshable:"true"`
-	ChannelTaskTimeout         ParamItem `refreshable:"true"`
-	SegmentTaskTimeout         ParamItem `refreshable:"true"`
-	DistPullInterval           ParamItem `refreshable:"false"`
-	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
-	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
+	SegmentCheckInterval             ParamItem `refreshable:"true"`
+	ChannelCheckInterval             ParamItem `refreshable:"true"`
+	BalanceCheckInterval             ParamItem `refreshable:"true"`
+	AutoBalanceInterval              ParamItem `refreshable:"true"`
+	IndexCheckInterval               ParamItem `refreshable:"true"`
+	ChannelTaskTimeout               ParamItem `refreshable:"true"`
+	GrowingSourceReleaseDrainTimeout ParamItem `refreshable:"true"`
+	SegmentTaskTimeout               ParamItem `refreshable:"true"`
+	DistPullInterval                 ParamItem `refreshable:"false"`
+	HeartbeatAvailableInterval       ParamItem `refreshable:"true"`
+	LoadTimeoutSeconds               ParamItem `refreshable:"true"`
 
 	DistributionRequestTimeout ParamItem `refreshable:"true"`
 	HeartBeatWarningLag        ParamItem `refreshable:"true"`
@@ -3034,6 +3045,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
+
+	p.GrowingSourceReleaseDrainTimeout = ParamItem{
+		Key:          "queryCoord.growingSourceReleaseDrainTimeout",
+		Version:      "2.3",
+		DefaultValue: "120000",
+		PanicIfEmpty: true,
+		Doc:          "timeout in milliseconds for waiting growing-source release fence to be drained by WAL flusher",
+		Export:       true,
+	}
+	p.GrowingSourceReleaseDrainTimeout.Init(base.mgr)
 
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",

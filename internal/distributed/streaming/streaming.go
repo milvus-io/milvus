@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -172,6 +173,10 @@ type WALAccesser interface {
 
 	// Local returns the local services.
 	Local() Local
+
+	// GetGrowingFlushProgress returns growing-source progress after the
+	// StreamingNode flusher has processed up to fenceTs on the vchannel.
+	GetGrowingFlushProgress(ctx context.Context, vchannel string, segmentIDs []int64, fenceTs uint64) ([]writebuffer.GrowingFlushSegmentProgress, error)
 
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)

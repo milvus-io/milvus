@@ -1596,6 +1596,7 @@ func (suite *TaskSuite) newScheduler() *taskScheduler {
 		suite.broker,
 		suite.cluster,
 		suite.nodeMgr,
+		nil,
 	)
 }
 
@@ -2102,7 +2103,8 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 		suite.broker,
 		suite.target,
 		suite.cluster,
-		suite.nodeMgr)
+		suite.nodeMgr,
+		nil)
 
 	// Verify shard leader ID was set for load action in move task
 	executor.executeSegmentAction(moveTask, 0)

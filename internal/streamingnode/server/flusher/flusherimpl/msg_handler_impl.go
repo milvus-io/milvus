@@ -50,14 +50,6 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 	}
 	logger := log.With(log.FieldMessage(createSegmentMsg))
 
-	// For TEXT collections, skip creating local metacache entry.
-	// Insert data is flushed by QueryNode's GrowingFlushManager, not StreamNode.
-	// This avoids useless empty SyncTasks and manifest path conflicts.
-	if impl.wbMgr.HasTextFields(vchannel) {
-		logger.Info("skip CreateNewGrowingSegment for TEXT collection, managed by QueryNode")
-		return nil
-	}
-
 	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
 		logger.Warn("fail to create new growing segment")
 		return err
@@ -113,6 +105,13 @@ func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2
 }
 
 func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error {
+	if message.IsGrowingSourceReleaseFence(flushMsg) {
+		vchannel := flushMsg.VChannel()
+		if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.TimeTick()); err != nil {
+			return errors.Wrap(err, "failed to advance release fence")
+		}
+		return nil
+	}
 	vchannel := flushMsg.VChannel()
 	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
 		return errors.Wrap(err, "failed to seal segments")

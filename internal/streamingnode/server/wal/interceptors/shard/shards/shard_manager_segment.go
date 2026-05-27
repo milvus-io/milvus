@@ -13,12 +13,13 @@ import (
 
 // AssignSegmentRequest is a request to allocate segment.
 type AssignSegmentRequest struct {
-	CollectionID    int64
-	PartitionID     int64
-	ModifiedMetrics stats.ModifiedMetrics
-	TimeTick        uint64
-	TxnSession      TxnSession
-	SchemaVersion   int32
+	CollectionID          int64
+	PartitionID           int64
+	ModifiedMetrics       stats.ModifiedMetrics
+	TimeTick              uint64
+	TxnSession            TxnSession
+	SchemaVersion         int32
+	UseGrowingSourceFlush bool
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -142,6 +143,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	// single place that resolves and stamps it before forwarding to partitionManager.
 	if info := m.collections[req.CollectionID]; info != nil {
 		req.SchemaVersion = info.SchemaVersion()
+		req.UseGrowingSourceFlush = info.UseGrowingSourceFlush()
 	}
 
 	result, err := pm.AssignSegment(req)
@@ -190,6 +192,18 @@ func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, ti
 	return segmentIDs, nil
 }
 
+func (m *shardManagerImpl) HandoffAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
+	logger := m.Logger().With(zap.Int64("collectionID", collectionID), zap.Uint64("timetick", timetick))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	segmentIDs, err := m.handoffAndFenceSegmentAllocUntil(collectionID, timetick)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("segments moved to handoff pending when HandoffAndFenceSegmentAllocUntil", zap.Int64s("segmentIDs", segmentIDs))
+	return segmentIDs, nil
+}
+
 func (m *shardManagerImpl) FlushAllAndFenceSegmentAllocUntil(timetick uint64) ([]int64, error) {
 	logger := m.Logger().With(zap.Uint64("timetick", timetick))
 	m.mu.Lock()
@@ -225,6 +239,29 @@ func (m *shardManagerImpl) flushAndFenceSegmentAllocUntil(collectionID int64, ti
 		}
 		newSealedSegments := pm.FlushAndFenceSegmentUntil(timetick)
 		segmentIDs = append(segmentIDs, newSealedSegments...)
+	}
+	return segmentIDs, nil
+}
+
+func (m *shardManagerImpl) handoffAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
+	logger := m.Logger().With(zap.Int64("collectionID", collectionID), zap.Uint64("timetick", timetick))
+
+	if err := m.checkIfCollectionExists(collectionID); err != nil {
+		logger.Warn("collection not found when HandoffAndFenceSegmentAllocUntil", zap.Error(err))
+		return nil, err
+	}
+
+	collectionInfo := m.collections[collectionID]
+	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
+	for partitionID := range collectionInfo.PartitionIDs {
+		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+		pm, ok := m.partitionManagers[uniqueKey]
+		if !ok {
+			logger.Warn("partition not found when HandoffAndFenceSegmentAllocUntil", zap.Int64("partitionID", partitionID))
+			continue
+		}
+		handoffSegments := pm.HandoffAndFenceSegmentUntil(timetick)
+		segmentIDs = append(segmentIDs, handoffSegments...)
 	}
 	return segmentIDs, nil
 }

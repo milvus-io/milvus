@@ -88,6 +88,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 			collectionID,
 			partitionID,
 			make(map[int64]*segmentAllocManager),
+			nil,
 			m.txnManager,
 			timetick,
 			m.metrics,

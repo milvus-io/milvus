@@ -400,6 +400,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.BalanceCheckInterval.Key, "3000")
 		assert.Equal(t, 3000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
+		assert.Equal(t, 120000, Params.GrowingSourceReleaseDrainTimeout.GetAsInt())
 		assert.Equal(t, 3, Params.CollectionRecoverTimesLimit.GetAsInt())
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, true, Params.AutoBalanceChannel.GetAsBool())

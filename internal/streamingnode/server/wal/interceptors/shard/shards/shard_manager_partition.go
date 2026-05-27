@@ -78,6 +78,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		collectionID,
 		partitionID,
 		make(map[int64]*segmentAllocManager),
+		nil,
 		m.txnManager,
 		tiemtick,
 		m.metrics,

@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -66,9 +67,15 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks    *typeutil.ConcurrentSet[string] // task index
-	channelTaskNum    atomic.Int32                    // channel task pool counter
-	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	executingTasks              *typeutil.ConcurrentSet[string] // task index
+	channelTaskNum              atomic.Int32                    // channel task pool counter
+	nonChannelTaskNum           atomic.Int32                    // non-channel task pool counter
+	growingSourceReleaseDrainer GrowingSourceReleaseDrainer
+}
+
+type GrowingSourceReleaseDrainer interface {
+	DrainGrowingSourceReleaseChannels(ctx context.Context, collectionID int64, channels []string) (map[string]uint64, error)
+	DrainGrowingSourceReleaseSegments(ctx context.Context, collectionID int64, segmentsByChannel map[string][]int64) (map[string]uint64, error)
 }
 
 func NewExecutor(nodeID int64,
@@ -78,16 +85,18 @@ func NewExecutor(nodeID int64,
 	targetMgr meta.TargetManagerInterface,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	growingSourceReleaseDrainer GrowingSourceReleaseDrainer,
 ) *Executor {
 	return &Executor{
-		nodeID:    nodeID,
-		doneCh:    make(chan struct{}),
-		meta:      meta,
-		dist:      dist,
-		broker:    broker,
-		targetMgr: targetMgr,
-		cluster:   cluster,
-		nodeMgr:   nodeMgr,
+		nodeID:                      nodeID,
+		doneCh:                      make(chan struct{}),
+		meta:                        meta,
+		dist:                        dist,
+		broker:                      broker,
+		targetMgr:                   targetMgr,
+		cluster:                     cluster,
+		nodeMgr:                     nodeMgr,
+		growingSourceReleaseDrainer: growingSourceReleaseDrainer,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
 	}
@@ -356,11 +365,36 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 
 	dstNode := action.Node()
 
+	var channel *meta.DmChannel
+	if ex.targetMgr != nil {
+		channel = ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), task.Shard(), meta.CurrentTarget)
+	}
+	skipTextDrain := channel != nil && channel.GetSeekPosition().GetTimestamp() == typeutil.MaxTimestamp &&
+		funcutil.SliceContain(channel.GetDroppedSegmentIds(), task.SegmentID())
+
+	var growingSourceReleaseFenceTs map[string]uint64
+	if action.Scope == querypb.DataScope_Streaming && !skipTextDrain {
+		growingSourceReleaseFenceTs, err = ex.drainGrowingSourceReleaseSegments(ctx, task.CollectionID(), map[string][]int64{
+			action.GetShard(): {task.SegmentID()},
+		})
+		if err != nil {
+			log.Warn("failed to drain growing-source release fence before releasing streaming segment", zap.Error(err))
+			return
+		}
+	} else if action.Scope == querypb.DataScope_Streaming {
+		log.Info("skip growing-source release drain for dropped streaming segment")
+	}
+
 	req := packReleaseSegmentRequest(task, action)
-	channel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), task.Shard(), meta.CurrentTarget)
 	if channel != nil {
 		// if channel exists in current target, set cp to ReleaseSegmentRequest, need to use it as growing segment's exclude ts
 		req.Checkpoint = channel.GetSeekPosition()
+	}
+	if fenceTs := growingSourceReleaseFenceTs[action.GetShard()]; fenceTs > 0 {
+		req.Checkpoint = &msgpb.MsgPosition{
+			ChannelName: action.GetShard(),
+			Timestamp:   fenceTs,
+		}
 	}
 
 	if action.Scope == querypb.DataScope_Streaming {
@@ -563,6 +597,12 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 
 	ctx := task.Context()
 
+	_, err = ex.drainGrowingSourceRelease(ctx, task.CollectionID(), []string{action.ChannelName()})
+	if err != nil {
+		log.Warn("failed to drain growing-source release fence before unsubscribing channel", zap.Error(err))
+		return err
+	}
+
 	req := packUnsubDmChannelRequest(task, action)
 	log.Info("unsubscribe channel...")
 	status, err := ex.cluster.UnsubDmChannel(ctx, action.Node(), req)
@@ -579,6 +619,52 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 	elapsed := time.Since(startTs)
 	log.Info("unsubscribe channel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
+}
+
+func (ex *Executor) drainGrowingSourceRelease(ctx context.Context, collectionID int64, channels []string) (map[string]uint64, error) {
+	if ex.growingSourceReleaseDrainer == nil {
+		return nil, nil
+	}
+	if ex.meta != nil && !ex.meta.Exist(ctx, collectionID) {
+		log.Ctx(ctx).Info("skip growing-source release drain for released collection",
+			zap.Int64("collectionID", collectionID),
+			zap.Strings("channels", channels))
+		return nil, nil
+	}
+	channels = lo.Uniq(lo.Filter(channels, func(channel string, _ int) bool {
+		return channel != ""
+	}))
+	if len(channels) == 0 {
+		return nil, nil
+	}
+	return ex.growingSourceReleaseDrainer.DrainGrowingSourceReleaseChannels(ctx, collectionID, channels)
+}
+
+func (ex *Executor) drainGrowingSourceReleaseSegments(ctx context.Context, collectionID int64, segmentsByChannel map[string][]int64) (map[string]uint64, error) {
+	if ex.growingSourceReleaseDrainer == nil {
+		return nil, nil
+	}
+	if ex.meta != nil && !ex.meta.Exist(ctx, collectionID) {
+		log.Ctx(ctx).Info("skip growing-source release drain for released collection",
+			zap.Int64("collectionID", collectionID),
+			zap.Any("segmentsByChannel", segmentsByChannel))
+		return nil, nil
+	}
+	filtered := make(map[string][]int64, len(segmentsByChannel))
+	for channel, segmentIDs := range segmentsByChannel {
+		if channel == "" {
+			continue
+		}
+		segmentIDs = lo.Uniq(segmentIDs)
+		if len(segmentIDs) == 0 {
+			continue
+		}
+		filtered[channel] = segmentIDs
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+	return ex.growingSourceReleaseDrainer.DrainGrowingSourceReleaseSegments(ctx, collectionID, filtered)
 }
 
 func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {

@@ -476,8 +476,9 @@ func NewPackedTextBatchWriter(
 
 	// build segment writer config
 	config := &packed.SegmentWriterConfig{
-		SegmentPath: basePath,
-		TextColumns: textColumnConfigs,
+		SegmentPath:  basePath,
+		TextColumns:  textColumnConfigs,
+		ColumnGroups: columnGroups,
 	}
 
 	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)

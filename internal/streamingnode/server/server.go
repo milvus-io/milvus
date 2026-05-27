@@ -78,7 +78,7 @@ func (s *Server) initBasicComponent() {
 
 // initService initializes the grpc service.
 func (s *Server) initService() {
-	s.handlerService = service.NewHandlerService(s.walManager)
+	s.handlerService = service.NewHandlerService(s.walManager, resource.Resource().WriteBufferManager())
 	s.managerService = service.NewManagerService(s.walManager)
 	s.registerGRPCService(s.grpcServer)
 }

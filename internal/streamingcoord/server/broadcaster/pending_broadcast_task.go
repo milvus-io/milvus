@@ -2,18 +2,21 @@ package broadcaster
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var errBroadcastTaskIsNotDone = errors.New("broadcast task is not done")
+var errStaleGrowingSourceReleaseFence = errors.New("stale growing-source release fence")
 
 // newPendingBroadcastTask creates a new pendingBroadcastTask.
 func newPendingBroadcastTask(task *broadcastTask) *pendingBroadcastTask {
@@ -58,12 +61,18 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
+			pendingMsg := b.pendingMessages[idx]
 			if resp.Error != nil {
+				if isStaleGrowingSourceReleaseFenceAppendError(pendingMsg, resp.Error) {
+					err := errors.Wrapf(errStaleGrowingSourceReleaseFence, "vchannel %s: %s", pendingMsg.VChannel(), resp.Error.Error())
+					b.Logger().Warn("skip stale growing-source release fence", zap.Int("idx", idx), zap.Error(resp.Error))
+					return b.MarkBroadcastAborted(ctx, err)
+				}
 				b.Logger().Warn("broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
-				newPendings = append(newPendings, b.pendingMessages[idx])
+				newPendings = append(newPendings, pendingMsg)
 				continue
 			}
-			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
+			b.appendResult[pendingMsg.VChannel()] = resp.AppendResult
 		}
 		b.pendingMessages = newPendings
 		b.Logger().Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
@@ -78,6 +87,26 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	}
 	b.UpdateInstantWithNextBackOff()
 	return errBroadcastTaskIsNotDone
+}
+
+func isStaleGrowingSourceReleaseFenceAppendError(msg message.MutableMessage, err error) bool {
+	if msg.MessageType() != message.MessageTypeManualFlush {
+		return false
+	}
+	if !message.IsGrowingSourceReleaseFence(msg) {
+		return false
+	}
+	streamingErr := status.AsStreamingError(err)
+	if streamingErr == nil || !streamingErr.IsUnrecoverable() {
+		return false
+	}
+	cause := strings.ToLower(streamingErr.Cause)
+	return strings.Contains(cause, "collection not found") ||
+		strings.Contains(cause, "channel not found") ||
+		strings.Contains(cause, "channel not available") ||
+		strings.Contains(cause, "channel has been dropped") ||
+		strings.Contains(cause, "channel dropped") ||
+		strings.Contains(cause, "not exist")
 }
 
 // pendingBroadcastTaskArray is a heap of pendingBroadcastTask.

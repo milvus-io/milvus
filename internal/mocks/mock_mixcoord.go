@@ -3516,6 +3516,53 @@ func (_c *MixCoord_DropSegmentsByTime_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// WatchChannelCheckpoint provides a mock function with given fields: ctx, checkpointTs
+func (_m *MixCoord) WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error {
+	ret := _m.Called(ctx, checkpointTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WatchChannelCheckpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]uint64) error); ok {
+		r0 = rf(ctx, checkpointTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_WatchChannelCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchChannelCheckpoint'
+type MixCoord_WatchChannelCheckpoint_Call struct {
+	*mock.Call
+}
+
+// WatchChannelCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - checkpointTs map[string]uint64
+func (_e *MixCoord_Expecter) WatchChannelCheckpoint(ctx interface{}, checkpointTs interface{}) *MixCoord_WatchChannelCheckpoint_Call {
+	return &MixCoord_WatchChannelCheckpoint_Call{Call: _e.mock.On("WatchChannelCheckpoint", ctx, checkpointTs)}
+}
+
+func (_c *MixCoord_WatchChannelCheckpoint_Call) Run(run func(ctx context.Context, checkpointTs map[string]uint64)) *MixCoord_WatchChannelCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(map[string]uint64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_WatchChannelCheckpoint_Call) Return(_a0 error) *MixCoord_WatchChannelCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_WatchChannelCheckpoint_Call) RunAndReturn(run func(context.Context, map[string]uint64) error) *MixCoord_WatchChannelCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropSnapshot provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) DropSnapshot(_a0 context.Context, _a1 *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

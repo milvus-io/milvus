@@ -2489,6 +2489,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 			zap.Time("time", ts))
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), vChannel).
 			Set(float64(ts.Unix()))
+		m.channelCPs.cond.UnsafeBroadcast()
 	}
 	return nil
 }
@@ -2512,6 +2513,7 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 	}
 
 	m.channelCPs.checkpoints[channel] = cp
+	m.channelCPs.cond.UnsafeBroadcast()
 
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	return nil

@@ -49,6 +49,7 @@ type Broker interface {
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
+	WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
 	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
 }
@@ -251,6 +252,10 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 	}
 
 	return recoveryInfo.Channels, recoveryInfo.Segments, nil
+}
+
+func (broker *CoordinatorBroker) WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error {
+	return broker.mixCoord.WatchChannelCheckpoint(ctx, checkpointTs)
 }
 
 func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) ([]*datapb.SegmentInfo, error) {

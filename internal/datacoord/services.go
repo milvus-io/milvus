@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -647,6 +648,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
 			return merr.Status(err), nil
 		}
+		if err := s.validateTextSegmentStorage(req); err != nil {
+			log.Warn("invalid TEXT segment storage format", zap.Error(err))
+			return merr.Status(err), nil
+		}
 
 		// Set storage version
 		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
@@ -737,6 +742,27 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	return merr.Success(), nil
+}
+
+func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest) error {
+	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
+		return nil
+	}
+	if !s.meta.collectionHasTextFields(req.GetCollectionID()) {
+		return nil
+	}
+	if req.GetStorageVersion() < storage.StorageV3 {
+		return merr.WrapErrParameterInvalidMsg(
+			"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
+			req.GetSegmentID(),
+			req.GetStorageVersion())
+	}
+	if req.GetManifestPath() == "" {
+		return merr.WrapErrParameterInvalidMsg(
+			"TEXT segment %d requires non-empty StorageV3 manifest path",
+			req.GetSegmentID())
+	}
+	return nil
 }
 
 // DropVirtualChannel notifies vchannel dropped
@@ -1487,12 +1513,16 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 	for _, channel := range channels {
 		cp := s.meta.GetChannelCheckpoint(channel.GetName())
-		if cp == nil || cp.GetTimestamp() < req.GetFlushTs() {
+		cpTs := uint64(0)
+		if cp != nil {
+			cpTs = cp.GetTimestamp()
+		}
+		if cp == nil || cpTs < req.GetFlushTs() {
 			resp.Flushed = false
 
 			log.RatedInfo(10, "GetFlushState failed, channel unflushed", zap.String("channel", channel.GetName()),
-				zap.Time("CP", tsoutil.PhysicalTime(cp.GetTimestamp())),
-				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cp.GetTimestamp()))))
+				zap.Time("CP", tsoutil.PhysicalTime(cpTs)),
+				zap.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
 			return resp, nil
 		}
 	}
@@ -2127,6 +2157,44 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		}
 	}
 
+	return nil
+}
+
+// WatchChannelCheckpoint waits until each channel checkpoint reaches or exceeds
+// the target timestamp. It is used by QueryCoord release drain to make sure WAL
+// flusher has persisted all fenced data before QueryNode releases growing data.
+func (s *Server) WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("receive WatchChannelCheckpoint request", zap.Any("checkpointTs", checkpointTs))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for channelName, targetTs := range checkpointTs {
+		channelName := channelName
+		targetTs := targetTs
+		group.Go(func() error {
+			if err := s.meta.WatchChannelCheckpoint(groupCtx, channelName, targetTs); err != nil {
+				log.Ctx(groupCtx).Warn("WatchChannelCheckpoint failed",
+					zap.String("channel", channelName),
+					zap.Uint64("targetTs", targetTs),
+					zap.Error(err))
+				return err
+			}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		log.Ctx(ctx).Warn("WatchChannelCheckpoint request failed",
+			zap.Any("checkpointTs", checkpointTs),
+			zap.Error(err))
+		return err
+	}
+	for channelName, targetTs := range checkpointTs {
+		log.Ctx(ctx).Info("WatchChannelCheckpoint reached",
+			zap.String("channel", channelName),
+			zap.Uint64("targetTs", targetTs))
+	}
 	return nil
 }
 

@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -100,8 +102,9 @@ type Server struct {
 	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
-	jobScheduler  *job.Scheduler
-	taskScheduler task.Scheduler
+	jobScheduler                *job.Scheduler
+	taskScheduler               task.Scheduler
+	growingSourceReleaseDrainer *growingSourceReleaseDrainer
 
 	// HeartBeat
 	distController dist.Controller
@@ -313,6 +316,18 @@ func (s *Server) initQueryCoord() error {
 	// Init schedulers
 	log.Info("init schedulers")
 	s.jobScheduler = job.NewScheduler()
+	s.growingSourceReleaseDrainer = newGrowingSourceReleaseDrainer(
+		s.broker,
+		s.targetMgr,
+		s.startBroadcastWithCollectionIDLock,
+		growingFlushProgressGetterFunc(func(ctx context.Context, vchannel string, segmentIDs []int64, fenceTs uint64) ([]writebuffer.GrowingFlushSegmentProgress, error) {
+			wal := streaming.WAL()
+			if wal == nil {
+				return nil, errors.New("streaming WAL is not initialized")
+			}
+			return wal.GetGrowingFlushProgress(ctx, vchannel, segmentIDs, fenceTs)
+		}),
+	)
 	s.taskScheduler = task.NewScheduler(
 		s.ctx,
 		s.meta,
@@ -321,6 +336,7 @@ func (s *Server) initQueryCoord() error {
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+		s.growingSourceReleaseDrainer,
 	)
 
 	// init proxy client manager

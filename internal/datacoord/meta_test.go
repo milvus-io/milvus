@@ -3432,6 +3432,37 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("WatchChannelCheckpointDroppedShouldWakeWaiter", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		channel := "vchan_drop_wake"
+		meta.channelCPs.Lock()
+		meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   100,
+		}
+		meta.channelCPs.Unlock()
+
+		waitDone := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			waitDone <- meta.WatchChannelCheckpoint(ctx, channel, 500)
+		}()
+
+		// Give the goroutine a moment to enter cond.Wait.
+		time.Sleep(50 * time.Millisecond)
+		require.NoError(t, meta.MarkChannelCheckpointDropped(context.Background(), channel))
+
+		select {
+		case err := <-waitDone:
+			require.NoError(t, err)
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("watcher not woken by MarkChannelCheckpointDropped")
+		}
+	})
+
 	t.Run("TruncateChannelByTime", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)

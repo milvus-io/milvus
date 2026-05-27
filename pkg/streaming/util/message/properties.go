@@ -2,21 +2,22 @@ package message
 
 const (
 	// preserved properties
-	messageVersion                          = "_v"   // message version for compatibility, see `Version` for more information.
-	messageWALTerm                          = "_wt"  // wal term of a message, always increase by MessageID order, should never rollback.
-	messageTypeKey                          = "_t"   // message type key.
-	messageTimeTick                         = "_tt"  // message time tick.
-	messageBarrierTimeTick                  = "_btt" // message barrier time tick.
-	messageLastConfirmed                    = "_lc"  // message last confirmed message id.
-	messageLastConfirmedIDSameWithMessageID = "_lcs" // message last confirmed message id is the same with message id.
-	messageVChannel                         = "_vc"  // message virtual channel.
-	messageBroadcastHeader                  = "_bh"  // message broadcast header.
-	messageHeader                           = "_h"   // specialized message header.
-	messageTxnContext                       = "_tx"  // transaction context.
-	messageCipherHeader                     = "_ch"  // message cipher header.
-	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
-	messagePChannelLevel                    = "_pcl" // mark the message as pchannel level message.
-	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
+	messageVersion                          = "_v"    // message version for compatibility, see `Version` for more information.
+	messageWALTerm                          = "_wt"   // wal term of a message, always increase by MessageID order, should never rollback.
+	messageTypeKey                          = "_t"    // message type key.
+	messageTimeTick                         = "_tt"   // message time tick.
+	messageBarrierTimeTick                  = "_btt"  // message barrier time tick.
+	messageLastConfirmed                    = "_lc"   // message last confirmed message id.
+	messageLastConfirmedIDSameWithMessageID = "_lcs"  // message last confirmed message id is the same with message id.
+	messageVChannel                         = "_vc"   // message virtual channel.
+	messageBroadcastHeader                  = "_bh"   // message broadcast header.
+	messageHeader                           = "_h"    // specialized message header.
+	messageTxnContext                       = "_tx"   // transaction context.
+	messageCipherHeader                     = "_ch"   // message cipher header.
+	messageNotPersisteted                   = "_np"   // check if the message is unpersisted.
+	messagePChannelLevel                    = "_pcl"  // mark the message as pchannel level message.
+	messageReplicateMesssageHeader          = "_rh"   // replicate message header.
+	messageGrowingSourceReleaseFence        = "_gsrf" // marks an internal growing-source release fence ManualFlush message.
 )
 
 var (
@@ -84,6 +85,19 @@ func (prop propertiesImpl) EstimateSize() int {
 		size += len(k) + len(v)
 	}
 	return size
+}
+
+// IsGrowingSourceReleaseFence returns true for an internal growing-source release fence ManualFlush
+// message. The property is a presence-only marker: the key existing is enough.
+func IsGrowingSourceReleaseFence(msg BasicMessage) bool {
+	return msg.Properties().Exist(messageGrowingSourceReleaseFence)
+}
+
+// GrowingSourceReleaseFenceProperty returns the internal property used to mark a
+// ManualFlush message as a growing-source release fence. The value is empty
+// because the marker is presence-only (checked via Exist).
+func GrowingSourceReleaseFenceProperty() (string, string) {
+	return messageGrowingSourceReleaseFence, ""
 }
 
 // CheckIfMessageFromStreaming checks if the message is from streaming.

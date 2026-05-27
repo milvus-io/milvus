@@ -469,11 +469,41 @@ func (r *recoveryStorageImpl) handleFlush(msg message.ImmutableFlushMessageV2) {
 
 // handleManualFlush handles the manual flush message.
 func (r *recoveryStorageImpl) handleManualFlush(msg message.ImmutableManualFlushMessageV2) {
+	if message.IsGrowingSourceReleaseFence(msg) {
+		segments := make(map[int64]struct{}, len(msg.Header().SegmentIds))
+		for _, segmentID := range msg.Header().SegmentIds {
+			segments[segmentID] = struct{}{}
+		}
+		r.handoffPendingSegments(msg, segments)
+		return
+	}
 	segments := make(map[int64]struct{}, len(msg.Header().SegmentIds))
 	for _, segmentID := range msg.Header().SegmentIds {
 		segments[segmentID] = struct{}{}
 	}
 	r.flushSegments(msg, segments)
+}
+
+func (r *recoveryStorageImpl) handoffPendingSegments(msg message.ImmutableMessage, sealSegmentIDs map[int64]struct{}) {
+	segmentIDs := make([]int64, 0, len(sealSegmentIDs))
+	rows := make([]uint64, 0, len(sealSegmentIDs))
+	binarySize := make([]uint64, 0, len(sealSegmentIDs))
+	for segmentID := range sealSegmentIDs {
+		if segment, ok := r.segments[segmentID]; ok {
+			segment.ObserveHandoffPending(msg.TimeTick())
+			segmentIDs = append(segmentIDs, segment.meta.SegmentId)
+			rows = append(rows, segment.Rows())
+			binarySize = append(binarySize, segment.BinarySize())
+		}
+	}
+	if len(segmentIDs) != len(sealSegmentIDs) {
+		r.detectInconsistency(msg, "handoff pending segments not exist", zap.Int64s("wanted", lo.Keys(sealSegmentIDs)), zap.Int64s("actually", segmentIDs))
+	}
+	r.Logger().Info("mark segments handoff pending by growing-source release fence", log.FieldMessage(msg),
+		zap.Uint64s("rows", rows),
+		zap.Uint64s("binarySize", binarySize),
+		zap.Int("handoffPendingSegmentCount", len(segmentIDs)),
+	)
 }
 
 // handleFlushAll handles the flush all message.

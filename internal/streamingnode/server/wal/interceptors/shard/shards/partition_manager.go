@@ -26,10 +26,14 @@ func newPartitionSegmentManager(
 	collectionID int64,
 	paritionID int64,
 	segments map[int64]*segmentAllocManager,
+	handoffPending map[int64]struct{},
 	txnManager TxnManager,
 	fencedAssignTimeTick uint64,
 	metrics *metricsutil.SegmentAssignMetrics,
 ) *partitionManager {
+	if handoffPending == nil {
+		handoffPending = make(map[int64]struct{})
+	}
 	for _, segment := range segments {
 		if segment.CreateSegmentTimeTick() > fencedAssignTimeTick {
 			fencedAssignTimeTick = segment.CreateSegmentTimeTick()
@@ -45,6 +49,7 @@ func newPartitionSegmentManager(
 		partitionID:          paritionID,
 		onAllocating:         nil,
 		segments:             segments,
+		handoffPending:       handoffPending,
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
@@ -65,6 +70,7 @@ type partitionManager struct {
 	partitionID          int64
 	onAllocating         chan struct{}                  // indicates that if the partition manager is on-allocating a new segment.
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
+	handoffPending       map[int64]struct{}             // sealed by release fence and owned by WriteBuffer until user flush/drop.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
 	metrics              *metricsutil.SegmentAssignMetrics
 }
@@ -120,7 +126,10 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 		m.onAllocating = nil
 	}
 
-	segmentIDs := make([]int64, 0, len(m.segments))
+	segmentIDs := make([]int64, 0, len(m.segments)+len(m.handoffPending))
+	for segmentID := range m.handoffPending {
+		segmentIDs = append(segmentIDs, segmentID)
+	}
 	for _, segment := range m.segments {
 		segment.Flush(policy)
 		m.metrics.ObserveSegmentFlushed(
@@ -131,6 +140,7 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
+	m.handoffPending = make(map[int64]struct{})
 	return segmentIDs
 }
 
@@ -138,6 +148,40 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 // !!! caller should ensure that the returned segment is flushed by other message (not FlushMessage), such as ManualFlushMessage, SchemaChange.
 func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 	// no-op if the incoming time tick is less than the fenced time tick.
+	if timeTick <= m.fencedAssignTimeTick {
+		return nil
+	}
+
+	segmentIDs := make([]int64, 0, len(m.segments)+len(m.handoffPending))
+	for segmentID := range m.handoffPending {
+		segmentIDs = append(segmentIDs, segmentID)
+	}
+	for _, segment := range m.segments {
+		segment.Flush(policy.PolicyFenced(timeTick))
+		m.metrics.ObserveSegmentFlushed(
+			string(segment.SealPolicy().Policy),
+			int64(segment.GetFlushedStat().Modified.Rows),
+			int64(segment.GetFlushedStat().Modified.BinarySize),
+		)
+		segmentIDs = append(segmentIDs, segment.GetSegmentID())
+	}
+	m.segments = make(map[int64]*segmentAllocManager)
+	m.handoffPending = make(map[int64]struct{})
+
+	// fence the assign operation until the incoming time tick or latest assigned timetick.
+	// The new incoming assignment request will be fenced.
+	// So all the insert operation before the fenced time tick cannot added to the growing segment (no more insert can be applied on it).
+	// In other words, all insert operation before the fenced time tick will be sealed
+	if timeTick > m.fencedAssignTimeTick {
+		m.fencedAssignTimeTick = timeTick
+	}
+	return segmentIDs
+}
+
+// HandoffAndFenceSegmentUntil fences current growing segments and moves them
+// into handoff-pending. These segments are no longer assignable, but must be
+// returned by a later user ManualFlush so DataCoord can wait for final flush.
+func (m *partitionManager) HandoffAndFenceSegmentUntil(timeTick uint64) []int64 {
 	if timeTick <= m.fencedAssignTimeTick {
 		return nil
 	}
@@ -150,14 +194,12 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 			int64(segment.GetFlushedStat().Modified.Rows),
 			int64(segment.GetFlushedStat().Modified.BinarySize),
 		)
-		segmentIDs = append(segmentIDs, segment.GetSegmentID())
+		segmentID := segment.GetSegmentID()
+		segmentIDs = append(segmentIDs, segmentID)
+		m.handoffPending[segmentID] = struct{}{}
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
 
-	// fence the assign operation until the incoming time tick or latest assigned timetick.
-	// The new incoming assignment request will be fenced.
-	// So all the insert operation before the fenced time tick cannot added to the growing segment (no more insert can be applied on it).
-	// In other words, all insert operation before the fenced time tick will be sealed
 	if timeTick > m.fencedAssignTimeTick {
 		m.fencedAssignTimeTick = timeTick
 	}
@@ -212,6 +254,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment(req.SchemaVersion)
+	m.asyncAllocSegment(req.SchemaVersion, req.UseGrowingSourceFlush)
 	return nil, ErrWaitForNewSegment
 }

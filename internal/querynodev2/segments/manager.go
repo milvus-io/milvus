@@ -657,6 +657,33 @@ func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.Unique
 	return removeGrowing, removeSealed
 }
 
+func (mgr *segmentManager) Detach(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int) {
+	var removeGrowing, removeSealed int
+	switch scope {
+	case querypb.DataScope_Streaming:
+		if mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID) != nil {
+			removeGrowing = 1
+		}
+	case querypb.DataScope_Historical:
+		if mgr.removeSegmentWithType(SegmentTypeSealed, segmentID) != nil {
+			removeSealed = 1
+		}
+	case querypb.DataScope_All:
+		if mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID) != nil {
+			removeGrowing = 1
+		}
+		if mgr.removeSegmentWithType(SegmentTypeSealed, segmentID) != nil {
+			removeSealed = 1
+		}
+	}
+	log.Ctx(ctx).Info("detached segment from active segment manager",
+		zap.Int64("segmentID", segmentID),
+		zap.String("scope", scope.String()),
+		zap.Int("growingCount", removeGrowing),
+		zap.Int("sealedCount", removeSealed))
+	return removeGrowing, removeSealed
+}
+
 func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID typeutil.UniqueID) Segment {
 	segment, ok := mgr.globalSegments.RemoveWithType(segmentID, typ)
 	if !ok {

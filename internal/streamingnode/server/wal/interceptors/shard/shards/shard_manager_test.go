@@ -1,17 +1,20 @@
 package shards
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -292,6 +295,185 @@ func TestShardManager(t *testing.T) {
 	m.Close()
 }
 
+func TestShardManagerAssignSegmentTextForcesV3CreateSegment(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	param := paramtable.Get()
+	param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
+	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
+
+	channel := types.PChannelInfo{
+		Name: "test_text_channel",
+		Term: 1,
+	}
+	appendCh := make(chan *message.CreateSegmentMessageHeader, 1)
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		return make(chan struct{})
+	}).Maybe()
+	w.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+			createMsg := message.MustAsMutableCreateSegmentMessageV2(msg)
+			appendCh <- createMsg.Header()
+			return &types.AppendResult{
+				MessageID: rmq.NewRmqID(1),
+				TimeTick:  1000,
+			}, nil
+		}).Once()
+	f := syncutil.NewFuture[wal.WAL]()
+	f.Set(w)
+
+	m := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         f,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			VChannels: map[string]*streamingpb.VChannelMeta{
+				"v_text": {
+					Vchannel: "v_text",
+					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: 10,
+						Partitions: []*streamingpb.PartitionInfoOfVChannel{
+							{PartitionId: 20},
+						},
+						Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+							{
+								Schema: &schemapb.CollectionSchema{
+									Name:    "text_collection",
+									Version: 7,
+									Fields: []*schemapb.FieldSchema{
+										{FieldID: 100, DataType: schemapb.DataType_Int64},
+										{FieldID: 101, DataType: schemapb.DataType_Text},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
+			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer m.Close()
+
+	_, err := m.AssignSegment(&AssignSegmentRequest{
+		CollectionID: 10,
+		PartitionID:  20,
+		TimeTick:     200,
+		ModifiedMetrics: stats.ModifiedMetrics{
+			Rows:       1,
+			BinarySize: 1,
+		},
+	})
+	assert.ErrorIs(t, err, ErrWaitForNewSegment)
+
+	select {
+	case header := <-appendCh:
+		assert.Equal(t, storage.StorageV3, header.GetStorageVersion())
+		assert.Equal(t, int32(7), header.GetSchemaVersion())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for create segment message")
+	}
+}
+
+func TestShardManagerGrowingSourceReleaseHandoffPendingReturnedByUserFlush(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	const (
+		collID = int64(10)
+		partID = int64(20)
+		segID  = int64(3001)
+	)
+
+	m := newShardManagerWithGrowingSegment(t, collID, partID, segID)
+	defer m.Close()
+
+	segmentIDs, err := m.HandoffAndFenceSegmentAllocUntil(collID, 200)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{segID}, segmentIDs)
+
+	segmentIDs, err = m.FlushAndFenceSegmentAllocUntil(collID, 300)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{segID}, segmentIDs)
+
+	segmentIDs, err = m.FlushAndFenceSegmentAllocUntil(collID, 400)
+	assert.NoError(t, err)
+	assert.Empty(t, segmentIDs)
+}
+
+func TestShardManagerRecoverGrowingSourceReleaseHandoffPending(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	const (
+		collID = int64(10)
+		partID = int64(20)
+		segID  = int64(3001)
+	)
+
+	channel := types.PChannelInfo{
+		Name: "test_text_handoff_recover_channel",
+		Term: 1,
+	}
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		return make(chan struct{})
+	}).Maybe()
+	f := syncutil.NewFuture[wal.WAL]()
+	f.Set(w)
+
+	m := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         f,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			VChannels: map[string]*streamingpb.VChannelMeta{
+				"v_text": {
+					Vchannel: "v_text",
+					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: collID,
+						Partitions: []*streamingpb.PartitionInfoOfVChannel{
+							{PartitionId: partID},
+						},
+						Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+							{Schema: &schemapb.CollectionSchema{Name: "text_collection"}},
+						},
+					},
+				},
+			},
+			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
+				segID: {
+					CollectionId:       collID,
+					PartitionId:        partID,
+					SegmentId:          segID,
+					Vchannel:           "v_text",
+					State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING,
+					CheckpointTimeTick: 200,
+					Stat: &streamingpb.SegmentAssignmentStat{
+						CreateSegmentTimeTick: 100,
+					},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 200},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer m.Close()
+
+	pm := m.partitionManagers[PartitionUniqueKey{CollectionID: collID, PartitionID: partID}]
+	require.NotNil(t, pm)
+	assert.Nil(t, pm.GetSegmentManager(segID))
+	assert.Contains(t, pm.handoffPending, segID)
+
+	segmentIDs, err := m.FlushAndFenceSegmentAllocUntil(collID, 300)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{segID}, segmentIDs)
+	assert.NotContains(t, pm.handoffPending, segID)
+}
+
 func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
@@ -368,6 +550,40 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(1), ver)
+
+	textSchema := &schemapb.CollectionSchema{
+		Name:    "test_text_schema_bytes_collection",
+		Version: 4,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	textSchemaBytes, err := proto.Marshal(textSchema)
+	require.NoError(t, err)
+	createMsgSchemaBytes := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_schema_bytes").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 104,
+			PartitionIds: []int64{204},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			Schema: textSchemaBytes,
+		}).
+		MustBuildMutable().
+		WithTimeTick(250).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(13))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgSchemaBytes))
+
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  104,
+		SchemaVersion: proto.Int32(4),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(4), ver)
+	assert.True(t, m.collections[104].HasTextField())
+	assert.True(t, m.collections[104].UseGrowingSourceFlush())
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -704,4 +920,43 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 		Schema: &schemapb.CollectionSchema{Name: "x", Version: 3},
 	}
 	assert.Equal(t, int32(3), ci.SchemaVersion())
+}
+
+func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	assert.False(t, (*CollectionInfo)(nil).UseGrowingSourceFlush())
+	ci := &CollectionInfo{}
+	assert.False(t, ci.UseGrowingSourceFlush())
+	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
+	assert.False(t, ci.UseGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	assert.True(t, ci.UseGrowingSourceFlush())
+}
+
+func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+
+	ci := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_Text},
+				},
+			},
+		},
+	}
+	assert.True(t, ci.HasTextField())
+	assert.True(t, ci.UseGrowingSourceFlush())
 }

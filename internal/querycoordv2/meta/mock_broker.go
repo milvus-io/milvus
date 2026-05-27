@@ -631,6 +631,53 @@ func (_c *MockBroker_ListIndexes_Call) RunAndReturn(run func(context.Context, in
 	return _c
 }
 
+// WatchChannelCheckpoint provides a mock function with given fields: ctx, checkpointTs
+func (_m *MockBroker) WatchChannelCheckpoint(ctx context.Context, checkpointTs map[string]uint64) error {
+	ret := _m.Called(ctx, checkpointTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WatchChannelCheckpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]uint64) error); ok {
+		r0 = rf(ctx, checkpointTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_WatchChannelCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchChannelCheckpoint'
+type MockBroker_WatchChannelCheckpoint_Call struct {
+	*mock.Call
+}
+
+// WatchChannelCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - checkpointTs map[string]uint64
+func (_e *MockBroker_Expecter) WatchChannelCheckpoint(ctx interface{}, checkpointTs interface{}) *MockBroker_WatchChannelCheckpoint_Call {
+	return &MockBroker_WatchChannelCheckpoint_Call{Call: _e.mock.On("WatchChannelCheckpoint", ctx, checkpointTs)}
+}
+
+func (_c *MockBroker_WatchChannelCheckpoint_Call) Run(run func(ctx context.Context, checkpointTs map[string]uint64)) *MockBroker_WatchChannelCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(map[string]uint64))
+	})
+	return _c
+}
+
+func (_c *MockBroker_WatchChannelCheckpoint_Call) Return(_a0 error) *MockBroker_WatchChannelCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_WatchChannelCheckpoint_Call) RunAndReturn(run func(context.Context, map[string]uint64) error) *MockBroker_WatchChannelCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockBroker creates a new instance of MockBroker. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroker(t interface {

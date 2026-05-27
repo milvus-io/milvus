@@ -75,6 +75,7 @@ func TestPartitionManager(t *testing.T) {
 			m1.GetSegmentID(): m1,
 			m2.GetSegmentID(): m2,
 		},
+		nil,
 		&mockedTxnManager{},
 		100,
 		metricsutil.NewSegmentAssignMetrics(channel.Name),

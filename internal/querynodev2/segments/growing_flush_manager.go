@@ -42,7 +42,7 @@ type BinlogSaver interface {
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
 }
 
-// GrowingFlushManager manages the incremental flush of Growing Segments for TEXT collections.
+// GrowingFlushManager manages the incremental flush of growing-source segments.
 // it periodically checks sync policies and triggers flush operations when conditions are met.
 //
 // key responsibilities:
@@ -400,7 +400,7 @@ func (m *GrowingFlushManager) buildFlushConfig(segment Segment) *FlushConfig {
 	partitionBasePath := m.chunkManager.RootPath() + "/insert_log/" +
 		metautil.JoinIDPath(m.collectionID, segment.Partition())
 
-	// Collect TEXT field IDs and LOB paths from schema
+	// Collect TEXT field IDs and LOB paths from schema for LOB storage.
 	var textFieldIDs []int64
 	var textLobPaths []string
 	if m.schema != nil {

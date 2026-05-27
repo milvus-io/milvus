@@ -68,6 +68,12 @@ func (info *segmentRecoveryInfo) IsGrowing() bool {
 	return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
 }
 
+// IsHandoffPending returns true if the segment is fenced by a growing-source release fence
+// and waiting to be returned by a later user flush/drop.
+func (info *segmentRecoveryInfo) IsHandoffPending() bool {
+	return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING
+}
+
 // CreateSegmentTimeTick returns the time tick when the segment was created.
 func (info *segmentRecoveryInfo) CreateSegmentTimeTick() uint64 {
 	return info.meta.Stat.CreateSegmentTimeTick
@@ -85,6 +91,9 @@ func (info *segmentRecoveryInfo) BinarySize() uint64 {
 
 // ObserveInsert is called when an insert message is observed.
 func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
+	if !info.IsGrowing() {
+		return
+	}
 	if timetick < info.meta.CheckpointTimeTick {
 		// the txn message will share the same time tick.
 		// so we only filter the time tick is less than the checkpoint time tick.
@@ -112,6 +121,26 @@ func (info *segmentRecoveryInfo) ObserveFlush(timetick uint64) {
 		return
 	}
 	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	info.meta.CheckpointTimeTick = timetick
+	info.dirty = true
+}
+
+// ObserveHandoffPending is called when a growing-source release fence seals the segment
+// from future assignment but keeps it visible to later flush/drop recovery.
+func (info *segmentRecoveryInfo) ObserveHandoffPending(timetick uint64) {
+	if timetick < info.meta.CheckpointTimeTick {
+		return
+	}
+	switch info.meta.State {
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+		return
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING:
+		if timetick == info.meta.CheckpointTimeTick {
+			return
+		}
+	}
+	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
 	info.meta.CheckpointTimeTick = timetick
 	info.dirty = true

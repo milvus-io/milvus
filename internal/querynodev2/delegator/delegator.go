@@ -37,11 +37,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/growingsource"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -86,7 +88,6 @@ type ShardDelegator interface {
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
-	ProcessManualFlush(ctx context.Context, flushTs uint64) error
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
@@ -183,11 +184,13 @@ type shardDelegator struct {
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
 
-	// growing segment flush support for TEXT collections
-	// checkpointTracker tracks offset -> MsgPosition mapping for Growing Segments
+	// checkpointTracker is still updated by legacy growing ingest hooks. It no
+	// longer drives QueryNode-side metadata commit; WAL flusher owns commit.
 	checkpointTracker *segments.CheckpointTracker
-	// growingFlushManager manages periodic flush of Growing Segments (for TEXT collections)
-	growingFlushManager *segments.GrowingFlushManager
+	// growingSourceRegistration is the process-local registry lease for this
+	// delegator's optional growing-source source.
+	growingSourceRegistration *syncmgr.GrowingSourceRegistration
+	growingSourceProvider     *delegatorGrowingSourceProvider
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -225,9 +228,6 @@ func (sd *shardDelegator) Stopped() bool {
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
 	sd.lifetime.SetState(lifetime.Working)
-	if sd.growingFlushManager != nil {
-		sd.growingFlushManager.Start(context.Background())
-	}
 }
 
 // Collection returns delegator collection id.
@@ -1254,16 +1254,15 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.L.Unlock()
 	sd.lifetime.Wait()
 
+	if sd.growingSourceProvider != nil {
+		sd.growingSourceProvider.Deactivate()
+	}
+
 	// Stop background snapshot loop before refunding candidates
 	sd.distribution.Close()
 
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
-
-	// stop growing flush manager
-	if sd.growingFlushManager != nil {
-		sd.growingFlushManager.Stop()
-	}
 
 	// clean idf oracle
 	if sd.idfOracle != nil {
@@ -1438,25 +1437,17 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.idfOracle.Start()
 	}
 
-	// initialize GrowingFlushManager for TEXT collections
-	// this enables incremental flush of Growing Segments to preserve TEXT data
-	if sd.hasTextFields() {
+	// Register growing-source segments as optional local flush sources. Metadata
+	// commit is still owned by WAL flusher / WriteBuffer.
+	if sd.useGrowingSourceFlush() {
 		sd.checkpointTracker = segments.NewCheckpointTracker()
-		if binlogSaver != nil {
-			sd.growingFlushManager = segments.NewGrowingFlushManager(
-				collectionID,
-				channel,
-				collection.Schema(),
-				manager.Collection,
-				manager.Segment,
-				binlogSaver,
-				chunkManager,
-				sd.checkpointTracker,
-			)
-			log.Info("initialized GrowingFlushManager for TEXT collection")
-		} else {
-			log.Warn("binlogSaver is nil, GrowingFlushManager not initialized for TEXT collection")
-		}
+		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
+			_, err := sd.waitTSafe(ctx, fenceTs)
+			return err
+		})
+		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
+		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
+		log.Info("registered growing-source source support")
 	}
 
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
@@ -1465,17 +1456,12 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	return sd, nil
 }
 
-// hasTextFields returns true if the collection has any TEXT type fields.
-func (sd *shardDelegator) hasTextFields() bool {
-	if sd.collection == nil {
+// useGrowingSourceFlush returns true when the collection should expose growing segments as a flush source.
+func (sd *shardDelegator) useGrowingSourceFlush() bool {
+	if sd == nil || sd.collection == nil {
 		return false
 	}
-	for _, field := range sd.collection.Schema().GetFields() {
-		if field.GetDataType() == schemapb.DataType_Text {
-			return true
-		}
-	}
-	return false
+	return growingsource.UseGrowingSourceFlush(sd.collection.Schema())
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {

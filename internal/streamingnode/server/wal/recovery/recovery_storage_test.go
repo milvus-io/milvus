@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -178,6 +179,52 @@ func TestRecoveryStorage(t *testing.T) {
 			assert.Equal(t, b.segmentNum(), len(segmentMetas))
 		}
 	}
+}
+
+func TestRecoveryStorageGrowingSourceReleaseFenceMarksHandoffPending(t *testing.T) {
+	const segmentID = int64(1001)
+	r := &recoveryStorageImpl{
+		segments: map[int64]*segmentRecoveryInfo{
+			segmentID: {
+				meta: &streamingpb.SegmentAssignmentMeta{
+					CollectionId: 1,
+					PartitionId:  2,
+					SegmentId:    segmentID,
+					Vchannel:     "v1",
+					State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+					Stat: &streamingpb.SegmentAssignmentStat{
+						ModifiedRows:          10,
+						ModifiedBinarySize:    100,
+						CreateSegmentTimeTick: 100,
+					},
+				},
+			},
+		},
+	}
+	r.SetLogger(log.With())
+
+	key, value := message.GrowingSourceReleaseFenceProperty()
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.ManualFlushMessageHeader{
+			CollectionId: 1,
+			SegmentIds:   []int64{segmentID},
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithProperty(key, value).
+		MustBuildMutable().
+		WithTimeTick(200).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(2))
+
+	r.handleManualFlush(message.MustAsImmutableManualFlushMessageV2(msg))
+	segment := r.segments[segmentID]
+	require.True(t, segment.IsHandoffPending())
+	snapshot, shouldBeRemoved := segment.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, snapshot)
+	assert.False(t, shouldBeRemoved)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_HANDOFF_PENDING, snapshot.GetState())
+	assert.EqualValues(t, 200, snapshot.GetCheckpointTimeTick())
 }
 
 type streamBuilder struct {
