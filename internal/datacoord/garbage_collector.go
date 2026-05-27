@@ -225,7 +225,6 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
 	lobSignal := make(chan gcCmd)
-	// control signal channels
 	controlChannels := map[string]chan gcCmd{
 		"meta":   metaSignal,
 		"orphan": orphanSignal,
@@ -818,69 +817,179 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		cloned := segment.Clone()
-
-		// V3 segment: delete entire basePath recursively
-		if cloned.GetStorageVersion() == storage.StorageV3 {
-			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
-			if err != nil {
-				log.Warn("GC V3 segment failed to parse manifest path",
-					zap.String("manifestPath", cloned.GetManifestPath()),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment start, removing basePath...",
-				zap.String("basePath", basePath))
-			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
-				log.Warn("GC V3 segment remove basePath failed",
-					zap.String("basePath", basePath),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment done")
-			cloned = nil
-			continue
-		}
-
-		// V1/V2 segment: delete individual log files
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-
-		logs := getLogs(cloned)
-		for key := range getTextLogs(cloned) {
-			logs[key] = struct{}{}
-		}
-
-		for key := range getJSONKeyLogs(cloned, gc) {
-			logs[key] = struct{}{}
-		}
-
-		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
-			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
-			zap.Int("stats_logs", len(cloned.GetStatslogs())),
-			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
-			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
-		if err := gc.removeObjectFiles(ctx, logs); err != nil {
-			log.Warn("GC segment remove logs failed", zap.Error(err))
-			cloned = nil
-			continue
-		}
-
-		if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-			cloned = nil
-			continue
-		}
-		log.Info("GC segment meta drop segment done")
-		cloned = nil // release memory
+		gc.recycleDroppedSegment(ctx, segmentID, segment)
 	}
+}
+
+// recycleDroppedSegment deletes a single dropped segment's object files,
+// segment-index files, segment-index meta, and segment meta in that order.
+//
+// The ordering matters: files first so a meta-only retry after partial
+// file deletion can still observe the leftover keys; segment-index meta
+// next so segment meta deletion (the final marker) is the only step that
+// commits the GC; if any step fails the later state is preserved for the
+// next GC cycle to retry.
+//
+// This path can race with recycleUnusedSegIndexes on the same BuildID
+// whenever a dropped segment's parent field index has also been marked
+// IsDeleted — both paths call removeObjectFiles for the same index files
+// and call indexMeta.RemoveSegmentIndex(buildID). The races are safe today
+// only because two invariants hold elsewhere:
+//
+//  1. removeObjectFiles swallows merr.ErrIoKeyNotFound (see the loop in
+//     removeObjectFiles below), so a double file delete is a no-op for the
+//     loser.
+//  2. indexMeta.RemoveSegmentIndex acquires a per-buildID keyLock and
+//     returns nil when segmentBuildInfo.Get(buildID) is !ok (see
+//     index_meta.go), so a double catalog delete is a no-op for the loser.
+//
+// Any future refactor on either side — tightening removeObjectFiles to
+// surface NotFound, or batching RemoveSegmentIndex past the per-buildID
+// keyLock — must preserve these invariants, otherwise dropped-segment GC
+// will silently break under load.
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+	log := log.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segmentID)
+	if indexSnapshotBlocked {
+		log.Info("skip GC segment since segment index is protected by snapshot",
+			zap.Int("segmentIndexes", len(segIndexes)))
+		return
+	}
+
+	cloned := segment.Clone()
+	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
+		log.Warn("GC segment remove files failed", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.removeDroppedSegmentIndexMeta(ctx, segIndexes); err != nil {
+		log.Warn("GC segment index meta failed, wait to retry", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+		log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+		return
+	}
+	log.Info("GC segment meta drop segment done", zap.Int("segmentIndexes", len(segIndexes)))
+}
+
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
+	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
+	if len(segIndexes) == 0 {
+		return nil, nil, false
+	}
+	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+		for _, segIdx := range segIndexes {
+			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+				return segIndexes, nil, true
+			}
+		}
+	}
+	indexFiles := make(map[string]struct{}, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		for key := range gc.getAllIndexFilesOfIndex(segIdx) {
+			indexFiles[key] = struct{}{}
+		}
+	}
+	return segIndexes, indexFiles, false
+}
+
+// getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
+// with a defensive nil guard. Production newMeta always wires indexMeta, but
+// the guard is cheap and turns any unexpected nil into "no index records"
+// instead of a panic during a GC sweep — keeping a single misbuilt gc
+// instance from taking the whole datacoord down.
+func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
+	if gc.meta == nil || gc.meta.indexMeta == nil {
+		return nil
+	}
+	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
+}
+
+func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
+	log := log.With(zap.Int64("segmentID", cloned.GetID()))
+
+	// V3 segment data lives under the manifest base path. Segment index files still
+	// live under index file prefixes and must be deleted from recorded file keys.
+	if cloned.GetStorageVersion() == storage.StorageV3 {
+		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
+		if err != nil {
+			log.Warn("GC V3 segment failed to parse manifest path",
+				zap.String("manifestPath", cloned.GetManifestPath()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment start, removing basePath...",
+			zap.String("basePath", basePath),
+			zap.Int("indexFiles", len(indexFiles)))
+		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+			log.Warn("GC V3 segment remove basePath failed",
+				zap.String("basePath", basePath),
+				zap.Error(err))
+			return err
+		}
+		if len(indexFiles) == 0 {
+			log.Info("GC V3 segment files done")
+			return nil
+		}
+		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			log.Warn("GC V3 segment remove index files failed", zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment files done")
+		return nil
+	}
+
+	binlog.DecompressBinLogs(cloned.SegmentInfo)
+	logs := getLogs(cloned)
+	for key := range getTextLogs(cloned) {
+		logs[key] = struct{}{}
+	}
+	for key := range getJSONKeyLogs(cloned, gc) {
+		logs[key] = struct{}{}
+	}
+	for key := range indexFiles {
+		logs[key] = struct{}{}
+	}
+
+	log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
+		zap.Int("delta_logs", len(cloned.GetDeltalogs())),
+		zap.Int("stats_logs", len(cloned.GetStatslogs())),
+		zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+		zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
+		zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+		zap.Int("index_files", len(indexFiles)))
+	if err := gc.removeObjectFiles(ctx, logs); err != nil {
+		log.Warn("GC segment remove logs failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+	if len(segIndexes) == 0 {
+		return nil
+	}
+	for _, segIdx := range segIndexes {
+		if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
