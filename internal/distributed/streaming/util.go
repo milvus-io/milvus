@@ -156,7 +156,7 @@ func (w *walAccesserImpl) getAppendBatcher(vchannel string) *appendBatcher {
 	if batcher, ok := w.appendBatchers[vchannel]; ok {
 		return batcher
 	}
-	batcher := newAppendBatcher(w.appendBatchConfig, w.appendVChannelMessages)
+	batcher := newAppendBatcher(vchannel, w.appendBatchConfig, w.appendVChannelMessages)
 	w.appendBatchers[vchannel] = batcher
 	return batcher
 }

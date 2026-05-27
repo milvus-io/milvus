@@ -5,6 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -42,6 +45,7 @@ type appendBatchRequest struct {
 
 type appendBatcher struct {
 	mu       sync.Mutex
+	vchannel string
 	cfg      appendBatchConfig
 	appendFn func(context.Context, ...message.MutableMessage) types.AppendResponse
 
@@ -55,10 +59,12 @@ type appendBatcher struct {
 }
 
 func newAppendBatcher(
+	vchannel string,
 	cfg appendBatchConfig,
 	appendFn func(context.Context, ...message.MutableMessage) types.AppendResponse,
 ) *appendBatcher {
 	return &appendBatcher{
+		vchannel: vchannel,
 		cfg:      cfg,
 		appendFn: appendFn,
 	}
@@ -144,6 +150,7 @@ func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
 
 	active := make([]*appendBatchRequest, 0, len(reqs))
 	msgs := make([]message.MutableMessage, 0, len(reqs))
+	size := 0
 	for _, req := range reqs {
 		if err := req.ctx.Err(); err != nil {
 			req.respCh <- types.AppendResponse{Error: err}
@@ -151,6 +158,7 @@ func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
 		}
 		active = append(active, req)
 		msgs = append(msgs, req.msgs...)
+		size += req.size
 	}
 	if len(active) == 0 {
 		return
@@ -158,6 +166,16 @@ func (b *appendBatcher) flush(reqs []*appendBatchRequest, fromTimer bool) {
 
 	b.observeFlush(fromTimer, len(active), len(msgs))
 	ctx, cancel := batchContext(active)
+	trigger := "size"
+	if fromTimer {
+		trigger = "timer"
+	}
+	log.Ctx(ctx).Debug("wal append batch flush",
+		zap.String("vchannel", b.vchannel),
+		zap.String("trigger", trigger),
+		zap.Int("requestCount", len(active)),
+		zap.Int("messageCount", len(msgs)),
+		zap.Int("estimatedSize", size))
 	resp := b.appendFn(ctx, msgs...)
 	cancel()
 	for _, req := range active {
