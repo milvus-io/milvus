@@ -198,6 +198,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
 		return err
 	}
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
 
 	// For external collections, validate the source URL scheme allowlist and
 	// the JSON spec structure (extfs allowlist + format whitelist) at the

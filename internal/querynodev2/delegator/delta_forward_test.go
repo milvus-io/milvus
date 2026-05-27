@@ -67,6 +67,11 @@ func (s *StreamingForwardSuite) SetupSuite() {
 }
 
 func (s *StreamingForwardSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535
@@ -86,6 +91,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return ms
 		})
@@ -300,6 +306,11 @@ func (s *GrowingMergeL0Suite) SetupSuite() {
 }
 
 func (s *GrowingMergeL0Suite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535
@@ -319,6 +330,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return ms
 		})

@@ -49,6 +49,10 @@ type SegmentInfo struct {
 	bm25logs         []*datapb.FieldBinlog
 	currentSplit     []storagecommon.ColumnGroup
 	manifestPath     string
+
+	// flushSourceMode is process-local runtime state; not persisted.
+	// See FlushSourceMode docs for lifecycle semantics.
+	flushSourceMode FlushSourceMode
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -134,6 +138,13 @@ func (s *SegmentInfo) ManifestPath() string {
 	return s.manifestPath
 }
 
+// FlushSourceMode returns the sticky decision of which subsystem owns this
+// segment's payload at flush time. The value is process-local and not
+// persisted; see FlushSourceMode docs for details.
+func (s *SegmentInfo) FlushSourceMode() FlushSourceMode {
+	return s.flushSourceMode
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -156,6 +167,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		bm25logs:         s.bm25logs,
 		currentSplit:     s.currentSplit,
 		manifestPath:     s.manifestPath,
+		flushSourceMode:  s.flushSourceMode,
 	}
 }
 

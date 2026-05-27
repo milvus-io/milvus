@@ -30,6 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// BinlogSaver is a minimal interface for saving binlog paths to DataCoord.
+// This avoids depending on the full broker.Broker interface.
+type BinlogSaver interface {
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
+}
+
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
 	MemorySize         uint64

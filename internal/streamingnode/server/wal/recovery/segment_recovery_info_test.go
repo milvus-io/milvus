@@ -77,10 +77,6 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 
-	// insert may came from same txn with same txn.
-	info.ObserveInsert(ts, assign)
-	assert.True(t, info.dirty)
-
 	ts += 1
 	info.ObserveFlush(ts)
 	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()

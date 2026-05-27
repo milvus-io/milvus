@@ -192,6 +192,20 @@ func TestReleaseTimeout(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestWALAccesserPrepareReleaseManualFlush(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	handler.EXPECT().
+		PrepareReleaseManualFlush(mock.Anything, int64(100), vChannel1, []int64{1001}).
+		Return(true, nil)
+
+	prepared, err := w.PrepareReleaseManualFlush(ctx, 100, vChannel1, []int64{1001})
+	assert.NoError(t, err)
+	assert.True(t, prepared)
+}
+
 func newInsertMessage(vChannel string) message.MutableMessage {
 	msg, err := message.NewInsertMessageBuilderV1().
 		WithVChannel(vChannel).

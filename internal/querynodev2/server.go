@@ -147,7 +147,7 @@ type QueryNode struct {
 
 	metricsRequest *metricsinfo.MetricsRequest
 
-	// binlogSaver for TEXT collection growing segment flush
+	// binlogSaver for growing-source segment flush
 	binlogSaver segments.BinlogSaver
 }
 
@@ -569,7 +569,7 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
-// SetBinlogSaver sets the BinlogSaver for TEXT collection growing segment flush.
+// SetBinlogSaver sets the BinlogSaver for growing-source segment flush.
 func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
 	node.binlogSaver = saver
 }

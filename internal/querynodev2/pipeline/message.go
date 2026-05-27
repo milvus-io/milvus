@@ -71,8 +71,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schemaVersion = taskMsg.BeginTs()
 		}
 	case commonpb.MsgType_ManualFlush:
-		// ManualFlush is already handled in filterNode.filtrate() via delegator.ProcessManualFlush().
-		// No-op here since ManualFlush doesn't carry insert/delete data.
+		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
