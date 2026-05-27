@@ -63,11 +63,16 @@ type backfillWriter interface {
 	Manifest() string
 }
 
-// ffiWriterWrapper wraps packed.FFIPackedWriter to implement backfillWriter,
-// capturing the manifest string returned by Close.
+// ffiWriterWrapper wraps packed.FFIPackedWriter to implement backfillWriter.
+// FFIPackedWriter itself knows nothing about manifests; this wrapper closes
+// the writer to collect column groups, then commits them to the existing
+// manifest via packed.CommitManifestUpdates.
 type ffiWriterWrapper struct {
-	writer   *packed.FFIPackedWriter
-	manifest string
+	writer        *packed.FFIPackedWriter
+	basePath      string
+	baseVersion   int64
+	storageConfig *indexpb.StorageConfig
+	manifest      string
 }
 
 func (w *ffiWriterWrapper) WriteRecordBatch(r arrow.Record) error {
@@ -75,11 +80,20 @@ func (w *ffiWriterWrapper) WriteRecordBatch(r arrow.Record) error {
 }
 
 func (w *ffiWriterWrapper) Close() error {
-	manifest, err := w.writer.Close()
+	out, err := w.writer.Close()
 	if err != nil {
 		return err
 	}
-	w.manifest = manifest
+	if out == nil {
+		return nil
+	}
+	defer out.Destroy()
+	newPath, err := packed.CommitManifestUpdates(w.basePath, w.baseVersion, w.storageConfig,
+		&packed.ManifestUpdates{NewFiles: out})
+	if err != nil {
+		return err
+	}
+	w.manifest = newPath
 	return nil
 }
 
@@ -389,7 +403,7 @@ func (t *backfillCompactionTask) setupWriter(outputField *schemapb.FieldSchema, 
 		if err != nil {
 			return nil, merr.WrapErrServiceInternal("failed to parse existing manifest for V3 backfill", err.Error())
 		}
-		ffiWriter, err := packed.NewFFIPackedWriter(basePath, existingVersion, arrowSchema, newColumnGroups, t.compactionParams.StorageConfig, pluginContext)
+		ffiWriter, err := packed.NewFFIPackedWriter(basePath, arrowSchema, newColumnGroups, t.compactionParams.StorageConfig, pluginContext)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +411,12 @@ func (t *backfillCompactionTask) setupWriter(outputField *schemapb.FieldSchema, 
 		// Use AddColumnGroup semantics so Loon does not require the count to match
 		// the existing groups in the manifest.
 		ffiWriter.AsNewColumnGroups()
-		result.writer = &ffiWriterWrapper{writer: ffiWriter}
+		result.writer = &ffiWriterWrapper{
+			writer:        ffiWriter,
+			basePath:      basePath,
+			baseVersion:   existingVersion,
+			storageConfig: t.compactionParams.StorageConfig,
+		}
 		result.basePath = basePath
 	} else {
 		// V2: use PackedWriter with explicit file paths.

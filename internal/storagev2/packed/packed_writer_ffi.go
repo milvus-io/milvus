@@ -28,16 +28,15 @@ package packed
 import "C"
 
 import (
+	"fmt"
 	"strings"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -76,7 +75,12 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 	return storageConfig
 }
 
-func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
+// NewFFIPackedWriter creates a writer that produces parquet files under
+// basePath. The writer knows nothing about manifests or versions — its
+// only job is to write data files. Close returns the resulting column
+// groups, which the caller passes to packed.CommitManifestUpdates to
+// register them with a manifest version.
+func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -145,16 +149,16 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 
 	return &FFIPackedWriter{
 		basePath:      basePath,
-		baseVersion:   baseVersion,
 		cWriterHandle: writerHandle,
 		cProperties:   cProperties,
 	}, nil
 }
 
-// AsNewColumnGroups marks this writer so that Close() calls loon_transaction_add_column_group
-// for each written column group instead of loon_transaction_append_files.
-// Call this when the written columns are brand-new additions to an existing manifest
-// (e.g. function-field backfill), not when appending more files to the same column structure.
+// AsNewColumnGroups marks this writer so that the column groups returned
+// by Close should be staged via loon_transaction_add_column_group instead
+// of loon_transaction_append_files when later passed to
+// CommitManifestUpdates. Use true when adding columns that do not yet
+// exist in the manifest (e.g. function-field backfill).
 func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
 	pw.addNewColumnGroups = true
 	return pw
@@ -176,52 +180,78 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return HandleLoonFFIResult(result)
 }
 
-func (pw *FFIPackedWriter) Close() (string, error) {
-	var cColumnGroups *C.LoonColumnGroups
+// ColumnGroups is the data carrier returned by FFIPackedWriter.Close. It
+// holds the column-groups payload produced by the C writer and owns C
+// memory; the caller MUST call Destroy after passing the handle to
+// CommitManifestUpdates (success or failure). Destroy is idempotent;
+// a nil cColumnGroups indicates the handle has already been released.
+type ColumnGroups struct {
+	cColumnGroups      *C.LoonColumnGroups
+	addNewColumnGroups bool
+}
 
-	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return "", err
+// Destroy releases C memory. Safe to call multiple times.
+func (f *ColumnGroups) Destroy() {
+	if f == nil || f.cColumnGroups == nil {
+		return
 	}
+	C.loon_column_groups_destroy(f.cColumnGroups)
+	f.cColumnGroups = nil
+}
 
-	cBasePath := C.CString(pw.basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-	var transationHandle C.LoonTransactionHandle
-
-	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transationHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return "", err
+// applyTo stages the column groups onto a loon transaction.
+//
+// When addNewColumnGroups is true the groups are added one-by-one via
+// loon_transaction_add_column_group (function-backfill case where the
+// schema is being extended). Otherwise they are appended in one call via
+// loon_transaction_append_files (normal multi-batch write case).
+func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
+	if f == nil || f.cColumnGroups == nil {
+		return nil
 	}
-	defer C.loon_transaction_destroy(transationHandle)
-
-	if pw.addNewColumnGroups {
-		// Each written group is a brand-new column group: add them one-by-one.
-		// loon_transaction_append_files requires the count to match existing groups,
-		// which would fail when extending the schema (e.g. backfill adds sparse vector
-		// to a manifest that already has 2 groups of different columns).
-		numGroups := int(cColumnGroups.num_of_column_groups)
-		colGroupSlice := (*[1 << 20]C.LoonColumnGroup)(unsafe.Pointer(cColumnGroups.column_group_array))[:numGroups:numGroups]
-		for i := range colGroupSlice {
-			result = C.loon_transaction_add_column_group(transationHandle, &colGroupSlice[i])
-			if err := HandleLoonFFIResult(result); err != nil {
-				return "", err
+	if f.addNewColumnGroups {
+		num := int(f.cColumnGroups.num_of_column_groups)
+		slice := unsafe.Slice(f.cColumnGroups.column_group_array, num)
+		for i := range slice {
+			if err := HandleLoonFFIResult(C.loon_transaction_add_column_group(handle, &slice[i])); err != nil {
+				return fmt.Errorf("commit manifest add_column_group: %w", err)
 			}
 		}
-	} else {
-		result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
-		if err := HandleLoonFFIResult(result); err != nil {
-			return "", err
+		return nil
+	}
+	if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cColumnGroups)); err != nil {
+		return fmt.Errorf("commit manifest append_files: %w", err)
+	}
+	return nil
+}
+
+// Close closes the underlying loon writer and returns the column-groups
+// payload. The writer never touches the manifest — the caller is
+// responsible for passing the returned handle to CommitManifestUpdates
+// and calling Destroy when done.
+//
+// Close releases the writer's C resources (loon writer handle and
+// cProperties) in a defer, so even when loon_writer_close fails those
+// resources are reclaimed. After Close the writer is exhausted; further
+// Close or Write calls fail.
+func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
+	if pw.closed {
+		return nil, fmt.Errorf("FFIPackedWriter already closed")
+	}
+	pw.closed = true
+	defer func() {
+		if pw.cProperties != nil {
+			C.loon_properties_free(pw.cProperties)
+			pw.cProperties = nil
 		}
-	}
-
-	var cCommitVersion C.int64_t
-	result = C.loon_transaction_commit(transationHandle, &cCommitVersion)
+	}()
+	var cColumnGroups *C.LoonColumnGroups
+	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", err
+		return nil, err
 	}
-
-	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
-
-	defer C.loon_properties_free(pw.cProperties)
-	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
+	return &ColumnGroups{
+		cColumnGroups:      cColumnGroups,
+		addNewColumnGroups: pw.addNewColumnGroups,
+	}, nil
 }

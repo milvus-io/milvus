@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -551,4 +552,113 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 	count2 := len(stats2[bm25Key].Paths)
 	s.Greater(count2, count1, "batch 2 should accumulate more bm25 files than batch 1")
 	s.NotEmpty(stats2[bm25Key].Metadata["memory_size"], "memory_size metadata should be set")
+}
+
+// TestWrite_SingleVersionBumpAcrossSections verifies that one Write call
+// bumps the manifest version exactly once even when inserts, stats, delta,
+// and bm25 are all present — the atomicity guarantee this refactor adds.
+func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 10
+
+	bfs := pkoracle.NewBloomFilterSet()
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).
+		Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) { action(seg) }).
+		Return().Maybe()
+
+	deletes := &storage.DeleteData{}
+	for i := 0; i < rows; i++ {
+		deletes.Append(storage.NewInt64PrimaryKey(int64(i+1)), uint64(100+i))
+	}
+
+	pack := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertData(rows, s.schema)).
+		WithDeleteData(deletes).
+		WithFlush()
+
+	_, baseVer, err := packed.UnmarshalManifestPath(manifestPath)
+	s.Require().NoError(err)
+
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
+		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+
+	_, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
+	s.Require().NoError(err)
+	_, newVer, err := packed.UnmarshalManifestPath(writtenManifestPath)
+	s.Require().NoError(err)
+	s.Equalf(baseVer+1, newVer,
+		"Write must produce exactly one version bump; baseVer=%d newVer=%d", baseVer, newVer)
+}
+
+// TestWrite_RetryDoesNotLeakVersionBumps verifies that when a transient
+// commit failure forces the retry loop to re-run, the eventual successful
+// commit produces only one version bump, not one per attempt.
+func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 4
+
+	bfs := pkoracle.NewBloomFilterSet()
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).
+		Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) { action(seg) }).
+		Return().Maybe()
+
+	pack := new(SyncPack).
+		WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).
+		WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
+
+	_, baseVer, err := packed.UnmarshalManifestPath(manifestPath)
+	s.Require().NoError(err)
+
+	var calls int32
+	var origin func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error)
+	patched := mockey.Mock(packed.CommitManifestUpdates).
+		To(func(basePath string, baseVersion int64, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			if atomic.AddInt32(&calls, 1) == 1 {
+				return "", packed.ErrLoonTransient
+			}
+			return origin(basePath, baseVersion, cfg, updates)
+		}).
+		Origin(&origin).
+		Build()
+	defer patched.UnPatch()
+
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc,
+		packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	_, _, _, _, newManifestPath, _, err := bw.Write(context.Background(), pack)
+	s.Require().NoError(err)
+	_, newVer, err := packed.UnmarshalManifestPath(newManifestPath)
+	s.Require().NoError(err)
+	s.Equal(baseVer+1, newVer, "retry must not produce extra version bumps")
+	s.Equal(int32(2), atomic.LoadInt32(&calls), "exactly one retry expected")
 }
