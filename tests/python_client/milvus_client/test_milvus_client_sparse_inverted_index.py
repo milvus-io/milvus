@@ -627,9 +627,7 @@ class TestSparseInvertedIndexV3OrdinaryIPShared(_SparseInvertedIndexV3Base):
         with_drop = self._search_hits(client, self.collection_name, "sparse_sindi_drop_build", [SPARSE_QUERY])
         self._assert_exact_ip_topk(baseline)
         assert self._hit_ids(with_drop) == self._hit_ids(baseline)
-        assert [hit["distance"] for hit in with_drop] == pytest.approx(
-            [hit["distance"] for hit in baseline]
-        )
+        assert [hit["distance"] for hit in with_drop] == pytest.approx([hit["distance"] for hit in baseline])
 
 
 @pytest.mark.xdist_group("TestSparseInvertedIndexV3BM25Shared")
@@ -766,9 +764,7 @@ class TestSparseInvertedIndexV3BM25Shared(_SparseInvertedIndexV3Base):
             limit=10,
         )
         assert self._hit_ids(hits) == self._hit_ids(explicit_default)
-        assert [hit["distance"] for hit in hits] == pytest.approx(
-            [hit["distance"] for hit in explicit_default]
-        )
+        assert [hit["distance"] for hit in hits] == pytest.approx([hit["distance"] for hit in explicit_default])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_bm25_sindi_search_with_jieba_analyzer(self):
