@@ -247,6 +247,7 @@ var (
 
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
+	ErrQueryPlan           = newMilvusError("query plan failed", 2201, false, WithErrorType(InputError))
 
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -237,7 +236,7 @@ func (v *ParserVisitor) parseRegexPatternOrTemplate(ctx parser.IExprContext, arg
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 && !columnInfo.GetIsElementLevel() {
-		return errors.New("can not comparisons array fields directly")
+		return merr.WrapErrQueryPlanMsg("can not comparisons array fields directly")
 	}
 	return nil
 }
@@ -530,12 +529,12 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	leftExpr := getExpr(left)
 	if leftExpr == nil {
-		return errors.New("the left operand of like is invalid")
+		return merr.WrapErrQueryPlanMsg("the left operand of like is invalid")
 	}
 
 	column := toColumnInfo(leftExpr)
 	if column == nil {
-		return errors.New("like operation on complicated expr is unsupported")
+		return merr.WrapErrQueryPlanMsg("like operation on complicated expr is unsupported")
 	}
 	if err := checkDirectComparisonBinaryField(column); err != nil {
 		return err
@@ -543,7 +542,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
 		(!typeutil.IsArrayType(leftExpr.dataType) || !typeutil.IsStringType(column.GetElementType())) {
-		return errors.New("like operation on non-string or no-json field is unsupported")
+		return merr.WrapErrQueryPlanMsg("like operation on non-string or no-json field is unsupported")
 	}
 
 	pattern, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(1), "like pattern")
@@ -585,11 +584,11 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 // sequences as-is, only processing quote delimiters.
 func extractRegexPattern(literal string) (string, error) {
 	if len(literal) < 2 {
-		return "", fmt.Errorf("invalid string literal: %s", literal)
+		return "", merr.WrapErrQueryPlanMsg("invalid string literal: %s", literal)
 	}
 	quote := literal[0]
 	if (quote != '"' && quote != '\'') || literal[len(literal)-1] != quote {
-		return "", fmt.Errorf("invalid string literal: %s", literal)
+		return "", merr.WrapErrQueryPlanMsg("invalid string literal: %s", literal)
 	}
 	// Strip surrounding quotes, preserve all escape sequences as-is
 	inner := literal[1 : len(literal)-1]
@@ -702,7 +701,7 @@ func tryOptimizeRegexToLike(pattern string) (planpb.OpType, string, bool) {
 
 func validateAndOptimizeRegexPattern(pattern string) (planpb.OpType, string, error) {
 	if _, err := regexp.Compile(pattern); err != nil {
-		return 0, "", fmt.Errorf("invalid regex pattern: %s", err)
+		return 0, "", merr.WrapErrQueryPlan(err, "invalid regex pattern")
 	}
 
 	op := planpb.OpType_RegexMatch
@@ -729,19 +728,19 @@ func (v *ParserVisitor) VisitRegexMatch(ctx *parser.RegexMatchContext) interface
 
 	leftExpr := getExpr(left)
 	if leftExpr == nil {
-		return errors.New("the left operand of =~ is invalid")
+		return merr.WrapErrQueryPlanMsg("the left operand of =~ is invalid")
 	}
 
 	column := toColumnInfo(leftExpr)
 	if column == nil {
-		return errors.New("regex match on complicated expr is unsupported")
+		return merr.WrapErrQueryPlanMsg("regex match on complicated expr is unsupported")
 	}
 	if err := checkDirectComparisonBinaryField(column); err != nil {
 		return err
 	}
 
 	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
-		return errors.New("regex match on non-string or non-json field is unsupported")
+		return merr.WrapErrQueryPlanMsg("regex match on non-string or non-json field is unsupported")
 	}
 
 	pattern, placeholder, isTemplate, err := v.parseRegexPatternOrTemplate(ctx.Expr(1), "regex pattern")
@@ -785,19 +784,19 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 
 	leftExpr := getExpr(left)
 	if leftExpr == nil {
-		return errors.New("the left operand of !~ is invalid")
+		return merr.WrapErrQueryPlanMsg("the left operand of !~ is invalid")
 	}
 
 	column := toColumnInfo(leftExpr)
 	if column == nil {
-		return errors.New("regex match on complicated expr is unsupported")
+		return merr.WrapErrQueryPlanMsg("regex match on complicated expr is unsupported")
 	}
 	if err := checkDirectComparisonBinaryField(column); err != nil {
 		return err
 	}
 
 	if !isRegexMatchSupportedType(leftExpr.dataType, column.GetElementType()) {
-		return errors.New("regex match on non-string or non-json field is unsupported")
+		return merr.WrapErrQueryPlanMsg("regex match on non-string or non-json field is unsupported")
 	}
 
 	pattern, placeholder, isTemplate, err := v.parseRegexPatternOrTemplate(ctx.Expr(1), "regex pattern")
@@ -850,10 +849,10 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return errors.New("text match operation on non-string is unsupported")
+		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
 	}
 	if column.dataType == schemapb.DataType_Text {
-		return errors.New("text match operation on text field is not supported yet")
+		return merr.WrapErrQueryPlanMsg("text match operation on text field is not supported yet")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
@@ -928,7 +927,7 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return errors.New("phrase match operation on non-string is unsupported")
+		return merr.WrapErrQueryPlanMsg("phrase match operation on non-string is unsupported")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
@@ -1291,11 +1290,11 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -1378,11 +1377,11 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -1451,13 +1450,13 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 
 	childExpr := getExpr(child)
 	if childExpr == nil {
-		return errors.New("failed to parse unary expressions")
+		return merr.WrapErrQueryPlanMsg("failed to parse unary expressions")
 	}
 	if isRandomSampleExpr(childExpr) {
-		return errors.New("random sample expression cannot be used in unary expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in unary expression")
 	}
 	if isElementFilterExpr(childExpr) {
-		return errors.New("element filter expression cannot be used in unary expression")
+		return merr.WrapErrQueryPlanMsg("element filter expression cannot be used in unary expression")
 	}
 
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
@@ -1517,7 +1516,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 			otherExpr = getExpr(left)
 		}
 		if !IsBool(boolLiteral) {
-			return errors.New("'or' can only be used between boolean expressions")
+			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 		}
 		if boolLiteral.GetBoolVal() {
 			// true or expr → always true
@@ -1528,7 +1527,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		}
 		// false or expr → expr
 		if otherExpr == nil || !canBeExecuted(otherExpr) {
-			return errors.New("'or' can only be used between boolean expressions")
+			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 		}
 		return otherExpr
 	}
@@ -1538,15 +1537,15 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
-		return errors.New("random sample expression cannot be used in logical and expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical and expression")
 	}
 
 	if isElementFilterExpr(leftExpr) {
-		return errors.New("element filter expression can only be the last expression in the logical or expression")
+		return merr.WrapErrQueryPlanMsg("element filter expression can only be the last expression in the logical or expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return errors.New("'or' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryExpr{
@@ -1595,7 +1594,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			otherExpr = getExpr(left)
 		}
 		if !IsBool(boolLiteral) {
-			return errors.New("'and' can only be used between boolean expressions")
+			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 		}
 		if !boolLiteral.GetBoolVal() {
 			// false and expr → always false
@@ -1606,7 +1605,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		}
 		// true and expr → expr
 		if otherExpr == nil || !canBeExecuted(otherExpr) {
-			return errors.New("'and' can only be used between boolean expressions")
+			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 		}
 		return otherExpr
 	}
@@ -1616,15 +1615,15 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) {
-		return errors.New("random sample expression can only be the last expression in the logical and expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
 	}
 
 	if isElementFilterExpr(leftExpr) {
-		return errors.New("element filter expression can only be the last expression in the logical and expression")
+		return merr.WrapErrQueryPlanMsg("element filter expression can only be the last expression in the logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return errors.New("'and' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 	}
 
 	var expr *planpb.Expr
@@ -1763,7 +1762,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 				return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", identifier)
 			}
 			if typeutil.IsArrayType(field.DataType) {
-				return nil, errors.New("can only access array field with integer index")
+				return nil, merr.WrapErrQueryPlanMsg("can only access array field with integer index")
 			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
