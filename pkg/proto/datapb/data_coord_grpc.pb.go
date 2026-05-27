@@ -84,6 +84,9 @@ const (
 	DataCoord_RefreshExternalCollection_FullMethodName            = "/milvus.proto.data.DataCoord/RefreshExternalCollection"
 	DataCoord_GetRefreshExternalCollectionProgress_FullMethodName = "/milvus.proto.data.DataCoord/GetRefreshExternalCollectionProgress"
 	DataCoord_ListRefreshExternalCollectionJobs_FullMethodName    = "/milvus.proto.data.DataCoord/ListRefreshExternalCollectionJobs"
+	DataCoord_CommitImport_FullMethodName                         = "/milvus.proto.data.DataCoord/CommitImport"
+	DataCoord_AbortImport_FullMethodName                          = "/milvus.proto.data.DataCoord/AbortImport"
+	DataCoord_HandleCommitVchannel_FullMethodName                 = "/milvus.proto.data.DataCoord/HandleCommitVchannel"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -165,6 +168,10 @@ type DataCoordClient interface {
 	RefreshExternalCollection(ctx context.Context, in *RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*RefreshExternalCollectionResponse, error)
 	GetRefreshExternalCollectionProgress(ctx context.Context, in *GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*GetRefreshExternalCollectionProgressResponse, error)
 	ListRefreshExternalCollectionJobs(ctx context.Context, in *ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*ListRefreshExternalCollectionJobsResponse, error)
+	// Import 2PC RPCs — internal only, not exposed in public MilvusService
+	CommitImport(ctx context.Context, in *CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AbortImport(ctx context.Context, in *AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	HandleCommitVchannel(ctx context.Context, in *HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataCoordClient struct {
@@ -726,6 +733,33 @@ func (c *dataCoordClient) ListRefreshExternalCollectionJobs(ctx context.Context,
 	return out, nil
 }
 
+func (c *dataCoordClient) CommitImport(ctx context.Context, in *CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_CommitImport_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) AbortImport(ctx context.Context, in *AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_AbortImport_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) HandleCommitVchannel(ctx context.Context, in *HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_HandleCommitVchannel_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -805,6 +839,10 @@ type DataCoordServer interface {
 	RefreshExternalCollection(context.Context, *RefreshExternalCollectionRequest) (*RefreshExternalCollectionResponse, error)
 	GetRefreshExternalCollectionProgress(context.Context, *GetRefreshExternalCollectionProgressRequest) (*GetRefreshExternalCollectionProgressResponse, error)
 	ListRefreshExternalCollectionJobs(context.Context, *ListRefreshExternalCollectionJobsRequest) (*ListRefreshExternalCollectionJobsResponse, error)
+	// Import 2PC RPCs — internal only, not exposed in public MilvusService
+	CommitImport(context.Context, *CommitImportRequest) (*commonpb.Status, error)
+	AbortImport(context.Context, *AbortImportRequest) (*commonpb.Status, error)
+	HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -993,6 +1031,15 @@ func (UnimplementedDataCoordServer) GetRefreshExternalCollectionProgress(context
 }
 func (UnimplementedDataCoordServer) ListRefreshExternalCollectionJobs(context.Context, *ListRefreshExternalCollectionJobsRequest) (*ListRefreshExternalCollectionJobsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRefreshExternalCollectionJobs not implemented")
+}
+func (UnimplementedDataCoordServer) CommitImport(context.Context, *CommitImportRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitImport not implemented")
+}
+func (UnimplementedDataCoordServer) AbortImport(context.Context, *AbortImportRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AbortImport not implemented")
+}
+func (UnimplementedDataCoordServer) HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HandleCommitVchannel not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2104,6 +2151,60 @@ func _DataCoord_ListRefreshExternalCollectionJobs_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_CommitImport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitImportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CommitImport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CommitImport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CommitImport(ctx, req.(*CommitImportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_AbortImport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AbortImportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).AbortImport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_AbortImport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).AbortImport(ctx, req.(*AbortImportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_HandleCommitVchannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HandleCommitVchannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).HandleCommitVchannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_HandleCommitVchannel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).HandleCommitVchannel(ctx, req.(*HandleCommitVchannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2354,6 +2455,18 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRefreshExternalCollectionJobs",
 			Handler:    _DataCoord_ListRefreshExternalCollectionJobs_Handler,
+		},
+		{
+			MethodName: "CommitImport",
+			Handler:    _DataCoord_CommitImport_Handler,
+		},
+		{
+			MethodName: "AbortImport",
+			Handler:    _DataCoord_AbortImport_Handler,
+		},
+		{
+			MethodName: "HandleCommitVchannel",
+			Handler:    _DataCoord_HandleCommitVchannel_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

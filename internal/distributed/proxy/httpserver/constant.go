@@ -87,6 +87,9 @@ const (
 	TransferReplicaAction           = "transfer_replica"
 
 	RunAnalyzerAction = "run_analyzer"
+
+	CommitAction = "commit"
+	AbortAction  = "abort"
 )
 
 const (

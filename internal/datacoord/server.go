@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -121,6 +122,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importJobLock    *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
@@ -211,6 +213,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
+		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
@@ -343,7 +346,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.broadcastCommitImportMessage)
 
 	// init file resource observer
 	if s.fileResourceObserver != nil {

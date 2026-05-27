@@ -185,6 +185,8 @@ type Proxy interface {
 	ImportV2(context.Context, *internalpb.ImportRequest) (*internalpb.ImportResponse, error)
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
 	ListImports(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)
+	CommitImport(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)
+	AbortImport(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

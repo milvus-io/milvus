@@ -879,6 +879,39 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
+	// auto-commit jobs should not expose transient commit states to progress callers.
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), func(job ImportJob) {
+		job.(*importJob).AutoCommit = true
+	}, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Committing))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), func(job ImportJob) {
+		job.(*importJob).AutoCommit = false
+	}, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Committing))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Committing, state)
+	assert.Equal(t, "", reason)
+
 	// completed state
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
