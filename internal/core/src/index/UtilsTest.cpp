@@ -17,6 +17,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <fcntl.h>
 #include <memory>
 #include <string>
@@ -26,6 +27,7 @@
 
 #include "common/Common.h"
 #include "index/Utils.h"
+#include "storage/IndexData.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus;
@@ -133,4 +135,26 @@ TEST(UtilIndex, TestGetValueFromConfigWithoutTypeCheck) {
     ASSERT_FALSE(e_value.has_value());
     auto f_value = GetValueFromConfig<bool>(cfg, "f");
     ASSERT_FALSE(f_value.has_value());
+}
+
+TEST(UtilIndex, AssembleIndexDataCodecConcatenatesSlices) {
+    std::vector<std::string> slices = {"hello", " ", "world"};
+
+    IndexDataCodec codec;
+    for (const auto& slice : slices) {
+        auto data = std::shared_ptr<uint8_t[]>(new uint8_t[slice.size()]);
+        std::memcpy(data.get(), slice.data(), slice.size());
+        auto index_data =
+            std::make_unique<storage::IndexData>(data.get(), slice.size());
+        index_data->SetData(std::move(data));
+        codec.size_ += slice.size();
+        codec.codecs_.push_back(std::move(index_data));
+    }
+
+    auto assembled = AssembleIndexDataCodec(codec);
+    ASSERT_EQ(assembled->PayloadSize(), codec.size_);
+    EXPECT_EQ(
+        std::string(reinterpret_cast<const char*>(assembled->PayloadData()),
+                    assembled->PayloadSize()),
+        "hello world");
 }

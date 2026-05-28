@@ -163,10 +163,10 @@ JsonInvertedIndex<T>::LoadIndexMetas(
                                    index_datas);
         AssertInfo(non_exist_offset_data.codecs_.size() > 0,
                    "non exist offset file is empty");
-        for (auto&& non_exist_offset_codec : non_exist_offset_data.codecs_) {
-            fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
-                                  non_exist_offset_codec->PayloadSize());
-        }
+        auto non_exist_offset_codec =
+            AssembleIndexDataCodec(non_exist_offset_data);
+        fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
+                              non_exist_offset_codec->PayloadSize());
         return;
     }
 

@@ -139,7 +139,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     // 1. Extract and load null_offset file(s) if present
     {
-        auto find_file = [&](const std::string& target) -> auto {
+        auto find_file = [&](const std::string& target) -> auto{
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
                     return GetFileName(filename) == target;
@@ -158,36 +158,44 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                 .value_or(milvus::proto::common::LoadPriority::HIGH);
 
         std::vector<std::string> null_offset_files;
+        bool loaded_null_offsets = false;
         if (auto it = find_file(INDEX_FILE_SLICE_META); it != files.end()) {
             // sliced case: collect all parts with prefix index_null_offset
             null_offset_files.push_back(*it);
             for (auto& f : files) {
                 auto filename = GetFileName(f);
-                static const std::string kName = "index_null_offset";
-                if (filename.size() >= kName.size() &&
+                static const std::string kName = "index_null_offset_";
+                if (filename.size() > kName.size() &&
                     filename.substr(0, kName.size()) == kName) {
                     null_offset_files.push_back(f);
                 }
             }
-            if (!null_offset_files.empty()) {
+            if (null_offset_files.size() > 1) {
                 auto index_datas = mem_file_manager_->LoadIndexToMemory(
                     null_offset_files, load_priority);
-                auto compacted = CompactIndexDatas(index_datas);
-                auto codecs = std::move(compacted.at("index_null_offset"));
-                for (auto&& codec : codecs.codecs_) {
-                    fill_null_offsets(codec->PayloadData(),
-                                      codec->PayloadSize());
-                }
+                auto slice_meta =
+                    std::move(index_datas.at(INDEX_FILE_SLICE_META));
+                auto codecs = CompactIndexDatasByKey(
+                    "index_null_offset", std::move(slice_meta), index_datas);
+                AssertInfo(codecs.codecs_.size() > 0,
+                           "null offset file is empty");
+                auto codec = AssembleIndexDataCodec(codecs);
+                fill_null_offsets(codec->PayloadData(), codec->PayloadSize());
+                loaded_null_offsets = true;
+            } else {
+                null_offset_files.clear();
             }
-        } else if (auto it = find_file("index_null_offset");
-                   it != files.end()) {
-            null_offset_files.push_back(*it);
-            files.erase(it);
-            auto index_datas = mem_file_manager_->LoadIndexToMemory(
-                {*null_offset_files.begin()}, load_priority);
-            auto null_data = std::move(index_datas.at("index_null_offset"));
-            fill_null_offsets(null_data->PayloadData(),
-                              null_data->PayloadSize());
+        }
+        if (!loaded_null_offsets) {
+            if (auto it = find_file("index_null_offset"); it != files.end()) {
+                null_offset_files.push_back(*it);
+                files.erase(it);
+                auto index_datas = mem_file_manager_->LoadIndexToMemory(
+                    {*null_offset_files.begin()}, load_priority);
+                auto null_data = std::move(index_datas.at("index_null_offset"));
+                fill_null_offsets(null_data->PayloadData(),
+                                  null_data->PayloadSize());
+            }
         }
 
         // remove loaded null_offset files from files list
