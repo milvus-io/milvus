@@ -88,7 +88,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	if ut.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -122,6 +122,8 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
 		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
 		ut.req.GetDbName(),
+		ut.req.Namespace,
+		ut.schema.CollectionSchema,
 	)
 	if err != nil {
 		return nil, err

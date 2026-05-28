@@ -87,6 +87,7 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
+	chMgr                channelsMgr
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -805,7 +806,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// convert partition names only when requery is false
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
-		if t.partitionKeyMode {
+		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+			if err != nil {
+				return err
+			}
+
+			partitionNames = append(partitionNames, hashedPartitionNames...)
+		} else if t.partitionKeyMode {
 			expr, err := exprutil.ParseExprFromPlan(t.plan)
 			if err != nil {
 				return err
@@ -919,14 +927,41 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             1,
-		Exec:           t.queryShard,
-		PreferredNodes: t.preferredNodes,
-	})
+	var err error
+	useNamespaceChannel := false
+	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		if err != nil {
+			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
+			return err
+		}
+		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		if err != nil {
+			return err
+		}
+		if ok {
+			useNamespaceChannel = true
+			err = t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+				Db:              t.request.GetDbName(),
+				CollectionName:  t.collectionName,
+				CollectionID:    t.CollectionID,
+				Channel:         channelName,
+				Nq:              1,
+				Exec:            t.queryShard,
+				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
+			})
+		}
+	}
+	if !useNamespaceChannel {
+		err = t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+			Db:             t.request.GetDbName(),
+			CollectionID:   t.CollectionID,
+			CollectionName: t.collectionName,
+			Nq:             1,
+			Exec:           t.queryShard,
+			PreferredNodes: t.preferredNodes,
+		})
+	}
 	if err != nil {
 		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")

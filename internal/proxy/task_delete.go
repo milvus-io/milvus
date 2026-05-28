@@ -128,7 +128,11 @@ func (dt *deleteTask) getChannels() []pChan {
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
-	return nil
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	return common.CheckNamespace(schema.CollectionSchema, dt.req.Namespace)
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
@@ -151,11 +155,26 @@ func repackDeleteMsgByHash(
 	partitionID int64,
 	partitionName string,
 	dbName string,
+	namespace *string,
+	schema *schemapb.CollectionSchema,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	hashValues, err := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	var hashValues []uint32
+	channelID, ok, err := namespaceShardingChannelID(schema, namespace, vChannels)
 	if err != nil {
 		return nil, 0, err
+	}
+	if ok {
+		size := typeutil.GetSizeOfIDs(primaryKeys)
+		hashValues = make([]uint32, size)
+		for i := 0; i < size; i++ {
+			hashValues[i] = channelID
+		}
+	} else {
+		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	// repack delete msg by dmChannel
 	result := make(map[uint32][]*msgstream.DeleteMsg)
@@ -321,9 +340,22 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 
+	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()
-	if dr.schema.IsPartitionKeyCollection() {
+	if namespacePartitionKeyMode(dr.schema.CollectionSchema) && dr.req.Namespace != nil {
+		if len(partName) > 0 {
+			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if namespace is used")
+		}
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		if err != nil {
+			return err
+		}
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		if err != nil {
+			return err
+		}
+	} else if dr.schema.IsPartitionKeyCollection() {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 		}
@@ -561,13 +593,28 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
-	err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             dr.req.GetDbName(),
-		CollectionName: dr.req.GetCollectionName(),
-		CollectionID:   dr.collectionID,
-		Nq:             1,
-		Exec:           dr.getStreamingQueryAndDelteFunc(plan),
-	})
+	channelName, useNamespaceChannel, err := namespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
+	if err != nil {
+		return err
+	}
+	if useNamespaceChannel {
+		err = dr.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+			Db:             dr.req.GetDbName(),
+			CollectionName: dr.req.GetCollectionName(),
+			CollectionID:   dr.collectionID,
+			Channel:        channelName,
+			Nq:             1,
+			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		})
+	} else {
+		err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+			Db:             dr.req.GetDbName(),
+			CollectionName: dr.req.GetCollectionName(),
+			CollectionID:   dr.collectionID,
+			Nq:             1,
+			Exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		})
+	}
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()
 	if err != nil {

@@ -222,6 +222,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		mixCoord:       t.node.(*Proxy).mixCoord,
 		lb:             t.node.(*Proxy).lbPolicy,
 		shardclientMgr: t.node.(*Proxy).shardMgr,
+		chMgr:          t.node.(*Proxy).chMgr,
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
