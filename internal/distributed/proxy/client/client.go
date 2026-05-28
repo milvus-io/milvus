@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -50,11 +50,11 @@ type Client struct {
 // NewClient creates a new client instance
 func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
 	if addr == "" {
-		return nil, errors.New("address is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("address is empty")
 	}
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
+		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("Proxy client new session failed", zap.Error(err))
 		return nil, err
 	}
