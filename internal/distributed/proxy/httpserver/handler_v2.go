@@ -31,7 +31,6 @@ import (
 	validator "github.com/go-playground/validator/v10"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -382,14 +381,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				collectionName = getter.GetCollectionName()
 			}
 		}
-		innerCtx := gCtx.Request.Context()
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(innerCtx, gCtx.Request.URL.Path)
-		defer span.End()
+		ctx := gCtx.Request.Context()
 		username, _ := gCtx.Get(ContextUsername)
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
-		traceID := span.SpanContext().TraceID().String()
-		ctx = log.WithTraceID(ctx, traceID)
-		gCtx.Set("traceID", traceID)
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", gCtx.Request.URL.Path))
 
