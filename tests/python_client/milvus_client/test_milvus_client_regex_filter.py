@@ -2481,7 +2481,9 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
             expr='MATCH_ANY(events, $[status] =~ "WARN")',
         )
 
-        res = client.hybrid_search(collection_name, [req_unfiltered], WeightedRanker(1.0), limit=1, output_fields=["id"])
+        res = client.hybrid_search(
+            collection_name, [req_unfiltered], WeightedRanker(1.0), limit=1, output_fields=["id"]
+        )
         result = {hit["id"] for hit in res[0]}
         assert result == {2}, f"unfiltered struct embedding top1 should be non-matching id 2, got {result}"
 
