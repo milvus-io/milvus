@@ -41,4 +41,13 @@ if ( NOT milvus-common_POPULATED )
                       ${milvus-common_BINARY_DIR} )
 endif()
 
+target_include_directories(milvus-common PUBLIC ${milvus-common_SOURCE_DIR}/include)
+
+if ( NOT EXISTS "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/milvus-common-config.cmake" )
+    file(WRITE "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/milvus-common-config.cmake"
+        "if (TARGET milvus-common AND NOT TARGET milvus-common::milvus-common)\n"
+        "    add_library(milvus-common::milvus-common ALIAS milvus-common)\n"
+        "endif()\n")
+endif()
+
 set( MILVUS_COMMON_INCLUDE_DIR ${milvus-common_SOURCE_DIR}/include CACHE INTERNAL "Path to milvus-common include directory" )

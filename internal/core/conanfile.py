@@ -90,6 +90,8 @@ class MilvusConan(ConanFile):
         "icu/*:shared": False,
         "icu/*:data_packaging": "library",
         "xz_utils/*:shared": True,
+        "openblas/*:dynamic_arch": True,
+        "openblas/*:use_openmp": True,
         "opentelemetry-cpp/*:with_stl": True,
     }
 
@@ -129,6 +131,8 @@ class MilvusConan(ConanFile):
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
         self.requires("lz4/1.9.4#7f0b5851453198536c14354ee30ca9ae", force=True)
+        if self.settings.os == "Linux":
+            self.requires("openblas/0.3.30#aca4131c143d4c109923372e052c643c")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
