@@ -2493,6 +2493,30 @@ func (s *SearchPipelineSuite) TestIsSameGroupByValue() {
 	s.False(isSameGroupByValue(boolField, 1, 2)) // true != false
 }
 
+func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam() {
+	task := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:           1,
+			Topk:         3,
+			Offset:       2,
+			CollectionID: 100,
+			PartitionIDs: []int64{10},
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}),
+		queryInfos: []*planpb.QueryInfo{{}},
+	}
+
+	op, err := newSearchReduceOperator(task, map[string]any{reduceOffsetParamKey: int64(0)})
+
+	s.NoError(err)
+	s.Equal(int64(0), op.(*searchReduceOperator).offset)
+}
+
 func (s *SearchPipelineSuite) TestNewOrderByOperatorUsesPluralGroupByFieldIDs() {
 	task := &searchTask{
 		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
@@ -2559,6 +2583,182 @@ func (s *SearchPipelineSuite) TestOrderByOperator() {
 	expectedPrices := []int64{10, 20, 30, 40}
 	actualPrices := sortedResult.Results.FieldsData[0].GetScalars().GetLongData().Data
 	s.Equal(expectedPrices, actualPrices)
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+				},
+			},
+			Scores:         []float32{0.9, 0.8, 0.7, 0.6},
+			Distances:      []float32{9, 8, 7, 6},
+			Recalls:        []float32{90, 80, 70, 60},
+			ElementIndices: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+			TopK:           4,
+			Topks:          []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3, 1}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]float32{7, 9}, sliced.GetDistances())
+	s.Equal([]float32{70, 90}, sliced.GetRecalls())
+	s.Equal([]int64{30, 10}, sliced.GetElementIndices().GetData())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorSlicesStringIDsAndNonNullableVectorAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6},
+			TopK:   4,
+			Topks:  []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vec",
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]string{"c", "a"}, sliced.GetIds().GetStrId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]float32{5, 6, 1, 2}, sliced.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesGroupOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6}},
+				},
+			},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7, 0.65},
+			TopK:   6,
+			Topks:  []int64{6},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 25, 10, 20, 15, 18}},
+							},
+						},
+					},
+				},
+			},
+			GroupByFieldValues: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{"A", "A", "B", "C", "C", "C"}},
+							},
+						},
+					},
+				},
+			},
+			GroupByFieldValue: &schemapb.FieldData{
+				Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"A", "A", "B", "C", "C", "C"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 100,
+		groupSize:      3,
+		limit:          1,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{4, 5, 6}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.75, 0.7, 0.65}, sliced.GetScores())
+	s.Equal([]int64{20, 15, 18}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]string{"C", "C", "C"}, sliced.GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+	s.Equal([]string{"C", "C", "C"}, sliced.GetGroupByFieldValue().GetScalars().GetStringData().GetData())
+	s.Equal([]int64{3}, sliced.GetTopks())
+	s.Equal(int64(3), sliced.GetTopK())
 }
 
 func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOutput() {
