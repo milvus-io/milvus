@@ -48,13 +48,14 @@ type appendBatchRequest struct {
 type appendBatcher struct {
 	mu       sync.Mutex
 	vchannel string
-	cfg      appendBatchConfig
+	cfg      func() appendBatchConfig
 	appendFn func(context.Context, ...message.MutableMessage) types.AppendResponse
 
 	pending       []*appendBatchRequest
 	totalSize     int
 	totalMessages int
 	timer         *time.Timer
+	timerDelay    time.Duration
 	closed        bool
 
 	consecutiveSingleFlushes int
@@ -63,7 +64,7 @@ type appendBatcher struct {
 
 func newAppendBatcher(
 	vchannel string,
-	cfg appendBatchConfig,
+	cfg func() appendBatchConfig,
 	appendFn func(context.Context, ...message.MutableMessage) types.AppendResponse,
 ) *appendBatcher {
 	return &appendBatcher{
@@ -94,16 +95,22 @@ func (b *appendBatcher) submit(ctx context.Context, msgs ...message.MutableMessa
 		return respCh
 	}
 
+	cfg := b.cfg()
 	b.pending = append(b.pending, req)
 	b.totalSize += req.size
 	b.totalMessages += len(req.msgs)
-	if b.totalSize >= b.cfg.MaxBatchSize || b.totalMessages >= b.cfg.MaxMessageCount {
+	if b.totalSize >= cfg.MaxBatchSize || b.totalMessages >= cfg.MaxMessageCount {
 		reqs := b.popPendingLocked()
 		go b.flush(reqs)
 		return respCh
 	}
 	if b.timer == nil {
-		b.timer = time.AfterFunc(b.cfg.MaxDelay, b.flushByTimer)
+		b.timerDelay = cfg.MaxDelay
+		b.timer = time.AfterFunc(cfg.MaxDelay, b.flushByTimer)
+	} else if b.timerDelay != cfg.MaxDelay {
+		b.timer.Stop()
+		b.timerDelay = cfg.MaxDelay
+		b.timer = time.AfterFunc(cfg.MaxDelay, b.flushByTimer)
 	}
 	return respCh
 }
@@ -119,6 +126,7 @@ func (b *appendBatcher) close() {
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
+		b.timerDelay = 0
 	}
 	reqs := b.popPendingLocked()
 	b.closed = true
@@ -140,6 +148,7 @@ func (b *appendBatcher) popPendingLocked() []*appendBatchRequest {
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
+		b.timerDelay = 0
 	}
 	reqs := b.pending
 	b.pending = nil
@@ -193,8 +202,9 @@ func (b *appendBatcher) observeFlush(reqCount int) {
 	}
 
 	b.consecutiveSingleFlushes++
-	if b.cfg.CooldownThreshold > 0 && b.consecutiveSingleFlushes >= b.cfg.CooldownThreshold {
-		b.cooldownUntil = time.Now().Add(b.cfg.CooldownDuration)
+	cfg := b.cfg()
+	if cfg.CooldownThreshold > 0 && b.consecutiveSingleFlushes >= cfg.CooldownThreshold {
+		b.cooldownUntil = time.Now().Add(cfg.CooldownDuration)
 		b.consecutiveSingleFlushes = 0
 	}
 }

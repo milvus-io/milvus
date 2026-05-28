@@ -84,7 +84,8 @@ func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 }
 
 func (u *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
-	if !u.appendBatchConfig.enabled() {
+	cfg := u.currentAppendBatchConfig()
+	if !cfg.enabled() {
 		return false
 	}
 	if u.getAppendBatcher(vchannel).inCooldown(time.Now()) {
@@ -95,7 +96,7 @@ func (u *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msg
 			return false
 		}
 	}
-	return len(msgs) > 0 && messagesEstimateSize(msgs...) < u.appendBatchConfig.SmallMessageThreshold
+	return len(msgs) > 0 && messagesEstimateSize(msgs...) < cfg.SmallMessageThreshold
 }
 
 func (u *walAccesserImpl) appendVChannelMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponse {
@@ -119,9 +120,16 @@ func (u *walAccesserImpl) getAppendBatcher(vchannel string) *appendBatcher {
 	if batcher, ok := u.appendBatchers[vchannel]; ok {
 		return batcher
 	}
-	batcher := newAppendBatcher(vchannel, u.appendBatchConfig, u.appendVChannelMessages)
+	batcher := newAppendBatcher(vchannel, u.currentAppendBatchConfig, u.appendVChannelMessages)
 	u.appendBatchers[vchannel] = batcher
 	return batcher
+}
+
+func (u *walAccesserImpl) currentAppendBatchConfig() appendBatchConfig {
+	if u.appendBatchConfigFn != nil {
+		return u.appendBatchConfigFn()
+	}
+	return u.appendBatchConfig
 }
 
 func (u *walAccesserImpl) closeAppendBatchers() {
