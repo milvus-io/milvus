@@ -870,6 +870,7 @@ type updateSegmentPack struct {
 	// for update segment metric after alter segments
 	metricMutation              *segMetricMutation
 	fromSaveBinlogPathSegmentID int64 // if true, the operator is from save binlog paths
+	l0ManifestUpdates           []*l0ManifestUpdate
 	err                         error
 }
 
@@ -1182,6 +1183,135 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 	return nil
 }
 
+type l0ManifestUpdate struct {
+	segmentID            int64
+	deltalogs            []*datapb.FieldBinlog
+	storageConfig        *indexpb.StorageConfig
+	committedV3Manifests map[int64]string
+	segment              *SegmentInfo
+	manifestPath         string
+	entries              []packed.DeltaLogEntry
+}
+
+func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
+	u.segment = modPack.Get(u.segmentID)
+	if u.segment == nil {
+		log.Ctx(context.TODO()).Warn("meta update: add L0 deltalog failed - segment not found",
+			zap.Int64("segmentID", u.segmentID))
+		return false
+	}
+	if len(u.deltalogs) == 0 {
+		return false
+	}
+
+	if u.segment.GetManifestPath() == "" {
+		if err := binlog.CompressFieldBinlogs(u.deltalogs); err != nil {
+			return modPack.fail(err)
+		}
+		return true
+	}
+
+	if u.committedV3Manifests != nil {
+		u.manifestPath = u.committedV3Manifests[u.segmentID]
+	}
+	if u.manifestPath != "" {
+		return true
+	}
+
+	entries, err := buildL0V3DeltaLogEntries(u.segmentID, u.deltalogs)
+	if err != nil {
+		return modPack.fail(err)
+	}
+	if len(entries) == 0 {
+		return false
+	}
+	u.entries = entries
+	return true
+}
+
+func (u *l0ManifestUpdate) commitManifest() error {
+	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+		return nil
+	}
+	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	if err != nil {
+		return err
+	}
+	u.manifestPath = manifestPath
+	return nil
+}
+
+func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
+	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
+		return update.segment.GetManifestPath() != ""
+	})
+	if len(updates) == 0 {
+		return nil
+	}
+
+	groups := make(map[int64][]*l0ManifestUpdate)
+	for _, update := range updates {
+		groups[update.segmentID] = append(groups[update.segmentID], update)
+	}
+
+	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	if poolSize > len(groups) {
+		poolSize = len(groups)
+	}
+
+	pool := conc.NewPool[struct{}](poolSize)
+	defer pool.Release()
+
+	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	for _, group := range groups {
+		group := group
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			return struct{}{}, commitL0ManifestUpdateGroup(group)
+		}))
+	}
+	err := conc.BlockOnAll(futures...)
+	for _, update := range updates {
+		if update.committedV3Manifests != nil && update.manifestPath != "" {
+			update.committedV3Manifests[update.segmentID] = update.manifestPath
+		}
+	}
+	return err
+}
+
+func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
+	for _, update := range updates {
+		if update.manifestPath != "" {
+			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(update.entries) == 0 {
+			continue
+		}
+		if err := update.commitManifest(); err != nil {
+			return err
+		}
+		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {
+	if u.segment.GetManifestPath() != "" {
+		if err := updateManifestPathIfNewer(u.segment, u.manifestPath); err != nil {
+			return modPack.fail(err)
+		}
+		clearBinlogPaths(u.deltalogs)
+	}
+	return addDeltalogsToSegment(modPack, u.segmentID, u.segment, u.deltalogs)
+}
+
 func AddL0DeltalogsAndUpdateManifestOperator(
 	segmentID int64,
 	deltalogs []*datapb.FieldBinlog,
@@ -1189,49 +1319,17 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 	committedV3Manifests map[int64]string,
 ) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.Get(segmentID)
-		if segment == nil {
-			log.Ctx(context.TODO()).Warn("meta update: add L0 deltalog failed - segment not found",
-				zap.Int64("segmentID", segmentID))
+		update := &l0ManifestUpdate{
+			segmentID:            segmentID,
+			deltalogs:            deltalogs,
+			storageConfig:        storageConfig,
+			committedV3Manifests: committedV3Manifests,
+		}
+		if !update.prepare(modPack) {
 			return false
 		}
-		if len(deltalogs) == 0 {
-			return false
-		}
-
-		if segment.GetManifestPath() == "" {
-			if err := binlog.CompressFieldBinlogs(deltalogs); err != nil {
-				return modPack.fail(err)
-			}
-			return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
-		}
-
-		manifestPath := ""
-		if committedV3Manifests != nil {
-			manifestPath = committedV3Manifests[segmentID]
-		}
-		if manifestPath == "" {
-			entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
-			if err != nil {
-				return modPack.fail(err)
-			}
-			if len(entries) == 0 {
-				return false
-			}
-			manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(segment.GetManifestPath(), storageConfig, entries)
-			if err != nil {
-				return modPack.fail(err)
-			}
-			if committedV3Manifests != nil {
-				committedV3Manifests[segmentID] = manifestPath
-			}
-		}
-
-		if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
-			return modPack.fail(err)
-		}
-		clearBinlogPaths(deltalogs)
-		return addDeltalogsToSegment(modPack, segmentID, segment, deltalogs)
+		modPack.l0ManifestUpdates = append(modPack.l0ManifestUpdates, update)
+		return true
 	}
 }
 
@@ -1658,6 +1756,14 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	for _, operator := range operators {
 		operator(updatePack)
 		if updatePack.err != nil {
+			return updatePack.err
+		}
+	}
+	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+		return err
+	}
+	for _, update := range updatePack.l0ManifestUpdates {
+		if !update.apply(updatePack) {
 			return updatePack.err
 		}
 	}

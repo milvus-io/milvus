@@ -3101,6 +3101,83 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	require.EqualValues(t, 3, updated.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
 }
 
+func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {
+	basePath1 := "/tmp/milvus/insert_log/1/10/200"
+	basePath2 := "/tmp/milvus/insert_log/1/10/201"
+	oldManifest1 := packed.MarshalManifestPath(basePath1, 7)
+	oldManifest2 := packed.MarshalManifestPath(basePath2, 11)
+	newManifest1 := packed.MarshalManifestPath(basePath1, 8)
+	newManifest2 := packed.MarshalManifestPath(basePath2, 12)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest1,
+	})))
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           201,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest2,
+	})))
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			entered <- manifestPath
+			<-release
+			switch manifestPath {
+			case oldManifest1:
+				return newManifest1, nil
+			case oldManifest2:
+				return newManifest2, nil
+			default:
+				require.Failf(t, "unexpected manifest", manifestPath)
+				return "", nil
+			}
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- meta.UpdateSegmentsInfo(context.TODO(),
+			AddL0DeltalogsAndUpdateManifestOperator(200, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath1 + "/_delta/9001", EntriesNum: 3}}}}, &indexpb.StorageConfig{}, nil),
+			AddL0DeltalogsAndUpdateManifestOperator(201, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9002, LogPath: basePath2 + "/_delta/9002", EntriesNum: 5}}}}, &indexpb.StorageConfig{}, nil),
+		)
+	}()
+
+	got := map[string]struct{}{}
+	for i := 0; i < 2; i++ {
+		select {
+		case manifestPath := <-entered:
+			got[manifestPath] = struct{}{}
+		case <-time.After(time.Second):
+			require.FailNow(t, "manifest updates did not run concurrently")
+		}
+	}
+	require.Contains(t, got, oldManifest1)
+	require.Contains(t, got, oldManifest2)
+	close(release)
+	require.NoError(t, <-errCh)
+
+	updated1 := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, newManifest1, updated1.GetManifestPath())
+	require.Empty(t, updated1.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	updated2 := meta.GetSegment(context.TODO(), 201)
+	require.Equal(t, newManifest2, updated2.GetManifestPath())
+	require.Empty(t, updated2.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
 func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
