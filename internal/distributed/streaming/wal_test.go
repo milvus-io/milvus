@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -548,6 +549,39 @@ func TestAppendMessagesBatchThresholdIsPerVChannel(t *testing.T) {
 
 	resp := <-respCh
 	assert.NoError(t, resp.UnwrapFirstError())
+}
+
+func TestAppendMessagesBatchDecisionIsPerVChannel(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	msg1 := newInsertMessageWithCollectionName(vChannel1, "payload-1")
+	msg2 := newInsertMessageWithCollectionName(vChannel2, strings.Repeat("x", messagesEstimateSize(msg1)*2))
+	w.appendBatchConfig = appendBatchConfig{
+		SmallMessageThreshold: messagesEstimateSize(msg1) + 1,
+		MaxBatchSize:          1 << 20,
+		MaxMessageCount:       64,
+		MaxDelay:              100 * time.Millisecond,
+		CooldownThreshold:     10,
+		CooldownDuration:      time.Second,
+	}
+
+	p := mock_producer.NewMockProducer(t)
+	available := make(chan struct{})
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(available).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+	}, nil).Twice()
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	start := time.Now()
+	resp := w.AppendMessages(ctx, msg1, msg2)
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.GreaterOrEqual(t, time.Since(start), w.appendBatchConfig.MaxDelay)
 }
 
 func TestAppendMessagesBatchFlushByMessageCount(t *testing.T) {

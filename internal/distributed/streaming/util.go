@@ -52,9 +52,8 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 	batchTasks := make([]batchTask, 0, len(dispatchedMessages))
 	guards := make([]*producer.ProduceGuard, 0, len(dispatchedMessages))
 	resp := types.NewAppendResponseN(len(msgs))
-	shouldBatch := w.shouldBatchAppendMessages(dispatchedMessages)
 	for vchannel, vchannelMsgs := range dispatchedMessages {
-		if shouldBatch {
+		if w.shouldBatchAppendVChannelMessages(vchannel, vchannelMsgs...) {
 			pendingBatchTasks = append(pendingBatchTasks, pendingBatchTask{
 				vchannel: vchannel,
 				indexes:  indexes[vchannel],
@@ -111,7 +110,8 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 }
 
 func (w *walAccesserImpl) shouldBatchAppendMessages(dispatchedMessages map[string][]message.MutableMessage) bool {
-	if !w.appendBatchConfig.enabled() {
+	cfg := w.currentAppendBatchConfig()
+	if !cfg.enabled() {
 		return false
 	}
 	if len(dispatchedMessages) == 0 {
@@ -126,6 +126,10 @@ func (w *walAccesserImpl) shouldBatchAppendMessages(dispatchedMessages map[strin
 }
 
 func (w *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
+	cfg := w.currentAppendBatchConfig()
+	if !cfg.enabled() {
+		return false
+	}
 	if w.getAppendBatcher(vchannel).inCooldown(time.Now()) {
 		return false
 	}
@@ -134,7 +138,7 @@ func (w *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msg
 			return false
 		}
 	}
-	return len(msgs) > 0 && messagesEstimateSize(msgs...) < w.appendBatchConfig.SmallMessageThreshold
+	return len(msgs) > 0 && messagesEstimateSize(msgs...) < cfg.SmallMessageThreshold
 }
 
 func (w *walAccesserImpl) appendVChannelMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponse {
@@ -156,9 +160,16 @@ func (w *walAccesserImpl) getAppendBatcher(vchannel string) *appendBatcher {
 	if batcher, ok := w.appendBatchers[vchannel]; ok {
 		return batcher
 	}
-	batcher := newAppendBatcher(vchannel, w.appendBatchConfig, w.appendVChannelMessages)
+	batcher := newAppendBatcher(vchannel, w.currentAppendBatchConfig, w.appendVChannelMessages)
 	w.appendBatchers[vchannel] = batcher
 	return batcher
+}
+
+func (w *walAccesserImpl) currentAppendBatchConfig() appendBatchConfig {
+	if w.appendBatchConfigFn != nil {
+		return w.appendBatchConfigFn()
+	}
+	return w.appendBatchConfig
 }
 
 func (w *walAccesserImpl) closeAppendBatchers() {
