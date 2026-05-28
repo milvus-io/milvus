@@ -13,7 +13,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -21,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
@@ -101,7 +99,7 @@ func constructKey(metaName, topic string) string {
 func parsePageID(key string) (int64, error) {
 	stringSlice := strings.Split(key, "/")
 	if len(stringSlice) != 3 {
-		return 0, fmt.Errorf("invalid page id %s ", key)
+		return 0, merr.WrapErrMqInternalMsg("invalid page id %s ", key)
 	}
 	return strconv.ParseInt(stringSlice[2], 10, 64)
 }
@@ -226,12 +224,12 @@ func parseCompressionType(params *paramtable.ComponentParam) ([]gorocksdb.Compre
 	return lo.Map(params.RocksmqCfg.CompressionTypes.GetAsStrings(), func(sType string, _ int) gorocksdb.CompressionType {
 		iType, err := strconv.Atoi(sType)
 		if err != nil {
-			tError = fmt.Errorf("invalid rocksmq compression type: %s", err.Error())
+			tError = merr.WrapErrParameterInvalidErr(err, "invalid rocksmq compression type")
 			return 0
 		}
 
 		if !lo.Contains(validType, iType) {
-			tError = fmt.Errorf("invalid rocksmq compression type, should in %v", validType)
+			tError = merr.WrapErrParameterInvalidMsg("invalid rocksmq compression type, should in %v", validType)
 			return 0
 		}
 		return gorocksdb.CompressionType(iType)
@@ -491,7 +489,7 @@ func (rmq *rocksmq) stopRetention() {
 // CreateTopic writes initialized messages for topic in rocksdb
 func (rmq *rocksmq) CreateTopic(topicName string) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	start := time.Now()
 
@@ -499,7 +497,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	// Check if topicName contains "/"
 	if strings.Contains(topicName, "/") {
 		log.Warn("rocksmq failed to create topic for topic name contains \"/\"", zap.String("topic", topicName))
-		return retry.Unrecoverable(fmt.Errorf("topic name = %s contains \"/\"", topicName))
+		return retry.Unrecoverable(merr.WrapErrParameterInvalidMsg("topic name = %s contains \"/\"", topicName))
 	}
 
 	// topicIDKey is the only identifier of a topic
@@ -543,11 +541,11 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topicName)
+		return merr.WrapErrMqTopicNotFound(topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -619,13 +617,13 @@ func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Cons
 // CreateConsumerGroup creates an nonexistent consumer group for topic
 func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	start := time.Now()
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if ok {
-		return fmt.Errorf("RMQ CreateConsumerGroup key already exists, key = %s", key)
+		return merr.WrapErrMqInternalMsg("RMQ CreateConsumerGroup key already exists, key = %s", key)
 	}
 	rmq.consumersID.Store(key, DefaultMessageID)
 	log.Ctx(rmq.ctx).Debug("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
@@ -637,7 +635,7 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 // RegisterConsumer registers a consumer in rocksmq consumers
 func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	ll, _ := topicMu.LoadOrStore(consumer.Topic, new(sync.Mutex))
 	mu, _ := ll.(*sync.Mutex)
@@ -658,7 +656,7 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 
 func (rmq *rocksmq) GetLatestMsg(topicName string) (int64, error) {
 	if rmq.isClosed() {
-		return DefaultMessageID, errors.New(RmqNotServingErrMsg)
+		return DefaultMessageID, merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	msgID, err := rmq.getLatestMsg(topicName)
 	if err != nil {
@@ -671,7 +669,7 @@ func (rmq *rocksmq) GetLatestMsg(topicName string) (int64, error) {
 // DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	return rmq.destroyConsumerGroupInternal(topicName, groupName)
 }
@@ -681,11 +679,11 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topicName)
+		return merr.WrapErrMqTopicNotFound(topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -709,19 +707,19 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 // Produce produces messages for topic and updates page infos for retention
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	if messages == nil {
-		return []UniqueID{}, errors.New("messages are empty")
+		return []UniqueID{}, merr.WrapErrParameterInvalidMsg("messages are empty")
 	}
 	if rmq.isClosed() {
-		return nil, errors.New(RmqNotServingErrMsg)
+		return nil, merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
+		return []UniqueID{}, merr.WrapErrMqTopicNotFound(topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return []UniqueID{}, merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -735,7 +733,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	}
 	allocTime := time.Since(start).Milliseconds()
 	if UniqueID(msgLen) != idEnd-idStart {
-		return []UniqueID{}, errors.New("Obtained id length is not equal that of message")
+		return []UniqueID{}, merr.WrapErrMqInternalMsg("Obtained id length is not equal that of message")
 	}
 	// Insert data to store system
 	batch := gorocksdb.NewWriteBatch()
@@ -840,24 +838,24 @@ func (rmq *rocksmq) getLastID(topicName string) (int64, bool) {
 // 3. Update ack informations in rocksdb
 func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
 	if rmq.isClosed() {
-		return nil, errors.New(RmqNotServingErrMsg)
+		return nil, merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return nil, fmt.Errorf("topic name = %s not exist", topicName)
+		return nil, merr.WrapErrMqTopicNotFound(topicName)
 	}
 
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return nil, fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return nil, merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
 
 	currentID, ok := rmq.getCurrentID(topicName, groupName)
 	if !ok {
-		return nil, fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", topicName, groupName)
+		return nil, merr.WrapErrMqInternalMsg("currentID of topicName=%s, groupName=%s not exist", topicName, groupName)
 	}
 
 	// return if don't have new message
@@ -951,7 +949,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if !ok {
-		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+		return merr.WrapErrMqInternalMsg("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
 	storeKey := path.Join(topicName, strconv.FormatInt(msgID, 10))
@@ -977,7 +975,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID UniqueID) error {
 	oldPos, ok := rmq.getCurrentID(topicName, groupName)
 	if !ok {
-		return errors.New("move unknown consumer")
+		return merr.WrapErrMqInternalMsg("move unknown consumer")
 	}
 
 	log := log.Ctx(rmq.ctx)
@@ -1002,7 +1000,7 @@ func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID Uni
 // Seek updates the current id to the given msgID
 func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	/* Step I: Check if key exists */
 	ll, ok := topicMu.Load(topicName)
@@ -1011,7 +1009,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -1029,7 +1027,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 	log := log.Ctx(rmq.ctx)
 	log.Warn("Use method ForceSeek that only for test")
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	/* Step I: Check if key exists */
 	ll, ok := topicMu.Load(topicName)
@@ -1038,7 +1036,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+		return merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -1048,7 +1046,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 	key := constructCurrentID(topicName, groupName)
 	_, ok = rmq.consumersID.Load(key)
 	if !ok {
-		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+		return merr.WrapErrMqInternalMsg("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
 	rmq.consumersID.Store(key, msgID)
@@ -1061,7 +1059,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 // SeekToLatest updates current id to the msg id of latest message + 1
 func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	if rmq.isClosed() {
-		return errors.New(RmqNotServingErrMsg)
+		return merr.WrapErrServiceUnavailable(RmqNotServingErrMsg)
 	}
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
@@ -1069,7 +1067,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if !ok {
-		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
+		return merr.WrapErrMqInternalMsg("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
 	msgID, err := rmq.getLatestMsg(topicName)
@@ -1185,7 +1183,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 			if c.GroupName != groupName {
 				beginID, ok := rmq.getCurrentID(c.Topic, c.GroupName)
 				if !ok {
-					err = fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", c.Topic, c.GroupName)
+					err = merr.WrapErrMqInternalMsg("currentID of topicName=%s, groupName=%s not exist", c.Topic, c.GroupName)
 					return false
 				}
 				if beginID < minBeginID {

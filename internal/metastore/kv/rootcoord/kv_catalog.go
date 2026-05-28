@@ -1169,7 +1169,7 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 	}
 	if err != nil && errors.Is(err, merr.ErrIoKeyNotFound) {
 		log.Ctx(ctx).Debug("the key isn't existed", zap.String("key", k))
-		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
+		return common.NewIgnorableErrorf("the key[%s] isn't existed", k)
 	}
 	return kc.Txn.Remove(ctx, k)
 }
@@ -1555,7 +1555,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			log.Ctx(ctx).Warn("fail to load grant privilege entity", zap.String("key", granteeKey), zap.Any("type", operateType), zap.Error(err))
 			if funcutil.IsRevoke(operateType) {
 				if errors.Is(err, merr.ErrIoKeyNotFound) {
-					return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", granteeKey))
+					return common.NewIgnorableErrorf("the grant[%s] isn't existed", granteeKey)
 				}
 				return err
 			}
@@ -1588,7 +1588,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		log.Ctx(ctx).Debug("not found the grantee id", zap.String("key", k))
 		if funcutil.IsRevoke(operateType) {
-			return common.NewIgnorableError(fmt.Errorf("the grantee-id[%s] isn't existed", k))
+			return common.NewIgnorableErrorf("the grantee-id[%s] isn't existed", k)
 		}
 		if funcutil.IsGrant(operateType) {
 			if err = kc.Txn.Save(ctx, k, entity.Grantor.User.Name); err != nil {
@@ -1605,7 +1605,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		return err
 	}
-	return common.NewIgnorableError(fmt.Errorf("the privilege[%s] has been granted", privilegeName))
+	return common.NewIgnorableErrorf("the privilege[%s] has been granted", privilegeName)
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {

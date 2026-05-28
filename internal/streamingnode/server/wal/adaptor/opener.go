@@ -367,7 +367,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 			log.Ctx(ctx).Warn("timeout waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),
 				zap.Duration("timeout", defaultWALSwitchFlushTimeout))
-			return errors.Newf("timeout waiting for flush completion during WAL switch")
+			return status.NewInner("timeout waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			log.Ctx(ctx).Warn("context canceled while waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),
