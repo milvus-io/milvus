@@ -84,7 +84,7 @@ func (u *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msg
 		return false
 	}
 	for _, msg := range msgs {
-		if !msg.MessageType().IsDMLMessageType() {
+		if msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeDelete {
 			return false
 		}
 	}
