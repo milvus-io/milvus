@@ -1459,7 +1459,7 @@ ChunkedSegmentSealedImpl::GetNgramIndex(milvus::OpContext* op_ctx,
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
                field_id.get());
-    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+    return PinWrapper<index::NgramInvertedIndex*>(std::move(ca), index);
 }
 
 PinWrapper<index::NgramInvertedIndex*>
@@ -1485,7 +1485,7 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
                    "nested_path: {}",
                    field_id.get(),
                    nested_path);
-        return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+        return PinWrapper<index::NgramInvertedIndex*>(std::move(ca), index);
     });
 }
 

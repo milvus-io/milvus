@@ -77,7 +77,7 @@ class ChunkedColumnGroup {
     GetGroupChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<GroupChunk*>(ca, chunk);
+        return PinWrapper<GroupChunk*>(std::move(ca), chunk);
     }
 
     std::shared_ptr<CellAccessor<GroupChunk>>
@@ -218,7 +218,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
-        return PinWrapper<const char*>(group_chunk, chunk->Data());
+        return PinWrapper<const char*>(std::move(group_chunk), chunk->Data());
     }
 
     bool
@@ -301,7 +301,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<SpanBase>(
-            chunk_wrapper, static_cast<FixedWidthChunk*>(chunk.get())->Span());
+            std::move(chunk_wrapper),
+            static_cast<FixedWidthChunk*>(chunk.get())->Span());
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -318,7 +319,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<StringChunk*>(chunk.get())->StringViews(offset_len));
     }
 
@@ -335,7 +336,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
@@ -353,7 +354,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
             std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
@@ -368,7 +369,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<const size_t*>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<VectorArrayChunk*>(chunk.get())->Offsets());
     }
 
@@ -385,7 +386,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<StringChunk*>(chunk.get())->ViewsByOffsets(offsets));
     }
 
@@ -396,7 +397,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
-            chunk_wrapper,
+            std::move(chunk_wrapper),
             static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
     }
 
@@ -414,7 +415,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
-        return PinWrapper<Chunk*>(group_chunk, chunk.get());
+        return PinWrapper<Chunk*>(std::move(group_chunk), chunk.get());
     }
 
     std::vector<PinWrapper<Chunk*>>
@@ -425,7 +426,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
         for (auto& group_chunk : group_chunks) {
             auto chunk = group_chunk.get()->GetChunk(field_id_);
-            ret.emplace_back(group_chunk, chunk.get());
+            ret.emplace_back(std::move(group_chunk), chunk.get());
         }
         return ret;
     }

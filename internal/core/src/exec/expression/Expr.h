@@ -1341,7 +1341,7 @@ class SegmentExpr : public Expr {
                         // use valid_data to see if raw data is null
                         auto pw = segment_->get_batch_views<T>(
                             op_ctx_, field_id_, i, data_pos, size);
-                        auto [data_vec, valid_data] = pw.get();
+                        const auto& [data_vec, valid_data] = pw.get();
 
                         if constexpr (NeedSegmentOffsets) {
                             func(data_vec.data(),

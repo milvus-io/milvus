@@ -361,15 +361,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw =
                 chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
-            auto [string_views, valid_data] = pw.get();
+            auto& [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                pw, {std::move(res), std::move(valid_data)});
+                std::move(pw), std::move(content));
         }
     }
 
@@ -404,14 +406,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
+            auto& [string_views, valid_data] = pw.get();
             std::vector<ViewType> res;
-            res.reserve(pw.get().first.size());
-            for (const auto& view : pw.get().first) {
+            res.reserve(string_views.size());
+            for (const auto& view : string_views) {
                 res.emplace_back(view);
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), pw.get().second});
+                std::move(pw), std::move(content));
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
