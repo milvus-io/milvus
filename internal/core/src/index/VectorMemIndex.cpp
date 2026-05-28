@@ -147,21 +147,6 @@ LoadEmptyEmbListOffsetsFromBinarySet(const BinarySet& binary_set) {
     return LoadEmptyEmbListOffsetsFromPayload(data->data.get(), data->size);
 }
 
-int64_t
-GetEmbListQueryCount(const DatasetPtr& dataset) {
-    auto offsets = dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
-    if (offsets == nullptr) {
-        return dataset->GetRows();
-    }
-
-    auto total_vectors = static_cast<size_t>(dataset->GetRows());
-    int64_t query_count = 0;
-    while (offsets[query_count] < total_vectors) {
-        ++query_count;
-    }
-    return query_count;
-}
-
 }  // namespace
 
 template <typename T>
@@ -678,7 +663,22 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
     if (IsEmptyEmbListIndex()) {
-        auto num_queries = GetEmbListQueryCount(dataset);
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        auto num_queries = dataset->GetRows();
+        if (offsets != nullptr) {
+            num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
+            AssertInfo(num_queries > 0,
+                       "embedding list query count is missing");
+            auto total_vectors = static_cast<size_t>(dataset->GetRows());
+            AssertInfo(
+                offsets[num_queries] == total_vectors,
+                "embedding list query offsets are inconsistent with flattened "
+                "rows: nq={}, terminal_offset={}, rows={}",
+                num_queries,
+                offsets[num_queries],
+                total_vectors);
+        }
         auto total_num = num_queries * topk;
         search_result.seg_offsets_.assign(total_num, INVALID_SEG_OFFSET);
         search_result.distances_.assign(total_num, 0.0F);

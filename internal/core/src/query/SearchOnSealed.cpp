@@ -87,6 +87,7 @@ SearchOnSealedIndex(const Schema& schema,
         auto num_vectors = query_offsets[num_queries];
         dataset = knowhere::GenDataSet(num_vectors, dim, query_data);
         dataset->Set(knowhere::meta::EMB_LIST_OFFSET, query_offsets);
+        dataset->Set(knowhere::meta::NQ, num_queries);
     }
 
     dataset->SetIsSparse(is_sparse);

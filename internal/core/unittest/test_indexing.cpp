@@ -1020,6 +1020,7 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     std::vector<size_t> query_offsets = {0, 1};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::NQ, int64_t{1});
     milvus::SearchInfo search_info;
     search_info.topk_ = 3;
     search_info.metric_type_ = metric_type;
@@ -1032,6 +1033,24 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     EXPECT_TRUE(std::all_of(
         result.seg_offsets_.begin(),
         result.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
+
+    std::vector<float> trailing_empty_queries(3 * dim, 0.1F);
+    auto trailing_query_dataset =
+        knowhere::GenDataSet(3, dim, trailing_empty_queries.data());
+    std::vector<size_t> trailing_query_offsets = {0, 2, 3, 3, 3};
+    trailing_query_dataset->Set(
+        knowhere::meta::EMB_LIST_OFFSET,
+        const_cast<const size_t*>(trailing_query_offsets.data()));
+    trailing_query_dataset->Set(knowhere::meta::NQ, int64_t{4});
+    SearchResult trailing_result;
+    loaded_vec_index->Query(
+        trailing_query_dataset, search_info, nullptr, nullptr, trailing_result);
+    EXPECT_EQ(trailing_result.total_nq_, 4);
+    EXPECT_EQ(trailing_result.seg_offsets_.size(), 4 * search_info.topk_);
+    EXPECT_TRUE(std::all_of(
+        trailing_result.seg_offsets_.begin(),
+        trailing_result.seg_offsets_.end(),
         [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 }
 
