@@ -636,10 +636,10 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_nullable_field(self):
         """
-        target: test order_by on nullable field with NULLS FIRST semantics
+        target: test order_by on nullable field with default ASC NULLS LAST semantics
         method: create collection with nullable price field, insert some null values,
                 search with order_by price asc
-        expected: null values appear before all non-null values (NULLS FIRST)
+        expected: null values appear after all non-null values (NULLS LAST)
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -683,16 +683,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             results = res[0]
             assert len(results) == default_limit
 
-            # Verify NULLS FIRST: all nulls come before non-nulls
-            seen_non_null = False
+            # Verify NULLS LAST: all nulls come after non-nulls
+            seen_null = False
             non_null_scores = []
             for r in results:
                 val = r["entity"].get("score")
                 if val is None:
-                    assert not seen_non_null, \
-                        "Null value found after non-null value (expected NULLS FIRST)"
+                    seen_null = True
                 else:
-                    seen_non_null = True
+                    assert not seen_null, \
+                        "Non-null value found after null value (expected NULLS LAST)"
                     non_null_scores.append(val)
 
             # Verify non-null values are sorted ascending
