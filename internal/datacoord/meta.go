@@ -2264,20 +2264,18 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	// Compaction normalizes import segments: row timestamps in the output
 	// binlogs are already rewritten to commit_ts by the compactor, so
 	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback positions are also normalized to commit_ts for safety
-	// when binlog timestamps are unavailable.
-	maxCommitTs := uint64(0)
-	for _, seg := range compactFromSegInfos {
-		if ts := seg.GetCommitTimestamp(); ts > maxCommitTs {
-			maxCommitTs = ts
-		}
-	}
-	fallbackStart := normalizePositionTimestamp(getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	// After sort compaction, each import segment's StartPosition.ts is
+	// already raised to its own commit_ts, so getMinPosition across inputs
+	// naturally yields the earliest visibility point for all rows in the
+	// output segment (including cascading merges where previously-merged
+	// inputs carry commit_ts=0 but whose StartPosition already encodes the
+	// correct min of their sources). No additional normalize is needed.
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
-	})), maxCommitTs)
-	fallbackDml := normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
-	})), maxCommitTs)
+	}))
 
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
@@ -2390,22 +2388,21 @@ func (m *meta) completeMixCompactionMutation(
 	outputSchemaVersion := t.GetSchema().GetVersion()
 
 	// Compaction normalizes import segments: row timestamps in the output
-	// binlogs are already rewritten to commit_ts by the compactor, so
+	// binlogs are already rewritten to commit_ts by the compactor, so the
+	// output segment is a normal segment with CommitTimestamp = 0.
 	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback positions are also normalized to commit_ts for safety
-	// when binlog timestamps are unavailable.
-	maxCommitTs := uint64(0)
-	for _, seg := range compactFromSegInfos {
-		if ts := seg.GetCommitTimestamp(); ts > maxCommitTs {
-			maxCommitTs = ts
-		}
-	}
-	fallbackStart := normalizePositionTimestamp(getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	// After sort compaction, each import segment's StartPosition.ts is
+	// already raised to its own commit_ts, so getMinPosition across inputs
+	// naturally yields the earliest visibility point for all rows in the
+	// output segment (including cascading merges where previously-merged
+	// inputs carry commit_ts=0 but whose StartPosition already encodes the
+	// correct min of their sources). No additional normalize is needed.
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
-	})), maxCommitTs)
-	fallbackDml := normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
-	})), maxCommitTs)
+	}))
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {

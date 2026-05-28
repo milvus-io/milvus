@@ -1755,7 +1755,10 @@ message AbortImportRequest {
 }
 
 message HandleCommitVchannelRequest {
-  common.MsgBase base     = 1;
-  int64          job_id   = 2;
-  string         vchannel = 3;
+  common.MsgBase base             = 1;
+  int64          job_id           = 2;
+  string         vchannel         = 3;
+  // commit_timestamp is the WAL message timestamp of the CommitImportMessage.
+  // This becomes the segment's commit_timestamp for MVCC/TTL/delete correctness.
+  uint64         commit_timestamp = 4;
 }

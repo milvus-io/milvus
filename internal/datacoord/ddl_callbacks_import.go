@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -107,21 +106,6 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 	if err != nil {
 		return err
-	}
-
-	// Validate channel assignment availability and replication configuration
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-	channelAssignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return err
-	}
-
-	// Import in replicating cluster is not supported yet
-	if channelAssignment.ReplicateConfiguration != nil && len(channelAssignment.ReplicateConfiguration.GetClusters()) > 1 {
-		return merr.WrapErrImportFailed("import in replicating cluster is not supported yet")
 	}
 
 	return nil
