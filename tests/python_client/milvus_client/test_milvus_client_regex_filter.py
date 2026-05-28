@@ -2071,7 +2071,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
                 "vec": [10.0, 10.0, 10.0, 10.0],
                 "vec2": [0.01, 0.0, 0.0, 0.0],
                 "text": "WARN beta retry",
-                "email": None,
+                "email": "b@gmail.com",
                 "metadata": {"trace": "api-002", "nested": {"x": "beta"}},
             },
             {
@@ -2089,6 +2089,14 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
                 "text": "ERROR delta fail",
                 "email": "d@gmail.com",
                 "metadata": {"trace": "ops-004", "nested": {"x": "delta"}},
+            },
+            {
+                "id": 5,
+                "vec": [10.0, 10.0, 10.0, 10.0],
+                "vec2": [0.03, 0.0, 0.0, 0.0],
+                "text": "INFO nullable email",
+                "email": None,
+                "metadata": {"trace": "ops-005", "nested": {"x": "nullable"}},
             },
         ]
         client.insert(collection_name=collection_name, data=data)
@@ -2133,9 +2141,18 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
             2,
             expr='email !~ "gmail" or email is null',
         )
+
+        res = client.hybrid_search(collection_name, [json_req], WeightedRanker(1.0), limit=2, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert result == {1, 2}, f"JSON template regex request should return only {{1,2}}, got {result}"
+
+        res = client.hybrid_search(collection_name, [nullable_req], WeightedRanker(1.0), limit=2, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert result == {3, 5}, f"nullable regex request should return only {{3,5}}, got {result}"
+
         res = client.hybrid_search(collection_name, [json_req, nullable_req], ranker, limit=4, output_fields=["id"])
         result = {hit["id"] for hit in res[0]}
-        assert {1, 2, 3}.issubset(result), f"both-regex/template/nullable hybrid ids missing, got {result}"
+        assert result == {1, 2, 3, 5}, f"both-regex/template/nullable hybrid expected {{1,2,3,5}}, got {result}"
         assert 4 not in result, f"id 4 should match neither request but appeared: {result}"
 
         self.drop_collection(client, collection_name)
@@ -2367,10 +2384,10 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
 
         res = client.query(collection_name, filter='MATCH_ANY(events, $[name] =~ ".*")', output_fields=["id"])
         result = sorted([r["id"] for r in res])
-        assert result == [1, 2, 3], f"struct name =~ .* should exclude null/missing paths, got {result}"
+        assert result == [1, 2, 3], f"struct name =~ .* should exclude empty/null arrays, got {result}"
 
         res = client.query(collection_name, filter='MATCH_ANY(events, $[name] !~ ".*")', output_fields=["id"])
-        assert res == [], f"struct name !~ .* should exclude null/missing paths, got {res}"
+        assert res == [], f"struct name !~ .* should exclude empty/null arrays, got {res}"
 
         # StructArray elements are strongly typed, so element-level missing required fields cannot be inserted.
         # Use an unknown StructArray sub-field to cover missing-path expression validation for =~ and !~.
@@ -2396,6 +2413,30 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
             check_items=error,
         )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="nullable StructArray None insert is not merged into master yet", strict=True)
+    def test_regex_struct_array_nullable_null_field_query(self):
+        """
+        target: regex filtering excludes null StructArray fields when nullable StructArray insert is supported
+        expected: events=None is inserted successfully; =~ and !~ both exclude the null StructArray row
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        setup_struct_array_regex_collection(client, collection_name)
+        client.insert(
+            collection_name=collection_name,
+            data=[{"id": 5, "vec": [0.05] + [0.0] * (default_dim - 1), "events": None}],
+        )
+
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[name] =~ ".*")', output_fields=["id"])
+        result = sorted([r["id"] for r in res])
+        assert result == [1, 2, 3], f"struct name =~ .* should exclude empty/null arrays, got {result}"
+
+        res = client.query(collection_name, filter='MATCH_ANY(events, $[name] !~ ".*")', output_fields=["id"])
+        assert res == [], f"struct name !~ .* should exclude empty/null arrays, got {res}"
+
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_regex_struct_array_scalar_index_path(self):
         """
@@ -2418,7 +2459,13 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
         """
         client, collection_name = self._shared_collection()
         query_vector = EmbeddingList()
-        query_vector.add([0.0] * default_dim)
+        query_vector.add([0.035] + [0.0] * (default_dim - 1))
+        req_unfiltered = AnnSearchRequest(
+            [query_vector],
+            "events[embedding]",
+            {"metric_type": "MAX_SIM_L2", "params": {"ef": 64}},
+            1,
+        )
         req_name = AnnSearchRequest(
             [query_vector],
             "events[embedding]",
@@ -2433,6 +2480,15 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
             1,
             expr='MATCH_ANY(events, $[status] =~ "WARN")',
         )
+
+        res = client.hybrid_search(collection_name, [req_unfiltered], WeightedRanker(1.0), limit=1, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert result == {2}, f"unfiltered struct embedding top1 should be non-matching id 2, got {result}"
+
+        res = client.hybrid_search(collection_name, [req_name], WeightedRanker(1.0), limit=1, output_fields=["id"])
+        result = {hit["id"] for hit in res[0]}
+        assert result == {1}, f"struct name regex request should return only id 1, got {result}"
+
         res = client.hybrid_search(
             collection_name, [req_name, req_status], WeightedRanker(0.5, 0.5), limit=2, output_fields=["id"]
         )
