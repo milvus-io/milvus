@@ -7157,7 +7157,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchSmallMessageThreshold = ParamItem{
 		Key:          "streaming.walAppendBatch.smallMessageThreshold",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The max total estimated size of one vchannel DML message group eligible for client-side append batching.",
 		DefaultValue: "64k",
 		Export:       false,
@@ -7166,7 +7166,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchMaxSize = ParamItem{
 		Key:          "streaming.walAppendBatch.maxSize",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The max accumulated estimated size that triggers a client-side vchannel append batch flush.",
 		DefaultValue: "1m",
 		Export:       false,
@@ -7175,7 +7175,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchMaxMessageCount = ParamItem{
 		Key:          "streaming.walAppendBatch.maxMessageCount",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The max accumulated message count that triggers a client-side vchannel append batch flush.",
 		DefaultValue: "64",
 		Export:       false,
@@ -7184,7 +7184,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchMaxDelay = ParamItem{
 		Key:          "streaming.walAppendBatch.maxDelay",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The max duration a client-side vchannel append batch can wait before flushing.",
 		DefaultValue: "5ms",
 		Export:       false,
@@ -7193,7 +7193,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchCooldownThreshold = ParamItem{
 		Key:          "streaming.walAppendBatch.cooldownThreshold",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The consecutive timer flush count with only one DML message before client-side append batching enters cooldown.",
 		DefaultValue: "3",
 		Export:       false,
@@ -7202,7 +7202,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 
 	p.WALAppendBatchCooldownDuration = ParamItem{
 		Key:          "streaming.walAppendBatch.cooldownDuration",
-		Version:      "3.0.0",
+		Version:      "2.6.18",
 		Doc:          "The cooldown duration after client-side append batching repeatedly flushes only one DML message.",
 		DefaultValue: "10s",
 		Export:       false,

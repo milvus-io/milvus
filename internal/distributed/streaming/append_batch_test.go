@@ -24,7 +24,7 @@ func TestNewAppendBatchConfigFromParams(t *testing.T) {
 }
 
 func TestAppendBatcherSubmitClosedAndCanceled(t *testing.T) {
-	batcher := newAppendBatcher(vChannel1, appendBatchTestConfig(), appendBatchTestAppendFn(nil))
+	batcher := newAppendBatcher(vChannel1, appendBatchTestConfigFn(), appendBatchTestAppendFn(nil))
 	batcher.close()
 
 	resp := <-batcher.submit(context.Background(), newInsertMessage(vChannel1))
@@ -32,13 +32,13 @@ func TestAppendBatcherSubmitClosedAndCanceled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	batcher = newAppendBatcher(vChannel1, appendBatchTestConfig(), appendBatchTestAppendFn(nil))
+	batcher = newAppendBatcher(vChannel1, appendBatchTestConfigFn(), appendBatchTestAppendFn(nil))
 	resp = <-batcher.submit(ctx, newInsertMessage(vChannel1))
 	assert.ErrorIs(t, resp.Error, context.Canceled)
 }
 
 func TestAppendBatcherClosePending(t *testing.T) {
-	batcher := newAppendBatcher(vChannel1, appendBatchTestConfig(), appendBatchTestAppendFn(nil))
+	batcher := newAppendBatcher(vChannel1, appendBatchTestConfigFn(), appendBatchTestAppendFn(nil))
 
 	respCh := batcher.submit(context.Background(), newInsertMessage(vChannel1))
 	batcher.close()
@@ -49,7 +49,7 @@ func TestAppendBatcherClosePending(t *testing.T) {
 
 func TestAppendBatcherSkipsCanceledPendingRequest(t *testing.T) {
 	appended := make(chan int, 1)
-	batcher := newAppendBatcher(vChannel1, appendBatchTestConfig(), appendBatchTestAppendFn(appended))
+	batcher := newAppendBatcher(vChannel1, appendBatchTestConfigFn(), appendBatchTestAppendFn(appended))
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	respCh1 := batcher.submit(canceledCtx, newInsertMessage(vChannel1))
@@ -69,7 +69,7 @@ func TestAppendBatcherFlushAllCanceledRequests(t *testing.T) {
 	called := false
 	batcher := newAppendBatcher(
 		vChannel1,
-		appendBatchTestConfig(),
+		appendBatchTestConfigFn(),
 		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponse {
 			called = true
 			return types.AppendResponse{}
@@ -84,6 +84,23 @@ func TestAppendBatcherFlushAllCanceledRequests(t *testing.T) {
 	resp := <-respCh
 	assert.ErrorIs(t, resp.Error, context.Canceled)
 	assert.False(t, called)
+}
+
+func TestAppendBatcherUsesDynamicConfig(t *testing.T) {
+	appended := make(chan int, 1)
+	cfg := appendBatchTestConfig()
+	cfg.MaxMessageCount = 100
+	batcher := newAppendBatcher(vChannel1, func() appendBatchConfig {
+		return cfg
+	}, appendBatchTestAppendFn(appended))
+
+	respCh1 := batcher.submit(context.Background(), newInsertMessage(vChannel1))
+	cfg.MaxMessageCount = 2
+	respCh2 := batcher.submit(context.Background(), newInsertMessage(vChannel1))
+
+	assert.Equal(t, 2, <-appended)
+	assert.NoError(t, (<-respCh1).Error)
+	assert.NoError(t, (<-respCh2).Error)
 }
 
 func TestAppendBatchContextCancelsOnlyWhenAllRequestsDone(t *testing.T) {
@@ -145,6 +162,12 @@ func appendBatchTestConfig() appendBatchConfig {
 		MaxDelay:              time.Hour,
 		CooldownThreshold:     3,
 		CooldownDuration:      time.Second,
+	}
+}
+
+func appendBatchTestConfigFn() func() appendBatchConfig {
+	return func() appendBatchConfig {
+		return appendBatchTestConfig()
 	}
 }
 
