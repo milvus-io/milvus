@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -1735,7 +1736,7 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	})
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithDiskLimit() {
 	ctx := context.Background()
 
 	// Save original value and restore after test
@@ -1784,12 +1785,15 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
 	totalMem := uint64(1024 * 1024 * 1024) // 1GB
 	localDiskUsage := int64(100 * 1024)    // 100KB
 
-	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	loadingUsage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx, loadInfo)
+	suite.NoError(err)
+
+	err = suite.loader.checkLoadingResource(ctx, mlog.With(), loadingUsage, maxSegmentSize, totalMem, memUsage, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithMemoryLimit() {
 	ctx := context.Background()
 
 	// Create a test segment that would exceed the memory limit
@@ -1819,7 +1823,10 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 	// Set memory threshold to 80%
 	paramtable.Get().Save("queryNode.overloadedMemoryThresholdPercentage", "0.8")
 
-	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	loadingUsage, maxSegmentSize, err := suite.loader.estimateSegmentLoadingResourceUsage(ctx, loadInfo)
+	suite.NoError(err)
+
+	err = suite.loader.checkLoadingResource(ctx, mlog.With(), loadingUsage, maxSegmentSize, totalMem, memUsage, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
