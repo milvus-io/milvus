@@ -578,6 +578,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id_to_offset.count(field_id) > 0) {
             continue;
         }
+        if (schema_->is_function_output(field_id)) {
+            LOG_INFO(
+                "schema newer than insert data found for segment {}, skip "
+                "bulk fill for function output field {}",
+                id_,
+                field_id.get());
+            continue;
+        }
         LOG_INFO(
             "schema newer than insert data found for segment {}, attach empty "
             "field data"
@@ -606,8 +614,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
-        AssertInfo(field_id_to_offset.count(field_id),
-                   fmt::format("can't find field {}", field_id.get()));
+        if (field_id_to_offset.count(field_id) == 0) {
+            AssertInfo(schema_->is_function_output(field_id),
+                       "field {} missing from insert without bulk fill",
+                       field_id.get());
+            continue;
+        }
         auto data_offset = field_id_to_offset[field_id];
         if (field_meta.is_nullable()) {
             insert_record_.get_valid_data(field_id)->set_data_raw(
@@ -2194,6 +2206,9 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         auto absent_fields = sch->AbsentFields(*schema_);
 
         for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
             fill_empty_field(field_meta);
         }
 
@@ -2201,6 +2216,9 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
         auto row_count = insert_record_.row_count();
         for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
             EnsureArrayOffsetsForStructField(field_meta, row_count);
         }
     }
@@ -2282,6 +2300,9 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+        if (schema_->is_function_output(field_id)) {
             continue;
         }
         // append_data is called according to schema before

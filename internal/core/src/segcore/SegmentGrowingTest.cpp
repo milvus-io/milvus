@@ -138,6 +138,39 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
+TEST(Growing, InsertSkipsMissingFunctionOutputField) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto sparse = FieldId(pk.get() + 1);
+    schema->AddField(FieldName("sparse_out"),
+                     sparse,
+                     DataType::VECTOR_SPARSE_U32_F32,
+                     0,
+                     std::nullopt,
+                     false);
+    schema->add_function_output_field_id(sparse);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    auto insert_schema = std::make_shared<Schema>();
+    insert_schema->set_schema_version(1);
+    insert_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    insert_schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(insert_schema, row_count);
+    segment->PreInsert(row_count);
+    ASSERT_NO_THROW(segment->Insert(0,
+                                    row_count,
+                                    dataset.row_ids_.data(),
+                                    dataset.timestamps_.data(),
+                                    dataset.raw_));
+    EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
 TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);

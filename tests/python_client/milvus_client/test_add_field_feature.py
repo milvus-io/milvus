@@ -188,7 +188,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # search on the new added null vector field fails for no reloading for it yet
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"field {new_vec_field_name} is not loaded, please reload the collection",
+            ct.err_msg: f"field index of the field: {new_vec_field_name} is not loaded, please reload the collection",
         }
         self.search(
             client,
@@ -1229,7 +1229,10 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 5. verify search on new field fails before indexing (field not loaded)
         search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
         # err_code 999 = gRPC unknown; Milvus uses it for "field not loaded" and "no index" errors
-        error = {ct.err_code: 999, ct.err_msg: f"field {new_vec_field} is not loaded, please reload the collection"}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"field index of the field: {new_vec_field} is not loaded, please reload the collection",
+        }
         self.search(
             client,
             collection_name,

@@ -105,6 +105,12 @@ type DelegatorDataSuite struct {
 	chunkManager storage.ChunkManager
 }
 
+func (s *DelegatorDataSuite) getIDFOracleForTest() *idfOracle {
+	oracle, ok := s.delegator.getIDFOracle().(*idfOracle)
+	s.Require().True(ok)
+	return oracle
+}
+
 func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
@@ -644,6 +650,175 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(0), fieldStats.NumRow())
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
+	s.genCollectionWithFunction()
+	s.delegator.distribution.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   100,
+		PartitionID: 500,
+		Version:     1,
+		Level:       datapb.SegmentLevel_L1,
+	})
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1,
+		SealedInTarget:        []int64{100},
+		SealedSegmentRowCount: map[int64]int64{100: 3},
+	}, []int64{500})
+	s.True(s.delegator.distribution.IsReadableSealedSegment(100))
+
+	remotePath := "bm25stats/reopen-readable/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRetry() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, "bm25stats/reopen/segment_100/field_101/0"),
+			},
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	})
+
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegments() {
 	s.Run("normal_run", func() {
 		defer func() {
@@ -1055,7 +1230,7 @@ func (s *DelegatorDataSuite) TestPostLoadLimiter() {
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
-		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+		if s.getIDFOracleForTest().TargetVersion() >= targetVersion {
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
@@ -1130,11 +1305,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1204,9 +1379,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{101: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1215,9 +1389,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
@@ -1231,9 +1403,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{101: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1242,9 +1413,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
@@ -1258,9 +1427,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
+		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{103: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1269,9 +1437,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
+		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
@@ -1287,11 +1453,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)

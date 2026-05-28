@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -174,8 +176,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 
 			if !sd.distribution.GrowingSegmentExists(segmentID) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
-				if sd.idfOracle != nil {
-					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
+				if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+					idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
@@ -189,8 +191,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
-		} else if sd.idfOracle != nil {
-			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+			idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
 		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
@@ -495,9 +497,9 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		}
 	}
 
-	for _, segment := range loaded {
-		if sd.idfOracle != nil {
-			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		for _, segment := range loaded {
+			idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
@@ -516,7 +518,8 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // load bm25 stats for sealed segments.
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
-	if sd.idfOracle == nil {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
 		return nil
 	}
 
@@ -527,7 +530,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
+			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Int64("segmentID", info.GetSegmentID()),
@@ -543,6 +546,91 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 		log.Warn("failed to load bm25 stats", zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	log := sd.getLogger(ctx).With(
+		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+		zap.String("loadScope", req.GetLoadScope().String()),
+	)
+
+	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
+	for _, info := range req.GetInfos() {
+		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+		if err != nil {
+			log.Warn("resolve reopened bm25 stats failed", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
+			return err
+		}
+		if len(bm25Paths) > 0 {
+			infosWithBM25Stats = append(infosWithBM25Stats, info)
+		}
+	}
+
+	if len(infosWithBM25Stats) == 0 {
+		return nil
+	}
+	return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
+}
+
+func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+	}
+
+	pool := segments.GetBM25LoadPool()
+	cm := sd.loader.GetChunkManager()
+	futures := make([]*conc.Future[any], 0, len(infos))
+	for _, info := range infos {
+		info := info
+		futures = append(futures, pool.Submit(func() (any, error) {
+			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
+			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
+				log.Warn("failed to load reopened bm25 stats for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Bool("activateIfReadable", activateIfReadable),
+					zap.Error(err))
+				return nil, err
+			}
+			return nil, nil
+		}))
+	}
+
+	if err := conc.BlockOnAll(futures...); err != nil {
+		log.Warn("failed to load reopened bm25 stats", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// syncCollectionIndexMeta refreshes the delegator node's CCollection IndexMeta after a
+// forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
+// worker, but the delegator (which executes growing search locally) must stay in sync.
+func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetIndexInfoList()) == 0 {
+		return nil
+	}
+
+	schema := req.GetSchema()
+	if schema == nil {
+		schema = sd.collection.Schema()
+	}
+
+	loadMeta := req.GetLoadMeta()
+	if loadMeta == nil {
+		loadMeta = &querypb.LoadMetaInfo{
+			CollectionID:  req.GetCollectionID(),
+			SchemaVersion: sd.collection.SchemaVersion(),
+		}
+	}
+
+	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+		return err
+	}
+	sd.collectionManager.Unref(req.GetCollectionID(), 1)
 	return nil
 }
 
@@ -623,9 +711,17 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug("work loads segments done")
 
+	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
+		log.Warn("failed to sync collection index meta on delegator", zap.Error(err))
+		return err
+	}
+
 	// load index segment need no stream delete and distribution change
-	if req.GetLoadScope() == querypb.LoadScope_Index || req.GetLoadScope() == querypb.LoadScope_Reopen {
+	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return nil
+	}
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		return sd.handleReopenPostLoad(ctx, req)
 	}
 
 	return sd.withPostLoadLimit(ctx, func() error {
@@ -1236,6 +1332,27 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 }
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
+	var avgdl float64
+	ok, err := sd.functionState.withFunctionRunner(req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
+		var runErr error
+		avgdl, runErr = sd.buildBM25IDFWithRunner(req, functionRunner)
+		return runErr
+	})
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+	}
+	return avgdl, nil
+}
+
+func (sd *shardDelegator) buildBM25IDFWithRunner(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (float64, error) {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
+	}
+
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
 		return 0, merr.WrapErrServiceInternal("failed to unmarshal BM25 IDF placeholder group", err.Error())
@@ -1252,11 +1369,6 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
-	if !ok {
-		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-	}
-
 	if len(functionRunner.GetInputFields()) == 2 {
 		analyzerName := "default"
 		if name := req.GetAnalyzerName(); name != "" {
@@ -1282,7 +1394,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 		return 0, errors.New("functionRunner return unknown data")
 	}
 
-	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
 	if err != nil {
 		return 0, err
 	}
@@ -1305,6 +1417,12 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 }
 
 func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
+	return sd.functionState.withRequiredFunctionRunner(req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
+		return sd.parseMinHashWithRunner(req, functionRunner)
+	})
+}
+
+func (sd *shardDelegator) parseMinHashWithRunner(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) error {
 	pb := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
 		return merr.WrapErrServiceInternal("failed to unmarshal MinHash placeholder group", err.Error())
@@ -1321,11 +1439,6 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
-	if !ok {
-		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-	}
-
 	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return err
@@ -1372,25 +1485,25 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
 			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
-		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
-		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
-		}
 		topks := req.GetTopks()
 		var results [][]*milvuspb.AnalyzerToken
-		var err error
-
-		if len(analyzer.GetInputFields()) == 1 {
-			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
-			if err != nil {
-				return nil, err
+		var analyzeErr error
+		ok, err := sd.functionState.withAnalyzerRunner(task.GetFieldId(), func(analyzer function.Analyzer) error {
+			if len(analyzer.GetInputFields()) == 1 {
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts())
+				return analyzeErr
 			}
-		} else if len(analyzer.GetInputFields()) == 2 {
-			// use analyzer names if analyzer need two input field
-			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
-			if err != nil {
-				return nil, err
+			if len(analyzer.GetInputFields()) == 2 {
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
+				return analyzeErr
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
 		}
 
 		// analyze result of search text
