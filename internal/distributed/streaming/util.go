@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type (
@@ -24,6 +25,12 @@ type (
 // !!! This function do not promise the atomicity and deliver order of the messages appending.
 func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
 	assertValidMessage(msgs...)
+	if !u.lifetime.Add(typeutil.LifetimeStateWorking) {
+		resp := types.NewAppendResponseN(len(msgs))
+		resp.FillAllError(ErrWALAccesserClosed)
+		return resp
+	}
+	defer u.lifetime.Done()
 
 	// dispatch the messages into different vchannel.
 	dispatchedMessages, indexes := u.dispatchMessages(msgs...)
