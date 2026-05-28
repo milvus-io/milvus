@@ -1504,7 +1504,6 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 	p.ShardingByNamespace = ParamItem{
 		Key:          "common.sharding.byNamespace",
 		Version:      "2.6.17",
-		FallbackKeys: []string{"common.sharding.byPartitionKey"},
 		DefaultValue: "false",
 		Doc:          "Indicates whether to use namespace as sharding key",
 		Export:       true,
