@@ -111,6 +111,10 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrChannelNotFound("test_Channel", "failed to get Channel"), ErrChannelNotFound)
 	s.ErrorIs(WrapErrChannelLack("test_Channel", "failed to get Channel"), ErrChannelLack)
 	s.ErrorIs(WrapErrChannelReduplicate("test_Channel", "failed to get Channel"), ErrChannelReduplicate)
+	s.ErrorIs(WrapErrChannelDroppedSentinel("test_Channel", "refuse to build next target"), ErrChannelDroppedSentinel)
+	// Dropped-sentinel and not-available are distinct: matching one must not match the other.
+	s.False(errors.Is(WrapErrChannelDroppedSentinel("test_Channel"), ErrChannelNotAvailable))
+	s.False(errors.Is(WrapErrChannelNotAvailable("test_Channel"), ErrChannelDroppedSentinel))
 
 	// Segment related
 	s.ErrorIs(WrapErrSegmentNotFound(1, "failed to get Segment"), ErrSegmentNotFound)

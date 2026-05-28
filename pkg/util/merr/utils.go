@@ -191,7 +191,12 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
 		return commonpb.ErrorCode_MetaFailed
 
-	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
+	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrChannelDroppedSentinel.code(), ErrNodeNotAvailable.code():
+		// ErrChannelDroppedSentinel is an internal-only signal that is currently
+		// swallowed by the alter-load-config ack callback and never serialized to a
+		// client Status. It is mapped alongside its ErrChannelNotAvailable sibling so
+		// that, if it is ever surfaced to a client, an old SDK keeps seeing
+		// NoReplicaAvailable instead of falling through to UnexpectedError.
 		return commonpb.ErrorCode_NoReplicaAvailable
 
 	case ErrServiceMemoryLimitExceeded.code():
@@ -769,6 +774,10 @@ func WrapErrChannelReduplicate(name string, msg ...string) error {
 
 func WrapErrChannelNotAvailable(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelNotAvailable, name, msg...)
+}
+
+func WrapErrChannelDroppedSentinel(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelDroppedSentinel, name, msg...)
 }
 
 // Segment related

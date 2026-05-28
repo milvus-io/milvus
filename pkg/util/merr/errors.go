@@ -100,6 +100,7 @@ var (
 	ErrChannelNotAvailable     = newMilvusError("channel not available", 503, false)
 	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
 	ErrChannelTSafeStalled     = newMilvusError("channel tsafe stalled", 505, true)
+	ErrChannelDroppedSentinel  = newMilvusError("channel checkpoint is dropped sentinel", 506, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
