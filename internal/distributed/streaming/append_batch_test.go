@@ -7,7 +7,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
@@ -21,6 +25,57 @@ func TestNewAppendBatchConfigFromParams(t *testing.T) {
 	assert.Equal(t, 3, cfg.CooldownThreshold)
 	assert.Equal(t, 10*time.Second, cfg.CooldownDuration)
 	assert.True(t, cfg.enabled())
+}
+
+func TestAppendBatchConfigProviderCachesLoadedConfig(t *testing.T) {
+	loadCount := 0
+	cfg := appendBatchTestConfig()
+	provider := newAppendBatchConfigProvider(func() appendBatchConfig {
+		loadCount++
+		return cfg
+	}, nil)
+
+	assert.Equal(t, cfg, provider.get())
+	assert.Equal(t, cfg, provider.get())
+	assert.Equal(t, 1, loadCount)
+
+	cfg.MaxMessageCount = 2
+	assert.NoError(t, provider.update(context.Background(), "", "", ""))
+	assert.Equal(t, cfg, provider.get())
+	assert.Equal(t, cfg, provider.get())
+	assert.Equal(t, 2, loadCount)
+}
+
+func TestAppendBatchConfigProviderLogsOnlyChangedConfig(t *testing.T) {
+	core, logs := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+	log.ReplaceGlobals(logger, &log.ZapProperties{
+		Core:  core,
+		Level: zap.NewAtomicLevelAt(zapcore.InfoLevel),
+	})
+	t.Cleanup(func() {
+		logger, props, err := log.InitLogger(&log.Config{Level: "debug", Stdout: true})
+		assert.NoError(t, err)
+		log.ReplaceGlobals(logger, props)
+	})
+
+	cfg := appendBatchTestConfig()
+	provider := newAppendBatchConfigProvider(func() appendBatchConfig {
+		return cfg
+	}, nil)
+
+	assert.NoError(t, provider.update(context.Background(), "", "", ""))
+	assert.Len(t, logs.FilterMessage("wal append batch config updated").All(), 0)
+
+	oldCfg := cfg
+	cfg.MaxMessageCount = 2
+	assert.NoError(t, provider.update(context.Background(), "", "", ""))
+
+	entries := logs.FilterMessage("wal append batch config updated").All()
+	assert.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	assert.Equal(t, oldCfg, fields["oldConfig"])
+	assert.Equal(t, cfg, fields["newConfig"])
 }
 
 func TestAppendBatcherSubmitClosedAndCanceled(t *testing.T) {
