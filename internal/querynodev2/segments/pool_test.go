@@ -134,3 +134,16 @@ func TestResizePools(t *testing.T) {
 		assert.Equal(t, c, pool.Cap())
 	})
 }
+
+func TestCollectPoolStatsIncludesReleasePool(t *testing.T) {
+	stats := CollectPoolStats()
+
+	for _, stat := range stats {
+		if stat.Name == "ReleasePool" {
+			assert.Equal(t, hardware.GetCPUNum(), stat.Cap)
+			return
+		}
+	}
+
+	assert.Fail(t, "ReleasePool should be reported in pool stats")
+}

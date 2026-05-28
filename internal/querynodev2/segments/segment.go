@@ -1464,7 +1464,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
 	}
 
-	GetDynamicPool().Submit(func() (any, error) {
+	GetReleasePool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
 		return nil, nil
 	}).Await()
@@ -1488,7 +1488,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 // ReleaseSegmentData releases the segment data.
 func (s *LocalSegment) ReleaseSegmentData() {
-	GetDynamicPool().Submit(func() (any, error) {
+	GetReleasePool().Submit(func() (any, error) {
 		C.ClearSegmentData(s.ptr)
 		return nil, nil
 	}).Await()

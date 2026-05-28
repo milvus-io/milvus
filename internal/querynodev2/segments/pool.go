@@ -48,14 +48,16 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp        atomic.Pointer[conc.Pool[any]]
-	sqOnce     sync.Once
-	dp         atomic.Pointer[conc.Pool[any]]
-	dynOnce    sync.Once
-	loadPool   atomic.Pointer[conc.Pool[any]]
-	loadOnce   sync.Once
-	warmupPool atomic.Pointer[conc.Pool[any]]
-	warmupOnce sync.Once
+	sqp         atomic.Pointer[conc.Pool[any]]
+	sqOnce      sync.Once
+	dp          atomic.Pointer[conc.Pool[any]]
+	dynOnce     sync.Once
+	loadPool    atomic.Pointer[conc.Pool[any]]
+	loadOnce    sync.Once
+	warmupPool  atomic.Pointer[conc.Pool[any]]
+	warmupOnce  sync.Once
+	releasePool atomic.Pointer[conc.Pool[any]]
+	releaseOnce sync.Once
 
 	deletePool     atomic.Pointer[conc.Pool[struct{}]]
 	deletePoolOnce sync.Once
@@ -71,6 +73,7 @@ var (
 	cgoTagLoad    = C.CString("CGO_LOAD")
 	cgoTagDynamic = C.CString("CGO_DYN")
 	cgoTagWarmup  = C.CString("CGO_WARMUP")
+	cgoTagRelease = C.CString("CGO_RELEASE")
 )
 
 // initSQPool initialize
@@ -166,6 +169,24 @@ func initWarmupPool() {
 	})
 }
 
+func initReleasePool() {
+	releaseOnce.Do(func() {
+		size := hardware.GetCPUNum()
+		pool := conc.NewPool[any](
+			size,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagRelease)
+			}),
+		)
+
+		releasePool.Store(pool)
+		log.Info("init releasePool done", zap.Int("size", size))
+	})
+}
+
 func initBFApplyPool() {
 	bfApplyOnce.Do(func() {
 		pt := paramtable.Get()
@@ -206,6 +227,11 @@ func GetLoadPool() *conc.Pool[any] {
 func GetWarmupPool() *conc.Pool[any] {
 	initWarmupPool()
 	return warmupPool.Load()
+}
+
+func GetReleasePool() *conc.Pool[any] {
+	initReleasePool()
+	return releasePool.Load()
 }
 
 func GetBFApplyPool() *conc.Pool[any] {
@@ -282,6 +308,7 @@ func CollectPoolStats() []metrics.PoolStats {
 		{"DynamicPool", GetDynamicPool()},
 		{"LoadPool", GetLoadPool()},
 		{"WarmupPool", GetWarmupPool()},
+		{"ReleasePool", GetReleasePool()},
 		{"BFApplyPool", GetBFApplyPool()},
 		{"BM25LoadPool", GetBM25LoadPool()},
 		{"DeletePool", GetDeletePool()},
