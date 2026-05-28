@@ -1,10 +1,10 @@
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from idx_faiss import FAISS
+from pymilvus import DataType
 
 index_type = "FAISS"
 success = "success"
@@ -40,28 +40,32 @@ class TestFaissBase(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-    def _create_faiss_index(self, client, collection_name, metric_type="L2", params=None,
-                            check_task=None, check_items=None):
+    def _create_faiss_index(
+        self, client, collection_name, metric_type="L2", params=None, check_task=None, check_items=None
+    ):
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric_type,
-                               index_type=index_type,
-                               params=params)
-        return self.create_index(client, collection_name, index_params,
-                                 check_task=check_task, check_items=check_items)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric_type, index_type=index_type, params=params
+        )
+        return self.create_index(client, collection_name, index_params, check_task=check_task, check_items=check_items)
 
-    def _search_and_check(self, client, collection_name, vector_data_type=DataType.FLOAT_VECTOR,
-                          search_params=None):
+    def _search_and_check(self, client, collection_name, vector_data_type=DataType.FLOAT_VECTOR, search_params=None):
         nq = ct.default_nq
         search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=vector_data_type)
-        self.search(client, collection_name, search_vectors,
-                    search_params=search_params,
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": nq,
-                                 "limit": ct.default_limit,
-                                 "pk_name": pk_field_name})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params=search_params,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": nq,
+                "limit": ct.default_limit,
+                "pk_name": pk_field_name,
+            },
+        )
 
     def _assert_index_params(self, client, collection_name, params, metric_type):
         idx_info = client.describe_index(collection_name, vector_field_name)
@@ -89,9 +93,14 @@ class TestFaissBuildParams(TestFaissBase):
         self._insert_rows(client, collection_name, vector_data_type)
 
         if params.get("expected", None) != success:
-            self._create_faiss_index(client, collection_name, metric_type=metric_type,
-                                     params=build_params, check_task=CheckTasks.err_res,
-                                     check_items=params.get("expected"))
+            self._create_faiss_index(
+                client,
+                collection_name,
+                metric_type=metric_type,
+                params=build_params,
+                check_task=CheckTasks.err_res,
+                check_items=params.get("expected"),
+            )
         else:
             self._create_faiss_index(client, collection_name, metric_type=metric_type, params=build_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
@@ -143,9 +152,14 @@ class TestFaissBuildParams(TestFaissBase):
             build_params = {"faiss_index_name": "Flat"}
 
         if vector_data_type not in FAISS.supported_vector_types:
-            self._create_faiss_index(client, collection_name, metric_type=metric_type, params=build_params,
-                                     check_task=CheckTasks.err_res,
-                                     check_items={"err_code": 999, "err_msg": "invalid parameter"})
+            self._create_faiss_index(
+                client,
+                collection_name,
+                metric_type=metric_type,
+                params=build_params,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 999, "err_msg": "invalid parameter"},
+            )
         else:
             self._create_faiss_index(client, collection_name, metric_type=metric_type, params=build_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
@@ -154,10 +168,9 @@ class TestFaissBuildParams(TestFaissBase):
             self._assert_index_params(client, collection_name, build_params, metric_type)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("params", [
-        p for p in FAISS.build_params
-        if p.get("expected") == success and p.get("searchable", True)
-    ])
+    @pytest.mark.parametrize(
+        "params", [p for p in FAISS.build_params if p.get("expected") == success and p.get("searchable", True)]
+    )
     def test_faiss_build_release_load_search(self, params):
         """
         Test vanilla Faiss index survives the full Milvus build -> release -> load -> search flow.
@@ -202,14 +215,19 @@ class TestFaissSearchParams(TestFaissBase):
         if params.get("expected", None) != success:
             nq = ct.default_nq
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-            self.search(client, collection_name, search_vectors,
-                        search_params=params["search_params"],
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.err_res,
-                        check_items=params.get("expected"))
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=params["search_params"],
+                limit=ct.default_limit,
+                check_task=CheckTasks.err_res,
+                check_items=params.get("expected"),
+            )
         else:
-            self._search_and_check(client, collection_name, DataType.FLOAT_VECTOR,
-                                   search_params=params["search_params"])
+            self._search_and_check(
+                client, collection_name, DataType.FLOAT_VECTOR, search_params=params["search_params"]
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_faiss_incompatible_search_params(self):
@@ -228,18 +246,25 @@ class TestFaissSearchParams(TestFaissBase):
 
         nq = ct.default_nq
         search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    search_params={"efSearch": 64},
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "not supported"})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params={"efSearch": 64},
+            limit=ct.default_limit,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999, "err_msg": "not supported"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("build_params", [
-        {"faiss_index_name": "Flat"},
-        {"faiss_index_name": "IVF64,Flat"},
-        {"faiss_index_name": "HNSW16,Flat"},
-    ])
+    @pytest.mark.parametrize(
+        "build_params",
+        [
+            {"faiss_index_name": "Flat"},
+            {"faiss_index_name": "IVF64,Flat"},
+            {"faiss_index_name": "HNSW16,Flat"},
+        ],
+    )
     def test_faiss_search_with_scalar_filter(self, build_params):
         """
         Test vanilla Faiss search honors Milvus scalar filter bitset.
@@ -255,10 +280,13 @@ class TestFaissSearchParams(TestFaissBase):
 
         search_params = _default_search_params_for_faiss_factory(build_params["faiss_index_name"])
         search_vectors = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        results = client.search(collection_name, search_vectors,
-                                filter=f"{pk_field_name} >= 100",
-                                search_params=search_params,
-                                limit=ct.default_limit)
+        results = client.search(
+            collection_name,
+            search_vectors,
+            filter=f"{pk_field_name} >= 100",
+            search_params=search_params,
+            limit=ct.default_limit,
+        )
         assert len(results) == 1
         assert len(results[0]) == ct.default_limit
         assert all(hit["id"] >= 100 for hit in results[0])
@@ -280,14 +308,20 @@ class TestFaissSearchParams(TestFaissBase):
 
         search_vectors = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
         range_params = {"radius": 100000.0, "range_filter": 0.0}
-        self.search(client, collection_name, search_vectors,
-                    search_params=range_params,
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": 1,
-                                 "limit": ct.default_limit,
-                                 "pk_name": pk_field_name})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params=range_params,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": 1,
+                "limit": ct.default_limit,
+                "pk_name": pk_field_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_faiss_binary_range_search_not_supported(self):
@@ -304,11 +338,15 @@ class TestFaissSearchParams(TestFaissBase):
         self.load_collection(client, collection_name)
 
         search_vectors = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.BINARY_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    search_params={"radius": 1000, "range_filter": 0},
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "RangeSearch unsupported for binary faiss indexes"})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params={"radius": 1000, "range_filter": 0},
+            limit=ct.default_limit,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999, "err_msg": "RangeSearch unsupported for binary faiss indexes"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_faiss_pq_search_selector_not_supported(self):
@@ -326,12 +364,16 @@ class TestFaissSearchParams(TestFaissBase):
         self.load_collection(client, collection_name)
 
         search_vectors = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    filter=f"{pk_field_name} >= 100",
-                    search_params={},
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "selector not supported"})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            filter=f"{pk_field_name} >= 100",
+            search_params={},
+            limit=ct.default_limit,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999, "err_msg": "selector not supported"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_faiss_search_iterator_not_supported(self):
@@ -349,8 +391,12 @@ class TestFaissSearchParams(TestFaissBase):
         self.load_collection(client, collection_name)
 
         search_vectors = cf.gen_vectors(1, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search_iterator(client, collection_name, data=search_vectors,
-                             batch_size=100,
-                             search_params={},
-                             check_task=CheckTasks.err_res,
-                             check_items={"err_code": 65535, "err_msg": "Failed to create iterators from index"})
+        self.search_iterator(
+            client,
+            collection_name,
+            data=search_vectors,
+            batch_size=100,
+            search_params={},
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 65535, "err_msg": "Failed to create iterators from index"},
+        )
