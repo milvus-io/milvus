@@ -253,7 +253,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 	}
 
 	// Act: Handle distribution response
-	handler.handleDistResp(ctx, resp, false)
+	handler.handleDistResp(ctx, resp)
 
 	// Assert: Verify our specific metric was recorded with the expected value
 	finalMetricValue := getMetricValueForNode(fmt.Sprint(nodeID))

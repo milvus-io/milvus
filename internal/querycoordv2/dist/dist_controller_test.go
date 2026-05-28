@@ -168,7 +168,7 @@ func (suite *DistControllerTestSuite) TestSyncAll() {
 	).Run(func(args mock.Arguments) {
 		calledSet.Insert(args[1].(int64))
 	})
-	suite.mockScheduler.EXPECT().Dispatch(mock.Anything)
+	suite.mockScheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 
 	// stop inner loop
 	suite.controller.handlers[1].stop()
