@@ -25,6 +25,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// errBalancerWatchDone is returned from a resolver.Watch callback to signal
+// "target watch condition met, stop watching". The outer call site identifies
+// it via errors.Is and treats it as success.
+var errBalancerWatchDone = errors.New("done")
+
 const (
 	versionChecker260 = "<2.6.0-dev"
 	versionChecker265 = "<2.6.6-dev"
@@ -481,7 +486,6 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 
 // blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
 func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
-	doneErr := errors.New("done")
 	logger := b.Logger().With(zap.String("role", role))
 	logger.Info("start to wait that the nodes is greater than version", zap.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
@@ -493,12 +497,12 @@ func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, rol
 	r := rb.Resolver()
 	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
 		if len(vs.Sessions()) == 0 {
-			return doneErr
+			return errBalancerWatchDone
 		}
 		logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
 		return nil
 	})
-	if err != nil && !errors.Is(err, doneErr) {
+	if err != nil && !errors.Is(err, errBalancerWatchDone) {
 		logger.Info("fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
 		return err
 	}

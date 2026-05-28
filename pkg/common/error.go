@@ -49,7 +49,20 @@ func NewIgnorableError(err error) error {
 	}
 }
 
+// NewIgnorableErrorf creates an IgnorableError from a format string. Prefer
+// this over NewIgnorableError(fmt.Errorf(...)) so the linter does not flag a
+// fmt.Errorf inside a function body — IgnorableError only ever surfaces the
+// message string anyway.
+func NewIgnorableErrorf(format string, args ...any) error {
+	return &IgnorableError{
+		msg: fmt.Sprintf(format, args...),
+	}
+}
+
+// IsIgnorableError reports whether err is (or wraps) an *IgnorableError.
+// Uses errors.As so intermediate wrappers (e.g. merr.Wrap, errors.Wrap)
+// do not hide the IgnorableError marker.
 func IsIgnorableError(err error) bool {
-	_, ok := err.(*IgnorableError)
-	return ok
+	var ie *IgnorableError
+	return errors.As(err, &ie)
 }

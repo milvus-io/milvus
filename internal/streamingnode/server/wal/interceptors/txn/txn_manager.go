@@ -114,7 +114,7 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
 	}
 	if keepalive < 1*time.Millisecond {
-		return nil, status.NewInvaildArgument("keepalive must be greater than 1ms")
+		return nil, status.NewInvalidArgument("keepalive must be greater than 1ms")
 	}
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {

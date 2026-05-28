@@ -1247,6 +1247,12 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	return &wrappedMilvusError{msg: ctx, inner: err, sentinel: ErrMqInternal}
 }
 
+// WrapErrMqInternalMsg creates a new ErrMqInternal (code 1302) with a detail
+// message. Use this when there is no underlying Go error to wrap.
+func WrapErrMqInternalMsg(format string, args ...any) error {
+	return errors.Wrapf(ErrMqInternal, format, args...)
+}
+
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
 	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
 	return err
