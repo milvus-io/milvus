@@ -34,6 +34,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		dt.req.GetCollectionName(),
 		dt.partitionID, dt.req.GetPartitionName(),
 		dt.req.GetDbName(),
+		dt.req.Namespace,
 	)
 	if err != nil {
 		return err

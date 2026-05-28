@@ -149,7 +149,12 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
-	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	var channel2RowOffsets map[string][]int
+	if insertMsg.Namespace != nil && Params.CommonCfg.ShardingByNamespace.GetAsBool() {
+		channel2RowOffsets = assignChannelsByNamespace(*insertMsg.Namespace, channelNames, insertMsg)
+	} else {
+		channel2RowOffsets = assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	}
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get default partition names failed in partition key mode",

@@ -2782,6 +2782,23 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	return partitionNames, nil
 }
 
+func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
+	channel := typeutil.HashNamespace2Channels(namespace, channelNames)
+	insertMsg.HashValues = make([]uint32, insertMsg.NumRows)
+	for i := range insertMsg.HashValues {
+		insertMsg.HashValues[i] = channel
+	}
+
+	channel2RowOffsets := map[string][]int{
+		channelNames[channel]: make([]int, 0, insertMsg.NRows()),
+	}
+	channleName := channelNames[channel]
+	for i := range insertMsg.NumRows {
+		channel2RowOffsets[channleName] = append(channel2RowOffsets[channleName], int(i))
+	}
+	return channel2RowOffsets
+}
+
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
 	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
 
@@ -2830,6 +2847,16 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 
 	hashedPartitionNames, err := typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
 	return hashedPartitionNames, err
+}
+
+func assignNamespacePartitionKey(ctx context.Context, dbName string, collName string, namespace *string) ([]string, error) {
+	if namespace == nil {
+		return nil, nil
+	}
+
+	return assignPartitionKeys(ctx, dbName, collName, []*planpb.GenericValue{
+		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
+	})
 }
 
 func ErrWithLog(logger *log.MLogger, msg string, err error) error {
