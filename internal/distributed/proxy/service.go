@@ -212,6 +212,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
 	ginHandler.Use(httpserver.MetricsHandlerFunc)
+	ginHandler.Use(httpserver.TraceIDHandlerFunc)
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
