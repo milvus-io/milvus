@@ -3,10 +3,12 @@ package streaming
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -36,6 +38,58 @@ func newAppendBatchConfigFromParams() appendBatchConfig {
 
 func (c appendBatchConfig) enabled() bool {
 	return c.SmallMessageThreshold > 0 && c.MaxBatchSize > 0 && c.MaxMessageCount > 0 && c.MaxDelay > 0
+}
+
+type appendBatchConfigProvider struct {
+	load    func() appendBatchConfig
+	current atomic.Pointer[appendBatchConfig]
+}
+
+func newAppendBatchConfigProvider(
+	load func() appendBatchConfig,
+	register func(paramtable.ParamChangeCallback),
+) *appendBatchConfigProvider {
+	p := &appendBatchConfigProvider{load: load}
+	p.refresh()
+	if register != nil {
+		register(p.update)
+	}
+	return p
+}
+
+func newAppendBatchConfigProviderFromParams() *appendBatchConfigProvider {
+	return newAppendBatchConfigProvider(newAppendBatchConfigFromParams, registerAppendBatchConfigCallbacks)
+}
+
+func registerAppendBatchConfigCallbacks(callback paramtable.ParamChangeCallback) {
+	params := paramtable.Get()
+	params.WatchKeyPrefix("streaming.walAppendBatch", config.NewHandler("wal-append-batch-config-provider", func(event *config.Event) {
+		_ = callback(context.Background(), event.Key, "", event.Value)
+	}))
+}
+
+func (p *appendBatchConfigProvider) get() appendBatchConfig {
+	if cfg := p.current.Load(); cfg != nil {
+		return *cfg
+	}
+	return appendBatchConfig{}
+}
+
+func (p *appendBatchConfigProvider) update(ctx context.Context, key, oldValue, newValue string) error {
+	oldConfig := p.get()
+	newConfig := p.load()
+	p.current.Store(&newConfig)
+	if oldConfig != newConfig {
+		log.Info("wal append batch config updated",
+			zap.Any("oldConfig", oldConfig),
+			zap.Any("newConfig", newConfig))
+	}
+	return nil
+}
+
+func (p *appendBatchConfigProvider) refresh() {
+	cfg := p.load()
+	p.current.Store(&cfg)
 }
 
 type appendBatchRequest struct {
