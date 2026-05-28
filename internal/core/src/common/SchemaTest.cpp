@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include <arrow/util/key_value_metadata.h>
+
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
@@ -529,4 +531,27 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
               columns->end());
     EXPECT_NE(std::find(columns->begin(), columns->end(), "102"),
               columns->end());
+}
+
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
+    auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
+    schema_->set_primary_field_id(pk_id);
+    auto vector_id = schema_->AddDebugField("nullable_vector",
+                                            DataType::VECTOR_FLOAT,
+                                            128,
+                                            knowhere::metric::L2,
+                                            true);
+
+    auto loon_schema = schema_->ConvertToLoonArrowSchema();
+    auto vector_field =
+        loon_schema->GetFieldByName(std::to_string(vector_id.get()));
+
+    ASSERT_NE(vector_field, nullptr);
+    EXPECT_EQ(vector_field->type()->id(), arrow::Type::BINARY);
+    EXPECT_TRUE(vector_field->nullable());
+    ASSERT_NE(vector_field->metadata(), nullptr);
+    ASSERT_TRUE(vector_field->metadata()->Contains("dim"));
+    auto dim_result = vector_field->metadata()->Get("dim");
+    ASSERT_TRUE(dim_result.ok()) << dim_result.status().ToString();
+    EXPECT_EQ(dim_result.ValueOrDie(), "128");
 }

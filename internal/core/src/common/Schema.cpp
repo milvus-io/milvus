@@ -222,17 +222,28 @@ Schema::ConvertToLoonArrowSchema() const {
 
         std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
         auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
+        auto is_nullable_dense_vector =
+            meta.is_nullable() && IsVectorDataType(data_type) &&
+            !IsSparseFloatVectorDataType(data_type) &&
+            data_type != DataType::VECTOR_ARRAY;
+        if (is_nullable_dense_vector) {
+            arrow_data_type = arrow::binary();
+        } else if (data_type == DataType::VECTOR_ARRAY) {
             arrow_data_type = GetArrowDataTypeForVectorArray(
                 meta.get_element_type(), meta.get_dim());
         } else {
             arrow_data_type = GetArrowDataType(data_type, dim);
         }
 
+        auto metadata = is_nullable_dense_vector
+                            ? arrow::key_value_metadata(
+                                  {"dim"}, {std::to_string(meta.get_dim())})
+                            : nullptr;
         auto arrow_field =
             std::make_shared<arrow::Field>(std::to_string(field_id.get()),
                                            arrow_data_type,
-                                           meta.is_nullable());
+                                           meta.is_nullable(),
+                                           metadata);
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);
