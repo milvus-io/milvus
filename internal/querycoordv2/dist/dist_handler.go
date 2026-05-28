@@ -96,7 +96,7 @@ func (dh *distHandler) startPullDistLoop(ctx context.Context) {
 			log.Ctx(ctx).Info("close dist pull loop", zap.Int64("nodeID", dh.nodeID))
 			return
 		case <-ticker.C:
-			dh.pullDist(ctx, &failures, false)
+			dh.pullDist(ctx, &failures)
 			// only reset when interval updated
 			newDistInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 			if newDistInterval != distInterval {
@@ -138,7 +138,7 @@ func (dh *distHandler) startDispatchLoop(ctx context.Context) {
 	}
 }
 
-func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask bool) {
+func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
 	tr := timerecord.NewTimeRecorder("")
 	resp, err := dh.getDistribution(ctx)
 	d1 := tr.RecordSpan()
@@ -154,14 +154,14 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask
 			RatedWarn(30.0, "failed to get data distribution", fields...)
 	} else {
 		*failures = 0
-		dh.handleDistResp(ctx, resp, dispatchTask)
+		dh.handleDistResp(ctx, resp)
 	}
 	log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 120).
 		RatedInfo(120.0, "pull and handle distribution done",
 			zap.Int("respSize", proto.Size(resp)), zap.Duration("pullDur", d1), zap.Duration("handleDur", tr.RecordSpan()))
 }
 
-func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse, dispatchTask bool) {
+func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
 	node := dh.nodeManager.Get(resp.GetNodeID())
 	if node == nil {
 		return
@@ -189,10 +189,6 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 		)
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
-	}
-
-	if dispatchTask {
-		dh.scheduler.Dispatch(dh.nodeID)
 	}
 }
 
