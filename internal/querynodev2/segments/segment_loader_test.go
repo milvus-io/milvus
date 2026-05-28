@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -1295,6 +1296,89 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize)
+}
+
+func TestGpuIndexRequiresGpu(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   []*commonpb.KeyValuePair
+		expected bool
+	}{
+		{
+			name: "GPU_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CUVS_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CUVS_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "1"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CAGRA without adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			},
+			expected: true,
+		},
+		{
+			name: "GPU_CAGRA invalid adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "invalid"},
+			},
+			expected: true,
+		},
+		{
+			name: "other GPU index ignores adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_IVF_FLAT"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: true,
+		},
+		{
+			name: "CPU index",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, gpuIndexRequiresGpu(test.params))
+		})
+	}
+
+	t.Run("GPU_CAGRA adapt for CPU from load config", func(t *testing.T) {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		assert.False(t, gpuIndexRequiresGpu([]*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+		}))
+	})
 }
 
 func TestSegmentLoader(t *testing.T) {
