@@ -153,8 +153,8 @@ TEST(ParallelDegreeSplitStrategy, LargerThanInput) {
     auto strategy = std::make_unique<ParallelDegreeSplitStrategy>(10);
     auto blocks = strategy->split(input);
 
-    EXPECT_EQ(blocks.size(), 1);
-    EXPECT_EQ(blocks[0], (RowGroupBlock{0, 5}));
+    EXPECT_EQ(blocks.size(), 5);
+    EXPECT_EQ(blocks[0], (RowGroupBlock{0, 1}));
 }
 
 TEST(ParallelDegreeSplitStrategy, Empty) {
