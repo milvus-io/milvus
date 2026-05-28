@@ -173,7 +173,7 @@ def setup_regex_collection(client, collection_name, dim=default_dim, data=None):
         data = gen_regex_test_data()
     client.insert(collection_name=collection_name, data=data)
     index_params = client.prepare_index_params()
-    index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2")
+    index_params.add_index(field_name="vec", index_type="FLAT", metric_type="L2")
     client.create_index(collection_name, index_params)
     client.load_collection(collection_name)
     return collection_name
@@ -282,8 +282,8 @@ def setup_struct_array_regex_collection(client, collection_name, create_scalar_i
 class RegexFilterSharedWideBase(TestMilvusClientV2Base):
     """Shared read-only regex dataset.
 
-    Add tests here only when they do not mutate collection state, require custom schema/data,
-    or depend on reload/index lifecycle behavior.
+    Add tests here only when they are read-only and do not require custom schema/data,
+    reload, or index lifecycle behavior.
     """
 
     def setup_class(self):
@@ -307,8 +307,8 @@ class RegexFilterSharedWideBase(TestMilvusClientV2Base):
 class RegexFilterStructArraySharedBase(TestMilvusClientV2Base):
     """Shared read-only StructArray regex dataset.
 
-    Add tests here only when they do not mutate collection state, require custom schema/data,
-    or depend on reload/index lifecycle behavior.
+    Add tests here only when they are read-only and do not require custom schema/data,
+    reload, or index lifecycle behavior.
     """
 
     def setup_class(self):
@@ -329,6 +329,7 @@ class RegexFilterStructArraySharedBase(TestMilvusClientV2Base):
         return self._client(), self.collection_name
 
 
+@pytest.mark.xdist_group("TestRegexFilterBasicSemantic")
 class TestRegexFilterBasicSemantic(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_regex_substring_match(self):
@@ -608,6 +609,7 @@ class TestRegexFilterBasicSemantic(RegexFilterSharedWideBase):
         self.drop_collection(client, collection_name)
 
 
+@pytest.mark.xdist_group("TestRegexFilterFieldAccess")
 class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_on_varchar_field(self):
@@ -1245,6 +1247,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
         self.drop_collection(client, collection_name)
 
 
+@pytest.mark.xdist_group("TestRegexFilterOptimization")
 class TestRegexFilterOptimization(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_optimize_pure_literal_as_inner_match(self):
@@ -1739,6 +1742,7 @@ class TestRegexFilterIndexPath(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+@pytest.mark.xdist_group("TestRegexFilterQuerySearch")
 class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_query_output_fields(self):
@@ -2359,6 +2363,7 @@ class TestRegexFilterQuerySearch(RegexFilterSharedWideBase):
         self.drop_collection(client, collection_name)
 
 
+@pytest.mark.xdist_group("TestRegexFilterStructArray")
 class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_struct_array_scalar_field_query(self):
@@ -2498,16 +2503,15 @@ class TestRegexFilterStructArray(RegexFilterStructArraySharedBase):
         assert result == {1, 2}, f"struct hybrid name/status regex should return only {{1,2}}, got {result}"
 
 
-class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
+@pytest.mark.xdist_group("TestRegexFilterTemplateExpression")
+class TestRegexFilterTemplateExpression(RegexFilterSharedWideBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_template_param_basic(self):
         """
         target: verify regex filter supports template parameter on query path
         expected: text/json/array regex template params behave the same as inline string literals
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -2536,17 +2540,13 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [1, 2, 5], f"array element template: expected [1,2,5], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_template_param_negation(self):
         """
         target: verify negated regex supports template parameter on query path
         expected: !~ template params match literal !~ semantics and still exclude NULL values
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         res = client.query(
             collection_name,
@@ -2566,17 +2566,13 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
         result = sorted([r["id"] for r in res])
         assert result == [2, 7], f"email !~ {{pattern}} excluding NULL: expected [2,7], got {result}"
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_invalid_regex(self):
         """
         target: verify invalid regex passed through template parameter is rejected
         expected: invalid regex raises an error with regex/parse related message
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         with pytest.raises(Exception) as exc_info:
             client.query(
@@ -2590,17 +2586,13 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
             f"expected invalid regex error, got: {err}"
         )
 
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_type_mismatch(self):
         """
         target: verify regex template parameter rejects non-string pattern values
         expected: non-string regex pattern parameter raises type/parameter related error
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        setup_regex_collection(client, collection_name)
+        client, collection_name = self._shared_collection()
 
         with pytest.raises(Exception) as exc_info:
             client.query(
@@ -2622,8 +2614,40 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
             ]
         ), f"expected non-string regex template parameter error, got: {err}"
 
-        self.drop_collection(client, collection_name)
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_regex_search_template_param_basic(self):
+        """
+        target: verify vector search supports regex template parameter in filter
+        expected: search filter url =~ {pattern} returns only ids [1,3,5]
+        """
+        client, collection_name = self._shared_collection()
+        query_vector = [0.0] * default_dim
+        unfiltered = client.search(
+            collection_name=collection_name,
+            data=[query_vector],
+            anns_field="vec",
+            search_params={"metric_type": "L2", "params": {"ef": 64}},
+            limit=7,
+            output_fields=["id"],
+        )
+        unfiltered_ids = [hit["id"] for hit in unfiltered[0]]
+        assert set(unfiltered_ids) == {1, 2, 3, 4, 5, 6, 7}, f"unfiltered expected all ids, got {unfiltered_ids}"
 
+        filtered = client.search(
+            collection_name=collection_name,
+            data=[query_vector],
+            anns_field="vec",
+            search_params={"metric_type": "L2", "params": {"ef": 64}},
+            filter="url =~ {pattern}",
+            filter_params={"pattern": r"^/api/v[0-9]+/users"},
+            limit=3,
+            output_fields=["id"],
+        )
+        filtered_ids = [hit["id"] for hit in filtered[0]]
+        assert set(filtered_ids) == {1, 3, 5}, f"filtered expected ids [1,3,5], got {filtered_ids}"
+
+
+class TestRegexFilterTemplateExpressionIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_regex_template_param_injection_safety(self):
         """
@@ -2678,43 +2702,5 @@ class TestRegexFilterTemplateExpression(TestMilvusClientV2Base):
         )
         result = sorted([r["id"] for r in res])
         assert result == [201], f"regex template parameter must not inject filter grammar, got {result}"
-
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_regex_search_template_param_basic(self):
-        """
-        target: verify vector search supports regex template parameter in filter
-        expected: search filter url =~ {pattern} returns only ids [1,3,5]
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        data = gen_regex_test_data()
-        setup_regex_collection(client, collection_name, data=data)
-
-        query_vector = data[0]["vec"]
-        unfiltered = client.search(
-            collection_name=collection_name,
-            data=[query_vector],
-            anns_field="vec",
-            search_params={"metric_type": "L2", "params": {"ef": 64}},
-            limit=7,
-            output_fields=["id"],
-        )
-        unfiltered_ids = [hit["id"] for hit in unfiltered[0]]
-        assert set(unfiltered_ids) == {1, 2, 3, 4, 5, 6, 7}, f"unfiltered expected all ids, got {unfiltered_ids}"
-
-        filtered = client.search(
-            collection_name=collection_name,
-            data=[query_vector],
-            anns_field="vec",
-            search_params={"metric_type": "L2", "params": {"ef": 64}},
-            filter="url =~ {pattern}",
-            filter_params={"pattern": r"^/api/v[0-9]+/users"},
-            limit=3,
-            output_fields=["id"],
-        )
-        filtered_ids = [hit["id"] for hit in filtered[0]]
-        assert set(filtered_ids) == {1, 3, 5}, f"filtered expected ids [1,3,5], got {filtered_ids}"
 
         self.drop_collection(client, collection_name)
