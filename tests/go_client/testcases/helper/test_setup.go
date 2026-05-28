@@ -127,23 +127,15 @@ func teardown() {
 // derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
 func managementBaseURL() string {
 	host := ""
-	rawAddr := *addr
-	if u, err := url.Parse(rawAddr); err == nil {
-		host = u.Hostname()
-	}
-	if host == "" && rawAddr != "" && !strings.Contains(rawAddr, "://") {
-		if u, err := url.Parse("http://" + rawAddr); err == nil {
+	rawAddr := strings.TrimSpace(*addr)
+	if rawAddr != "" {
+		parseAddr := rawAddr
+		if !strings.Contains(rawAddr, "://") {
+			parseAddr = "http://" + rawAddr
+		}
+		if u, err := url.Parse(parseAddr); err == nil {
 			host = u.Hostname()
 		}
-	}
-	if host == "" {
-		host = rawAddr
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		} else if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
-			host = host[:idx]
-		}
-		host = strings.Trim(host, "[]")
 	}
 	if host == "" {
 		host = "localhost"
