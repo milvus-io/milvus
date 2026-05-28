@@ -545,14 +545,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment) &&
-				isFlushed(segment) &&
-				!segment.isCompacting && // not compacting now
-				!segment.GetIsImporting() && // not importing now
-				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible() &&
-				segment.GetIsSorted()
+			return isNormalManualCompactionCandidate(t.meta, segment)
 		}),
 	}
 

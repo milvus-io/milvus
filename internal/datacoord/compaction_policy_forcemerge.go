@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -103,11 +102,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			isFlushed(segment) &&
-			!segment.isCompacting &&
-			!segment.GetIsImporting() &&
-			segment.GetLevel() != datapb.SegmentLevel_L0
+		return isNormalManualCompactionCandidate(policy.meta, segment)
 	}))
 
 	if len(segments) == 0 {
