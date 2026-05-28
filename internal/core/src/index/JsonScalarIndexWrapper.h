@@ -290,9 +290,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
                                            std::move(slice_meta),
                                            datas);
-                for (auto&& c : non_exist_codecs.codecs_) {
-                    fill(c->PayloadData(), c->PayloadSize());
-                }
+                auto non_exist_codec = AssembleIndexDataCodec(non_exist_codecs);
+                fill(non_exist_codec->PayloadData(),
+                     non_exist_codec->PayloadSize());
                 return;
             }
 

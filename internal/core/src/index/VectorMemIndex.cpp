@@ -772,7 +772,22 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     std::chrono::duration<double> write_disk_duration_sum;
     std::unique_ptr<storage::DataCodec> valid_data_count_codec;
     std::unique_ptr<storage::DataCodec> valid_data_codec;
+    std::map<std::string, IndexDataCodec> deferred_index_data_codecs;
     bool wrote_index_data = false;
+    auto DeferIndexData = [&](const std::string& prefix,
+                              std::unique_ptr<storage::DataCodec>& index_data) {
+        auto& codec = deferred_index_data_codecs[prefix];
+        codec.size_ += index_data->PayloadSize();
+        codec.codecs_.push_back(std::move(index_data));
+    };
+    auto AssembleDeferredIndexData =
+        [&](const std::string& prefix) -> std::unique_ptr<storage::DataCodec> {
+        auto it = deferred_index_data_codecs.find(prefix);
+        if (it == deferred_index_data_codecs.end()) {
+            return nullptr;
+        }
+        return AssembleIndexDataCodec(it->second);
+    };
     // load files in two parts:
     // 1. Emb-list sidecar files: written separately so knowhere can mmap them.
     // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere.
@@ -789,9 +804,9 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             embedding_list_raw_index_writer_ptr->Write(
                 index_data->PayloadData(), index_data->PayloadSize());
         } else if (prefix == VALID_DATA_COUNT_KEY) {
-            valid_data_count_codec = std::move(index_data);
+            DeferIndexData(prefix, index_data);
         } else if (prefix == VALID_DATA_KEY) {
-            valid_data_codec = std::move(index_data);
+            DeferIndexData(prefix, index_data);
         } else {
             file_writer.Write(index_data->PayloadData(),
                               index_data->PayloadSize());
@@ -867,6 +882,8 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
     }
+    valid_data_count_codec = AssembleDeferredIndexData(VALID_DATA_COUNT_KEY);
+    valid_data_codec = AssembleDeferredIndexData(VALID_DATA_KEY);
     milvus::monitor::internal_storage_download_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
             .count());
