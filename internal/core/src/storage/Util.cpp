@@ -1790,6 +1790,9 @@ IsByteVectorListInput(DataType data_type) {
 arrow::Type::type
 ExpectedVectorListElementArrowType(DataType data_type,
                                    const FieldMeta& field_meta) {
+    // This only validates vector columns encoded as List/FixedSizeList input.
+    // FixedSizeBinary and nullable Binary inputs bypass this helper and are
+    // validated by their byte-width checks instead.
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return arrow::Type::FLOAT;
@@ -1826,6 +1829,8 @@ ArrowTypeName(arrow::Type::type type) {
 
 int
 ExpectedVectorListLength(DataType data_type, int dim) {
+    // Float-like vector lists are element-counted by dim. Byte vector lists are
+    // raw-byte encoded, so their list length must match the physical byte width.
     if (IsByteVectorListInput(data_type)) {
         return GetDataTypeSize(data_type, dim);
     }
