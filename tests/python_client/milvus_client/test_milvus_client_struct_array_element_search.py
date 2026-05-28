@@ -3617,6 +3617,114 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             )
         return data
 
+    def _cosine_vector(self, cosine, dim=default_dim):
+        """Build a unit vector whose cosine similarity with [1, 0, ...] is fixed."""
+        vec = [0.0] * dim
+        vec[0] = float(cosine)
+        if dim > 1:
+            vec[1] = float(np.sqrt(max(0.0, 1.0 - cosine * cosine)))
+        return vec
+
+    def _generate_hybrid_collapse_data(self, nb=default_nb, candidate_count=64):
+        """Generate enough rows to verify hybrid collapse with brute-force GT."""
+        data = [
+            {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": self._cosine_vector(-1.0),
+                "structA": [
+                    {
+                        "embedding": self._cosine_vector(-1.0 + offset * 0.01),
+                        "int_val": -(offset + 1),
+                        "color": "drop",
+                    }
+                    for offset in range(3 + i % 4)
+                ],
+            }
+            for i in range(nb)
+        ]
+
+        for rank in range(candidate_count):
+            row_id = nb + rank
+            elem_score = 1.0 - rank * 0.025
+            normal_score = -1.0 if rank == 0 else 1.0 - (rank - 1) * 0.025
+            struct_array = [
+                {
+                    "embedding": self._cosine_vector(elem_score),
+                    "int_val": rank * 10,
+                    "color": "keep",
+                }
+            ]
+            if rank == 0:
+                struct_array.append(
+                    {
+                        "embedding": self._cosine_vector(0.99),
+                        "int_val": rank * 10 + 1,
+                        "color": "keep",
+                    }
+                )
+            elif rank % 7 == 0:
+                struct_array.append(
+                    {
+                        "embedding": self._cosine_vector(elem_score - 0.01),
+                        "int_val": rank * 10 + 1,
+                        "color": "keep",
+                    }
+                )
+            struct_array.append({"embedding": self._cosine_vector(-1.0), "int_val": -1, "color": "drop"})
+            struct_array.append({"embedding": self._cosine_vector(-0.9), "int_val": -2, "color": "drop"})
+            data.append(
+                {
+                    "id": row_id,
+                    "doc_int": row_id,
+                    "normal_vector": self._cosine_vector(normal_score),
+                    "structA": struct_array,
+                }
+            )
+
+        return data
+
+    def _gt_hybrid_collapse_rrf(self, data, query_vector, sub_limit, hybrid_limit, rrf_k):
+        """Compute element-level collapse + normal-vector RRF ground truth."""
+        element_hits = []
+        for row in data:
+            for offset, elem in enumerate(row["structA"]):
+                if elem["color"] != "keep":
+                    continue
+                element_hits.append(
+                    {
+                        "id": row["id"],
+                        "score": _cosine_sim(query_vector, elem["embedding"]),
+                        "offset": offset,
+                    }
+                )
+        element_hits.sort(key=lambda hit: (-hit["score"], hit["id"], hit["offset"]))
+        element_hits = element_hits[:sub_limit]
+
+        best_by_id = {}
+        for order, hit in enumerate(element_hits):
+            current = best_by_id.get(hit["id"])
+            if current is None or hit["score"] > current["score"]:
+                best_by_id[hit["id"]] = {
+                    "id": hit["id"],
+                    "score": hit["score"],
+                    "order": order,
+                }
+        element_rows = sorted(best_by_id.values(), key=lambda hit: (-hit["score"], hit["order"]))
+
+        normal_rows = [{"id": row["id"], "score": _cosine_sim(query_vector, row["normal_vector"])} for row in data]
+        normal_rows.sort(key=lambda hit: (-hit["score"], hit["id"]))
+        normal_rows = normal_rows[:sub_limit]
+
+        rrf_scores = {}
+        for hits in (element_rows, normal_rows):
+            for rank, hit in enumerate(hits):
+                rrf_scores[hit["id"]] = rrf_scores.get(hit["id"], 0.0) + 1 / (rrf_k + rank + 1)
+
+        hybrid_rows = [{"id": row_id, "score": score} for row_id, score in rrf_scores.items()]
+        hybrid_rows.sort(key=lambda hit: (-hit["score"], hit["id"]))
+        return element_hits, normal_rows, hybrid_rows[:hybrid_limit]
+
     def _setup_collection(
         self,
         client,
@@ -3691,7 +3799,126 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type", ["FLAT", "HNSW"])
+    def test_hybrid_element_filter_collapse_correctness(self, index_type):
+        """
+        target: verify element-level hybrid search collapses element hits to row hits before rerank
+        method: insert more than 3000 deterministic rows, compute brute-force ground truth,
+                and run with both FLAT and HNSW
+        expected: hybrid result matches element-collapse + normal-vector RRF ground truth
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_collapse_{index_type.lower()}")
+        query_vector = self._cosine_vector(1.0)
+        search_params = {"metric_type": "COSINE"}
+        if index_type == "HNSW":
+            search_params["params"] = HNSW_SEARCH_PARAMS
+
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        normal_index = {
+            "field_name": "normal_vector",
+            "index_type": index_type,
+            "metric_type": "COSINE",
+        }
+        struct_index = {
+            "field_name": "structA[embedding]",
+            "index_type": index_type,
+            "metric_type": "COSINE",
+        }
+        if index_type == "HNSW":
+            normal_index["params"] = INDEX_PARAMS
+            struct_index["params"] = INDEX_PARAMS
+        index_params.add_index(**normal_index)
+        index_params.add_index(**struct_index)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        sub_limit = 20
+        hybrid_limit = 10
+        rrf_k = 60
+        data = self._generate_hybrid_collapse_data()
+        assert len(data) > default_nb
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        element_gt, normal_gt, hybrid_gt = self._gt_hybrid_collapse_rrf(
+            data,
+            query_vector,
+            sub_limit,
+            hybrid_limit,
+            rrf_k,
+        )
+
+        element_results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params=search_params,
+            filter='element_filter(structA, $[color] == "keep")',
+            limit=sub_limit,
+            output_fields=["id"],
+        )
+        assert check
+        element_ids = [hit["id"] for hit in element_results[0]]
+        element_gt_ids = [hit["id"] for hit in element_gt]
+        assert len(element_gt_ids) > len(set(element_gt_ids))
+        assert element_ids == element_gt_ids
+
+        normal_results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params=search_params,
+            limit=sub_limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert [hit["id"] for hit in normal_results[0]] == [hit["id"] for hit in normal_gt]
+
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": search_params,
+                "limit": sub_limit,
+                "expr": 'element_filter(structA, $[color] == "keep")',
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "normal_vector",
+                "param": search_params,
+                "limit": sub_limit,
+            }
+        )
+
+        results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(rrf_k),
+            limit=hybrid_limit,
+            output_fields=["id"],
+        )
+        assert check
+        hits = results[0]
+        ids = [hit["id"] for hit in hits]
+        expected_ids = [hit["id"] for hit in hybrid_gt]
+        assert ids == expected_ids
+        assert len(ids) == len(set(ids)), f"hybrid result should be row-level, got duplicate ids: {ids}"
+        assert all("offset" not in hit for hit in hits), f"hybrid result should not expose element offsets: {hits}"
+
+        expected_scores = {hit["id"]: hit["score"] for hit in hybrid_gt}
+        for hit in hits:
+            assert abs(hit["distance"] - expected_scores[hit["id"]]) < 1e-5, (
+                f"unexpected RRF score for id={hit['id']}: got {hit['distance']}, expected {expected_scores[hit['id']]}"
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_element_filter_with_weighted_ranker(self):
@@ -3732,7 +3959,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
 
     # ---- L2 tests ----
 
@@ -3777,7 +4004,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
 
 
 class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
