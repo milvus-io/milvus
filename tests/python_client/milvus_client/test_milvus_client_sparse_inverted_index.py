@@ -6,6 +6,7 @@ from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType, Function, FunctionType
 
 ROW_COUNT = 3000
+IP_SCORE_RATIO = 1.003
 SPARSE_QUERY = {1: 1.0}
 
 IP_INDEX_FIELDS = {
@@ -135,7 +136,7 @@ LIFECYCLE_IP_INDEX_FIELDS = {
 
 def _ip_vector(row_id):
     return {
-        1: float(ROW_COUNT - row_id),
+        1: IP_SCORE_RATIO ** (ROW_COUNT - row_id),
         2: 1.0,
         3: 0.5,
         4: 0.25,
@@ -301,7 +302,7 @@ class TestSparseInvertedIndexV3IPShared(_SparseInvertedIndexV3Base):
     def test_ip_sindi_search_topk_and_score_order(self, limit):
         """
         target: verify SINDI IP search returns deterministic topK results
-        method: search a fixed sparse dimension whose document values decrease by id
+        method: search a fixed sparse dimension whose fp16-distinguishable values decrease by id
         expected: ids are returned in ascending id order with descending scores
         """
         client = self._client(alias=self.shared_alias)
@@ -701,7 +702,7 @@ class TestSparseInvertedIndexV3BM25Shared(_SparseInvertedIndexV3Base):
         """
         target: verify full text search works on SINDI indexes with explicit BM25 parameter combinations
         method: search a fixed standard-analyzer token using three k1/b configurations
-        expected: only matching documents are returned and scores are descending
+        expected: matching documents are returned and k1/b-sensitive rankings are preserved
         """
         client = self._client(alias=self.shared_alias)
         hits = self._search_hits(
@@ -715,6 +716,10 @@ class TestSparseInvertedIndexV3BM25Shared(_SparseInvertedIndexV3Base):
         assert set(self._hit_ids(hits)) == {0, 1, 2}
         self._assert_scores_descending(hits)
         self._assert_index_params(client, self.collection_name, field_name, BM25_INDEX_FIELDS[field_name])
+        if field_name == "bm25_sindi_high":
+            assert self._hit_ids(hits)[:2] == [2, 0]
+        else:
+            assert self._hit_ids(hits)[:2] == [0, 2]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_name", ["bm25_u16", "bm25_u32"])
@@ -877,29 +882,43 @@ class TestSparseInvertedIndexV3LifecycleShared(_SparseInvertedIndexV3Base):
         client = self._client(alias=self.shared_alias)
         collection_name = self.collection_name
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": enabled})
-        collection_info, _ = self.describe_collection(client, collection_name)
-        assert collection_info.get("properties", {}).get("mmap.enabled") == str(enabled)
-        for field_name in LIFECYCLE_IP_INDEX_FIELDS:
-            self.alter_index_properties(
-                client,
-                collection_name,
-                index_name=field_name,
-                properties={"mmap.enabled": enabled},
-            )
-            index_info, _ = self.describe_index(client, collection_name, index_name=field_name)
-            assert index_info.get("mmap.enabled") == str(enabled)
-        self.load_collection(client, collection_name)
-        self._assert_encoding_hits(self._search_all_encodings(client, collection_name))
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
+        try:
+            self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": enabled})
+            collection_info, _ = self.describe_collection(client, collection_name)
+            assert collection_info.get("properties", {}).get("mmap.enabled") == str(enabled)
+            for field_name in LIFECYCLE_IP_INDEX_FIELDS:
+                self.alter_index_properties(
+                    client,
+                    collection_name,
+                    index_name=field_name,
+                    properties={"mmap.enabled": enabled},
+                )
+                index_info, _ = self.describe_index(client, collection_name, index_name=field_name)
+                assert index_info.get("mmap.enabled") == str(enabled)
+            self.load_collection(client, collection_name)
+            self._assert_encoding_hits(self._search_all_encodings(client, collection_name))
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
 
-        collection_info, _ = self.describe_collection(client, collection_name)
-        assert collection_info.get("properties", {}).get("mmap.enabled") == str(enabled)
-        for field_name in LIFECYCLE_IP_INDEX_FIELDS:
-            index_info, _ = self.describe_index(client, collection_name, index_name=field_name)
-            assert index_info.get("mmap.enabled") == str(enabled)
-        self._assert_encoding_hits(self._search_all_encodings(client, collection_name))
+            collection_info, _ = self.describe_collection(client, collection_name)
+            assert collection_info.get("properties", {}).get("mmap.enabled") == str(enabled)
+            for field_name in LIFECYCLE_IP_INDEX_FIELDS:
+                index_info, _ = self.describe_index(client, collection_name, index_name=field_name)
+                assert index_info.get("mmap.enabled") == str(enabled)
+            self._assert_encoding_hits(self._search_all_encodings(client, collection_name))
+        finally:
+            self.release_collection(client, collection_name)
+            self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"])
+            for field_name in LIFECYCLE_IP_INDEX_FIELDS:
+                self.drop_index_properties(
+                    client, collection_name, index_name=field_name, property_keys=["mmap.enabled"]
+                )
+            collection_info, _ = self.describe_collection(client, collection_name)
+            assert "mmap.enabled" not in collection_info.get("properties", {})
+            for field_name in LIFECYCLE_IP_INDEX_FIELDS:
+                index_info, _ = self.describe_index(client, collection_name, index_name=field_name)
+                assert index_info.get("mmap.enabled") is None
+            self.load_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_sindi_drop_ratio_search_changes_effective_query(self):
@@ -955,6 +974,9 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "bad_algo",
             "bad_window_low",
             "bad_window_high",
+            "bad_codec",
+            "bad_block_size_zero",
+            "bad_block_size_negative",
         ]:
             schema.add_field(field_name, DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field("bad_text", DataType.VARCHAR, max_length=256, enable_analyzer=True)
@@ -1003,21 +1025,6 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
         )
         indexes, _ = self.list_indexes(client, self.collection_name, field_name=field_name)
         assert indexes == []
-
-    def _assert_create_index_accepted_with_params(self, field_name, metric_type, params):
-        client = self._client(alias=self.shared_alias)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=field_name,
-            index_type="SPARSE_INVERTED_INDEX",
-            metric_type=metric_type,
-            params=params,
-        )
-        self.create_index(client, self.collection_name, index_params=index_params)
-        try:
-            self._assert_index_params(client, self.collection_name, field_name, params)
-        finally:
-            self.drop_index(client, self.collection_name, index_name=field_name)
 
     @pytest.mark.parametrize(
         "field_name, metric_type",
@@ -1094,27 +1101,34 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "sindi_window_size",
         )
 
-    def test_sparse_index_accepts_unvalidated_codec(self):
+    @pytest.mark.xfail(reason="Known issue #50108: server accepts unsupported sparse inverted index codec values")
+    def test_sparse_index_rejects_invalid_codec(self):
         """
-        target: verify ordinary sparse indexes accept unvalidated posting-list codec params
-        method: create a DAAT_MAXSCORE index with an unknown inverted_index_codec and describe it
-        expected: index creation succeeds and the explicit codec parameter is recorded
+        target: verify ordinary sparse indexes reject unsupported posting-list codecs
+        method: create a DAAT_MAXSCORE index with an unknown inverted_index_codec
+        expected: index creation fails and identifies the invalid codec parameter
         """
-        self._assert_create_index_accepted_with_params(
-            "bad_algo",
+        self._assert_create_index_fails(
+            "bad_codec",
             "IP",
             {"inverted_index_algo": "DAAT_MAXSCORE", "inverted_index_codec": "invalid_codec"},
+            "inverted_index_codec",
         )
 
-    @pytest.mark.parametrize("block_size", [0, -1])
-    def test_block_max_accepts_unvalidated_block_size(self, block_size):
+    @pytest.mark.xfail(reason="Known issue #50108: server accepts non-positive block_max_block_size values")
+    @pytest.mark.parametrize(
+        "field_name, block_size",
+        [("bad_block_size_zero", 0), ("bad_block_size_negative", -1)],
+    )
+    def test_block_max_rejects_invalid_block_size(self, field_name, block_size):
         """
-        target: verify Block-Max sparse indexes accept unvalidated block size params
-        method: create BLOCK_MAX_WAND indexes with zero and negative block_max_block_size and describe them
-        expected: index creation succeeds and the explicit block size parameter is recorded
+        target: verify Block-Max sparse indexes reject non-positive block size params
+        method: create BLOCK_MAX_WAND indexes with zero and negative block_max_block_size
+        expected: index creation fails and identifies the invalid block size parameter
         """
-        self._assert_create_index_accepted_with_params(
-            "bad_algo",
+        self._assert_create_index_fails(
+            field_name,
             "IP",
             {"inverted_index_algo": "BLOCK_MAX_WAND", "block_max_block_size": block_size},
+            "block_max_block_size",
         )
