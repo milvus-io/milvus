@@ -118,7 +118,7 @@ func TestPackedFFIReader(t *testing.T) {
 
 	// Create FFI packed reader
 	neededColumns := []string{"pk", "vector"}
-	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 
@@ -270,7 +270,7 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 		schema.Field(1),
 	}, nil)
 
-	reader, err := NewFFIPackedReader(manifest, partialSchema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, partialSchema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 
@@ -404,7 +404,7 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 	// Read all data using the same storageConfig
 
 	neededColumns := []string{"pk", "vector"}
-	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil)
+	reader, err := NewFFIPackedReader(manifest, schema, neededColumns, 8192, storageConfig, nil, ExternalReaderContext{})
 	require.NoError(t, err)
 
 	totalRowsRead := int64(0)

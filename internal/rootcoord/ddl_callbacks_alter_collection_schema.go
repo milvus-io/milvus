@@ -148,6 +148,9 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	schema.DoPhysicalBackfill = addRequest.GetDoPhysicalBackfill()
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
+	if err := typeutil.ValidateExternalCollectionGeneratedColumns(schema); err != nil {
+		return err
+	}
 
 	// 7. get cache expirations.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())

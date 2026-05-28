@@ -429,6 +429,17 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
+	if err != nil {
+		return err
+	}
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
+		return err
+	}
+	if err := normalizeFunctionOutputFields(t.schema); err != nil {
+		return err
+	}
+
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
 	hasExternalConfig := t.schema.GetExternalSource() != "" || t.schema.GetExternalSpec() != ""
 	if hasExternalConfig && !isExternalCollection {
@@ -437,14 +448,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			t.schema.GetName())
 	}
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
-		return err
-	}
-
-	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
-	if err != nil {
-		return err
-	}
-	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
@@ -1107,8 +1110,6 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	// SparseFloatVector output). Construct a merged schema with old fields + new fields
 	// + new function, then validate only the new function to avoid re-checking existing
 	// functions' runtime providers.
-	// Deep-copy each new field schema so validateFunction's mutations (e.g. clearing
-	// IsFunctionOutput) do not affect the original request objects.
 	mergedSchema := proto.Clone(t.oldSchema).(*schemapb.CollectionSchema)
 	for _, fieldInfo := range fieldInfos {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(fieldInfo.GetFieldSchema()).(*schemapb.FieldSchema))

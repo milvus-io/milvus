@@ -526,6 +526,12 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 
 		err = task.SetJobInfo(ctx, resp)
 		assert.NoError(t, err)
+		newSegment := mt.segments.GetSegment(10)
+		assert.NotNil(t, newSegment)
+		assert.False(t, newSegment.GetIsSorted())
+		assert.Equal(t, commonpb.SegmentState_Flushed, newSegment.GetState())
+		assert.Equal(t, "by-dev-rootcoord-dml_0_v1", newSegment.GetInsertChannel())
+		assert.Equal(t, int64(1), newSegment.GetPartitionID())
 	})
 
 	t.Run("high_drop_ratio_warning", func(t *testing.T) {

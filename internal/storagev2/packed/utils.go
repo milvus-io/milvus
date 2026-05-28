@@ -257,16 +257,19 @@ func FetchFragmentsFromExternalSourceWithRange(
 
 // BuildCurrentSegmentFragments builds segment to fragments mapping from current segments.
 // It reads fragment info from manifest if available, otherwise creates virtual fragments.
+// When columns is non-empty, only manifest column groups containing at least
+// one requested column are considered.
 // Returns error if a segment has a manifest path but the manifest cannot be read.
 func BuildCurrentSegmentFragments(
 	segments []*datapb.SegmentInfo,
 	storageConfig *indexpb.StorageConfig,
+	columns []string,
 ) (SegmentFragments, error) {
 	result := make(SegmentFragments)
 	for _, seg := range segments {
 		// Try to read from manifest if available
 		if seg.GetManifestPath() != "" && storageConfig != nil {
-			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig)
+			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read manifest for segment %d at %s: %w",
 					seg.GetID(), seg.GetManifestPath(), err)
@@ -294,8 +297,7 @@ func BuildCurrentSegmentFragments(
 	return result, nil
 }
 
-// CreateSegmentManifestWithBasePath creates a manifest file with a custom base path.
-// This allows creating temporary manifests that will be renamed later.
+// CreateSegmentManifestWithBasePath creates a manifest file at the given base path.
 func CreateSegmentManifestWithBasePath(
 	ctx context.Context,
 	basePath string,
@@ -336,6 +338,9 @@ func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
 	isExternal := schema.GetExternalSource() != ""
 	var columns []string
 	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue // function output fields don't exist in external data
+		}
 		extField := field.GetExternalField()
 		if extField != "" {
 			columns = append(columns, extField)

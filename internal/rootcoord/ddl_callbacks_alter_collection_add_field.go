@@ -74,6 +74,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
 	schema.Fields = append(schema.Fields, fieldSchema)
+	if err := typeutil.ValidateExternalCollectionGeneratedColumns(schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

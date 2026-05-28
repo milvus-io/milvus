@@ -303,12 +303,25 @@ func TestGetColumnNamesFromSchema_EmptyFields(t *testing.T) {
 	assert.Nil(t, columns)
 }
 
+func TestGetColumnNamesFromSchema_ExternalSkipsFunctionOutputAndSystemFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", ExternalField: "external_id"},
+			{Name: "virtual_pk"},
+			{Name: "sparse", IsFunctionOutput: true},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"external_id"}, columns)
+}
+
 func TestBuildCurrentSegmentFragments_NoManifest(t *testing.T) {
 	segments := []*datapb.SegmentInfo{
 		{ID: 1, NumOfRows: 1000},
 		{ID: 2, NumOfRows: 2000},
 	}
-	result, err := BuildCurrentSegmentFragments(segments, nil)
+	result, err := BuildCurrentSegmentFragments(segments, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 
@@ -326,7 +339,7 @@ func TestBuildCurrentSegmentFragments_NoManifest(t *testing.T) {
 }
 
 func TestBuildCurrentSegmentFragments_EmptySegments(t *testing.T) {
-	result, err := BuildCurrentSegmentFragments(nil, nil)
+	result, err := BuildCurrentSegmentFragments(nil, nil, nil)
 	assert.NoError(t, err)
 	assert.Empty(t, result)
 }
@@ -336,10 +349,99 @@ func TestBuildCurrentSegmentFragments_ManifestPathWithNilConfig(t *testing.T) {
 	segments := []*datapb.SegmentInfo{
 		{ID: 1, NumOfRows: 500, ManifestPath: "some/path"},
 	}
-	result, err := BuildCurrentSegmentFragments(segments, nil)
+	result, err := BuildCurrentSegmentFragments(segments, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, result[1], 1)
 	assert.Equal(t, int64(500), result[1][0].RowCount)
+}
+
+func TestBuildCurrentSegmentFragments_PassesColumns(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, NumOfRows: 500, ManifestPath: MarshalManifestPath("files/insert_log/1/2/3", 1)},
+	}
+	expected := []Fragment{{FragmentID: 7, FilePath: "/data/file.parquet", RowCount: 500}}
+
+	var gotColumns []string
+	mockRead := mockey.Mock(ReadFragmentsFromManifest).
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, columns []string) ([]Fragment, error) {
+			gotColumns = columns
+			return expected, nil
+		}).Build()
+	defer mockRead.UnPatch()
+
+	result, err := BuildCurrentSegmentFragments(segments, storageConfig, []string{"text_col"})
+	require.NoError(t, err)
+	assert.Equal(t, expected, result[1])
+	assert.Equal(t, []string{"text_col"}, gotColumns)
+}
+
+func TestBuildCurrentSegmentFragments_ManifestErrorsAndEmptyResult(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, NumOfRows: 500, ManifestPath: MarshalManifestPath("files/insert_log/1/2/3", 1)},
+	}
+
+	mockRead := mockey.Mock(ReadFragmentsFromManifest).Return(nil, fmt.Errorf("read failed")).Build()
+	_, err := BuildCurrentSegmentFragments(segments, storageConfig, []string{"text_col"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read manifest for segment 1")
+	mockRead.UnPatch()
+
+	mockRead = mockey.Mock(ReadFragmentsFromManifest).Return(nil, nil).Build()
+	defer mockRead.UnPatch()
+	result, err := BuildCurrentSegmentFragments(segments, storageConfig, []string{"missing_col"})
+	require.NoError(t, err)
+	require.Len(t, result[1], 1)
+	assert.Equal(t, int64(1), result[1][0].FragmentID)
+	assert.Equal(t, int64(500), result[1][0].RowCount)
+}
+
+func TestReadFragmentsFromManifest_FiltersColumns(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
+	fragments := []Fragment{
+		{FragmentID: 0, FilePath: filepath.Join(tmpDir, "data-1.parquet"), StartRow: 0, EndRow: 10, RowCount: 10},
+		{FragmentID: 1, FilePath: filepath.Join(tmpDir, "data-2.parquet"), StartRow: 10, EndRow: 20, RowCount: 10},
+	}
+
+	manifestPath, err := CreateManifestForSegment(
+		filepath.Join(tmpDir, "segment"),
+		[]string{"text_col", "101"},
+		"parquet",
+		fragments,
+		config,
+	)
+	require.NoError(t, err)
+
+	got, err := ReadFragmentsFromManifest(manifestPath, config, []string{"text_col"})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, fragments[0].FilePath, got[0].FilePath)
+	assert.Equal(t, int64(0), got[0].StartRow)
+	assert.Equal(t, int64(10), got[0].EndRow)
+	assert.Equal(t, int64(10), got[0].RowCount)
+	assert.Equal(t, fragments[1].FilePath, got[1].FilePath)
+
+	got, err = ReadFragmentsFromManifest(manifestPath, config, []string{"missing_col"})
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	has, err := ManifestHasColumns(manifestPath, config, []string{"text_col", "101"})
+	require.NoError(t, err)
+	assert.True(t, has)
+
+	has, err = ManifestHasColumns(manifestPath, config, []string{"text_col", "missing_col"})
+	require.NoError(t, err)
+	assert.False(t, has)
+
+	has, err = ManifestHasColumns(manifestPath, config, nil)
+	require.NoError(t, err)
+	assert.True(t, has)
+
+	_, err = ReadFragmentsFromManifest("bad manifest", config, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse manifest path")
 }
 
 func TestMarshalUnmarshalManifestPath(t *testing.T) {
