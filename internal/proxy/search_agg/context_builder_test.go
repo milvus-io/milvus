@@ -364,14 +364,14 @@ func TestBuildSearchAggregationContextRejectsJSONField(t *testing.T) {
 			Fields: []string{"meta"}, Size: 3,
 		}, schema, 1)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		require.Contains(t, err.Error(), "group_by field \"meta\": JSON / dynamic fields are not yet supported with search_aggregation")
 	})
 	t.Run("json path", func(t *testing.T) {
 		_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
 			Fields: []string{"meta['region']"}, Size: 3,
 		}, schema, 1)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		require.Contains(t, err.Error(), "group_by field \"meta['region']\": JSON / dynamic fields are not yet supported with search_aggregation")
 	})
 }
 
@@ -443,6 +443,7 @@ func TestBuildSearchAggregationContextRejectsDynamicField(t *testing.T) {
 		Name: "agg_test",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
 			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
 		},
 	}
@@ -450,7 +451,74 @@ func TestBuildSearchAggregationContextRejectsDynamicField(t *testing.T) {
 		Fields: []string{"arbitrary_dyn_field"}, Size: 3,
 	}, schema, 1)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+	require.Contains(t, err.Error(), "group_by field \"arbitrary_dyn_field\": JSON / dynamic fields are not yet supported with search_aggregation")
+}
+
+func TestBuildSearchAggregationContextRejectsJSONDynamicMetricFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	cases := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "plain json", fieldName: "meta"},
+		{name: "json path", fieldName: "meta['region']"},
+		{name: "dynamic field", fieldName: "dynamic_brand"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+				Fields: []string{"brand"},
+				Metrics: map[string]*commonpb.MetricAggSpec{
+					"field_count": {Op: "count", FieldName: tc.fieldName},
+				},
+			}, schema, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		})
+	}
+}
+
+func TestBuildSearchAggregationContextRejectsJSONDynamicTopHitsSortFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "agg_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+			{FieldID: 108, Name: "meta", DataType: schemapb.DataType_JSON},
+			{FieldID: 109, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	cases := []struct {
+		name      string
+		fieldName string
+	}{
+		{name: "plain json", fieldName: "meta"},
+		{name: "dynamic field", fieldName: "dynamic_brand"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildSearchAggregationContext(&commonpb.SearchAggregationSpec{
+				Fields: []string{"brand"},
+				TopHits: &commonpb.TopHitsSpec{
+					Sort: []*commonpb.SortSpec{{FieldName: tc.fieldName}},
+				},
+			}, schema, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not yet supported with search_aggregation")
+		})
+	}
 }
 
 func TestBuildSearchAggregationContextValidationMatrix(t *testing.T) {

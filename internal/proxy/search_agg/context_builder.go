@@ -275,14 +275,12 @@ func resolveAggregationSpec(groupBy *commonpb.SearchAggregationSpec, schema *sch
 			if err != nil {
 				return fmt.Errorf("invalid group_by field %q: %w", fieldName, err)
 			}
-			// jsonPath plumbing to segcore is not wired for SearchAggregation yet;
-			// reject JSON / dynamic-field group_by up-front so callers get a
-			// deterministic error instead of an empty group-by column downstream.
-			if fs := typeutil.GetFieldByID(schema, fieldID); fs != nil {
-				if fs.GetDataType() == schemapb.DataType_JSON || fs.GetIsDynamic() {
-					return fmt.Errorf("group_by field %q: JSON / dynamic fields are not yet supported with search_aggregation", fieldName)
-				}
-				if fs.GetDataType() == schemapb.DataType_Float || fs.GetDataType() == schemapb.DataType_Double {
+			field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "group_by field")
+			if err != nil {
+				return err
+			}
+			if field != nil {
+				if field.GetDataType() == schemapb.DataType_Float || field.GetDataType() == schemapb.DataType_Double {
 					return fmt.Errorf("group_by field %q: FLOAT / DOUBLE fields are not supported with search_aggregation (BucketKeyEntry has no float variant; equality on floats is fragile)", fieldName)
 				}
 			}
@@ -388,7 +386,11 @@ func buildMetricSpec(metric *commonpb.MetricAggSpec, schema *schemapb.Collection
 			return MetricSpec{}, 0, err
 		}
 		fieldType := schemapb.DataType_None
-		if field := typeutil.GetFieldByName(schema, fieldName); field != nil {
+		field, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "metric field")
+		if err != nil {
+			return MetricSpec{}, 0, err
+		}
+		if field != nil {
 			fieldType = field.GetDataType()
 		}
 		return MetricSpec{Op: op, FieldID: fieldID, FieldType: fieldType}, fieldID, nil
@@ -436,6 +438,9 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 		fieldID, err := resolveFieldID(fieldName, schema, dynamicField)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid top_hits.sort field %q: %w", fieldName, err)
+		}
+		if _, err := validateSearchAggregationFieldSupport(fieldName, fieldID, schema, "top_hits.sort field"); err != nil {
+			return nil, nil, err
 		}
 		cfg.Sort = append(cfg.Sort, SortCriterion{FieldID: fieldID, Dir: direction, NullFirst: sortSpec.GetNullFirst()})
 		appendUniqueFieldID(seen, &sortFieldIDs, fieldID)
@@ -488,6 +493,17 @@ func normalizeDirection(direction string, defaultDir string) (string, error) {
 	default:
 		return "", fmt.Errorf("direction must be asc or desc")
 	}
+}
+
+func validateSearchAggregationFieldSupport(fieldName string, fieldID int64, schema *schemapb.CollectionSchema, usage string) (*schemapb.FieldSchema, error) {
+	field := typeutil.GetFieldByID(schema, fieldID)
+	if field == nil {
+		return nil, nil
+	}
+	if field.GetDataType() == schemapb.DataType_JSON || field.GetIsDynamic() {
+		return nil, fmt.Errorf("%s %q: JSON / dynamic fields are not yet supported with search_aggregation", usage, fieldName)
+	}
+	return field, nil
 }
 
 func isJSONPathFieldExpr(fieldExpr string) bool {
