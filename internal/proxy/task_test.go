@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1577,6 +1578,14 @@ func TestCreateCollectionTask(t *testing.T) {
 		task.Schema = tooLongNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
+
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema.Description = strings.Repeat("a", Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()+1)
+		tooLongDescriptionSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = tooLongDescriptionSchema
+		err = task.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		schema.Name = "$" // invalid first char
 		invalidFirstCharSchema, err := proto.Marshal(schema)
@@ -5494,6 +5503,58 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		}
 		assert.NoError(t, task.PreExecute(ctx))
 	})
+}
+
+func TestAlterCollectionTaskValidateDescription(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	err := InitMetaCache(ctx, qc)
+	assert.NoError(t, err)
+
+	collectionName := "alter_description_" + funcutil.GenRandomStr()
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "short description",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
+	bs, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+	status, err := qc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         bs,
+		ShardsNum:      1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionDescription, Value: strings.Repeat("a", Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()+1)},
+			},
+		},
+		ctx:      ctx,
+		mixCoord: qc,
+	}
+	err = task.PreExecute(ctx)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	task.Properties = []*commonpb.KeyValuePair{
+		{Key: common.CollectionDescription, Value: "short description"},
+		{Key: common.CollectionDescription, Value: strings.Repeat("a", Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()+1)},
+	}
+	err = task.PreExecute(ctx)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 func mockVectorIndexForCollection(t *testing.T, ctx context.Context, qc *MixCoordMock, colName string) {
