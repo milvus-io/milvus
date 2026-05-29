@@ -387,29 +387,27 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetS
 	policy := newForceMergeCompactionPolicy(meta, s.mockAlloc, s.mockHandler)
 	policy.SetTopologyQuerier(s.mockQuerier)
 
-	newSegment := func(id int64, level datapb.SegmentLevel, sorted bool, sortedByNamespace bool, compacting bool) *SegmentInfo {
+	newSegment := func(id int64, level datapb.SegmentLevel, sorted bool, compacting bool) *SegmentInfo {
 		return &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:                  id,
-				CollectionID:        collectionID,
-				PartitionID:         s.testLabel.PartitionID,
-				InsertChannel:       s.testLabel.Channel,
-				State:               commonpb.SegmentState_Flushed,
-				Level:               level,
-				IsSorted:            sorted,
-				IsSortedByNamespace: sortedByNamespace,
-				Binlogs:             genTestBinlogs(1, 10*MB),
+				ID:            id,
+				CollectionID:  collectionID,
+				PartitionID:   s.testLabel.PartitionID,
+				InsertChannel: s.testLabel.Channel,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         level,
+				IsSorted:      sorted,
+				Binlogs:       genTestBinlogs(1, 10*MB),
 			},
 			isCompacting: compacting,
 		}
 	}
 
 	for _, segment := range []*SegmentInfo{
-		newSegment(10, datapb.SegmentLevel_L1, true, false, false),
-		newSegment(11, datapb.SegmentLevel_L1, false, true, false),
-		newSegment(12, datapb.SegmentLevel_L1, false, false, false),
-		newSegment(13, datapb.SegmentLevel_L2, true, false, false),
-		newSegment(14, datapb.SegmentLevel_L1, true, false, true),
+		newSegment(10, datapb.SegmentLevel_L1, true, false),
+		newSegment(11, datapb.SegmentLevel_L1, false, false),
+		newSegment(12, datapb.SegmentLevel_L2, true, false),
+		newSegment(13, datapb.SegmentLevel_L1, true, true),
 	} {
 		meta.segments.SetSegment(segment.GetID(), segment)
 	}
@@ -438,5 +436,5 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetS
 	for _, segment := range views[0].GetSegmentsView() {
 		gotSegmentIDs = append(gotSegmentIDs, segment.ID)
 	}
-	s.ElementsMatch([]int64{10, 11}, gotSegmentIDs)
+	s.ElementsMatch([]int64{10}, gotSegmentIDs)
 }

@@ -102,7 +102,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isNormalManualCompactionCandidate(policy.meta, segment)
+		return isNormalManualCompactionCandidate(segment)
 	}))
 
 	if len(segments) == 0 {

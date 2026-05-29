@@ -545,7 +545,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isNormalManualCompactionCandidate(t.meta, segment)
+			return isNormalManualCompactionCandidate(segment)
 		}),
 	}
 

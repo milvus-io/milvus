@@ -87,7 +87,7 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 	}
 }
 
-func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {
+func isNormalManualCompactionCandidate(segment *SegmentInfo) bool {
 	return isSegmentHealthy(segment) &&
 		isFlushed(segment) &&
 		!segment.isCompacting &&
@@ -95,8 +95,7 @@ func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		segment.GetLevel() != datapb.SegmentLevel_L2 &&
 		!segment.GetIsInvisible() &&
-		(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-		!meta.isSegmentCompactionProtected(segment.GetID())
+		segment.GetIsSorted()
 }
 
 // isCompactionTaskFinished returns true if the task has reached a terminal state
