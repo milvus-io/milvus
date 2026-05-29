@@ -5481,6 +5481,9 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err := ValidateUsername(username); err != nil {
 		return merr.Status(err), nil
 	}
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
 	rawPassword, err := crypto.Base64Decode(req.Password)
 	if err != nil {
 		log.Error("decode password fail",
@@ -5509,6 +5512,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
 		Sha256Password:    crypto.SHA256(rawPassword, req.Username),
+		Description:       req.Description,
 	}
 	result, err := node.mixCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
@@ -5531,57 +5535,65 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
-	if err != nil {
-		log.Error("decode old password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode old password failed")
-		return merr.Status(err), nil
-	}
-	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
-	if err != nil {
-		log.Error("decode password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode password failed")
-		return merr.Status(err), nil
-	}
-	// valid new password
-	if err = ValidatePassword(rawNewPassword); err != nil {
-		log.Error("illegal password",
-			zap.Error(err))
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	skipPasswordVerify := false
-	if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
-		for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
-			if s == currentUser {
-				skipPasswordVerify = true
+	updateCredReq := &internalpb.CredentialInfo{
+		Username:    req.Username,
+		Description: req.Description,
+	}
+
+	if req.GetNewPassword() != "" {
+		rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
+		if err != nil {
+			log.Error("decode old password fail",
+				zap.Error(err))
+			err = errors.Wrap(err, "decode old password failed")
+			return merr.Status(err), nil
+		}
+		rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
+		if err != nil {
+			log.Error("decode password fail",
+				zap.Error(err))
+			err = errors.Wrap(err, "decode password failed")
+			return merr.Status(err), nil
+		}
+		// valid new password
+		if err = ValidatePassword(rawNewPassword); err != nil {
+			log.Error("illegal password",
+				zap.Error(err))
+			return merr.Status(err), nil
+		}
+
+		skipPasswordVerify := false
+		if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
+			for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
+				if s == currentUser {
+					skipPasswordVerify = true
+				}
 			}
 		}
-	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
-		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
-		return merr.Status(err), nil
-	}
-	// update meta data
-	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
-	if err != nil {
-		log.Error("encrypt password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "encrypt password failed")
-		return merr.Status(err), nil
+		if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
+			err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
+			return merr.Status(err), nil
+		}
+		// update meta data
+		encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
+		if err != nil {
+			log.Error("encrypt password fail",
+				zap.Error(err))
+			err = errors.Wrap(err, "encrypt password failed")
+			return merr.Status(err), nil
+		}
+		updateCredReq.Sha256Password = crypto.SHA256(rawNewPassword, req.Username)
+		updateCredReq.EncryptedPassword = encryptedPassword
 	}
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
 	}
 	req.Base.MsgType = commonpb.MsgType_UpdateCredential
-	updateCredReq := &internalpb.CredentialInfo{
-		Username:          req.Username,
-		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
-		EncryptedPassword: encryptedPassword,
-	}
 	result, err := node.mixCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail",

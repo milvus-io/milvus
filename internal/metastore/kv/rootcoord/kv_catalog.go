@@ -360,7 +360,8 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
 	credentialInfo := model.MarshalCredentialModel(credential)
-	credentialInfo.Username = "" // Username is already save in the key, remove it from the value.
+	credentialInfo.Username = ""       // Username is already save in the key, remove it from the value.
+	credentialInfo.Sha256Password = "" // Sha256Password is cache-only, do not persist it.
 	v, err := json.Marshal(credentialInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("create credential marshal fail", zap.String("key", k), zap.Error(err))
@@ -1302,9 +1303,16 @@ func (kc *Catalog) getRolesByUsername(ctx context.Context, tenant string, userna
 	return roles, nil
 }
 
-// getUserResult get the user result by the username. And never return the error because the error means the user isn't added to a role.
+// getUserResult gets the user result by username.
 func (kc *Catalog) getUserResult(ctx context.Context, tenant string, username string, includeRoleInfo bool) (*milvuspb.UserResult, error) {
 	result := &milvuspb.UserResult{User: &milvuspb.UserEntity{Name: username}}
+	credential, err := kc.GetCredential(ctx, username)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get credential by the username", zap.Error(err))
+		return result, err
+	}
+	result.Description = credential.Description
+
 	if !includeRoleInfo {
 		return result, nil
 	}

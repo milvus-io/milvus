@@ -1774,9 +1774,20 @@ func (mt *MetaTable) AlterCredential(ctx context.Context, result message.Broadca
 		)
 		return nil
 	}
+	encryptedPassword := body.CredentialInfo.EncryptedPassword
+	description := body.CredentialInfo.GetDescription()
+	if existsCredential != nil {
+		if encryptedPassword == "" {
+			encryptedPassword = existsCredential.EncryptedPassword
+		}
+		if body.CredentialInfo.Description == nil {
+			description = existsCredential.Description
+		}
+	}
 	credential := &model.Credential{
 		Username:          body.CredentialInfo.Username,
-		EncryptedPassword: body.CredentialInfo.EncryptedPassword,
+		EncryptedPassword: encryptedPassword,
+		Description:       description,
 		TimeTick:          result.GetControlChannelResult().TimeTick,
 	}
 	return mt.catalog.AlterCredential(ctx, credential)

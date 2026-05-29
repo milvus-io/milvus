@@ -1607,6 +1607,46 @@ func getUserInfoMetaString(username string) string {
 	return string(validBytes)
 }
 
+func TestGetUserResultIncludesDescriptionWithoutRoleInfo(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "stored description"
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{Description: &description})
+	require.NoError(t, err)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return(string(credentialValue), nil)
+
+	result, err := c.getUserResult(ctx, tenant, username, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, username, result.GetUser().GetName())
+	assert.Equal(t, description, result.GetDescription())
+	assert.Empty(t, result.GetRoles())
+}
+
+func TestGetUserResultReturnsCredentialLoadError(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-credential-load-error"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	expectedErr := errors.New("credential load failed")
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return("", expectedErr)
+
+	result, err := c.getUserResult(ctx, tenant, username, false)
+
+	require.ErrorIs(t, err, expectedErr)
+	assert.Equal(t, username, result.GetUser().GetName())
+	assert.Empty(t, result.GetDescription())
+	assert.Empty(t, result.GetRoles())
+}
+
 func TestRBAC_Credential(t *testing.T) {
 	ctx := context.TODO()
 
@@ -1709,6 +1749,32 @@ func TestRBAC_Credential(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("test AlterCredential does not persist sha256 password", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		kvmock.EXPECT().
+			Save(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1"), mock.MatchedBy(func(value string) bool {
+				credential := &internalpb.CredentialInfo{}
+				require.NoError(t, json.Unmarshal([]byte(value), credential))
+				return credential.GetEncryptedPassword() == "password" &&
+					credential.GetSha256Password() == "" &&
+					credential.GetDescription() == "description"
+			})).
+			Return(nil)
+
+		description := "description"
+		err := c.AlterCredential(ctx, &model.Credential{
+			Username:          "user1",
+			EncryptedPassword: "password",
+			Sha256Password:    "sha256-password",
+			Description:       description,
+		})
+		assert.NoError(t, err)
 	})
 
 	t.Run("test DropCredential", func(t *testing.T) {
@@ -2119,11 +2185,12 @@ func TestRBAC_Role(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = NewCatalog(kvmock).(*Catalog)
 
-			invalidUser    = "invalid-user"
-			invalidUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidUser)
+			invalidUser        = "invalid-user"
+			invalidRoleUser    = "invalid-role-user"
+			invalidRoleUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidRoleUser)
 		)
-		// returns error for invalidUserKey
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidUserKey).Call.Return(
+		// returns error for invalidRoleUserKey
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidRoleUserKey).Call.Return(
 			nil, nil, errors.New("Mock load with prefix wrong"))
 
 		// Returns keys for RoleMappingPrefix/tenant/user1/ (with trailing slash after the fix)
@@ -2136,6 +2203,9 @@ func TestRBAC_Role(t *testing.T) {
 					user1Key + "role3/error",
 				}
 			}, nil, nil)
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1")).Return(getUserInfoMetaString("user1"), nil).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidUser)).Return("", errors.New("mock load credential error")).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidRoleUser)).Return(getUserInfoMetaString(invalidRoleUser), nil).Maybe()
 
 		// Returns keys for CredentialPrefix
 		var loadCredentialPrefixReturn atomic.Bool
@@ -2173,8 +2243,9 @@ func TestRBAC_Role(t *testing.T) {
 			}{
 				{"valid user1 not include RoleInfo", true, "user1", false},
 				{"valid user1 include RoleInfo", true, "user1", true},
-				{"invalid user not include RoleInfo", true, invalidUser, false},
+				{"invalid user not include RoleInfo", false, invalidUser, false},
 				{"invalid user include RoleInfo", false, invalidUser, true},
+				{"invalid role user include RoleInfo", false, invalidRoleUser, true},
 			}
 
 			for _, test := range tests {
@@ -2231,6 +2302,7 @@ func TestRBAC_Role(t *testing.T) {
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, false, "valid entity user1 not include RoleInfo"},
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, true, "valid entity user1 include RoleInfo"},
 				{false, true, &milvuspb.UserEntity{Name: invalidUser}, true, "invalid entity invalidUser include RoleInfo"},
+				{false, true, &milvuspb.UserEntity{Name: invalidRoleUser}, true, "invalid entity invalidRoleUser include RoleInfo"},
 			}
 
 			for _, test := range tests {

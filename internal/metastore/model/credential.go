@@ -8,6 +8,7 @@ type Credential struct {
 	Tenant            string
 	IsSuper           bool
 	Sha256Password    string
+	Description       string
 	TimeTick          uint64 // the timetick in wal which the credential updates
 }
 
@@ -15,7 +16,7 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 	if cred == nil {
 		return nil
 	}
-	return &internalpb.CredentialInfo{
+	credentialInfo := &internalpb.CredentialInfo{
 		Tenant:            cred.Tenant,
 		Username:          cred.Username,
 		EncryptedPassword: cred.EncryptedPassword,
@@ -23,6 +24,8 @@ func MarshalCredentialModel(cred *Credential) *internalpb.CredentialInfo {
 		Sha256Password:    cred.Sha256Password,
 		TimeTick:          cred.TimeTick,
 	}
+	credentialInfo.Description = &cred.Description
+	return credentialInfo
 }
 
 func UnmarshalCredentialModel(cred *internalpb.CredentialInfo) *Credential {
@@ -35,6 +38,7 @@ func UnmarshalCredentialModel(cred *internalpb.CredentialInfo) *Credential {
 		Tenant:            cred.Tenant,
 		IsSuper:           cred.IsSuper,
 		Sha256Password:    cred.Sha256Password,
+		Description:       cred.GetDescription(),
 		TimeTick:          cred.TimeTick,
 	}
 }
