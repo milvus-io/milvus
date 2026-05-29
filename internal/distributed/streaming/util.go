@@ -109,22 +109,6 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 	return resp
 }
 
-func (w *walAccesserImpl) shouldBatchAppendMessages(dispatchedMessages map[string][]message.MutableMessage) bool {
-	cfg := w.currentAppendBatchConfig()
-	if !cfg.enabled() {
-		return false
-	}
-	if len(dispatchedMessages) == 0 {
-		return false
-	}
-	for vchannel, msgs := range dispatchedMessages {
-		if !w.shouldBatchAppendVChannelMessages(vchannel, msgs...) {
-			return false
-		}
-	}
-	return true
-}
-
 func (w *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msgs ...message.MutableMessage) bool {
 	cfg := w.currentAppendBatchConfig()
 	if !cfg.enabled() {
@@ -142,6 +126,9 @@ func (w *walAccesserImpl) shouldBatchAppendVChannelMessages(vchannel string, msg
 }
 
 func (w *walAccesserImpl) appendVChannelMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponse {
+	// A merged append batch is committed as one WAL transaction, so all batched
+	// callers share the same commit result. The win is amortizing producer
+	// reservation and scheduling overhead, not reducing the number of WAL entries.
 	guard, err := w.getProducer(msgs[0].VChannel()).BeginProduce(ctx, msgs...)
 	if err != nil {
 		return types.AppendResponse{Error: err}

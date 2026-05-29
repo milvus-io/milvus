@@ -730,7 +730,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
-		assert.Equal(t, int64(64*1024), params.StreamingCfg.WALAppendBatchSmallMessageThreshold.GetAsSize())
+		assert.Equal(t, int64(0), params.StreamingCfg.WALAppendBatchSmallMessageThreshold.GetAsSize())
 		assert.Equal(t, int64(1024*1024), params.StreamingCfg.WALAppendBatchMaxSize.GetAsSize())
 		assert.Equal(t, 64, params.StreamingCfg.WALAppendBatchMaxMessageCount.GetAsInt())
 		assert.Equal(t, 5*time.Millisecond, params.StreamingCfg.WALAppendBatchMaxDelay.GetAsDurationByParse())

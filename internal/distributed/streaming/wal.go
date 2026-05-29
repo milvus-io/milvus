@@ -28,16 +28,18 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	streamingCoordClient := client.NewClient(c)
 	// Create a new streamingnode handler client.
 	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
+	appendBatchConfigProvider := newAppendBatchConfigProviderFromParams()
 	w := &walAccesserImpl{
-		lifetime:             typeutil.NewLifetime(),
-		clusterID:            paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
-		streamingCoordClient: streamingCoordClient,
-		handlerClient:        handlerClient,
-		producerMutex:        sync.Mutex{},
-		producers:            make(map[string]*producer.ResumableProducer),
-		appendBatcherMutex:   sync.Mutex{},
-		appendBatchers:       make(map[string]*appendBatcher),
-		appendBatchConfigFn:  newAppendBatchConfigProviderFromParams().get,
+		lifetime:                  typeutil.NewLifetime(),
+		clusterID:                 paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		streamingCoordClient:      streamingCoordClient,
+		handlerClient:             handlerClient,
+		producerMutex:             sync.Mutex{},
+		producers:                 make(map[string]*producer.ResumableProducer),
+		appendBatcherMutex:        sync.Mutex{},
+		appendBatchers:            make(map[string]*appendBatcher),
+		appendBatchConfigFn:       appendBatchConfigProvider.get,
+		appendBatchConfigProvider: appendBatchConfigProvider,
 
 		// TODO: optimize the pool size, use the streaming api but not goroutines.
 		appendExecutionPool:   conc.NewPool[struct{}](0),
@@ -59,14 +61,15 @@ type walAccesserImpl struct {
 	streamingCoordClient client.Client
 	handlerClient        handler.HandlerClient
 
-	producerMutex         sync.Mutex
-	producers             map[string]*producer.ResumableProducer
-	appendBatcherMutex    sync.Mutex
-	appendBatchers        map[string]*appendBatcher
-	appendBatchConfigFn   func() appendBatchConfig
-	appendBatchConfig     appendBatchConfig
-	appendExecutionPool   *conc.Pool[struct{}]
-	dispatchExecutionPool *conc.Pool[struct{}]
+	producerMutex             sync.Mutex
+	producers                 map[string]*producer.ResumableProducer
+	appendBatcherMutex        sync.Mutex
+	appendBatchers            map[string]*appendBatcher
+	appendBatchConfigFn       func() appendBatchConfig
+	appendBatchConfigProvider *appendBatchConfigProvider
+	appendBatchConfig         appendBatchConfig
+	appendExecutionPool       *conc.Pool[struct{}]
+	dispatchExecutionPool     *conc.Pool[struct{}]
 
 	forwardService *forwardServiceImpl
 }
@@ -149,6 +152,9 @@ func (w *walAccesserImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
 
+	if w.appendBatchConfigProvider != nil {
+		w.appendBatchConfigProvider.close()
+	}
 	w.closeAppendBatchers()
 
 	w.producerMutex.Lock()
