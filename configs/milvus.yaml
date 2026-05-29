@@ -853,6 +853,7 @@ dataNode:
     workPoolSize: 8 # worker pool size for one clustering compaction job.
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
+    format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
