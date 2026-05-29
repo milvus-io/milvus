@@ -150,7 +150,7 @@ func (s *NamespaceCompactorTestSuite) TestCompactSorted() {
 	params := compaction.GenParams()
 	sortedByFieldIDs := []int64{101, 100}
 
-	c := NewNamespaceCompactor(context.Background(), plan, s.binlogIO, params, sortedByFieldIDs)
+	c := NewNamespaceCompactor(context.Background(), plan, s.binlogIO, nil, params, sortedByFieldIDs)
 	result, err := c.Compact()
 
 	s.Require().NoError(err)
