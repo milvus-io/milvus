@@ -63,6 +63,7 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/comp/time_recorder.h"
 #include "knowhere/dataset.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/index/index_factory.h"
 #include "knowhere/sparse_utils.h"
 #include "log/Log.h"
@@ -86,6 +87,19 @@ constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY = "empty_emb_list_offsets";
 struct EmptyEmbListState {
     int64_t dim;
     std::vector<size_t> offsets;
+};
+
+class EmptyVectorIterator : public knowhere::IndexNode::iterator {
+ public:
+    std::pair<int64_t, float>
+    Next() override {
+        throw std::runtime_error("empty vector iterator has no next result");
+    }
+
+    bool
+    HasNext() override {
+        return false;
+    }
 };
 
 EmptyEmbListState
@@ -219,6 +233,19 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
                                    const milvus::BitsetView& bitset) const {
+    if (IsEmptyEmbListIndex()) {
+        auto metric_type = conf.value(knowhere::meta::METRIC_TYPE,
+                                      std::string(GetMetricType()));
+        if (!knowhere::get_el_metric_type(metric_type).has_value()) {
+            auto num_queries = dataset->GetRows();
+            std::vector<knowhere::IndexNode::IteratorPtr> iterators;
+            iterators.reserve(num_queries);
+            for (int64_t i = 0; i < num_queries; ++i) {
+                iterators.emplace_back(std::make_shared<EmptyVectorIterator>());
+            }
+            return iterators;
+        }
+    }
     return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
 

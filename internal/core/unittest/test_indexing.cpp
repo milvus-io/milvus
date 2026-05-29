@@ -1008,6 +1008,20 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
     EXPECT_TRUE(loaded_vec_index->HasRawData());
     EXPECT_EQ(loaded_vec_index->Count(), 0);
 
+    std::vector<float> iterator_queries(2 * dim, 0.1F);
+    auto iterator_dataset =
+        knowhere::GenDataSet(2, dim, iterator_queries.data());
+    auto iterator_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 10},
+    };
+    auto iterators = loaded_vec_index->VectorIterators(
+        iterator_dataset, iterator_conf, nullptr);
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 2);
+    EXPECT_FALSE(iterators.value()[0]->HasNext());
+    EXPECT_FALSE(iterators.value()[1]->HasNext());
+
     std::vector<int64_t> ids = {0, 3, 7};
     auto ids_ds = GenIdsDataset(ids.size(), ids.data());
     auto [raw_data, offsets] =
