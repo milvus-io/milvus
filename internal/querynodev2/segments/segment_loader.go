@@ -335,7 +335,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		segmentID := loadInfo.SegmentID
 		segment, _ := newSegments.Get(segmentID)
 
-		logger := log.With(zap.Int64("partitionID", partitionID),
+		logger := mlog.With(zap.Int64("partitionID", partitionID),
 			zap.Int64("segmentID", segmentID),
 			zap.String("segmentType", loadInfo.GetLevel().String()))
 		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadSegment").Inc()

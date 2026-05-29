@@ -281,7 +281,7 @@ func (node *Proxy) ClearReadTaskQueue(ctx context.Context, request *internalpb.C
 		NodeID:        paramtable.GetNodeID(),
 		QueuedCleared: result.queuedCleared,
 	})
-	log.Ctx(ctx).Info("cleared proxy read task queue",
+	mlog.Info(ctx, "cleared proxy read task queue",
 		zap.String("taskType", request.GetTaskType()),
 		zap.String("reason", request.GetReason()),
 		zap.Int64("queuedCleared", result.queuedCleared))
