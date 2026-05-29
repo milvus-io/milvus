@@ -1601,10 +1601,6 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		return merr.Status(err), nil
 	}
 
-	// TODO(#48808): gate AlterCollectionField against in-progress backfill once segment schema-version
-	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Same timing issue as
-	// AddCollectionField — backfill tick may not have fired before the next DDL arrives.
-
 	act := &alterCollectionFieldTask{
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),

@@ -2863,7 +2863,27 @@ func TestValidateFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "output field not found")
 	})
 
-	t.Run("Valid function schema - nullable input field", func(t *testing.T) {
+	t.Run("Invalid function schema - nullable BM25 output field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "function output field cannot be nullable")
+	})
+
+	t.Run("Valid create schema function - nullable BM25 input with non-nullable output field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}, Nullable: true},
@@ -2942,7 +2962,7 @@ func TestValidateFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
 
-	t.Run("Invalid function schema - nullable output field", func(t *testing.T) {
+	t.Run("Invalid create schema function - non-nullable BM25 input with nullable output field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
@@ -5240,7 +5260,7 @@ func TestMinHashFunction(t *testing.T) {
 	t.Run("MinHash function without permutations ", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "text_field", DataType: schemapb.DataType_VarChar, Nullable: true},
 				{
 					Name:     "minhash_output",
 					DataType: schemapb.DataType_BinaryVector,
@@ -5263,6 +5283,36 @@ func TestMinHashFunction(t *testing.T) {
 						{Key: "shingle_size", Value: "3"},
 						{Key: "hash_function", Value: "xxhash64"},
 						{Key: "seed", Value: "42"},
+					},
+				},
+			},
+		}
+
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create schema allows nullable mismatch", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar, Nullable: true},
+				{
+					Name:     "minhash_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4096"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "128"},
+						{Key: "shingle_size", Value: "3"},
 					},
 				},
 			},

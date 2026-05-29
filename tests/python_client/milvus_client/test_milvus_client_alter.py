@@ -355,8 +355,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                                  "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 9. add new field same as dynamic field name
-        # Wait for step-3 add_collection_field's backfill segment-version propagation tick.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client, collection_name, field_name=default_dynamic_field_name,
             data_type=DataType.INT64, nullable=True, default_value=default_value)
         # 10. query using filter with dynamic field and new field
@@ -703,8 +702,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                     field_params={"nullable": False},
                                     check_task=CheckTasks.err_res, check_items=error)
         # add a nullable varchar field to the collection
-        # Wait for previous add_collection_field's backfill segment-version propagation tick.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client, collection_name, field_name="varchar_3",
             data_type=DataType.VARCHAR, max_length=64, nullable=True)
         # try to alert the new added nullable varchar field to non-nullable varchar field

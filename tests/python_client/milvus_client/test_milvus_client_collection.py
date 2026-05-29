@@ -937,8 +937,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                 nullable=True,
                 is_cluster_key=True,
             )
-            # Wait for previous schema bump's backfill segment-version propagation tick.
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name="field_new_var",

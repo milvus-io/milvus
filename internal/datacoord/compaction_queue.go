@@ -166,7 +166,7 @@ var (
 			return 1
 		case datapb.CompactionType_MixCompaction:
 			return 10
-		case datapb.CompactionType_BackfillCompaction:
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
 			return 10
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100
@@ -181,7 +181,7 @@ var (
 			return 10
 		case datapb.CompactionType_MixCompaction:
 			return 1
-		case datapb.CompactionType_BackfillCompaction:
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
 			return 1
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100

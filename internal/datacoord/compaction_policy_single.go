@@ -51,10 +51,6 @@ func (policy *singleCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 }
 
-func (policy *singleCompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
-}
-
 func (policy *singleCompactionPolicy) Name() string {
 	return "SingleCompactionPolicy"
 }
@@ -317,9 +313,6 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)
-
-// IsInlineExecutable returns false: mix compaction is real compaction work.
-func (v *MixSegmentView) IsInlineExecutable() bool { return false }
 
 type MixSegmentView struct {
 	label         *CompactionGroupLabel

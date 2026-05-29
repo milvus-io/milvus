@@ -26,6 +26,7 @@ import "C"
 
 import (
 	"fmt"
+	"strconv"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -172,6 +173,41 @@ func createColumnGroups(
 	}
 
 	return outColumnGroups, nil
+}
+
+func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_manifest_destroy(manifest)
+
+	fields := make(map[int64]struct{})
+	cgroups := &manifest.column_groups
+	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
+		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+	}
+
+	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
+	for i := range cgArray {
+		cg := &cgArray[i]
+		if cg.columns == nil {
+			continue
+		}
+		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
+		for _, column := range columns {
+			if column == nil {
+				continue
+			}
+			columnName := C.GoString(column)
+			fieldID, err := strconv.ParseInt(columnName, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid manifest column name %q: %w", columnName, err)
+			}
+			fields[fieldID] = struct{}{}
+		}
+	}
+	return fields, nil
 }
 
 // ReadFragmentsFromManifest reads fragment info from a manifest path.

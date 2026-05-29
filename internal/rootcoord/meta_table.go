@@ -1101,7 +1101,6 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		zap.Int64("oldCollectionID", oldColl.CollectionID),
 		zap.Bool("dbChanged", dbChanged),
 		zap.Uint64("ts", newColl.UpdateTimestamp),
-		zap.Bool("doPhysicalBackfill", newColl.DoPhysicalBackfill),
 		zap.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil

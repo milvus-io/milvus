@@ -91,8 +91,8 @@ func getTaskSlotUsage(task Compactor) int64 {
 			taskSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 		case datapb.CompactionType_Level0DeleteCompaction:
 			taskSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
-		case datapb.CompactionType_BackfillCompaction:
-			taskSlotUsage = paramtable.Get().DataCoordCfg.BackfillCompactionSlotUsage.GetAsInt64()
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
+			taskSlotUsage = paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 		}
 		log.Warn("illegal task slot usage, change it to a default value",
 			zap.Int64("illegalSlotUsage", task.GetSlotUsage()),

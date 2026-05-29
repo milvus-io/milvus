@@ -1060,6 +1060,9 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
 		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
 	}
+	if funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 function is supported in alter schema task")
+	}
 	if len(fieldInfos) == 0 {
 		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
 	}
@@ -1095,15 +1098,6 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 				outName,
 			)
 		}
-	}
-
-	// Physical backfill is currently only implemented for BM25 in the datanode backfill
-	// compactor. Reject unsupported types early so the request never reaches RootCoord
-	// and no segment is left in an unrecoverable stale-schema state.
-	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg(
-			"physical backfill is currently only supported for BM25 functions, got %s",
-			funcSchemas[0].GetType().String())
 	}
 
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
