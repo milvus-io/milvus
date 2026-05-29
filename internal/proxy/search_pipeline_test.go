@@ -801,6 +801,19 @@ func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderUsesAscendingRo
 	s.Equal([][]int64{{105}, {101}, {104}, {102}}, fieldIdxs)
 }
 
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderCopiesSharedComputeBuffer() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	shared := []int64{0, 0}
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		shared[0] = rowIdx + 100
+		shared[1] = rowIdx + 200
+		return shared
+	})
+
+	s.Equal([][]int64{{105, 205}, {101, 201}, {104, 204}, {102, 202}}, fieldIdxs)
+}
+
 func (s *SearchPipelineSuite) TestRequeryOp() {
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "int64", 20)
 	f1.FieldId = 101
