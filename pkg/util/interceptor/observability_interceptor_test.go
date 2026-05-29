@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
 
 func TestParseZapLevel(t *testing.T) {
