@@ -370,12 +370,15 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// set analyzer resource for text match index if use ref mode
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskSchema.GetFileResourceIds()) > 0 {
+	// set analyzer resource for text match index if use ref mode.
+	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources.
+	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+		(taskProto.GetType() == datapb.CompactionType_SortCompaction || taskProto.GetType() == datapb.CompactionType_MixCompaction) &&
+		len(taskSchema.GetFileResourceIds()) > 0 {
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			mlog.Warn(context.TODO(), "get file resources for collection failed", mlog.Int64("collectionID", taskProto.GetCollectionID()), mlog.Err(err))
-			return nil, merr.Wrap(err, "get file resources for sort compaction failed")
+			return nil, merr.Wrap(err, "get file resources for compaction failed")
 		}
 		plan.FileResources = resources
 	}
