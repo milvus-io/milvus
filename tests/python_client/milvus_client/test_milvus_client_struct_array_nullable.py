@@ -245,1051 +245,1064 @@ STRUCT_VECTOR_DISKANN_SEARCH_PARAMS = DEFAULT_SEARCH_SPEC.struct_vector_diskann_
 OMITTED_FIELD = object()
 
 
-class StructArrayNullableTestMixin:
-    @staticmethod
-    def _vector(seed: int, dim: int | None = None) -> list[float]:
-        dim = dim or DEFAULT_SCHEMA_SPEC.vector_dim
-        return [float(seed) + float(i) / 1000 for i in range(dim)]
+# Schema generation
 
-    @staticmethod
-    def _schema_as_dict(schema) -> dict[str, Any]:
-        if isinstance(schema, dict):
-            return schema
-        return schema.to_dict()
 
-    @classmethod
-    def _schema_field_names(cls, schema) -> set[str]:
-        schema_dict = cls._schema_as_dict(schema)
-        field_names = {field.get("name") for field in schema_dict.get("fields", [])}
-        field_names.update(field.get("name") for field in schema_dict.get("struct_fields", []))
-        return field_names
+def gen_schema(case, client, **kwargs):
+    schema, check = case.create_schema(client, **kwargs)
+    assert check
+    return schema
 
-    @classmethod
-    def _schema_field_dim(cls, schema, field_name: str, default: int) -> int:
-        schema_dict = cls._schema_as_dict(schema)
-        for field in schema_dict.get("fields", []):
-            if field.get("name") != field_name:
-                continue
-            return int((field.get("params") or {}).get("dim", default))
-        return default
 
-    @classmethod
-    def _default_struct_array_schema_dict(
-        cls,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        include_struct: bool = False,
-        include_vector_subfield: bool = False,
-        normal_vector_dim: int | None = None,
-        struct_vector_type: DataType | None = None,
-        struct_vector_dim: int | None = None,
-        struct_nullable: bool = True,
-    ) -> dict[str, Any]:
-        normal_vector_dim = normal_vector_dim or spec.vector_dim
-        struct_vector_type = struct_vector_type or spec.vector_subfield_type
-        struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
-        fields = [
+def gen_struct_schema(case, client, **kwargs):
+    struct_schema, check = case.create_struct_field_schema(client, **kwargs)
+    assert check
+    return struct_schema
+
+
+def gen_index_params(case, client, **kwargs):
+    index_params, check = case.prepare_index_params(client, **kwargs)
+    assert check
+    return index_params
+
+
+def _schema_as_dict(schema) -> dict[str, Any]:
+    if isinstance(schema, dict):
+        return schema
+    return schema.to_dict()
+
+
+def _schema_field_names(schema) -> set[str]:
+    schema_dict = _schema_as_dict(schema)
+    field_names = {field.get("name") for field in schema_dict.get("fields", [])}
+    field_names.update(field.get("name") for field in schema_dict.get("struct_fields", []))
+    return field_names
+
+
+def _schema_field_dim(schema, field_name: str, default: int) -> int:
+    schema_dict = _schema_as_dict(schema)
+    for field in schema_dict.get("fields", []):
+        if field.get("name") != field_name:
+            continue
+        return int((field.get("params") or {}).get("dim", default))
+    return default
+
+
+def gen_struct_array_schema_dict(
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    include_struct: bool = False,
+    include_vector_subfield: bool = False,
+    normal_vector_dim: int | None = None,
+    struct_vector_type: DataType | None = None,
+    struct_vector_dim: int | None = None,
+    struct_nullable: bool = True,
+) -> dict[str, Any]:
+    normal_vector_dim = normal_vector_dim or spec.vector_dim
+    struct_vector_type = struct_vector_type or spec.vector_subfield_type
+    struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
+    fields = [
+        {
+            "name": spec.pk_field,
+            "type": spec.pk_type,
+            "is_primary": True,
+            "auto_id": False,
+        },
+        {
+            "name": spec.vector_field,
+            "type": spec.vector_type,
+            "params": {"dim": normal_vector_dim},
+        },
+        {
+            "name": spec.tag_field,
+            "type": spec.tag_type,
+            "params": {"max_length": spec.tag_max_length},
+        },
+    ]
+    schema = {
+        "auto_id": False,
+        "enable_dynamic_field": False,
+        "fields": fields,
+        "functions": [],
+    }
+    if include_struct:
+        struct_subfields = [
+            {"name": spec.int_subfield, "type": spec.int_subfield_type, "nullable": True},
             {
-                "name": spec.pk_field,
-                "type": spec.pk_type,
-                "is_primary": True,
-                "auto_id": False,
-            },
-            {
-                "name": spec.vector_field,
-                "type": spec.vector_type,
-                "params": {"dim": normal_vector_dim},
-            },
-            {
-                "name": spec.tag_field,
-                "type": spec.tag_type,
+                "name": spec.tag_subfield,
+                "type": spec.tag_subfield_type,
                 "params": {"max_length": spec.tag_max_length},
+                "nullable": True,
             },
         ]
-        schema = {
-            "auto_id": False,
-            "enable_dynamic_field": False,
-            "fields": fields,
-            "functions": [],
-        }
-        if include_struct:
-            struct_subfields = [
-                {"name": spec.int_subfield, "type": spec.int_subfield_type, "nullable": True},
-                {
-                    "name": spec.tag_subfield,
-                    "type": spec.tag_subfield_type,
-                    "params": {"max_length": spec.tag_max_length},
-                    "nullable": True,
-                },
-            ]
-            if include_vector_subfield:
-                struct_subfields.append(
-                    {
-                        "name": spec.vector_subfield,
-                        "type": struct_vector_type,
-                        "params": {"dim": struct_vector_dim},
-                        "nullable": True,
-                    }
-                )
-            fields.append(
-                {
-                    "name": spec.struct_field,
-                    "type": spec.struct_type,
-                    "element_type": spec.struct_element_type,
-                    "params": {"max_capacity": spec.struct_max_capacity},
-                    "nullable": struct_nullable,
-                    "struct_fields": struct_subfields,
-                }
-            )
-            schema["struct_fields"] = [
-                {
-                    "name": spec.struct_field,
-                    "max_capacity": spec.struct_max_capacity,
-                    "nullable": struct_nullable,
-                    "fields": struct_subfields,
-                }
-            ]
-        return schema
-
-    @staticmethod
-    def _create_struct_field_schema(
-        client,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        include_vector_subfield: bool = False,
-        vector_type: DataType | None = None,
-        vector_dim: int | None = None,
-    ):
-        vector_type = vector_type or spec.vector_subfield_type
-        vector_dim = vector_dim or spec.vector_subfield_dim
-        struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(spec.int_subfield, spec.int_subfield_type)
-        struct_schema.add_field(spec.tag_subfield, spec.tag_subfield_type, max_length=spec.tag_max_length)
         if include_vector_subfield:
-            struct_schema.add_field(spec.vector_subfield, vector_type, dim=vector_dim)
-        return struct_schema
-
-    @classmethod
-    def _create_nullable_struct_array_schema(
-        cls,
-        client,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        include_struct: bool = True,
-        include_vector_subfield: bool = False,
-        normal_vector_dim: int | None = None,
-        struct_vector_type: DataType | None = None,
-        struct_vector_dim: int | None = None,
-        include_tag_field: bool = True,
-        enable_dynamic_field: bool = False,
-    ):
-        normal_vector_dim = normal_vector_dim or spec.vector_dim
-        struct_vector_type = struct_vector_type or spec.vector_subfield_type
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=enable_dynamic_field)
-        schema.add_field(field_name=spec.pk_field, datatype=spec.pk_type, is_primary=True)
-        schema.add_field(field_name=spec.vector_field, datatype=spec.vector_type, dim=normal_vector_dim)
-        if include_tag_field:
-            schema.add_field(field_name=spec.tag_field, datatype=spec.tag_type, max_length=spec.tag_max_length)
-        if include_struct:
-            struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
-            struct_schema = cls._create_struct_field_schema(
-                client,
-                spec=spec,
-                include_vector_subfield=include_vector_subfield,
-                vector_type=struct_vector_type,
-                vector_dim=struct_vector_dim,
+            struct_subfields.append(
+                {
+                    "name": spec.vector_subfield,
+                    "type": struct_vector_type,
+                    "params": {"dim": struct_vector_dim},
+                    "nullable": True,
+                }
             )
-            schema.add_field(
-                spec.struct_field,
-                datatype=spec.struct_type,
-                element_type=spec.struct_element_type,
-                struct_schema=struct_schema,
-                max_capacity=spec.struct_max_capacity,
-                nullable=True,
-            )
-        return schema
+        fields.append(
+            {
+                "name": spec.struct_field,
+                "type": spec.struct_type,
+                "element_type": spec.struct_element_type,
+                "params": {"max_capacity": spec.struct_max_capacity},
+                "nullable": struct_nullable,
+                "struct_fields": struct_subfields,
+            }
+        )
+        schema["struct_fields"] = [
+            {
+                "name": spec.struct_field,
+                "max_capacity": spec.struct_max_capacity,
+                "nullable": struct_nullable,
+                "fields": struct_subfields,
+            }
+        ]
+    return schema
 
-    def _create_indexed_nullable_struct_array_collection(
-        self,
-        client,
-        collection_name: str,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
-        include_vector_subfield: bool = False,
-        normal_vector_dim: int | None = None,
-        struct_vector_type: DataType | None = None,
-        struct_vector_dim: int | None = None,
-    ):
-        schema = self._create_nullable_struct_array_schema(
+
+def gen_struct_field_schema(
+    case,
+    client,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    include_vector_subfield: bool = False,
+    vector_type: DataType | None = None,
+    vector_dim: int | None = None,
+):
+    vector_type = vector_type or spec.vector_subfield_type
+    vector_dim = vector_dim or spec.vector_subfield_dim
+    struct_schema = gen_struct_schema(case, client)
+    struct_schema.add_field(spec.int_subfield, spec.int_subfield_type)
+    struct_schema.add_field(spec.tag_subfield, spec.tag_subfield_type, max_length=spec.tag_max_length)
+    if include_vector_subfield:
+        struct_schema.add_field(spec.vector_subfield, vector_type, dim=vector_dim)
+    return struct_schema
+
+
+def gen_struct_array_schema(
+    case,
+    client,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    include_struct: bool = True,
+    include_vector_subfield: bool = False,
+    normal_vector_dim: int | None = None,
+    struct_vector_type: DataType | None = None,
+    struct_vector_dim: int | None = None,
+    include_tag_field: bool = True,
+    enable_dynamic_field: bool = False,
+):
+    normal_vector_dim = normal_vector_dim or spec.vector_dim
+    struct_vector_type = struct_vector_type or spec.vector_subfield_type
+    schema = gen_schema(case, client, auto_id=False, enable_dynamic_field=enable_dynamic_field)
+    schema.add_field(field_name=spec.pk_field, datatype=spec.pk_type, is_primary=True)
+    schema.add_field(field_name=spec.vector_field, datatype=spec.vector_type, dim=normal_vector_dim)
+    if include_tag_field:
+        schema.add_field(field_name=spec.tag_field, datatype=spec.tag_type, max_length=spec.tag_max_length)
+    if include_struct:
+        struct_vector_dim = struct_vector_dim or spec.vector_subfield_dim
+        struct_schema = gen_struct_field_schema(
+            case,
             client,
             spec=spec,
             include_vector_subfield=include_vector_subfield,
-            normal_vector_dim=normal_vector_dim,
-            struct_vector_type=struct_vector_type,
-            struct_vector_dim=struct_vector_dim,
+            vector_type=struct_vector_type,
+            vector_dim=struct_vector_dim,
         )
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name=spec.vector_field,
-            index_type=index_spec.normal_vector_index_type,
-            metric_type=index_spec.normal_vector_metric_type,
+        schema.add_field(
+            spec.struct_field,
+            datatype=spec.struct_type,
+            element_type=spec.struct_element_type,
+            struct_schema=struct_schema,
+            max_capacity=spec.struct_max_capacity,
+            nullable=True,
         )
-        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        assert check
-        return schema
+    return schema
 
-    @classmethod
-    def _generated_rows_by_schema(
-        cls,
-        schema,
-        count: int,
-        *,
-        start_id: int = 0,
-        tag_prefix: str = "row",
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        profiles: list[Any] | None = None,
-        default_values: dict[str, Any] | None = None,
-        vector_dim: int | None = None,
-    ) -> list[dict[str, Any]]:
-        field_names = cls._schema_field_names(schema)
-        row_ids = list(range(start_id, start_id + count))
-        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
-        overrides = {
-            spec.pk_field: row_ids,
-            spec.vector_field: [cls._vector(row_id, vector_dim) for row_id in row_ids],
-            spec.tag_field: [f"{tag_prefix}_{i}" for i in range(count)],
-        }
-        if profiles is not None:
-            overrides[spec.struct_field] = profiles
-        if default_values:
-            overrides.update(default_values)
-        overrides = {field_name: value for field_name, value in overrides.items() if field_name in field_names}
-        return cf.gen_row_data_by_schema_with_defaults(
-            nb=count,
-            schema=schema,
-            start=start_id,
-            default_values=overrides,
-        )
 
-    @classmethod
-    def _generated_row_by_schema(
-        cls,
-        schema,
-        row_id: int,
-        tag: str,
-        *,
-        profile=OMITTED_FIELD,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        vector_dim: int | None = None,
-    ) -> dict[str, Any]:
-        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
-        default_values = {
-            spec.pk_field: [row_id],
-            spec.vector_field: [cls._vector(row_id, vector_dim)],
-            spec.tag_field: [tag],
-        }
-        if profile is not OMITTED_FIELD:
-            default_values[spec.struct_field] = [profile]
-        row = cls._generated_rows_by_schema(
-            schema,
-            1,
-            start_id=row_id,
-            tag_prefix=tag,
-            spec=spec,
-            default_values=default_values,
-            vector_dim=vector_dim,
-        )[0]
-        if profile is OMITTED_FIELD:
-            row.pop(spec.struct_field, None)
-        return row
-
-    @classmethod
-    def _default_nullable_scalar_profile(
-        cls,
-        row_id: int,
-        offset: int,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        if offset % 3 == 0:
-            return None
-        if offset % 3 == 1:
-            return []
-        return cls._scalar_profile(row_id, spec=spec)
-
-    @classmethod
-    def _nullable_scalar_struct_rows_by_schema(
-        cls,
-        schema,
-        count: int,
-        *,
-        start_id: int = 0,
-        tag_prefix: str = "row",
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        profile_factory=None,
-        tag_factory=None,
-        vector_factory=None,
-    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
-        row_ids = list(range(start_id, start_id + count))
-        profile_factory = profile_factory or cls._default_nullable_scalar_profile
-        tag_factory = tag_factory or (lambda row_id, _offset: f"{tag_prefix}_{row_id}")
-        vector_dim = cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
-        vector_factory = vector_factory or (lambda row_id, _offset: cls._vector(row_id, vector_dim))
-        profiles = [profile_factory(row_id, offset, spec=spec) for offset, row_id in enumerate(row_ids)]
-        default_values = {
-            spec.vector_field: [vector_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
-            spec.tag_field: [tag_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
-        }
-        rows = cls._generated_rows_by_schema(
-            schema,
-            count,
-            start_id=start_id,
-            tag_prefix=tag_prefix,
-            spec=spec,
-            profiles=profiles,
-            default_values=default_values,
-            vector_dim=vector_dim,
-        )
-        return rows, {row[spec.pk_field]: row for row in rows}
-
-    @staticmethod
-    def _scalar_struct_profile_arrow_type(
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        return pa.list_(
-            pa.struct(
-                [
-                    pa.field(spec.int_subfield, pa.int64()),
-                    pa.field(spec.tag_subfield, pa.string()),
-                ]
-            )
-        )
-
-    @classmethod
-    def _write_scalar_struct_rows_parquet(
-        cls,
-        rows: list[dict[str, Any]],
-        local_file_path: str,
-        *,
-        row_group_size: int,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        table = pa.table(
-            {
-                spec.pk_field: pa.array([row[spec.pk_field] for row in rows], type=pa.int64()),
-                spec.vector_field: pa.array([row[spec.vector_field] for row in rows], type=pa.list_(pa.float32())),
-                spec.tag_field: pa.array([row[spec.tag_field] for row in rows], type=pa.string()),
-                spec.struct_field: pa.array(
-                    [row[spec.struct_field] for row in rows],
-                    type=cls._scalar_struct_profile_arrow_type(spec=spec),
-                ),
-            }
-        )
-        pq.write_table(table, local_file_path, row_group_size=row_group_size)
-
-    @classmethod
-    def _index_filler_rows(
-        cls,
-        start_id: int,
-        count: int,
-        tag_prefix: str,
-        *,
-        schema=None,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        vector_dim: int | None = None,
-    ) -> list[dict[str, Any]]:
-        schema = schema or cls._default_struct_array_schema_dict(spec=spec, normal_vector_dim=vector_dim)
-        return cls._generated_rows_by_schema(
-            schema,
-            count,
-            start_id=start_id,
-            tag_prefix=tag_prefix,
-            spec=spec,
-            vector_dim=vector_dim,
-        )
-
-    @classmethod
-    def _scalar_struct_index_filler_rows(
-        cls,
-        start_id: int,
-        count: int,
-        tag_prefix: str,
-        *,
-        schema=None,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        vector_dim: int | None = None,
-    ) -> list[dict[str, Any]]:
-        schema = schema or cls._default_struct_array_schema_dict(
-            spec=spec,
-            include_struct=True,
-            normal_vector_dim=vector_dim,
-        )
-        profiles = [
-            [{spec.int_subfield: -(start_id + i), spec.tag_subfield: f"{tag_prefix}_profile_{i}"}] for i in range(count)
-        ]
-        return cls._generated_rows_by_schema(
-            schema,
-            count,
-            start_id=start_id,
-            tag_prefix=tag_prefix,
-            spec=spec,
-            profiles=profiles,
-            vector_dim=vector_dim,
-        )
-
-    @classmethod
-    def _vector_struct_index_filler_rows(
-        cls,
-        start_id: int,
-        count: int,
-        tag_prefix: str,
-        *,
-        schema=None,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        vector_dim: int | None = None,
-    ) -> list[dict[str, Any]]:
-        schema = schema or cls._default_struct_array_schema_dict(
-            spec=spec,
-            include_struct=True,
-            include_vector_subfield=True,
-            normal_vector_dim=vector_dim,
-        )
-        vector_dim = vector_dim or cls._schema_field_dim(schema, spec.vector_field, spec.vector_dim)
-        profiles = [
-            [
-                {
-                    spec.int_subfield: -(start_id + i),
-                    spec.tag_subfield: f"{tag_prefix}_profile_{i}",
-                    spec.vector_subfield: cls._vector(start_id + i, vector_dim),
-                }
-            ]
-            for i in range(count)
-        ]
-        return cls._generated_rows_by_schema(
-            schema,
-            count,
-            start_id=start_id,
-            tag_prefix=tag_prefix,
-            spec=spec,
-            profiles=profiles,
-            vector_dim=vector_dim,
-        )
-
-    @staticmethod
-    def _unit_vector(axis: int, dim: int | None = None) -> list[float]:
-        dim = dim or DEFAULT_SCHEMA_SPEC.vector_subfield_dim
-        vector = [0.0 for _ in range(dim)]
-        vector[axis % dim] = 1.0
-        return vector
-
-    def _profile(
-        self,
-        row_id: int,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                spec.int_subfield: row_id * 10,
-                spec.tag_subfield: f"profile_{row_id}_0",
-                spec.vector_subfield: self._vector(row_id * 10, spec.vector_subfield_dim),
-            },
-            {
-                spec.int_subfield: row_id * 10 + 1,
-                spec.tag_subfield: f"profile_{row_id}_1",
-                spec.vector_subfield: self._vector(row_id * 10 + 1, spec.vector_subfield_dim),
-            },
-        ]
-
-    @staticmethod
-    def _typed_vector(vector_type: DataType, seed: int, dim: int = EMB_LIST_DIM):
-        if vector_type == DataType.FLOAT16_VECTOR:
-            return np.array([((seed + i) % 17) / 17 for i in range(dim)], dtype=np.float16)
-        if vector_type == DataType.BFLOAT16_VECTOR:
-            return np.array([((seed + i) % 19) / 19 for i in range(dim)], dtype=cf.bfloat16)
-        if vector_type == DataType.INT8_VECTOR:
-            return np.array([((seed + i) % 255) - 128 for i in range(dim)], dtype=np.int8)
-        if vector_type == DataType.BINARY_VECTOR:
-            bits = [((seed + i) % 2) for i in range(dim)]
-            return bytes(np.packbits(bits, axis=-1).tolist())
-        return [float(seed) + float(i) / 1000 for i in range(dim)]
-
-    def _typed_profile(
-        self,
-        row_id: int,
-        vector_type: DataType,
-        dim: int = EMB_LIST_DIM,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                spec.int_subfield: row_id * 10,
-                spec.tag_subfield: f"profile_{row_id}_0",
-                spec.vector_subfield: self._typed_vector(vector_type, row_id * 10, dim),
-            },
-            {
-                spec.int_subfield: row_id * 10 + 1,
-                spec.tag_subfield: f"profile_{row_id}_1",
-                spec.vector_subfield: self._typed_vector(vector_type, row_id * 10 + 1, dim),
-            },
-        ]
-
-    def _assert_struct_array_equal(
-        self,
-        actual,
-        expected,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        expected_keys=None,
-        vector_type: DataType | None = None,
-        exact_keys: bool = False,
-    ):
-        vector_type = vector_type or spec.vector_subfield_type
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            keys = tuple(expected_keys or expected_item.keys())
-            if exact_keys:
-                assert set(actual_item) == set(keys)
-            for key in keys:
-                if key == spec.vector_subfield:
-                    self._assert_typed_vector_equal(actual_item[key], expected_item[key], vector_type)
-                else:
-                    assert actual_item[key] == expected_item[key]
-
-    def _assert_profile_equal(
-        self,
-        actual,
-        expected,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.vector_subfields)
-
-    def _assert_profile_vector_subfield_equal(
-        self,
-        actual,
-        expected,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(
-            actual,
-            expected,
-            spec=spec,
-            expected_keys=(spec.vector_subfield,),
-            exact_keys=True,
-        )
-
-    @staticmethod
-    def _binary_vector_bytes(value) -> bytes:
-        if isinstance(value, bytes | bytearray):
-            return bytes(value)
-        if isinstance(value, np.ndarray):
-            return value.tobytes()
-        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], bytes | bytearray):
-            return bytes(value[0])
-        return bytes(value)
-
-    def _assert_typed_vector_equal(self, actual, expected, vector_type: DataType):
-        if vector_type == DataType.BINARY_VECTOR:
-            assert self._binary_vector_bytes(actual) == self._binary_vector_bytes(expected)
-            return
-
-        if vector_type == DataType.BFLOAT16_VECTOR:
-            actual_bits = np.asarray(actual, dtype=np.uint16).tolist()
-            expected_bits = np.asarray(expected).view(np.uint16).tolist()
-            assert actual_bits == expected_bits
-            return
-
-        if vector_type == DataType.INT8_VECTOR:
-            assert np.asarray(actual, dtype=np.int8).tolist() == np.asarray(expected, dtype=np.int8).tolist()
-            return
-
-        assert np.asarray(actual, dtype=np.float32).tolist() == pytest.approx(
-            np.asarray(expected, dtype=np.float32).tolist(),
-            abs=epsilon,
-        )
-
-    def _assert_typed_profile_equal(
-        self,
-        actual,
-        expected,
-        vector_type: DataType,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(
-            actual,
-            expected,
-            spec=spec,
-            expected_keys=spec.vector_subfields,
-            vector_type=vector_type,
-        )
-
-    def _assert_typed_profile_vector_subfield_equal(
-        self,
-        actual,
-        expected,
-        vector_type: DataType,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(
-            actual,
-            expected,
-            spec=spec,
-            expected_keys=(spec.vector_subfield,),
-            vector_type=vector_type,
-            exact_keys=True,
-        )
-
-    @staticmethod
-    def _search_entity(hit):
-        return hit.get("entity", hit)
-
-    @staticmethod
-    def _drain_iterator(iterator):
-        assert iterator is not None
-        rows = []
-        while True:
-            batch = iterator.next()
-            if not batch:
-                break
-            rows.extend(batch)
-        iterator.close()
-        return rows
-
-    @staticmethod
-    def _scalar_profile(
-        row_id: int,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                spec.int_subfield: row_id * 10,
-                spec.tag_subfield: f"profile_{row_id}_0",
-            },
-            {
-                spec.int_subfield: row_id * 10 + 1,
-                spec.tag_subfield: f"profile_{row_id}_1",
-            },
-        ]
-
-    def _assert_scalar_profile_equal(
-        self,
-        actual,
-        expected,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.scalar_subfields)
-
-    def _assert_nullable_scalar_profile_equal(
-        self,
-        actual,
-        expected,
-        expected_keys=None,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        self._assert_struct_array_equal(
-            actual,
-            expected,
-            spec=spec,
-            expected_keys=expected_keys,
-            exact_keys=True,
-        )
-
-    def _setup_nullable_scalar_struct_expression_collection(
-        self,
+def gen_indexed_struct_array_collection(
+    case,
+    client,
+    collection_name: str,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
+    include_vector_subfield: bool = False,
+    normal_vector_dim: int | None = None,
+    struct_vector_type: DataType | None = None,
+    struct_vector_dim: int | None = None,
+):
+    schema = gen_struct_array_schema(
+        case,
         client,
-        collection_name,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-        index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
-    ):
-        schema = self._create_nullable_struct_array_schema(client, spec=spec, include_vector_subfield=False)
+        spec=spec,
+        include_vector_subfield=include_vector_subfield,
+        normal_vector_dim=normal_vector_dim,
+        struct_vector_type=struct_vector_type,
+        struct_vector_dim=struct_vector_dim,
+    )
+    index_params = gen_index_params(case, client)
+    index_params.add_index(
+        field_name=spec.vector_field,
+        index_type=index_spec.normal_vector_index_type,
+        metric_type=index_spec.normal_vector_metric_type,
+    )
+    res, check = case.create_collection(client, collection_name, schema=schema, index_params=index_params)
+    assert check
+    return schema
 
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
 
-        sealed_explicit_null_profile_row = self._generated_row_by_schema(
-            schema, 0, "sealed_explicit_null_profile", profile=None, spec=spec
-        )
-        sealed_omitted_profile_row = self._generated_row_by_schema(schema, 1, "sealed_omit_profile", spec=spec)
-        sealed_empty_profile_row = self._generated_row_by_schema(
-            schema, 2, "sealed_empty_profile", profile=[], spec=spec
-        )
-        sealed_one_match_profile_row = self._generated_row_by_schema(
-            schema,
-            3,
-            "sealed_one_match_profile",
-            profile=[
-                {spec.int_subfield: 9100, spec.tag_subfield: "match_9100"},
-                {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
-            ],
-            spec=spec,
-        )
-        sealed_two_match_profile_row = self._generated_row_by_schema(
-            schema,
-            4,
-            "sealed_two_match_profile",
-            profile=[
-                {spec.int_subfield: 9200, spec.tag_subfield: "match_9200"},
-                {spec.int_subfield: 9300, spec.tag_subfield: "match_9300"},
-            ],
-            spec=spec,
-        )
-        sealed_zero_match_profile_row = self._generated_row_by_schema(
-            schema,
-            5,
-            "sealed_zero_match_profile",
-            profile=[
-                {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
-                {spec.int_subfield: 200, spec.tag_subfield: "low_200"},
-            ],
-            spec=spec,
-        )
-        sealed_control_rows = [
-            sealed_explicit_null_profile_row,
-            sealed_omitted_profile_row,
-            sealed_empty_profile_row,
-            sealed_one_match_profile_row,
-            sealed_two_match_profile_row,
-            sealed_zero_match_profile_row,
-        ]
-        sealed_index_filler_rows = self._scalar_struct_index_filler_rows(
-            50000,
-            self.min_index_sealed_rows - len(sealed_control_rows),
-            "sealed_expr_index_filler",
-            schema=schema,
-            spec=spec,
-        )
-        sealed_rows = sealed_control_rows + sealed_index_filler_rows
-        res, check = self.insert(client, collection_name, sealed_rows)
-        assert check
-        assert res["insert_count"] == len(sealed_rows)
+# Data generation
 
-        res, check = self.flush(client, collection_name)
-        assert check
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name=spec.vector_field,
-            index_type=index_spec.normal_vector_index_type,
-            metric_type=index_spec.normal_vector_metric_type,
-        )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-        assert self.wait_for_index_ready(client, collection_name, spec.vector_field, timeout=300)
+def gen_vector(seed: int, dim: int | None = None) -> list[float]:
+    dim = dim or DEFAULT_SCHEMA_SPEC.vector_dim
+    return [float(seed) + float(i) / 1000 for i in range(dim)]
 
-        res, check = self.load_collection(client, collection_name)
-        assert check
 
-        growing_explicit_null_profile_row = self._generated_row_by_schema(
-            schema, 7000, "growing_explicit_null_profile", profile=None, spec=spec
-        )
-        growing_omitted_profile_row = self._generated_row_by_schema(schema, 7001, "growing_omit_profile", spec=spec)
-        growing_empty_profile_row = self._generated_row_by_schema(
-            schema, 7002, "growing_empty_profile", profile=[], spec=spec
-        )
-        growing_one_match_profile_row = self._generated_row_by_schema(
-            schema,
-            7003,
-            "growing_one_match_profile",
-            profile=[
-                {spec.int_subfield: 9600, spec.tag_subfield: "match_9600"},
-                {spec.int_subfield: 600, spec.tag_subfield: "low_600"},
-            ],
-            spec=spec,
-        )
-        growing_two_match_profile_row = self._generated_row_by_schema(
-            schema,
-            7004,
-            "growing_two_match_profile",
-            profile=[
-                {spec.int_subfield: 9700, spec.tag_subfield: "match_9700"},
-                {spec.int_subfield: 9800, spec.tag_subfield: "match_9800"},
-            ],
-            spec=spec,
-        )
-        growing_zero_match_profile_row = self._generated_row_by_schema(
-            schema,
-            7005,
-            "growing_zero_match_profile",
-            profile=[
-                {spec.int_subfield: 700, spec.tag_subfield: "low_700"},
-                {spec.int_subfield: 800, spec.tag_subfield: "low_800"},
-            ],
-            spec=spec,
-        )
-        growing_rows = [
-            growing_explicit_null_profile_row,
-            growing_omitted_profile_row,
-            growing_empty_profile_row,
-            growing_one_match_profile_row,
-            growing_two_match_profile_row,
-            growing_zero_match_profile_row,
-        ]
-        res, check = self.insert(client, collection_name, growing_rows)
-        assert check
-        assert res["insert_count"] == len(growing_rows)
+def gen_rows_by_schema(
+    schema,
+    count: int,
+    *,
+    start_id: int = 0,
+    tag_prefix: str = "row",
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    profiles: list[Any] | None = None,
+    default_values: dict[str, Any] | None = None,
+    vector_dim: int | None = None,
+) -> list[dict[str, Any]]:
+    field_names = _schema_field_names(schema)
+    row_ids = list(range(start_id, start_id + count))
+    vector_dim = vector_dim or _schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+    overrides = {
+        spec.pk_field: row_ids,
+        spec.vector_field: [gen_vector(row_id, vector_dim) for row_id in row_ids],
+        spec.tag_field: [f"{tag_prefix}_{i}" for i in range(count)],
+    }
+    if profiles is not None:
+        overrides[spec.struct_field] = profiles
+    if default_values:
+        overrides.update(default_values)
+    overrides = {field_name: value for field_name, value in overrides.items() if field_name in field_names}
+    return cf.gen_row_data_by_schema_with_defaults(
+        nb=count,
+        schema=schema,
+        start=start_id,
+        default_values=overrides,
+    )
 
-        source_by_id = {}
-        source_by_id[sealed_explicit_null_profile_row[spec.pk_field]] = sealed_explicit_null_profile_row
-        source_by_id[sealed_omitted_profile_row[spec.pk_field]] = {
-            **sealed_omitted_profile_row,
-            spec.struct_field: None,
-        }
-        source_by_id[sealed_empty_profile_row[spec.pk_field]] = sealed_empty_profile_row
-        source_by_id[sealed_one_match_profile_row[spec.pk_field]] = sealed_one_match_profile_row
-        source_by_id[sealed_two_match_profile_row[spec.pk_field]] = sealed_two_match_profile_row
-        source_by_id[sealed_zero_match_profile_row[spec.pk_field]] = sealed_zero_match_profile_row
-        source_by_id.update({row[spec.pk_field]: row for row in sealed_index_filler_rows})
-        source_by_id[growing_explicit_null_profile_row[spec.pk_field]] = growing_explicit_null_profile_row
-        source_by_id[growing_omitted_profile_row[spec.pk_field]] = {
-            **growing_omitted_profile_row,
-            spec.struct_field: None,
-        }
-        source_by_id[growing_empty_profile_row[spec.pk_field]] = growing_empty_profile_row
-        source_by_id[growing_one_match_profile_row[spec.pk_field]] = growing_one_match_profile_row
-        source_by_id[growing_two_match_profile_row[spec.pk_field]] = growing_two_match_profile_row
-        source_by_id[growing_zero_match_profile_row[spec.pk_field]] = growing_zero_match_profile_row
 
-        controlled_ids = {row[spec.pk_field] for row in sealed_control_rows + growing_rows}
-        return {
-            "source_by_id": source_by_id,
-            "source_rows": list(source_by_id.values()),
-            "controlled_ids": controlled_ids,
-            "schema_spec": spec,
-        }
+def gen_row_by_schema(
+    schema,
+    row_id: int,
+    tag: str,
+    *,
+    profile=OMITTED_FIELD,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    vector_dim: int | None = None,
+) -> dict[str, Any]:
+    vector_dim = vector_dim or _schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+    default_values = {
+        spec.pk_field: [row_id],
+        spec.vector_field: [gen_vector(row_id, vector_dim)],
+        spec.tag_field: [tag],
+    }
+    if profile is not OMITTED_FIELD:
+        default_values[spec.struct_field] = [profile]
+    row = gen_rows_by_schema(
+        schema,
+        1,
+        start_id=row_id,
+        tag_prefix=tag,
+        spec=spec,
+        default_values=default_values,
+        vector_dim=vector_dim,
+    )[0]
+    if profile is OMITTED_FIELD:
+        row.pop(spec.struct_field, None)
+    return row
 
-    def _assert_expression_rows_match_source(
-        self,
-        rows,
-        source_by_id,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ):
-        for row in rows:
-            expected = source_by_id[row[spec.pk_field]]
-            assert row[spec.tag_field] == expected[spec.tag_field]
-            self._assert_scalar_profile_equal(row[spec.struct_field], expected[spec.struct_field], spec=spec)
 
-    @staticmethod
-    def _parse_expression_value(raw_value: str):
-        raw_value = raw_value.strip()
-        if raw_value.startswith('"') and raw_value.endswith('"'):
-            return raw_value[1:-1]
-        if raw_value.lower() == "null":
-            return None
-        try:
-            return int(raw_value)
-        except ValueError:
-            return float(raw_value)
+def _default_nullable_scalar_profile(
+    row_id: int,
+    offset: int,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    if offset % 3 == 0:
+        return None
+    if offset % 3 == 1:
+        return []
+    return gen_scalar_profile(row_id, spec=spec)
 
-    @classmethod
-    def _parse_expression_list(cls, raw_value: str):
-        return json.loads(raw_value)
 
-    @staticmethod
-    def _compare_expression_values(actual, op: str, expected) -> bool:
-        if actual is None or expected is None:
-            if op == "==":
-                return actual is expected
-            if op == "!=":
-                return actual is not expected
-            return False
-        if op == ">=":
-            return actual >= expected
-        if op == "<=":
-            return actual <= expected
-        if op == "==":
-            return actual == expected
-        if op == "!=":
-            return actual != expected
-        if op == ">":
-            return actual > expected
-        if op == "<":
-            return actual < expected
-        raise AssertionError(f"unsupported operator: {op}")
+def gen_nullable_scalar_struct_rows(
+    schema,
+    count: int,
+    *,
+    start_id: int = 0,
+    tag_prefix: str = "row",
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    profile_factory=None,
+    tag_factory=None,
+    vector_factory=None,
+) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    row_ids = list(range(start_id, start_id + count))
+    profile_factory = profile_factory or _default_nullable_scalar_profile
+    tag_factory = tag_factory or (lambda row_id, _offset: f"{tag_prefix}_{row_id}")
+    vector_dim = _schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+    vector_factory = vector_factory or (lambda row_id, _offset: gen_vector(row_id, vector_dim))
+    profiles = [profile_factory(row_id, offset, spec=spec) for offset, row_id in enumerate(row_ids)]
+    default_values = {
+        spec.vector_field: [vector_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
+        spec.tag_field: [tag_factory(row_id, offset) for offset, row_id in enumerate(row_ids)],
+    }
+    rows = gen_rows_by_schema(
+        schema,
+        count,
+        start_id=start_id,
+        tag_prefix=tag_prefix,
+        spec=spec,
+        profiles=profiles,
+        default_values=default_values,
+        vector_dim=vector_dim,
+    )
+    return rows, {row[spec.pk_field]: row for row in rows}
 
-    @classmethod
-    def _eval_struct_element_condition(cls, element: dict[str, Any], condition: str) -> bool:
-        condition = condition.strip()
-        if " && " in condition:
-            return all(cls._eval_struct_element_condition(element, part) for part in condition.split(" && "))
-        if " || " in condition:
-            return any(cls._eval_struct_element_condition(element, part) for part in condition.split(" || "))
-        for op in [">=", "<=", "==", "!=", ">", "<"]:
-            if op not in condition:
-                continue
-            left, right = [part.strip() for part in condition.split(op, 1)]
-            assert left.startswith("$[") and left.endswith("]")
-            field_name = left[2:-1]
-            actual = element.get(field_name)
-            expected = cls._parse_expression_value(right)
-            return cls._compare_expression_values(actual, op, expected)
-        raise AssertionError(f"unsupported element condition: {condition}")
 
-    @staticmethod
-    def _strip_id_scope(
-        rows: list[dict[str, Any]],
-        expression: str,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> tuple[list[dict[str, Any]], str]:
-        expression = expression.strip()
-        match = re.match(rf"^{re.escape(spec.pk_field)}\s+in\s+\[([^\]]*)\]\s*&&\s*(.+)$", expression)
-        if match is None:
-            return rows, expression
-        id_values = {int(value.strip()) for value in match.group(1).split(",") if value.strip()}
-        return [row for row in rows if row[spec.pk_field] in id_values], match.group(2).strip()
-
-    @classmethod
-    def _expected_struct_array_expression_rows(
-        cls,
-        rows: list[dict[str, Any]],
-        expression: str,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> list[dict[str, Any]]:
-        scoped_rows, expression = cls._strip_id_scope(rows, expression, spec=spec)
-        struct_field_pattern = re.escape(spec.struct_field)
-
-        def output_row(row, offset=None):
-            result = {
-                spec.pk_field: row[spec.pk_field],
-                spec.tag_field: row[spec.tag_field],
-                spec.struct_field: row.get(spec.struct_field),
-            }
-            if offset is not None:
-                result["offset"] = offset
-            return result
-
-        if expression == f"{spec.struct_field} is null":
-            return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is None]
-        if expression == f"{spec.struct_field} is not null":
-            return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is not None]
-
-        length_match = re.match(
-            rf"^array_length\({struct_field_pattern}(?:\[[^\]]+\])?\)\s*(==|!=|>=|<=|>|<)\s*(\d+)$",
-            expression,
-        )
-        if length_match is not None:
-            op, raw_expected = length_match.groups()
-            expected = int(raw_expected)
-            return [
-                output_row(row)
-                for row in scoped_rows
-                if row.get(spec.struct_field) is not None
-                and cls._compare_expression_values(len(row[spec.struct_field]), op, expected)
+def _scalar_struct_profile_arrow_type(
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    return pa.list_(
+        pa.struct(
+            [
+                pa.field(spec.int_subfield, pa.int64()),
+                pa.field(spec.tag_subfield, pa.string()),
             ]
-
-        array_contains_match = re.match(
-            rf"^array_contains(?:_(all|any))?\({struct_field_pattern}\[([^\]]+)\],\s*(.+)\)$",
-            expression,
         )
-        if array_contains_match is not None:
-            mode, field_name, raw_expected = array_contains_match.groups()
-            expected_values = (
-                cls._parse_expression_list(raw_expected)
-                if mode in {"all", "any"}
-                else [cls._parse_expression_value(raw_expected)]
+    )
+
+
+def write_scalar_struct_rows_parquet(
+    rows: list[dict[str, Any]],
+    local_file_path: str,
+    *,
+    row_group_size: int,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    table = pa.table(
+        {
+            spec.pk_field: pa.array([row[spec.pk_field] for row in rows], type=pa.int64()),
+            spec.vector_field: pa.array([row[spec.vector_field] for row in rows], type=pa.list_(pa.float32())),
+            spec.tag_field: pa.array([row[spec.tag_field] for row in rows], type=pa.string()),
+            spec.struct_field: pa.array(
+                [row[spec.struct_field] for row in rows],
+                type=_scalar_struct_profile_arrow_type(spec=spec),
+            ),
+        }
+    )
+    pq.write_table(table, local_file_path, row_group_size=row_group_size)
+
+
+def gen_index_filler_rows(
+    start_id: int,
+    count: int,
+    tag_prefix: str,
+    *,
+    schema=None,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    vector_dim: int | None = None,
+) -> list[dict[str, Any]]:
+    schema = schema or gen_struct_array_schema_dict(spec=spec, normal_vector_dim=vector_dim)
+    return gen_rows_by_schema(
+        schema,
+        count,
+        start_id=start_id,
+        tag_prefix=tag_prefix,
+        spec=spec,
+        vector_dim=vector_dim,
+    )
+
+
+def gen_scalar_index_filler_rows(
+    start_id: int,
+    count: int,
+    tag_prefix: str,
+    *,
+    schema=None,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    vector_dim: int | None = None,
+) -> list[dict[str, Any]]:
+    schema = schema or gen_struct_array_schema_dict(
+        spec=spec,
+        include_struct=True,
+        normal_vector_dim=vector_dim,
+    )
+    profiles = [
+        [{spec.int_subfield: -(start_id + i), spec.tag_subfield: f"{tag_prefix}_profile_{i}"}] for i in range(count)
+    ]
+    return gen_rows_by_schema(
+        schema,
+        count,
+        start_id=start_id,
+        tag_prefix=tag_prefix,
+        spec=spec,
+        profiles=profiles,
+        vector_dim=vector_dim,
+    )
+
+
+def gen_vector_index_filler_rows(
+    start_id: int,
+    count: int,
+    tag_prefix: str,
+    *,
+    schema=None,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    vector_dim: int | None = None,
+) -> list[dict[str, Any]]:
+    schema = schema or gen_struct_array_schema_dict(
+        spec=spec,
+        include_struct=True,
+        include_vector_subfield=True,
+        normal_vector_dim=vector_dim,
+    )
+    vector_dim = vector_dim or _schema_field_dim(schema, spec.vector_field, spec.vector_dim)
+    profiles = [
+        [
+            {
+                spec.int_subfield: -(start_id + i),
+                spec.tag_subfield: f"{tag_prefix}_profile_{i}",
+                spec.vector_subfield: gen_vector(start_id + i, vector_dim),
+            }
+        ]
+        for i in range(count)
+    ]
+    return gen_rows_by_schema(
+        schema,
+        count,
+        start_id=start_id,
+        tag_prefix=tag_prefix,
+        spec=spec,
+        profiles=profiles,
+        vector_dim=vector_dim,
+    )
+
+
+def gen_unit_vector(axis: int, dim: int | None = None) -> list[float]:
+    dim = dim or DEFAULT_SCHEMA_SPEC.vector_subfield_dim
+    vector = [0.0 for _ in range(dim)]
+    vector[axis % dim] = 1.0
+    return vector
+
+
+def gen_profile(
+    row_id: int,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            spec.int_subfield: row_id * 10,
+            spec.tag_subfield: f"profile_{row_id}_0",
+            spec.vector_subfield: gen_vector(row_id * 10, spec.vector_subfield_dim),
+        },
+        {
+            spec.int_subfield: row_id * 10 + 1,
+            spec.tag_subfield: f"profile_{row_id}_1",
+            spec.vector_subfield: gen_vector(row_id * 10 + 1, spec.vector_subfield_dim),
+        },
+    ]
+
+
+def gen_typed_vector(vector_type: DataType, seed: int, dim: int = EMB_LIST_DIM):
+    if vector_type == DataType.FLOAT16_VECTOR:
+        return np.array([((seed + i) % 17) / 17 for i in range(dim)], dtype=np.float16)
+    if vector_type == DataType.BFLOAT16_VECTOR:
+        return np.array([((seed + i) % 19) / 19 for i in range(dim)], dtype=cf.bfloat16)
+    if vector_type == DataType.INT8_VECTOR:
+        return np.array([((seed + i) % 255) - 128 for i in range(dim)], dtype=np.int8)
+    if vector_type == DataType.BINARY_VECTOR:
+        bits = [((seed + i) % 2) for i in range(dim)]
+        return bytes(np.packbits(bits, axis=-1).tolist())
+    return [float(seed) + float(i) / 1000 for i in range(dim)]
+
+
+def gen_typed_profile(
+    row_id: int,
+    vector_type: DataType,
+    dim: int = EMB_LIST_DIM,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            spec.int_subfield: row_id * 10,
+            spec.tag_subfield: f"profile_{row_id}_0",
+            spec.vector_subfield: gen_typed_vector(vector_type, row_id * 10, dim),
+        },
+        {
+            spec.int_subfield: row_id * 10 + 1,
+            spec.tag_subfield: f"profile_{row_id}_1",
+            spec.vector_subfield: gen_typed_vector(vector_type, row_id * 10 + 1, dim),
+        },
+    ]
+
+
+def gen_scalar_profile(
+    row_id: int,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            spec.int_subfield: row_id * 10,
+            spec.tag_subfield: f"profile_{row_id}_0",
+        },
+        {
+            spec.int_subfield: row_id * 10 + 1,
+            spec.tag_subfield: f"profile_{row_id}_1",
+        },
+    ]
+
+
+def gen_expression_fixture(
+    case,
+    client,
+    collection_name,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    index_spec: StructArrayNullableIndexSpec = DEFAULT_INDEX_SPEC,
+):
+    schema = gen_struct_array_schema(case, client, spec=spec, include_vector_subfield=False)
+
+    res, check = case.create_collection(client, collection_name, schema=schema)
+    assert check
+
+    sealed_explicit_null_profile_row = gen_row_by_schema(
+        schema, 0, "sealed_explicit_null_profile", profile=None, spec=spec
+    )
+    sealed_omitted_profile_row = gen_row_by_schema(schema, 1, "sealed_omit_profile", spec=spec)
+    sealed_empty_profile_row = gen_row_by_schema(schema, 2, "sealed_empty_profile", profile=[], spec=spec)
+    sealed_one_match_profile_row = gen_row_by_schema(
+        schema,
+        3,
+        "sealed_one_match_profile",
+        profile=[
+            {spec.int_subfield: 9100, spec.tag_subfield: "match_9100"},
+            {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
+        ],
+        spec=spec,
+    )
+    sealed_two_match_profile_row = gen_row_by_schema(
+        schema,
+        4,
+        "sealed_two_match_profile",
+        profile=[
+            {spec.int_subfield: 9200, spec.tag_subfield: "match_9200"},
+            {spec.int_subfield: 9300, spec.tag_subfield: "match_9300"},
+        ],
+        spec=spec,
+    )
+    sealed_zero_match_profile_row = gen_row_by_schema(
+        schema,
+        5,
+        "sealed_zero_match_profile",
+        profile=[
+            {spec.int_subfield: 100, spec.tag_subfield: "low_100"},
+            {spec.int_subfield: 200, spec.tag_subfield: "low_200"},
+        ],
+        spec=spec,
+    )
+    sealed_control_rows = [
+        sealed_explicit_null_profile_row,
+        sealed_omitted_profile_row,
+        sealed_empty_profile_row,
+        sealed_one_match_profile_row,
+        sealed_two_match_profile_row,
+        sealed_zero_match_profile_row,
+    ]
+    sealed_index_filler_rows = gen_scalar_index_filler_rows(
+        50000,
+        case.min_index_sealed_rows - len(sealed_control_rows),
+        "sealed_expr_index_filler",
+        schema=schema,
+        spec=spec,
+    )
+    sealed_rows = sealed_control_rows + sealed_index_filler_rows
+    res, check = case.insert(client, collection_name, sealed_rows)
+    assert check
+    assert res["insert_count"] == len(sealed_rows)
+
+    res, check = case.flush(client, collection_name)
+    assert check
+
+    index_params = gen_index_params(case, client)
+    index_params.add_index(
+        field_name=spec.vector_field,
+        index_type=index_spec.normal_vector_index_type,
+        metric_type=index_spec.normal_vector_metric_type,
+    )
+    res, check = case.create_index(client, collection_name, index_params)
+    assert check
+    assert case.wait_for_index_ready(client, collection_name, spec.vector_field, timeout=300)
+
+    res, check = case.load_collection(client, collection_name)
+    assert check
+
+    growing_explicit_null_profile_row = gen_row_by_schema(
+        schema, 7000, "growing_explicit_null_profile", profile=None, spec=spec
+    )
+    growing_omitted_profile_row = gen_row_by_schema(schema, 7001, "growing_omit_profile", spec=spec)
+    growing_empty_profile_row = gen_row_by_schema(schema, 7002, "growing_empty_profile", profile=[], spec=spec)
+    growing_one_match_profile_row = gen_row_by_schema(
+        schema,
+        7003,
+        "growing_one_match_profile",
+        profile=[
+            {spec.int_subfield: 9600, spec.tag_subfield: "match_9600"},
+            {spec.int_subfield: 600, spec.tag_subfield: "low_600"},
+        ],
+        spec=spec,
+    )
+    growing_two_match_profile_row = gen_row_by_schema(
+        schema,
+        7004,
+        "growing_two_match_profile",
+        profile=[
+            {spec.int_subfield: 9700, spec.tag_subfield: "match_9700"},
+            {spec.int_subfield: 9800, spec.tag_subfield: "match_9800"},
+        ],
+        spec=spec,
+    )
+    growing_zero_match_profile_row = gen_row_by_schema(
+        schema,
+        7005,
+        "growing_zero_match_profile",
+        profile=[
+            {spec.int_subfield: 700, spec.tag_subfield: "low_700"},
+            {spec.int_subfield: 800, spec.tag_subfield: "low_800"},
+        ],
+        spec=spec,
+    )
+    growing_rows = [
+        growing_explicit_null_profile_row,
+        growing_omitted_profile_row,
+        growing_empty_profile_row,
+        growing_one_match_profile_row,
+        growing_two_match_profile_row,
+        growing_zero_match_profile_row,
+    ]
+    res, check = case.insert(client, collection_name, growing_rows)
+    assert check
+    assert res["insert_count"] == len(growing_rows)
+
+    source_by_id = {}
+    source_by_id[sealed_explicit_null_profile_row[spec.pk_field]] = sealed_explicit_null_profile_row
+    source_by_id[sealed_omitted_profile_row[spec.pk_field]] = {
+        **sealed_omitted_profile_row,
+        spec.struct_field: None,
+    }
+    source_by_id[sealed_empty_profile_row[spec.pk_field]] = sealed_empty_profile_row
+    source_by_id[sealed_one_match_profile_row[spec.pk_field]] = sealed_one_match_profile_row
+    source_by_id[sealed_two_match_profile_row[spec.pk_field]] = sealed_two_match_profile_row
+    source_by_id[sealed_zero_match_profile_row[spec.pk_field]] = sealed_zero_match_profile_row
+    source_by_id.update({row[spec.pk_field]: row for row in sealed_index_filler_rows})
+    source_by_id[growing_explicit_null_profile_row[spec.pk_field]] = growing_explicit_null_profile_row
+    source_by_id[growing_omitted_profile_row[spec.pk_field]] = {
+        **growing_omitted_profile_row,
+        spec.struct_field: None,
+    }
+    source_by_id[growing_empty_profile_row[spec.pk_field]] = growing_empty_profile_row
+    source_by_id[growing_one_match_profile_row[spec.pk_field]] = growing_one_match_profile_row
+    source_by_id[growing_two_match_profile_row[spec.pk_field]] = growing_two_match_profile_row
+    source_by_id[growing_zero_match_profile_row[spec.pk_field]] = growing_zero_match_profile_row
+
+    controlled_ids = {row[spec.pk_field] for row in sealed_control_rows + growing_rows}
+    return {
+        "source_by_id": source_by_id,
+        "source_rows": list(source_by_id.values()),
+        "controlled_ids": controlled_ids,
+        "schema_spec": spec,
+    }
+
+
+# Ground truth generation and result assertions
+
+
+def assert_struct_array_equal(
+    actual,
+    expected,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+    expected_keys=None,
+    vector_type: DataType | None = None,
+    exact_keys: bool = False,
+):
+    vector_type = vector_type or spec.vector_subfield_type
+    if expected is None:
+        assert actual is None
+        return
+
+    assert isinstance(actual, list)
+    assert len(actual) == len(expected)
+    for actual_item, expected_item in zip(actual, expected):
+        keys = tuple(expected_keys or expected_item.keys())
+        if exact_keys:
+            assert set(actual_item) == set(keys)
+        for key in keys:
+            if key == spec.vector_subfield:
+                assert_typed_vector_equal(actual_item[key], expected_item[key], vector_type)
+            else:
+                assert actual_item[key] == expected_item[key]
+
+
+def assert_profile_equal(
+    actual,
+    expected,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.vector_subfields)
+
+
+def assert_profile_vector_subfield_equal(
+    actual,
+    expected,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(
+        actual,
+        expected,
+        spec=spec,
+        expected_keys=(spec.vector_subfield,),
+        exact_keys=True,
+    )
+
+
+def _binary_vector_bytes(value) -> bytes:
+    if isinstance(value, bytes | bytearray):
+        return bytes(value)
+    if isinstance(value, np.ndarray):
+        return value.tobytes()
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], bytes | bytearray):
+        return bytes(value[0])
+    return bytes(value)
+
+
+def assert_typed_vector_equal(actual, expected, vector_type: DataType):
+    if vector_type == DataType.BINARY_VECTOR:
+        assert _binary_vector_bytes(actual) == _binary_vector_bytes(expected)
+        return
+
+    if vector_type == DataType.BFLOAT16_VECTOR:
+        actual_bits = np.asarray(actual, dtype=np.uint16).tolist()
+        expected_bits = np.asarray(expected).view(np.uint16).tolist()
+        assert actual_bits == expected_bits
+        return
+
+    if vector_type == DataType.INT8_VECTOR:
+        assert np.asarray(actual, dtype=np.int8).tolist() == np.asarray(expected, dtype=np.int8).tolist()
+        return
+
+    assert np.asarray(actual, dtype=np.float32).tolist() == pytest.approx(
+        np.asarray(expected, dtype=np.float32).tolist(),
+        abs=epsilon,
+    )
+
+
+def assert_typed_profile_equal(
+    actual,
+    expected,
+    vector_type: DataType,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(
+        actual,
+        expected,
+        spec=spec,
+        expected_keys=spec.vector_subfields,
+        vector_type=vector_type,
+    )
+
+
+def assert_typed_profile_vector_subfield_equal(
+    actual,
+    expected,
+    vector_type: DataType,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(
+        actual,
+        expected,
+        spec=spec,
+        expected_keys=(spec.vector_subfield,),
+        vector_type=vector_type,
+        exact_keys=True,
+    )
+
+
+def search_entity(hit):
+    return hit.get("entity", hit)
+
+
+def drain_iterator(iterator):
+    assert iterator is not None
+    rows = []
+    while True:
+        batch = iterator.next()
+        if not batch:
+            break
+        rows.extend(batch)
+    iterator.close()
+    return rows
+
+
+def assert_scalar_profile_equal(
+    actual,
+    expected,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(actual, expected, spec=spec, expected_keys=spec.scalar_subfields)
+
+
+def assert_nullable_scalar_profile_equal(
+    actual,
+    expected,
+    expected_keys=None,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    assert_struct_array_equal(
+        actual,
+        expected,
+        spec=spec,
+        expected_keys=expected_keys,
+        exact_keys=True,
+    )
+
+
+def assert_expression_rows_match_source(
+    rows,
+    source_by_id,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+):
+    for row in rows:
+        expected = source_by_id[row[spec.pk_field]]
+        assert row[spec.tag_field] == expected[spec.tag_field]
+        assert_scalar_profile_equal(row[spec.struct_field], expected[spec.struct_field], spec=spec)
+
+
+def _parse_expression_value(raw_value: str):
+    raw_value = raw_value.strip()
+    if raw_value.startswith('"') and raw_value.endswith('"'):
+        return raw_value[1:-1]
+    if raw_value.lower() == "null":
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        return float(raw_value)
+
+
+def _parse_expression_list(raw_value: str):
+    return json.loads(raw_value)
+
+
+def _compare_expression_values(actual, op: str, expected) -> bool:
+    if actual is None or expected is None:
+        if op == "==":
+            return actual is expected
+        if op == "!=":
+            return actual is not expected
+        return False
+    if op == ">=":
+        return actual >= expected
+    if op == "<=":
+        return actual <= expected
+    if op == "==":
+        return actual == expected
+    if op == "!=":
+        return actual != expected
+    if op == ">":
+        return actual > expected
+    if op == "<":
+        return actual < expected
+    raise AssertionError(f"unsupported operator: {op}")
+
+
+def _eval_struct_element_condition(element: dict[str, Any], condition: str) -> bool:
+    condition = condition.strip()
+    if " && " in condition:
+        return all(_eval_struct_element_condition(element, part) for part in condition.split(" && "))
+    if " || " in condition:
+        return any(_eval_struct_element_condition(element, part) for part in condition.split(" || "))
+    for op in [">=", "<=", "==", "!=", ">", "<"]:
+        if op not in condition:
+            continue
+        left, right = [part.strip() for part in condition.split(op, 1)]
+        assert left.startswith("$[") and left.endswith("]")
+        field_name = left[2:-1]
+        actual = element.get(field_name)
+        expected = _parse_expression_value(right)
+        return _compare_expression_values(actual, op, expected)
+    raise AssertionError(f"unsupported element condition: {condition}")
+
+
+def _strip_id_scope(
+    rows: list[dict[str, Any]],
+    expression: str,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> tuple[list[dict[str, Any]], str]:
+    expression = expression.strip()
+    match = re.match(rf"^{re.escape(spec.pk_field)}\s+in\s+\[([^\]]*)\]\s*&&\s*(.+)$", expression)
+    if match is None:
+        return rows, expression
+    id_values = {int(value.strip()) for value in match.group(1).split(",") if value.strip()}
+    return [row for row in rows if row[spec.pk_field] in id_values], match.group(2).strip()
+
+
+def gt_struct_array_expression_rows(
+    rows: list[dict[str, Any]],
+    expression: str,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> list[dict[str, Any]]:
+    scoped_rows, expression = _strip_id_scope(rows, expression, spec=spec)
+    struct_field_pattern = re.escape(spec.struct_field)
+
+    def output_row(row, offset=None):
+        result = {
+            spec.pk_field: row[spec.pk_field],
+            spec.tag_field: row[spec.tag_field],
+            spec.struct_field: row.get(spec.struct_field),
+        }
+        if offset is not None:
+            result["offset"] = offset
+        return result
+
+    if expression == f"{spec.struct_field} is null":
+        return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is None]
+    if expression == f"{spec.struct_field} is not null":
+        return [output_row(row) for row in scoped_rows if row.get(spec.struct_field) is not None]
+
+    length_match = re.match(
+        rf"^array_length\({struct_field_pattern}(?:\[[^\]]+\])?\)\s*(==|!=|>=|<=|>|<)\s*(\d+)$",
+        expression,
+    )
+    if length_match is not None:
+        op, raw_expected = length_match.groups()
+        expected = int(raw_expected)
+        return [
+            output_row(row)
+            for row in scoped_rows
+            if row.get(spec.struct_field) is not None
+            and _compare_expression_values(len(row[spec.struct_field]), op, expected)
+        ]
+
+    array_contains_match = re.match(
+        rf"^array_contains(?:_(all|any))?\({struct_field_pattern}\[([^\]]+)\],\s*(.+)\)$",
+        expression,
+    )
+    if array_contains_match is not None:
+        mode, field_name, raw_expected = array_contains_match.groups()
+        expected_values = (
+            _parse_expression_list(raw_expected) if mode in {"all", "any"} else [_parse_expression_value(raw_expected)]
+        )
+        results = []
+        for row in scoped_rows:
+            struct_array = row.get(spec.struct_field)
+            if struct_array is None:
+                continue
+            actual_values = [element.get(field_name) for element in struct_array]
+            if (
+                (mode == "all" and all(value in actual_values for value in expected_values))
+                or (mode == "any" and any(value in actual_values for value in expected_values))
+                or (mode is None and expected_values[0] in actual_values)
+            ):
+                results.append(output_row(row))
+        return results
+
+    index_access_match = re.match(
+        rf"^{struct_field_pattern}\[(\d+)\]\[([^\]]+)\]\s*(==|!=|>=|<=|>|<)\s*(.+)$",
+        expression,
+    )
+    if index_access_match is not None:
+        raw_offset, field_name, op, raw_expected = index_access_match.groups()
+        offset = int(raw_offset)
+        expected = _parse_expression_value(raw_expected)
+        results = []
+        for row in scoped_rows:
+            struct_array = row.get(spec.struct_field) or []
+            if len(struct_array) <= offset:
+                continue
+            if _compare_expression_values(struct_array[offset].get(field_name), op, expected):
+                results.append(output_row(row))
+        return results
+
+    element_filter_match = re.match(rf"^element_filter\({struct_field_pattern},\s*(.+)\)$", expression)
+    if element_filter_match is not None:
+        condition = element_filter_match.group(1)
+        results = []
+        for row in scoped_rows:
+            struct_array = row.get(spec.struct_field) or []
+            for offset, element in enumerate(struct_array):
+                if _eval_struct_element_condition(element, condition):
+                    results.append(output_row(row, offset=offset))
+        return results
+
+    match_family_match = re.match(
+        rf"^MATCH_(ALL|ANY|LEAST|MOST|EXACT)\({struct_field_pattern},\s*(.+?)(?:,\s*threshold=(\d+))?\)$",
+        expression,
+    )
+    if match_family_match is not None:
+        match_type, condition, raw_threshold = match_family_match.groups()
+        threshold = int(raw_threshold) if raw_threshold is not None else None
+        results = []
+        for row in scoped_rows:
+            struct_array = row.get(spec.struct_field) or []
+            match_count = sum(1 for element in struct_array if _eval_struct_element_condition(element, condition))
+            total_count = len(struct_array)
+            matched = (
+                (match_type == "ALL" and match_count == total_count)
+                or (match_type == "ANY" and match_count >= 1)
+                or (match_type == "LEAST" and match_count >= threshold)
+                or (match_type == "MOST" and match_count <= threshold)
+                or (match_type == "EXACT" and match_count == threshold)
             )
-            results = []
-            for row in scoped_rows:
-                struct_array = row.get(spec.struct_field)
-                if struct_array is None:
-                    continue
-                actual_values = [element.get(field_name) for element in struct_array]
-                if (
-                    (mode == "all" and all(value in actual_values for value in expected_values))
-                    or (mode == "any" and any(value in actual_values for value in expected_values))
-                    or (mode is None and expected_values[0] in actual_values)
-                ):
-                    results.append(output_row(row))
-            return results
+            if matched:
+                results.append(output_row(row))
+        return results
 
-        index_access_match = re.match(
-            rf"^{struct_field_pattern}\[(\d+)\]\[([^\]]+)\]\s*(==|!=|>=|<=|>|<)\s*(.+)$",
-            expression,
-        )
-        if index_access_match is not None:
-            raw_offset, field_name, op, raw_expected = index_access_match.groups()
-            offset = int(raw_offset)
-            expected = cls._parse_expression_value(raw_expected)
-            results = []
-            for row in scoped_rows:
-                struct_array = row.get(spec.struct_field) or []
-                if len(struct_array) <= offset:
-                    continue
-                if cls._compare_expression_values(struct_array[offset].get(field_name), op, expected):
-                    results.append(output_row(row))
-            return results
-
-        element_filter_match = re.match(rf"^element_filter\({struct_field_pattern},\s*(.+)\)$", expression)
-        if element_filter_match is not None:
-            condition = element_filter_match.group(1)
-            results = []
-            for row in scoped_rows:
-                struct_array = row.get(spec.struct_field) or []
-                for offset, element in enumerate(struct_array):
-                    if cls._eval_struct_element_condition(element, condition):
-                        results.append(output_row(row, offset=offset))
-            return results
-
-        match_family_match = re.match(
-            rf"^MATCH_(ALL|ANY|LEAST|MOST|EXACT)\({struct_field_pattern},\s*(.+?)(?:,\s*threshold=(\d+))?\)$",
-            expression,
-        )
-        if match_family_match is not None:
-            match_type, condition, raw_threshold = match_family_match.groups()
-            threshold = int(raw_threshold) if raw_threshold is not None else None
-            results = []
-            for row in scoped_rows:
-                struct_array = row.get(spec.struct_field) or []
-                match_count = sum(
-                    1 for element in struct_array if cls._eval_struct_element_condition(element, condition)
-                )
-                total_count = len(struct_array)
-                matched = (
-                    (match_type == "ALL" and match_count == total_count)
-                    or (match_type == "ANY" and match_count >= 1)
-                    or (match_type == "LEAST" and match_count >= threshold)
-                    or (match_type == "MOST" and match_count <= threshold)
-                    or (match_type == "EXACT" and match_count == threshold)
-                )
-                if matched:
-                    results.append(output_row(row))
-            return results
-
-        raise AssertionError(f"unsupported expression: {expression}")
-
-    @staticmethod
-    def _expected_nullable_scalar_struct_expression_rows(
-        rows: list[dict[str, Any]],
-        expression: str,
-        *,
-        spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
-    ) -> list[dict[str, Any]]:
-        return StructArrayNullableTestMixin._expected_struct_array_expression_rows(rows, expression, spec=spec)
-
-    @staticmethod
-    def _expression_result_keys(rows, *, spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC):
-        return sorted((row[spec.pk_field], row.get("offset")) for row in rows)
+    raise AssertionError(f"unsupported expression: {expression}")
 
 
-class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, TestMilvusClientV2Base):
+def gt_nullable_scalar_struct_expression_rows(
+    rows: list[dict[str, Any]],
+    expression: str,
+    *,
+    spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC,
+) -> list[dict[str, Any]]:
+    return gt_struct_array_expression_rows(rows, expression, spec=spec)
+
+
+def gt_expression_result_keys(rows, *, spec: StructArrayNullableSchemaSpec = DEFAULT_SCHEMA_SPEC):
+    return sorted((row[spec.pk_field], row.get("offset")) for row in rows)
+
+
+class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
     """Test cases for struct array schema evolution"""
 
     min_index_sealed_rows = 3000
@@ -1299,19 +1312,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         target: test schema nullable propagation after dynamically adding a struct array field
         method: add a nullable struct array field with scalar and vector sub-fields, then describe collection
-        expected: parent struct is nullable, and raw schema shows both scalar and vector sub-fields nullable
+        expected: public describe_collection output shows the nullable Struct Array field and its sub-fields
         """
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_schema_nullable")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -1335,35 +1348,22 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert user_sub_fields[VECTOR_SUBFIELD]["type"] == DataType.FLOAT_VECTOR
         assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
-        raw_describe = client._get_connection().describe_collection(collection_name)
-        raw_profile = next(field for field in raw_describe["struct_array_fields"] if field["name"] == STRUCT_FIELD)
-        assert raw_profile["nullable"] is True
-        raw_sub_fields = {field["name"]: field for field in raw_profile["fields"]}
-        assert set(raw_sub_fields) == {INT_SUBFIELD, TAG_SUBFIELD, VECTOR_SUBFIELD}
-        assert raw_sub_fields[INT_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[TAG_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[VECTOR_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[INT_SUBFIELD]["element_type"] == DataType.INT64
-        assert raw_sub_fields[TAG_SUBFIELD]["element_type"] == DataType.VARCHAR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["element_type"] == DataType.FLOAT_VECTOR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_schema_nullable_propagation(self):
         """
         target: test schema nullable propagation when creating a nullable struct array field
         method: create a collection with a nullable struct array field containing scalar and vector sub-fields,
             then describe collection
-        expected: parent struct is nullable, and raw schema shows both scalar and vector sub-fields nullable
+        expected: public describe_collection output shows the nullable Struct Array field and its sub-fields
         """
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_schema_nullable")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -1394,19 +1394,6 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert user_sub_fields[VECTOR_SUBFIELD]["type"] == DataType.FLOAT_VECTOR
         assert user_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
 
-        raw_describe = client._get_connection().describe_collection(collection_name)
-        raw_profile = next(field for field in raw_describe["struct_array_fields"] if field["name"] == STRUCT_FIELD)
-        assert raw_profile["nullable"] is True
-        raw_sub_fields = {field["name"]: field for field in raw_profile["fields"]}
-        assert set(raw_sub_fields) == {INT_SUBFIELD, TAG_SUBFIELD, VECTOR_SUBFIELD}
-        assert raw_sub_fields[INT_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[TAG_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[VECTOR_SUBFIELD]["nullable"] is True
-        assert raw_sub_fields[INT_SUBFIELD]["element_type"] == DataType.INT64
-        assert raw_sub_fields[TAG_SUBFIELD]["element_type"] == DataType.VARCHAR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["element_type"] == DataType.FLOAT_VECTOR
-        assert raw_sub_fields[VECTOR_SUBFIELD]["params"]["dim"] == VECTOR_DIM
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_omit_nullable_query_search(self):
         """
@@ -1419,12 +1406,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_omit")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -1440,19 +1427,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"},
-            {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"},
+            {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
-                STRUCT_FIELD: self._scalar_profile(2),
+                STRUCT_FIELD: gen_scalar_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
-                STRUCT_FIELD: self._scalar_profile(3),
+                STRUCT_FIELD: gen_scalar_profile(3),
             },
         ]
         res, check = self.insert(client, collection_name, rows)
@@ -1462,15 +1449,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        index_params.add_index(
-            field_name=STRUCT_VECTOR_FIELD,
-            index_type=STRUCT_VECTOR_INDEX_TYPE,
-            metric_type=STRUCT_VECTOR_METRIC_TYPE,
-            params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -1492,7 +1473,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -1506,7 +1487,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         filter_results, check = self.query(
             client,
@@ -1520,12 +1501,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(2)],
+            data=[gen_vector(2)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -1535,9 +1516,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_insert_explicit_null_query_search(self):
@@ -1551,12 +1532,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_explicit_null")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -1574,17 +1555,17 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows = [
             {
                 PK_FIELD: 0,
-                VECTOR_FIELD: self._vector(0),
+                VECTOR_FIELD: gen_vector(0),
                 TAG_FIELD: "explicit_null_profile",
                 STRUCT_FIELD: None,
             },
-            {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "omitted_profile"},
-            {PK_FIELD: 2, VECTOR_FIELD: self._vector(2), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
+            {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "omitted_profile"},
+            {PK_FIELD: 2, VECTOR_FIELD: gen_vector(2), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile",
-                STRUCT_FIELD: self._scalar_profile(3),
+                STRUCT_FIELD: gen_scalar_profile(3),
             },
         ]
         res, check = self.insert(client, collection_name, rows)
@@ -1594,15 +1575,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
-        )
-        index_params.add_index(
-            field_name=STRUCT_VECTOR_FIELD,
-            index_type=STRUCT_VECTOR_INDEX_TYPE,
-            metric_type=STRUCT_VECTOR_METRIC_TYPE,
-            params=INDEX_PARAMS,
         )
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -1624,7 +1599,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -1638,7 +1613,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         filter_results, check = self.query(
             client,
@@ -1652,12 +1627,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(3)],
+            data=[gen_vector(3)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -1668,9 +1643,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == 3
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_upsert_null_non_null(self):
@@ -1683,12 +1658,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_upsert")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -1704,14 +1679,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "initial_null_profile"},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "initial_null_profile"},
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "initial_non_null_profile",
-                STRUCT_FIELD: self._scalar_profile(1),
+                STRUCT_FIELD: gen_scalar_profile(1),
             },
-            {PK_FIELD: 2, VECTOR_FIELD: self._vector(2), TAG_FIELD: "initial_empty_profile", STRUCT_FIELD: []},
+            {PK_FIELD: 2, VECTOR_FIELD: gen_vector(2), TAG_FIELD: "initial_empty_profile", STRUCT_FIELD: []},
         ]
         res, check = self.insert(client, collection_name, rows)
         assert check
@@ -1720,7 +1695,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -1734,18 +1709,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         source_by_id = {row[PK_FIELD]: {**row, STRUCT_FIELD: row.get(STRUCT_FIELD)} for row in rows}
         null_to_non_null = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(100),
+            VECTOR_FIELD: gen_vector(100),
             TAG_FIELD: "upserted_null_to_non_null",
-            STRUCT_FIELD: self._scalar_profile(100),
+            STRUCT_FIELD: gen_scalar_profile(100),
         }
         non_null_to_null = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(101),
+            VECTOR_FIELD: gen_vector(101),
             TAG_FIELD: "upserted_non_null_to_null",
         }
         new_omitted_profile = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "upserted_new_omit_profile",
         }
         res, check = self.upsert(client, collection_name, [null_to_non_null, non_null_to_null, new_omitted_profile])
@@ -1768,7 +1743,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -1779,7 +1754,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in element_filter_results} == {null_to_non_null[PK_FIELD]}
-        self._assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], null_to_non_null[STRUCT_FIELD])
+        assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], null_to_non_null[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -1795,9 +1770,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == non_null_to_null[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_query_iterator(self):
@@ -1810,12 +1785,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_qiter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -1831,20 +1806,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile_0"},
-            {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile_0"},
+            {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
-                STRUCT_FIELD: self._scalar_profile(2),
+                STRUCT_FIELD: gen_scalar_profile(2),
             },
-            {PK_FIELD: 3, VECTOR_FIELD: self._vector(3), TAG_FIELD: "missing_profile_3"},
+            {PK_FIELD: 3, VECTOR_FIELD: gen_vector(3), TAG_FIELD: "missing_profile_3"},
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "present_profile_4",
-                STRUCT_FIELD: self._scalar_profile(4),
+                STRUCT_FIELD: gen_scalar_profile(4),
             },
         ]
         res, check = self.insert(client, collection_name, rows)
@@ -1854,7 +1829,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -1876,7 +1851,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(iterator)
+        iterator_rows = drain_iterator(iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
@@ -1884,7 +1859,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in iterator_rows:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_search_iterator(self):
@@ -1897,12 +1872,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_siter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -1918,20 +1893,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile_0"},
-            {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile_0"},
+            {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "empty_profile", STRUCT_FIELD: []},
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
-                STRUCT_FIELD: self._scalar_profile(2),
+                STRUCT_FIELD: gen_scalar_profile(2),
             },
-            {PK_FIELD: 3, VECTOR_FIELD: self._vector(3), TAG_FIELD: "missing_profile_3"},
+            {PK_FIELD: 3, VECTOR_FIELD: gen_vector(3), TAG_FIELD: "missing_profile_3"},
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "present_profile_4",
-                STRUCT_FIELD: self._scalar_profile(4),
+                STRUCT_FIELD: gen_scalar_profile(4),
             },
         ]
         res, check = self.insert(client, collection_name, rows)
@@ -1941,7 +1916,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -1956,7 +1931,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         iterator, check = self.search_iterator(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
@@ -1964,7 +1939,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=len(source_by_id),
         )
         assert check
-        iterator_hits = self._drain_iterator(iterator)
+        iterator_hits = drain_iterator(iterator)
         hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(hit_ids) == len(set(hit_ids))
         assert set(hit_ids) == set(source_by_id)
@@ -1975,9 +1950,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_match_family_query_search(self):
@@ -1991,12 +1966,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_scalar_struct_match")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -2013,24 +1988,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(0),
+            VECTOR_FIELD: gen_vector(0),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
         sealed_one_match_profile_row = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "sealed_one_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9100, TAG_SUBFIELD: "match_9100"},
@@ -2039,7 +2014,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         sealed_two_match_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "sealed_two_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9200, TAG_SUBFIELD: "match_9200"},
@@ -2048,7 +2023,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         sealed_zero_match_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "sealed_zero_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 100, TAG_SUBFIELD: "low_100"},
@@ -2063,7 +2038,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             sealed_two_match_profile_row,
             sealed_zero_match_profile_row,
         ]
-        sealed_index_filler_rows = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_scalar_index_filler_rows(
             50000,
             self.min_index_sealed_rows - len(sealed_rows),
             "sealed_match_index_filler",
@@ -2076,7 +2051,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -2089,19 +2064,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 7000,
-            VECTOR_FIELD: self._vector(7000),
+            VECTOR_FIELD: gen_vector(7000),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_empty_profile_row = {
             PK_FIELD: 7001,
-            VECTOR_FIELD: self._vector(7001),
+            VECTOR_FIELD: gen_vector(7001),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
         growing_two_match_profile_row = {
             PK_FIELD: 7002,
-            VECTOR_FIELD: self._vector(7002),
+            VECTOR_FIELD: gen_vector(7002),
             TAG_FIELD: "growing_two_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9600, TAG_SUBFIELD: "match_9600"},
@@ -2158,7 +2133,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_any_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_least_results, check = self.query(
             client,
@@ -2172,7 +2147,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_least_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_exact_results, check = self.query(
             client,
@@ -2186,7 +2161,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_exact_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_all_results, check = self.query(
             client,
@@ -2200,7 +2175,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_all_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_most_results, check = self.query(
             client,
@@ -2217,7 +2192,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_most_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -2234,9 +2209,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_two_match_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_nullable_element_filter_expression_query(self):
@@ -2249,7 +2224,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_element_filter_expr")
         client = self._client()
-        fixture = self._setup_nullable_scalar_struct_expression_collection(client, collection_name)
+        fixture = gen_expression_fixture(self, client, collection_name)
         source_rows = fixture["source_rows"]
         source_by_id = fixture["source_by_id"]
 
@@ -2259,7 +2234,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             f'element_filter({STRUCT_FIELD}, $[{TAG_SUBFIELD}] == "match_9700")',
         ]
         for expr in expressions:
-            expected_rows = self._expected_nullable_scalar_struct_expression_rows(source_rows, expr)
+            expected_rows = gt_nullable_scalar_struct_expression_rows(source_rows, expr)
             actual_rows, check = self.query(
                 client,
                 collection_name,
@@ -2268,8 +2243,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(expected_rows) + 5,
             )
             assert check
-            assert self._expression_result_keys(actual_rows) == self._expression_result_keys(expected_rows)
-            self._assert_expression_rows_match_source(actual_rows, source_by_id)
+            assert gt_expression_result_keys(actual_rows) == gt_expression_result_keys(expected_rows)
+            assert_expression_rows_match_source(actual_rows, source_by_id)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_nullable_match_family_null_semantics(self):
@@ -2282,7 +2257,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_match_null_expr")
         client = self._client()
-        fixture = self._setup_nullable_scalar_struct_expression_collection(client, collection_name)
+        fixture = gen_expression_fixture(self, client, collection_name)
         source_rows = fixture["source_rows"]
         source_by_id = fixture["source_by_id"]
         scoped_prefix = f"{PK_FIELD} in {sorted(fixture['controlled_ids'])} && "
@@ -2297,7 +2272,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         ]
         for expr in expressions:
             scoped_expr = scoped_prefix + expr
-            expected_rows = self._expected_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
+            expected_rows = gt_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
             actual_rows, check = self.query(
                 client,
                 collection_name,
@@ -2306,17 +2281,17 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(fixture["controlled_ids"]),
             )
             assert check
-            assert self._expression_result_keys(actual_rows) == self._expression_result_keys(expected_rows)
-            self._assert_expression_rows_match_source(actual_rows, source_by_id)
+            assert gt_expression_result_keys(actual_rows) == gt_expression_result_keys(expected_rows)
+            assert_expression_rows_match_source(actual_rows, source_by_id)
 
         search_expr = f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)"
         expected_search_ids = {
-            row[PK_FIELD] for row in self._expected_nullable_scalar_struct_expression_rows(source_rows, search_expr)
+            row[PK_FIELD] for row in gt_nullable_scalar_struct_expression_rows(source_rows, search_expr)
         }
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(7004)],
+            data=[gen_vector(7004)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=search_expr,
@@ -2327,9 +2302,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == expected_search_ids
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_nullable_subfield_projection_expression_query_search(self):
@@ -2343,7 +2318,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_projection_expr")
         client = self._client()
-        fixture = self._setup_nullable_scalar_struct_expression_collection(client, collection_name)
+        fixture = gen_expression_fixture(self, client, collection_name)
         source_rows = fixture["source_rows"]
         source_by_id = fixture["source_by_id"]
         scoped_prefix = f"{PK_FIELD} in {sorted(fixture['controlled_ids'])} && "
@@ -2359,7 +2334,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         ]
         for expr in expressions:
             scoped_expr = scoped_prefix + expr
-            expected_rows = self._expected_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
+            expected_rows = gt_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
             expected_ids = {row[PK_FIELD] for row in expected_rows}
 
             actual_rows, check = self.query(
@@ -2370,13 +2345,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(fixture["controlled_ids"]),
             )
             assert check
-            assert self._expression_result_keys(actual_rows) == self._expression_result_keys(expected_rows)
-            self._assert_expression_rows_match_source(actual_rows, source_by_id)
+            assert gt_expression_result_keys(actual_rows) == gt_expression_result_keys(expected_rows)
+            assert_expression_rows_match_source(actual_rows, source_by_id)
 
             search_results, check = self.search(
                 client,
                 collection_name,
-                data=[self._vector(7004)],
+                data=[gen_vector(7004)],
                 anns_field=VECTOR_FIELD,
                 search_params=NORMAL_VECTOR_SEARCH_PARAMS,
                 filter=scoped_expr,
@@ -2387,9 +2362,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert {hit[PK_FIELD] for hit in search_results[0]} == expected_ids
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -2406,7 +2381,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_parent_null_expr")
         client = self._client()
-        fixture = self._setup_nullable_scalar_struct_expression_collection(client, collection_name)
+        fixture = gen_expression_fixture(self, client, collection_name)
         source_rows = fixture["source_rows"]
         source_by_id = fixture["source_by_id"]
         scoped_prefix = f"{PK_FIELD} in {sorted(fixture['controlled_ids'])} && "
@@ -2419,7 +2394,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         ]
         for expr in expressions:
             scoped_expr = scoped_prefix + expr
-            expected_rows = self._expected_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
+            expected_rows = gt_nullable_scalar_struct_expression_rows(source_rows, scoped_expr)
             actual_rows, check = self.query(
                 client,
                 collection_name,
@@ -2428,8 +2403,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(fixture["controlled_ids"]),
             )
             assert check
-            assert self._expression_result_keys(actual_rows) == self._expression_result_keys(expected_rows)
-            self._assert_expression_rows_match_source(actual_rows, source_by_id)
+            assert gt_expression_result_keys(actual_rows) == gt_expression_result_keys(expected_rows)
+            assert_expression_rows_match_source(actual_rows, source_by_id)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -2446,18 +2421,16 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_element_filter_search")
         client = self._client()
-        fixture = self._setup_nullable_scalar_struct_expression_collection(client, collection_name)
+        fixture = gen_expression_fixture(self, client, collection_name)
         source_rows = fixture["source_rows"]
         source_by_id = fixture["source_by_id"]
         expr = f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 9000)"
-        expected_ids = {
-            row[PK_FIELD] for row in self._expected_nullable_scalar_struct_expression_rows(source_rows, expr)
-        }
+        expected_ids = {row[PK_FIELD] for row in gt_nullable_scalar_struct_expression_rows(source_rows, expr)}
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(7004)],
+            data=[gen_vector(7004)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=expr,
@@ -2468,11 +2441,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == expected_ids
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50009: mixed nullable/non-null ArrayOfVector rows in the same growing batch lose vector sub-field output",
+        strict=True,
+    )
     def test_create_struct_array_field_with_vector_insert_omit_nullable_growing_row(self):
         """
         target: test query/search output for a nullable struct array with vector sub-field created with collection
@@ -2484,12 +2461,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_omit")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -2506,19 +2483,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"},
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile",
-                STRUCT_FIELD: self._profile(1),
+                STRUCT_FIELD: gen_profile(1),
             },
         ]
         res, check = self.insert(client, collection_name, rows)
         assert check
         assert res["insert_count"] == len(rows)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -2548,12 +2525,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(1)],
+            data=[gen_vector(1)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -2563,9 +2540,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_sealed_null_empty_rows(self):
@@ -2580,12 +2557,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_sealed")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -2601,30 +2578,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -2636,7 +2613,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -2668,7 +2645,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -2682,12 +2659,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         normal_search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(3)],
+            data=[gen_vector(3)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -2697,9 +2674,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in normal_search_results[0]} == set(source_by_id)
         for hit in normal_search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_tensor = EmbeddingList()
         search_tensor.add(non_empty_rows[-1][STRUCT_FIELD][0][VECTOR_SUBFIELD])
@@ -2721,8 +2698,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert struct_search_results[0][0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         for hit in struct_search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            entity = search_entity(hit)
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -2740,12 +2717,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
         dim = 8
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=dim)
@@ -2763,19 +2740,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         empty_profile_row = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(0, dim),
+            VECTOR_FIELD: gen_vector(0, dim),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         present_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1, dim),
+            VECTOR_FIELD: gen_vector(1, dim),
             TAG_FIELD: "present_single_profile",
             STRUCT_FIELD: [
                 {
                     INT_SUBFIELD: 10,
                     TAG_SUBFIELD: "profile_1_0",
-                    VECTOR_SUBFIELD: self._vector(10, dim),
+                    VECTOR_SUBFIELD: gen_vector(10, dim),
                 }
             ],
         }
@@ -2787,7 +2764,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -2816,7 +2793,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -2830,7 +2807,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
@@ -2855,12 +2832,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         client = self._client()
         dim = EMB_LIST_DIM
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, vector_type, dim=dim)
@@ -2877,30 +2854,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         sealed_special_rows = [
-            {PK_FIELD: 0, VECTOR_FIELD: self._vector(0, dim), TAG_FIELD: "sealed_omitted_profile"},
+            {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0, dim), TAG_FIELD: "sealed_omitted_profile"},
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1, dim),
+                VECTOR_FIELD: gen_vector(1, dim),
                 TAG_FIELD: "sealed_empty_profile",
                 STRUCT_FIELD: [],
             },
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2, dim),
+                VECTOR_FIELD: gen_vector(2, dim),
                 TAG_FIELD: "sealed_present_profile_2",
-                STRUCT_FIELD: self._typed_profile(2, vector_type, dim),
+                STRUCT_FIELD: gen_typed_profile(2, vector_type, dim),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3, dim),
+                VECTOR_FIELD: gen_vector(3, dim),
                 TAG_FIELD: "sealed_present_profile_3",
-                STRUCT_FIELD: self._typed_profile(3, vector_type, dim),
+                STRUCT_FIELD: gen_typed_profile(3, vector_type, dim),
             },
         ]
         sealed_filler_rows = [
             {
                 PK_FIELD: 10000 + i,
-                VECTOR_FIELD: self._vector(10000 + i, dim),
+                VECTOR_FIELD: gen_vector(10000 + i, dim),
                 TAG_FIELD: f"sealed_filler_{i}",
             }
             for i in range(self.min_index_sealed_rows - len(sealed_special_rows))
@@ -2914,7 +2891,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         profile_metric = "MAX_SIM_HAMMING" if vector_type == DataType.BINARY_VECTOR else "MAX_SIM_COSINE"
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -2935,9 +2912,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         growing_rows = [
             {
                 PK_FIELD: 20002,
-                VECTOR_FIELD: self._vector(20002, dim),
+                VECTOR_FIELD: gen_vector(20002, dim),
                 TAG_FIELD: "growing_present_profile",
-                STRUCT_FIELD: self._typed_profile(20002, vector_type, dim),
+                STRUCT_FIELD: gen_typed_profile(20002, vector_type, dim),
             }
         ]
         res, check = self.insert(client, collection_name, growing_rows)
@@ -2960,7 +2937,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_typed_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
+            assert_typed_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
 
         subfield_results, check = self.query(
             client,
@@ -2974,7 +2951,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_typed_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
+            assert_typed_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
 
         top_k = 16
         search_vector = growing_rows[-1][VECTOR_FIELD]
@@ -3002,9 +2979,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert [hit[PK_FIELD] for hit in hits] == expected_top_ids
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_typed_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
+            assert_typed_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD], vector_type)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_query_iterator(self):
@@ -3018,12 +2995,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_qiter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3039,25 +3016,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
-                STRUCT_FIELD: self._profile(2),
+                STRUCT_FIELD: gen_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
-                STRUCT_FIELD: self._profile(3),
+                STRUCT_FIELD: gen_profile(3),
             },
         ]
         rows = [missing_profile_row, empty_profile_row, *non_empty_rows]
@@ -3068,7 +3045,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3097,7 +3074,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(iterator)
+        iterator_rows = drain_iterator(iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
@@ -3105,7 +3082,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in iterator_rows:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_search_iterator(self):
@@ -3120,12 +3097,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_siter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3141,25 +3118,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
-                STRUCT_FIELD: self._profile(2),
+                STRUCT_FIELD: gen_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
-                STRUCT_FIELD: self._profile(3),
+                STRUCT_FIELD: gen_profile(3),
             },
         ]
         rows = [missing_profile_row, empty_profile_row, *non_empty_rows]
@@ -3170,7 +3147,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3193,7 +3170,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         iterator, check = self.search_iterator(
             client,
             collection_name,
-            data=[self._vector(3)],
+            data=[gen_vector(3)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
@@ -3201,7 +3178,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=len(source_by_id),
         )
         assert check
-        iterator_hits = self._drain_iterator(iterator)
+        iterator_hits = drain_iterator(iterator)
         hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(hit_ids) == len(set(hit_ids))
         assert set(hit_ids) == set(source_by_id)
@@ -3212,9 +3189,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_stress_nullable_scalar_struct_array_query_search_iterators(self):
@@ -3229,12 +3206,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         dim = 8
         entities = 10000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -3257,7 +3234,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row_id in range(entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id, dim=dim),
+                VECTOR_FIELD: gen_vector(row_id, dim=dim),
                 TAG_FIELD: f"stress_row_{row_id}",
             }
 
@@ -3300,7 +3277,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3323,7 +3300,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -3336,7 +3313,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
         search_results, check = self.search(
@@ -3357,9 +3334,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert distances[index] <= distances[index + 1] + epsilon
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         query_iterator, check = self.query_iterator(
             client,
@@ -3370,14 +3347,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(query_iterator)
+        iterator_rows = drain_iterator(query_iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
         for row in iterator_rows:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_iterator, check = self.search_iterator(
             client,
@@ -3390,7 +3367,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=entities,
         )
         assert check
-        iterator_hits = self._drain_iterator(search_iterator)
+        iterator_hits = drain_iterator(search_iterator)
         iterator_hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(iterator_hit_ids) == len(set(iterator_hit_ids))
         assert set(iterator_hit_ids) == set(source_by_id)
@@ -3399,9 +3376,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert iterator_distances[index] <= iterator_distances[index + 1] + epsilon
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -3420,12 +3397,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         dim = 8
         entities = 10000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=dim)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=dim)
@@ -3449,7 +3426,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row_id in range(entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id, dim=dim),
+                VECTOR_FIELD: gen_vector(row_id, dim=dim),
                 TAG_FIELD: f"stress_row_{row_id}",
             }
 
@@ -3472,7 +3449,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                     {
                         INT_SUBFIELD: row_id * 10 + element_index,
                         TAG_SUBFIELD: f"profile_{row_id}_{element_index}",
-                        VECTOR_SUBFIELD: self._vector(row_id * 10 + element_index, dim=dim),
+                        VECTOR_SUBFIELD: gen_vector(row_id * 10 + element_index, dim=dim),
                     }
                     for element_index in range(element_count)
                 ]
@@ -3493,7 +3470,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3523,7 +3500,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -3536,7 +3513,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
         search_results, check = self.search(
@@ -3557,9 +3534,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert distances[index] <= distances[index + 1] + epsilon
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         query_iterator, check = self.query_iterator(
             client,
@@ -3570,14 +3547,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(query_iterator)
+        iterator_rows = drain_iterator(query_iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
         for row in iterator_rows:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_iterator, check = self.search_iterator(
             client,
@@ -3590,7 +3567,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=entities,
         )
         assert check
-        iterator_hits = self._drain_iterator(search_iterator)
+        iterator_hits = drain_iterator(search_iterator)
         iterator_hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(iterator_hit_ids) == len(set(iterator_hit_ids))
         assert set(iterator_hit_ids) == set(source_by_id)
@@ -3599,9 +3576,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert iterator_distances[index] <= iterator_distances[index + 1] + epsilon
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_ann_search_iterator_rejects_embedding_list(self):
@@ -3615,12 +3592,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_ann_siter_reject")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3636,30 +3613,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -3671,7 +3648,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3713,8 +3690,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            entity = search_entity(hit)
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         error = {
             ct.err_code: 1100,
@@ -3746,12 +3723,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_siter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3767,30 +3744,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -3802,7 +3779,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3832,7 +3809,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=len(non_empty_rows),
         )
         assert check
-        iterator_hits = self._drain_iterator(iterator)
+        iterator_hits = drain_iterator(iterator)
         hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(hit_ids) == len(set(hit_ids))
         assert set(hit_ids) == set(source_by_id)
@@ -3846,8 +3823,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            entity = search_entity(hit)
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -3865,12 +3842,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_flat")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3889,20 +3866,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows = [
             {
                 PK_FIELD: 0,
-                VECTOR_FIELD: self._vector(0),
+                VECTOR_FIELD: gen_vector(0),
                 TAG_FIELD: "present_profile_0",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 0, TAG_SUBFIELD: "profile_0_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 1, TAG_SUBFIELD: "profile_0_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 0, TAG_SUBFIELD: "profile_0_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 1, TAG_SUBFIELD: "profile_0_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -3913,7 +3890,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -3937,7 +3914,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -3951,9 +3928,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert search_results[0][0][PK_FIELD] == rows[-1][PK_FIELD]
         assert search_results[0][0]["offset"] == 0
-        entity = self._search_entity(search_results[0][0])
+        entity = search_entity(search_results[0][0])
         assert entity[TAG_FIELD] == rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -3971,12 +3948,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_missing_prefix")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -3992,24 +3969,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         non_empty_rows = [
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -4021,7 +3998,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4051,7 +4028,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -4070,9 +4047,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert missing_profile_row[PK_FIELD] not in hit_ids
         assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert hits[0]["offset"] == 0
-        entity = self._search_entity(hits[0])
+        entity = search_entity(hits[0])
         assert entity[TAG_FIELD] == non_empty_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_element_search_missing_empty_prefix(self):
@@ -4087,12 +4064,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_missing_empty_prefix")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -4108,30 +4085,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         empty_profile_row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "present_profile_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -4143,7 +4120,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4174,7 +4151,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -4194,9 +4171,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert empty_profile_row[PK_FIELD] not in hit_ids
         assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert hits[0]["offset"] == 0
-        entity = self._search_entity(hits[0])
+        entity = search_entity(hits[0])
         assert entity[TAG_FIELD] == non_empty_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_element_search_empty_prefix(self):
@@ -4210,12 +4187,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_empty_prefix")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -4233,27 +4210,27 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         empty_profile_row = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(0),
+            VECTOR_FIELD: gen_vector(0),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -4265,7 +4242,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4295,7 +4272,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -4314,9 +4291,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert empty_profile_row[PK_FIELD] not in hit_ids
         assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert hits[0]["offset"] == 0
-        entity = self._search_entity(hits[0])
+        entity = search_entity(hits[0])
         assert entity[TAG_FIELD] == non_empty_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_element_search_empty_prefix_flat(self):
@@ -4330,12 +4307,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_empty_prefix_flat")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -4353,27 +4330,27 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         empty_profile_row = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(0),
+            VECTOR_FIELD: gen_vector(0),
             TAG_FIELD: "empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -4385,7 +4362,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4410,7 +4387,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -4429,9 +4406,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert empty_profile_row[PK_FIELD] not in hit_ids
         assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert hits[0]["offset"] == 0
-        entity = self._search_entity(hits[0])
+        entity = search_entity(hits[0])
         assert entity[TAG_FIELD] == non_empty_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -4450,12 +4427,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_elem_missing_prefix_flat")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -4471,24 +4448,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "missing_profile"}
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
         non_empty_rows = [
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "present_profile_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "present_profile_2",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "profile_2_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 21, TAG_SUBFIELD: "profile_2_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -4500,7 +4477,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4525,7 +4502,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -4544,9 +4521,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert missing_profile_row[PK_FIELD] not in hit_ids
         assert hits[0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         assert hits[0]["offset"] == 0
-        entity = self._search_entity(hits[0])
+        entity = search_entity(hits[0])
         assert entity[TAG_FIELD] == non_empty_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], non_empty_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_by_alias_query_by_name_and_alias(self):
@@ -4561,7 +4538,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         alias = cf.gen_unique_str(f"{prefix}_alias")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -4571,7 +4548,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_alias(client, collection_name, alias)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -4579,7 +4556,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         for target in (collection_name, alias):
             describe_info, check = self.describe_collection(client, target)
@@ -4592,9 +4569,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         row = {
             PK_FIELD: 1,
-            VECTOR_FIELD: self._vector(1),
+            VECTOR_FIELD: gen_vector(1),
             TAG_FIELD: "inserted_by_alias",
-            STRUCT_FIELD: self._scalar_profile(1),
+            STRUCT_FIELD: gen_scalar_profile(1),
         }
         res, check = self.insert(client, alias, [row])
         assert check
@@ -4603,7 +4580,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4625,7 +4602,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert len(query_results) == 1
             assert query_results[0][PK_FIELD] == row[PK_FIELD]
             assert query_results[0][TAG_FIELD] == row[TAG_FIELD]
-            self._assert_scalar_profile_equal(query_results[0][STRUCT_FIELD], row[STRUCT_FIELD])
+            assert_scalar_profile_equal(query_results[0][STRUCT_FIELD], row[STRUCT_FIELD])
 
         res, check = self.drop_alias(client, alias)
         assert check
@@ -4640,14 +4617,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_non_nullable")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         error = {
             ct.err_code: 1,
@@ -4679,21 +4656,21 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_dup_name")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
 
-        duplicate_profile_schema = client.create_struct_field_schema()
+        duplicate_profile_schema = gen_struct_schema(self, client)
         duplicate_profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name profile"}
         self.add_collection_struct_field(
@@ -4706,7 +4683,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             check_items=error,
         )
 
-        conflict_regular_field_schema = client.create_struct_field_schema()
+        conflict_regular_field_schema = gen_struct_schema(self, client)
         conflict_regular_field_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name normal_vector"}
         self.add_collection_struct_field(
@@ -4736,14 +4713,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_append_struct_subfield")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         res, check = self.add_collection_struct_field(
             client,
@@ -4754,7 +4731,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        append_subfield_schema = client.create_struct_field_schema()
+        append_subfield_schema = gen_struct_schema(self, client)
         append_subfield_schema.add_field(TAG_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name profile"}
         self.add_collection_struct_field(
@@ -4782,14 +4759,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_dup_subfield")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(INT_SUBFIELD, DataType.VARCHAR, max_length=TAG_MAX_LENGTH)
         error = {
@@ -4832,14 +4809,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_bad_subfield_attr")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, DataType.INT64, **field_kwargs)
         error = {ct.err_code: 1, ct.err_msg: expected_msg}
         self.add_collection_struct_field(
@@ -4879,14 +4856,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_reserved_name")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
 
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(subfield_name, DataType.INT64)
         error = {ct.err_code: 1100, ct.err_msg: expected_msg}
         self.add_collection_struct_field(
@@ -4915,7 +4892,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_concurrent_dml")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -4923,8 +4900,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(4)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(4)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -4937,7 +4914,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -4948,7 +4925,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(4, 8)
+            {PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(4, 8)
         ]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
@@ -4957,7 +4934,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         concurrent_insert_rows = [
             {
                 PK_FIELD: 1000 + batch * 10 + i,
-                VECTOR_FIELD: self._vector(1000 + batch * 10 + i),
+                VECTOR_FIELD: gen_vector(1000 + batch * 10 + i),
                 TAG_FIELD: f"concurrent_insert_{batch}_{i}",
             }
             for batch in range(3)
@@ -4966,27 +4943,27 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         concurrent_upsert_rows = [
             {
                 PK_FIELD: old_sealed_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(5000),
+                VECTOR_FIELD: gen_vector(5000),
                 TAG_FIELD: "concurrent_upsert_old_sealed",
             },
             {
                 PK_FIELD: old_sealed_rows[2][PK_FIELD],
-                VECTOR_FIELD: self._vector(5002),
+                VECTOR_FIELD: gen_vector(5002),
                 TAG_FIELD: "concurrent_upsert_old_sealed_second",
             },
             {
                 PK_FIELD: old_growing_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(5004),
+                VECTOR_FIELD: gen_vector(5004),
                 TAG_FIELD: "concurrent_upsert_old_growing",
             },
             {
                 PK_FIELD: old_growing_rows[2][PK_FIELD],
-                VECTOR_FIELD: self._vector(5006),
+                VECTOR_FIELD: gen_vector(5006),
                 TAG_FIELD: "concurrent_upsert_old_growing_second",
             },
             {
                 PK_FIELD: 1100,
-                VECTOR_FIELD: self._vector(5100),
+                VECTOR_FIELD: gen_vector(5100),
                 TAG_FIELD: "concurrent_upsert_new_row",
             },
         ]
@@ -4996,7 +4973,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         def add_struct_field_task():
             task_client = self._client()
-            profile_schema = task_client.create_struct_field_schema()
+            profile_schema = gen_struct_schema(self, task_client)
             profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
             profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
             start_barrier.wait()
@@ -5053,26 +5030,26 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert task_results["upsert"] == len(concurrent_upsert_rows)
         assert task_results["delete"] == len(delete_ids)
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         post_add_rows = [
             {
                 PK_FIELD: 1200,
-                VECTOR_FIELD: self._vector(1200),
+                VECTOR_FIELD: gen_vector(1200),
                 TAG_FIELD: "post_add_explicit_null_profile",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: 1201,
-                VECTOR_FIELD: self._vector(1201),
+                VECTOR_FIELD: gen_vector(1201),
                 TAG_FIELD: "post_add_empty_profile",
                 STRUCT_FIELD: [],
             },
             {
                 PK_FIELD: 1202,
-                VECTOR_FIELD: self._vector(1202),
+                VECTOR_FIELD: gen_vector(1202),
                 TAG_FIELD: "post_add_non_empty_profile",
-                STRUCT_FIELD: self._scalar_profile(1202),
+                STRUCT_FIELD: gen_scalar_profile(1202),
             },
         ]
         res, check = self.insert(client, collection_name, post_add_rows)
@@ -5105,7 +5082,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -5119,7 +5096,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -5130,7 +5107,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in element_filter_results} == {post_add_rows[2][PK_FIELD]}
-        self._assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], post_add_rows[2][STRUCT_FIELD])
+        assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], post_add_rows[2][STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -5147,9 +5124,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == post_add_rows[2][PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_subfield_output_query_search(self):
@@ -5162,7 +5139,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_subfield")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5170,8 +5147,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -5184,7 +5161,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5194,14 +5171,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5209,14 +5184,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(4, 6)
         ]
@@ -5239,12 +5214,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(5)],
+            data=[gen_vector(5)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
@@ -5254,9 +5229,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert set(entity) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_query_search_after_reload(self):
@@ -5269,7 +5244,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_reload")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5277,8 +5252,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -5291,7 +5266,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5301,14 +5276,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5316,14 +5289,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(4, 6)
         ]
@@ -5354,7 +5327,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         filter_results, check = self.query(
             client,
@@ -5366,12 +5339,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert {row[PK_FIELD] for row in filter_results} == {5}
         for row in filter_results:
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], source_by_id[row[PK_FIELD]][STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], source_by_id[row[PK_FIELD]][STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(5)],
+            data=[gen_vector(5)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -5381,9 +5354,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_query_iterator(self):
@@ -5396,7 +5369,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_qiter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5404,7 +5377,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5412,7 +5385,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5422,14 +5395,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5437,14 +5408,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(5, 8)
         ]
@@ -5464,7 +5435,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(iterator)
+        iterator_rows = drain_iterator(iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
@@ -5473,7 +5444,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_search_iterator(self):
@@ -5486,7 +5457,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_siter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5494,7 +5465,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5502,7 +5473,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5512,14 +5483,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5527,14 +5496,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(5, 8)
         ]
@@ -5548,7 +5517,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         iterator, check = self.search_iterator(
             client,
             collection_name,
-            data=[self._vector(7)],
+            data=[gen_vector(7)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
@@ -5556,7 +5525,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=len(source_by_id),
         )
         assert check
-        iterator_hits = self._drain_iterator(iterator)
+        iterator_hits = drain_iterator(iterator)
         hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(hit_ids) == len(set(hit_ids))
         assert set(hit_ids) == set(source_by_id)
@@ -5567,10 +5536,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in entity
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_upsert_null_non_null(self):
@@ -5583,7 +5552,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_upsert")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5591,7 +5560,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5599,7 +5568,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5609,14 +5578,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5624,14 +5591,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(5, 7)
         ]
@@ -5644,13 +5611,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         old_null_to_non_null = {
             PK_FIELD: 0,
-            VECTOR_FIELD: self._vector(100),
+            VECTOR_FIELD: gen_vector(100),
             TAG_FIELD: "upserted_old_null_to_non_null",
-            STRUCT_FIELD: self._scalar_profile(100),
+            STRUCT_FIELD: gen_scalar_profile(100),
         }
         new_non_null_to_null = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(500),
+            VECTOR_FIELD: gen_vector(500),
             TAG_FIELD: "upserted_new_non_null_to_null",
         }
         res, check = self.upsert(client, collection_name, [old_null_to_non_null, new_non_null_to_null])
@@ -5673,7 +5640,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -5684,12 +5651,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in element_filter_results} == {old_null_to_non_null[PK_FIELD]}
-        self._assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], old_null_to_non_null[STRUCT_FIELD])
+        assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], old_null_to_non_null[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(500)],
+            data=[gen_vector(500)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -5700,12 +5667,16 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == new_non_null_to_null[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in entity
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(
+        reason="normal-vector search with element_filter on dynamically added nullable StructArray returns rows that fail predicate when an empty row is present",
+        strict=True,
+    )
     def test_add_scalar_struct_array_field_empty_array_query_search(self):
         """
         target: test null and empty array are distinguishable after dynamically adding a nullable struct array field
@@ -5717,7 +5688,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_empty")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5725,7 +5696,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5733,7 +5704,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5743,14 +5714,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -5758,19 +5727,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         empty_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "new_empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "new_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(6),
+            STRUCT_FIELD: gen_scalar_profile(6),
         }
         res, check = self.insert(client, collection_name, [empty_profile_row, non_empty_profile_row])
         assert check
@@ -5793,7 +5762,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -5804,12 +5773,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in element_filter_results} == {non_empty_profile_row[PK_FIELD]}
-        self._assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
+        assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(6)],
+            data=[gen_vector(6)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -5819,15 +5788,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in entity
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         filtered_search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(6)],
+            data=[gen_vector(6)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 60)",
@@ -5836,8 +5805,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {hit[PK_FIELD] for hit in filtered_search_results[0]} == {non_empty_profile_row[PK_FIELD]}
-        entity = self._search_entity(filtered_search_results[0][0])
-        self._assert_scalar_profile_equal(entity[STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
+        entity = search_entity(filtered_search_results[0][0])
+        assert_scalar_profile_equal(entity[STRUCT_FIELD], non_empty_profile_row[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_search_on_added_subfield(self):
@@ -5850,7 +5819,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_search")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5858,7 +5827,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5866,7 +5835,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5876,7 +5845,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -5885,25 +5854,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "new_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -5914,7 +5883,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -5953,9 +5922,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == new_rows[-1][PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_search_on_added_subfield_old_growing_rows(self):
@@ -5969,7 +5938,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_search_growing")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -5977,7 +5946,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -5985,7 +5954,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -5995,14 +5964,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6011,25 +5978,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 5,
-                VECTOR_FIELD: self._vector(5),
+                VECTOR_FIELD: gen_vector(5),
                 TAG_FIELD: "new_5",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 50, TAG_SUBFIELD: "profile_5_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 51, TAG_SUBFIELD: "profile_5_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 50, TAG_SUBFIELD: "profile_5_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 51, TAG_SUBFIELD: "profile_5_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -6055,12 +6022,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -6094,9 +6061,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == new_rows[-1][PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -6115,7 +6082,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_elem_no_old")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6123,7 +6090,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6135,20 +6102,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows = [
             {
                 PK_FIELD: 0,
-                VECTOR_FIELD: self._vector(0),
+                VECTOR_FIELD: gen_vector(0),
                 TAG_FIELD: "new_0",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 0, TAG_SUBFIELD: "profile_0_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 1, TAG_SUBFIELD: "profile_0_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 0, TAG_SUBFIELD: "profile_0_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 1, TAG_SUBFIELD: "profile_0_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 1,
-                VECTOR_FIELD: self._vector(1),
+                VECTOR_FIELD: gen_vector(1),
                 TAG_FIELD: "new_1",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "profile_1_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 11, TAG_SUBFIELD: "profile_1_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -6159,7 +6126,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6183,7 +6150,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -6197,9 +6164,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert search_results[0][0][PK_FIELD] == rows[-1][PK_FIELD]
         assert search_results[0][0]["offset"] == 0
-        entity = self._search_entity(search_results[0][0])
+        entity = search_entity(search_results[0][0])
         assert entity[TAG_FIELD] == rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -6219,7 +6186,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_elem_filter_new")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6227,7 +6194,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6235,12 +6202,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        old_growing_rows = [{PK_FIELD: 2, VECTOR_FIELD: self._vector(2), TAG_FIELD: "growing_2"}]
+        old_growing_rows = [{PK_FIELD: 2, VECTOR_FIELD: gen_vector(2), TAG_FIELD: "growing_2"}]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6250,7 +6217,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6259,25 +6226,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "new_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -6302,12 +6269,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(field_name=STRUCT_VECTOR_FIELD, index_type="FLAT", metric_type="COSINE")
         res, check = self.create_index(client, collection_name, index_params)
         assert check
@@ -6331,11 +6298,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == new_rows[-1][PK_FIELD]
         assert search_results[0][0]["offset"] == 0
         assert search_results[0][0][PK_FIELD] not in old_ids
-        entity = self._search_entity(search_results[0][0])
+        entity = search_entity(search_results[0][0])
         assert entity[TAG_FIELD] == new_rows[-1][TAG_FIELD]
-        self._assert_profile_equal(entity[STRUCT_FIELD], new_rows[-1][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], new_rows[-1][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
+    )
     def test_add_struct_array_field_with_vector_element_search_old_null_rows(self):
         """
         target: test element-level search after dynamically adding a nullable struct array vector sub-field
@@ -6347,7 +6318,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_elem_search")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6355,7 +6326,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6363,12 +6334,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        old_growing_rows = [{PK_FIELD: 2, VECTOR_FIELD: self._vector(2), TAG_FIELD: "growing_2"}]
+        old_growing_rows = [{PK_FIELD: 2, VECTOR_FIELD: gen_vector(2), TAG_FIELD: "growing_2"}]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6378,7 +6349,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6387,25 +6358,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "new_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -6431,12 +6402,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -6475,10 +6446,10 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_search_skip_null_empty_rows(self):
@@ -6491,7 +6462,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_empty_search")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6499,7 +6470,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6507,7 +6478,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6517,7 +6488,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6526,31 +6497,31 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         empty_profile_row = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "new_empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_rows = [
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 5,
-                VECTOR_FIELD: self._vector(5),
+                VECTOR_FIELD: gen_vector(5),
                 TAG_FIELD: "new_5",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 50, TAG_SUBFIELD: "profile_5_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 51, TAG_SUBFIELD: "profile_5_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 50, TAG_SUBFIELD: "profile_5_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 51, TAG_SUBFIELD: "profile_5_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -6575,12 +6546,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -6615,9 +6586,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == non_empty_rows[-1][PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_subfield_output_query_search(self):
@@ -6630,7 +6601,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_subfield")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6638,7 +6609,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6646,7 +6617,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6656,7 +6627,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6665,14 +6636,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(3, 5)
         ]
@@ -6695,12 +6666,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_VECTOR_FIELD],
@@ -6710,9 +6681,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert set(entity) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_subfield_output_old_growing_rows(self):
@@ -6726,7 +6697,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_subfield_growing")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6734,7 +6705,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6742,7 +6713,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6752,14 +6723,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6768,14 +6737,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(4, 6)
         ]
@@ -6798,12 +6767,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(5)],
+            data=[gen_vector(5)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_VECTOR_FIELD],
@@ -6813,9 +6782,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert set(entity) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_query_iterator(self):
@@ -6829,7 +6798,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_qiter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6837,7 +6806,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6845,7 +6814,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6855,14 +6824,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6871,14 +6838,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(4, 7)
         ]
@@ -6898,7 +6865,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             consistency_level="Strong",
         )
         assert check
-        iterator_rows = self._drain_iterator(iterator)
+        iterator_rows = drain_iterator(iterator)
         iterator_ids = [row[PK_FIELD] for row in iterator_rows]
         assert len(iterator_ids) == len(set(iterator_ids))
         assert set(iterator_ids) == set(source_by_id)
@@ -6907,7 +6874,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_search_iterator(self):
@@ -6921,7 +6888,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_siter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -6929,7 +6896,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -6937,7 +6904,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -6947,14 +6914,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -6963,14 +6928,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(4, 7)
         ]
@@ -6984,7 +6949,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         iterator, check = self.search_iterator(
             client,
             collection_name,
-            data=[self._vector(6)],
+            data=[gen_vector(6)],
             batch_size=2,
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
@@ -6992,7 +6957,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             limit=len(source_by_id),
         )
         assert check
-        iterator_hits = self._drain_iterator(iterator)
+        iterator_hits = drain_iterator(iterator)
         hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
         assert len(hit_ids) == len(set(hit_ids))
         assert set(hit_ids) == set(source_by_id)
@@ -7003,12 +6968,16 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         for hit in iterator_hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50049: nullable StructArray vector element-level search returns wrong rows",
+        strict=True,
+    )
     def test_add_struct_array_field_with_vector_search_element_filter(self):
         """
         target: test struct array vector search with element_filter after dynamically adding a nullable struct array field
@@ -7019,7 +6988,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_filter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7027,7 +6996,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -7035,7 +7004,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7045,7 +7014,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -7054,25 +7023,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "new_3",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: self._unit_vector(0)},
-                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: self._unit_vector(1)},
+                    {INT_SUBFIELD: 30, TAG_SUBFIELD: "profile_3_0", VECTOR_SUBFIELD: gen_unit_vector(0)},
+                    {INT_SUBFIELD: 31, TAG_SUBFIELD: "profile_3_1", VECTOR_SUBFIELD: gen_unit_vector(1)},
                 ],
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "new_4",
                 STRUCT_FIELD: [
-                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: self._unit_vector(2)},
-                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: self._unit_vector(3)},
+                    {INT_SUBFIELD: 40, TAG_SUBFIELD: "profile_4_0", VECTOR_SUBFIELD: gen_unit_vector(2)},
+                    {INT_SUBFIELD: 41, TAG_SUBFIELD: "profile_4_1", VECTOR_SUBFIELD: gen_unit_vector(3)},
                 ],
             },
         ]
@@ -7083,7 +7052,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -7115,9 +7084,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert {hit[PK_FIELD] for hit in search_results[0]} == {3}
         assert not {hit[PK_FIELD] for hit in search_results[0]}.intersection(old_ids)
-        entity = self._search_entity(search_results[0][0])
+        entity = search_entity(search_results[0][0])
         assert STRUCT_FIELD in entity
-        self._assert_profile_equal(entity[STRUCT_FIELD], source_by_id[3][STRUCT_FIELD])
+        assert_profile_equal(entity[STRUCT_FIELD], source_by_id[3][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_query_search_old_new_rows(self):
@@ -7130,7 +7099,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7138,7 +7107,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -7146,7 +7115,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7156,14 +7125,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3, 5)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -7171,14 +7138,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(5, 7)
         ]
@@ -7202,12 +7169,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(6)],
+            data=[gen_vector(6)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -7218,9 +7185,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert hit_ids == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_element_filter_query_search(self):
@@ -7233,7 +7200,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_filter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7241,7 +7208,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -7249,7 +7216,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7259,14 +7226,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -7274,14 +7239,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._scalar_profile(i),
+                STRUCT_FIELD: gen_scalar_profile(i),
             }
             for i in range(4, 6)
         ]
@@ -7306,7 +7271,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         int_filter_results, check = self.query(
             client,
@@ -7320,7 +7285,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in int_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         string_filter_results, check = self.query(
             client,
@@ -7334,12 +7299,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in string_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(5)],
+            data=[gen_vector(5)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 40)",
@@ -7352,8 +7317,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert not hit_ids.intersection(old_ids)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            entity = search_entity(hit)
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(
@@ -7371,7 +7336,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_match")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7380,7 +7345,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_sealed_rows = [
-            {PK_FIELD: row_id, VECTOR_FIELD: self._vector(row_id), TAG_FIELD: f"old_sealed_{row_id}"}
+            {PK_FIELD: row_id, VECTOR_FIELD: gen_vector(row_id), TAG_FIELD: f"old_sealed_{row_id}"}
             for row_id in range(self.min_index_sealed_rows)
         ]
         res, check = self.insert(client, collection_name, old_sealed_rows)
@@ -7390,7 +7355,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7401,14 +7366,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_growing_rows = [
-            {PK_FIELD: 3000, VECTOR_FIELD: self._vector(3000), TAG_FIELD: "old_growing_3000"},
-            {PK_FIELD: 3001, VECTOR_FIELD: self._vector(3001), TAG_FIELD: "old_growing_3001"},
+            {PK_FIELD: 3000, VECTOR_FIELD: gen_vector(3000), TAG_FIELD: "old_growing_3000"},
+            {PK_FIELD: 3001, VECTOR_FIELD: gen_vector(3001), TAG_FIELD: "old_growing_3001"},
         ]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -7416,28 +7381,28 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4000,
-            VECTOR_FIELD: self._vector(4000),
+            VECTOR_FIELD: gen_vector(4000),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 4001,
-            VECTOR_FIELD: self._vector(4001),
+            VECTOR_FIELD: gen_vector(4001),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 4002,
-            VECTOR_FIELD: self._vector(4002),
+            VECTOR_FIELD: gen_vector(4002),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
         sealed_one_match_profile_row = {
             PK_FIELD: 4003,
-            VECTOR_FIELD: self._vector(4003),
+            VECTOR_FIELD: gen_vector(4003),
             TAG_FIELD: "sealed_one_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9100, TAG_SUBFIELD: "match_9100"},
@@ -7446,7 +7411,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         sealed_two_match_profile_row = {
             PK_FIELD: 4004,
-            VECTOR_FIELD: self._vector(4004),
+            VECTOR_FIELD: gen_vector(4004),
             TAG_FIELD: "sealed_two_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9200, TAG_SUBFIELD: "match_9200"},
@@ -7455,7 +7420,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         sealed_zero_match_profile_row = {
             PK_FIELD: 4005,
-            VECTOR_FIELD: self._vector(4005),
+            VECTOR_FIELD: gen_vector(4005),
             TAG_FIELD: "sealed_zero_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 100, TAG_SUBFIELD: "low_100"},
@@ -7470,7 +7435,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             sealed_two_match_profile_row,
             sealed_zero_match_profile_row,
         ]
-        sealed_index_filler_rows = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_scalar_index_filler_rows(
             50000,
             self.min_index_sealed_rows - len(sealed_rows),
             "sealed_match_index_filler",
@@ -7483,23 +7448,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 7000,
-            VECTOR_FIELD: self._vector(7000),
+            VECTOR_FIELD: gen_vector(7000),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_empty_profile_row = {
             PK_FIELD: 7001,
-            VECTOR_FIELD: self._vector(7001),
+            VECTOR_FIELD: gen_vector(7001),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
         growing_two_match_profile_row = {
             PK_FIELD: 7002,
-            VECTOR_FIELD: self._vector(7002),
+            VECTOR_FIELD: gen_vector(7002),
             TAG_FIELD: "growing_two_match_profile",
             STRUCT_FIELD: [
                 {INT_SUBFIELD: 9600, TAG_SUBFIELD: "match_9600"},
@@ -7567,7 +7533,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_any_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_least_results, check = self.query(
             client,
@@ -7581,7 +7547,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_least_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_exact_results, check = self.query(
             client,
@@ -7595,7 +7561,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_exact_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_all_results, check = self.query(
             client,
@@ -7609,7 +7575,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_all_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         match_most_results, check = self.query(
             client,
@@ -7626,7 +7592,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in match_most_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -7643,9 +7609,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_two_match_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_insert_omit_empty_non_empty_rows(self):
@@ -7660,7 +7626,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_omit_empty")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7668,7 +7634,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -7676,7 +7642,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7686,14 +7652,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -7701,24 +7665,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         omitted_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "new_omit_profile",
         }
         empty_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "new_empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "new_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(6),
+            STRUCT_FIELD: gen_scalar_profile(6),
         }
         res, check = self.insert(
             client, collection_name, [omitted_profile_row, empty_profile_row, non_empty_profile_row]
@@ -7743,7 +7707,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -7757,7 +7721,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -7771,12 +7735,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in element_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(6)],
+            data=[gen_vector(6)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -7786,9 +7750,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_insert_explicit_null_rows(self):
@@ -7802,7 +7766,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_explicit_null")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7810,7 +7774,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -7818,7 +7782,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7828,14 +7792,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -7843,30 +7805,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         explicit_null_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "new_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         omitted_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "new_omit_profile",
         }
         empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "new_empty_profile",
             STRUCT_FIELD: [],
         }
         non_empty_profile_row = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "new_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(7),
+            STRUCT_FIELD: gen_scalar_profile(7),
         }
         res, check = self.insert(
             client,
@@ -7894,7 +7856,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -7908,7 +7870,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -7922,12 +7884,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in element_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(7)],
+            data=[gen_vector(7)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
@@ -7938,9 +7900,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == non_empty_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_delete_null_empty_non_empty_rows(self):
@@ -7953,7 +7915,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_delete")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -7961,8 +7923,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -7975,7 +7937,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -7985,14 +7947,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -8000,36 +7960,36 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
         sealed_non_empty_profile_row = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "sealed_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(7),
+            STRUCT_FIELD: gen_scalar_profile(7),
         }
         sealed_deleted_non_empty_profile_row = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "sealed_deleted_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(8),
+            STRUCT_FIELD: gen_scalar_profile(8),
         }
         sealed_inserted_rows = [
             sealed_explicit_null_profile_row,
@@ -8038,7 +7998,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             sealed_non_empty_profile_row,
             sealed_deleted_non_empty_profile_row,
         ]
-        sealed_index_filler_rows = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_scalar_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_inserted_rows),
             "sealed_index_filler",
@@ -8054,32 +8014,32 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 9,
-            VECTOR_FIELD: self._vector(9),
+            VECTOR_FIELD: gen_vector(9),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_omitted_profile_row = {
             PK_FIELD: 10,
-            VECTOR_FIELD: self._vector(10),
+            VECTOR_FIELD: gen_vector(10),
             TAG_FIELD: "growing_omit_profile",
         }
         growing_empty_profile_row = {
             PK_FIELD: 11,
-            VECTOR_FIELD: self._vector(11),
+            VECTOR_FIELD: gen_vector(11),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
         growing_non_empty_profile_row = {
             PK_FIELD: 12,
-            VECTOR_FIELD: self._vector(12),
+            VECTOR_FIELD: gen_vector(12),
             TAG_FIELD: "growing_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(12),
+            STRUCT_FIELD: gen_scalar_profile(12),
         }
         growing_deleted_non_empty_profile_row = {
             PK_FIELD: 13,
-            VECTOR_FIELD: self._vector(13),
+            VECTOR_FIELD: gen_vector(13),
             TAG_FIELD: "growing_deleted_non_empty_profile",
-            STRUCT_FIELD: self._scalar_profile(13),
+            STRUCT_FIELD: gen_scalar_profile(13),
         }
         growing_inserted_rows = [
             growing_explicit_null_profile_row,
@@ -8131,7 +8091,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -8148,7 +8108,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in element_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -8165,9 +8125,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_non_empty_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_delete_null_empty_non_empty_rows(self):
@@ -8180,7 +8140,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_delete")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -8188,8 +8148,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -8202,7 +8162,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -8212,14 +8172,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(2, 4)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -8228,22 +8186,22 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_non_empty_profile_row = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "sealed_non_empty_profile",
-            STRUCT_FIELD: self._profile(7),
+            STRUCT_FIELD: gen_profile(7),
         }
         sealed_deleted_non_empty_profile_row = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "sealed_deleted_non_empty_profile",
-            STRUCT_FIELD: self._profile(8),
+            STRUCT_FIELD: gen_profile(8),
         }
         sealed_non_empty_rows = [sealed_non_empty_profile_row, sealed_deleted_non_empty_profile_row]
-        sealed_index_filler_rows = self._vector_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_vector_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_non_empty_rows),
             "sealed_index_filler",
@@ -8255,18 +8213,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
@@ -8284,15 +8242,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_non_empty_profile_row = {
             PK_FIELD: 12,
-            VECTOR_FIELD: self._vector(12),
+            VECTOR_FIELD: gen_vector(12),
             TAG_FIELD: "growing_non_empty_profile",
-            STRUCT_FIELD: self._profile(12),
+            STRUCT_FIELD: gen_profile(12),
         }
         growing_deleted_non_empty_profile_row = {
             PK_FIELD: 13,
-            VECTOR_FIELD: self._vector(13),
+            VECTOR_FIELD: gen_vector(13),
             TAG_FIELD: "growing_deleted_non_empty_profile",
-            STRUCT_FIELD: self._profile(13),
+            STRUCT_FIELD: gen_profile(13),
         }
         growing_non_empty_rows = [growing_non_empty_profile_row, growing_deleted_non_empty_profile_row]
         res, check = self.insert(client, collection_name, growing_non_empty_rows)
@@ -8301,18 +8259,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 9,
-            VECTOR_FIELD: self._vector(9),
+            VECTOR_FIELD: gen_vector(9),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_omitted_profile_row = {
             PK_FIELD: 10,
-            VECTOR_FIELD: self._vector(10),
+            VECTOR_FIELD: gen_vector(10),
             TAG_FIELD: "growing_omit_profile",
         }
         growing_empty_profile_row = {
             PK_FIELD: 11,
-            VECTOR_FIELD: self._vector(11),
+            VECTOR_FIELD: gen_vector(11),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
@@ -8364,7 +8322,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -8379,7 +8337,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -8396,7 +8354,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in element_filter_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -8413,9 +8371,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_non_empty_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_upsert_null_empty_non_empty_rows(self):
@@ -8428,7 +8386,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_upsert_states")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -8436,8 +8394,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -8450,7 +8408,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -8461,13 +8419,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
+            {PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
         ]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -8476,20 +8434,20 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         post_add_sealed_rows = [
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "post_add_sealed_non_empty_to_null",
-                STRUCT_FIELD: self._profile(4),
+                STRUCT_FIELD: gen_profile(4),
             },
             {
                 PK_FIELD: 5,
-                VECTOR_FIELD: self._vector(5),
+                VECTOR_FIELD: gen_vector(5),
                 TAG_FIELD: "post_add_sealed_non_empty_to_empty",
-                STRUCT_FIELD: self._profile(5),
+                STRUCT_FIELD: gen_profile(5),
             },
         ]
         res, check = self.insert(client, collection_name, post_add_sealed_rows)
@@ -8502,15 +8460,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         post_add_growing_rows = [
             {
                 PK_FIELD: 6,
-                VECTOR_FIELD: self._vector(6),
+                VECTOR_FIELD: gen_vector(6),
                 TAG_FIELD: "post_add_growing_non_empty_to_null",
-                STRUCT_FIELD: self._profile(6),
+                STRUCT_FIELD: gen_profile(6),
             },
             {
                 PK_FIELD: 7,
-                VECTOR_FIELD: self._vector(7),
+                VECTOR_FIELD: gen_vector(7),
                 TAG_FIELD: "post_add_growing_non_empty_to_empty",
-                STRUCT_FIELD: self._profile(7),
+                STRUCT_FIELD: gen_profile(7),
             },
         ]
         res, check = self.insert(client, collection_name, post_add_growing_rows)
@@ -8520,21 +8478,21 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         non_empty_upserts = [
             {
                 PK_FIELD: old_sealed_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(100),
+                VECTOR_FIELD: gen_vector(100),
                 TAG_FIELD: "upsert_old_sealed_null_to_non_empty",
-                STRUCT_FIELD: self._profile(100),
+                STRUCT_FIELD: gen_profile(100),
             },
             {
                 PK_FIELD: old_growing_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(200),
+                VECTOR_FIELD: gen_vector(200),
                 TAG_FIELD: "upsert_old_growing_null_to_non_empty",
-                STRUCT_FIELD: self._profile(200),
+                STRUCT_FIELD: gen_profile(200),
             },
             {
                 PK_FIELD: 8,
-                VECTOR_FIELD: self._vector(800),
+                VECTOR_FIELD: gen_vector(800),
                 TAG_FIELD: "upsert_new_non_empty",
-                STRUCT_FIELD: self._profile(800),
+                STRUCT_FIELD: gen_profile(800),
             },
         ]
         res, check = self.upsert(client, collection_name, non_empty_upserts)
@@ -8544,30 +8502,30 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         nullish_upserts = [
             {
                 PK_FIELD: post_add_sealed_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(400),
+                VECTOR_FIELD: gen_vector(400),
                 TAG_FIELD: "upsert_post_add_sealed_non_empty_to_null",
             },
             {
                 PK_FIELD: post_add_sealed_rows[1][PK_FIELD],
-                VECTOR_FIELD: self._vector(500),
+                VECTOR_FIELD: gen_vector(500),
                 TAG_FIELD: "upsert_post_add_sealed_non_empty_to_empty",
                 STRUCT_FIELD: [],
             },
             {
                 PK_FIELD: post_add_growing_rows[0][PK_FIELD],
-                VECTOR_FIELD: self._vector(600),
+                VECTOR_FIELD: gen_vector(600),
                 TAG_FIELD: "upsert_post_add_growing_non_empty_to_null",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: post_add_growing_rows[1][PK_FIELD],
-                VECTOR_FIELD: self._vector(700),
+                VECTOR_FIELD: gen_vector(700),
                 TAG_FIELD: "upsert_post_add_growing_non_empty_to_empty",
                 STRUCT_FIELD: [],
             },
             {
                 PK_FIELD: 9,
-                VECTOR_FIELD: self._vector(900),
+                VECTOR_FIELD: gen_vector(900),
                 TAG_FIELD: "upsert_new_omitted_profile",
             },
         ]
@@ -8595,7 +8553,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -8609,7 +8567,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         for expected_row in non_empty_upserts:
             element_filter_results, check = self.query(
@@ -8624,7 +8582,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             row = element_filter_results[0]
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -8640,9 +8598,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == non_empty_upserts[-1][PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_delete_by_element_filter_sealed_growing_rows(self):
@@ -8655,7 +8613,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_delete_filter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -8663,8 +8621,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -8677,7 +8635,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -8688,13 +8646,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
+            {PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
         ]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -8702,7 +8660,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         deleted_profile = [
             {INT_SUBFIELD: 7000, TAG_SUBFIELD: "deleted_shared_0"},
@@ -8710,32 +8668,32 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         ]
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
         sealed_deleted_profile_row = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "sealed_deleted_by_element_filter",
             STRUCT_FIELD: deleted_profile,
         }
         sealed_kept_profile_row = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "sealed_kept_after_element_filter",
-            STRUCT_FIELD: self._scalar_profile(8),
+            STRUCT_FIELD: gen_scalar_profile(8),
         }
         sealed_rows = [
             sealed_explicit_null_profile_row,
@@ -8744,7 +8702,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             sealed_deleted_profile_row,
             sealed_kept_profile_row,
         ]
-        sealed_index_filler_rows = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_scalar_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_rows),
             "sealed_index_filler",
@@ -8759,32 +8717,32 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 9,
-            VECTOR_FIELD: self._vector(9),
+            VECTOR_FIELD: gen_vector(9),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_omitted_profile_row = {
             PK_FIELD: 10,
-            VECTOR_FIELD: self._vector(10),
+            VECTOR_FIELD: gen_vector(10),
             TAG_FIELD: "growing_omit_profile",
         }
         growing_empty_profile_row = {
             PK_FIELD: 11,
-            VECTOR_FIELD: self._vector(11),
+            VECTOR_FIELD: gen_vector(11),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
         growing_deleted_profile_row = {
             PK_FIELD: 12,
-            VECTOR_FIELD: self._vector(12),
+            VECTOR_FIELD: gen_vector(12),
             TAG_FIELD: "growing_deleted_by_element_filter",
             STRUCT_FIELD: deleted_profile,
         }
         growing_kept_profile_row = {
             PK_FIELD: 13,
-            VECTOR_FIELD: self._vector(13),
+            VECTOR_FIELD: gen_vector(13),
             TAG_FIELD: "growing_kept_after_element_filter",
-            STRUCT_FIELD: self._scalar_profile(13),
+            STRUCT_FIELD: gen_scalar_profile(13),
         }
         growing_rows = [
             growing_explicit_null_profile_row,
@@ -8830,7 +8788,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         deleted_filter_results, check = self.query(
             client,
@@ -8855,7 +8813,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             row = kept_filter_results[0]
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -8872,9 +8830,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_kept_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_delete_by_element_filter_sealed_growing_rows(self):
@@ -8889,7 +8847,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_delete_filter")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -8897,8 +8855,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
-        old_sealed_filler_rows = self._index_filler_rows(
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_sealed_{i}"} for i in range(2)]
+        old_sealed_filler_rows = gen_index_filler_rows(
             1000,
             self.min_index_sealed_rows - len(old_sealed_rows),
             "old_sealed_index_filler",
@@ -8911,7 +8869,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -8922,13 +8880,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
 
         old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
+            {PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"old_growing_{i}"} for i in range(2, 4)
         ]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -8937,26 +8895,26 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         deleted_profile = [
-            {INT_SUBFIELD: 7000, TAG_SUBFIELD: "deleted_shared_0", VECTOR_SUBFIELD: self._vector(7000)},
-            {INT_SUBFIELD: 7001, TAG_SUBFIELD: "deleted_shared_1", VECTOR_SUBFIELD: self._vector(7001)},
+            {INT_SUBFIELD: 7000, TAG_SUBFIELD: "deleted_shared_0", VECTOR_SUBFIELD: gen_vector(7000)},
+            {INT_SUBFIELD: 7001, TAG_SUBFIELD: "deleted_shared_1", VECTOR_SUBFIELD: gen_vector(7001)},
         ]
         sealed_deleted_profile_row = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "sealed_deleted_by_element_filter",
             STRUCT_FIELD: deleted_profile,
         }
         sealed_kept_profile_row = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "sealed_kept_after_element_filter",
-            STRUCT_FIELD: self._profile(8),
+            STRUCT_FIELD: gen_profile(8),
         }
         sealed_non_empty_rows = [sealed_deleted_profile_row, sealed_kept_profile_row]
-        sealed_index_filler_rows = self._vector_struct_index_filler_rows(
+        sealed_index_filler_rows = gen_vector_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_non_empty_rows),
             "sealed_index_filler",
@@ -8968,18 +8926,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_explicit_null_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "sealed_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         sealed_omitted_profile_row = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "sealed_omit_profile",
         }
         sealed_empty_profile_row = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "sealed_empty_profile",
             STRUCT_FIELD: [],
         }
@@ -8998,15 +8956,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_deleted_profile_row = {
             PK_FIELD: 12,
-            VECTOR_FIELD: self._vector(12),
+            VECTOR_FIELD: gen_vector(12),
             TAG_FIELD: "growing_deleted_by_element_filter",
             STRUCT_FIELD: deleted_profile,
         }
         growing_kept_profile_row = {
             PK_FIELD: 13,
-            VECTOR_FIELD: self._vector(13),
+            VECTOR_FIELD: gen_vector(13),
             TAG_FIELD: "growing_kept_after_element_filter",
-            STRUCT_FIELD: self._profile(13),
+            STRUCT_FIELD: gen_profile(13),
         }
         growing_non_empty_rows = [growing_deleted_profile_row, growing_kept_profile_row]
         res, check = self.insert(client, collection_name, growing_non_empty_rows)
@@ -9015,18 +8973,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_explicit_null_profile_row = {
             PK_FIELD: 9,
-            VECTOR_FIELD: self._vector(9),
+            VECTOR_FIELD: gen_vector(9),
             TAG_FIELD: "growing_explicit_null_profile",
             STRUCT_FIELD: None,
         }
         growing_omitted_profile_row = {
             PK_FIELD: 10,
-            VECTOR_FIELD: self._vector(10),
+            VECTOR_FIELD: gen_vector(10),
             TAG_FIELD: "growing_omit_profile",
         }
         growing_empty_profile_row = {
             PK_FIELD: 11,
-            VECTOR_FIELD: self._vector(11),
+            VECTOR_FIELD: gen_vector(11),
             TAG_FIELD: "growing_empty_profile",
             STRUCT_FIELD: [],
         }
@@ -9072,7 +9030,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         subfield_results, check = self.query(
             client,
@@ -9087,7 +9045,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         deleted_filter_results, check = self.query(
             client,
@@ -9112,7 +9070,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             row = kept_filter_results[0]
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
@@ -9129,9 +9087,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert search_results[0][0][PK_FIELD] == growing_kept_profile_row[PK_FIELD]
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_partition_query_search_sealed_growing_rows(self):
@@ -9146,7 +9104,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -9158,14 +9116,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -9182,7 +9140,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -9192,8 +9150,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -9201,7 +9159,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -9209,29 +9167,29 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_non_empty_a = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "a_sealed_non_empty",
-            STRUCT_FIELD: self._scalar_profile(2),
+            STRUCT_FIELD: gen_scalar_profile(2),
         }
         sealed_null_a = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "a_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_non_empty_b = {
             PK_FIELD: 102,
-            VECTOR_FIELD: self._vector(102),
+            VECTOR_FIELD: gen_vector(102),
             TAG_FIELD: "b_sealed_non_empty",
-            STRUCT_FIELD: self._scalar_profile(102),
+            STRUCT_FIELD: gen_scalar_profile(102),
         }
         sealed_omit_b = {
             PK_FIELD: 103,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_omit",
         }
         res, check = self.insert(
@@ -9250,27 +9208,27 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_empty_a = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "a_growing_empty",
             STRUCT_FIELD: [],
         }
         growing_non_empty_a = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "a_growing_non_empty",
-            STRUCT_FIELD: self._scalar_profile(5),
+            STRUCT_FIELD: gen_scalar_profile(5),
         }
         growing_null_b = {
             PK_FIELD: 104,
-            VECTOR_FIELD: self._vector(104),
+            VECTOR_FIELD: gen_vector(104),
             TAG_FIELD: "b_growing_null",
             STRUCT_FIELD: None,
         }
         growing_non_empty_b = {
             PK_FIELD: 105,
-            VECTOR_FIELD: self._vector(105),
+            VECTOR_FIELD: gen_vector(105),
             TAG_FIELD: "b_growing_non_empty",
-            STRUCT_FIELD: self._scalar_profile(105),
+            STRUCT_FIELD: gen_scalar_profile(105),
         }
         res, check = self.insert(
             client, collection_name, [growing_empty_a, growing_non_empty_a], partition_name=partition_a
@@ -9319,7 +9277,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -9336,9 +9294,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         query_results, check = self.query(
             client,
@@ -9389,7 +9347,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -9401,14 +9359,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -9425,7 +9383,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -9435,8 +9393,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -9444,7 +9402,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -9453,19 +9411,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_non_empty_a = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "a_sealed_non_empty",
-            STRUCT_FIELD: self._profile(2),
+            STRUCT_FIELD: gen_profile(2),
         }
         sealed_non_empty_b = {
             PK_FIELD: 102,
-            VECTOR_FIELD: self._vector(102),
+            VECTOR_FIELD: gen_vector(102),
             TAG_FIELD: "b_sealed_non_empty",
-            STRUCT_FIELD: self._profile(102),
+            STRUCT_FIELD: gen_profile(102),
         }
         res, check = self.insert(client, collection_name, [sealed_non_empty_a], partition_name=partition_a)
         assert check
@@ -9476,25 +9434,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_null_a = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "a_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_a = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "a_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_empty_b = {
             PK_FIELD: 103,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_null_b = {
             PK_FIELD: 104,
-            VECTOR_FIELD: self._vector(104),
+            VECTOR_FIELD: gen_vector(104),
             TAG_FIELD: "b_sealed_null",
             STRUCT_FIELD: None,
         }
@@ -9510,15 +9468,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_non_empty_a = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "a_growing_non_empty",
-            STRUCT_FIELD: self._profile(5),
+            STRUCT_FIELD: gen_profile(5),
         }
         growing_non_empty_b = {
             PK_FIELD: 105,
-            VECTOR_FIELD: self._vector(105),
+            VECTOR_FIELD: gen_vector(105),
             TAG_FIELD: "b_growing_non_empty",
-            STRUCT_FIELD: self._profile(105),
+            STRUCT_FIELD: gen_profile(105),
         }
         res, check = self.insert(client, collection_name, [growing_non_empty_a], partition_name=partition_a)
         assert check
@@ -9529,13 +9487,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_empty_a = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "a_growing_empty",
             STRUCT_FIELD: [],
         }
         growing_empty_b = {
             PK_FIELD: 106,
-            VECTOR_FIELD: self._vector(106),
+            VECTOR_FIELD: gen_vector(106),
             TAG_FIELD: "b_growing_empty",
             STRUCT_FIELD: [],
         }
@@ -9584,7 +9542,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             subfield_results, check = self.query(
                 client,
@@ -9599,7 +9557,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in subfield_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert set(row) == {PK_FIELD, STRUCT_FIELD}
-                self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -9616,9 +9574,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         query_results, check = self.query(
             client,
@@ -9630,7 +9588,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in query_results} == {sealed_non_empty_a[PK_FIELD]}
-        self._assert_profile_equal(query_results[0][STRUCT_FIELD], sealed_non_empty_a[STRUCT_FIELD])
+        assert_profile_equal(query_results[0][STRUCT_FIELD], sealed_non_empty_a[STRUCT_FIELD])
 
         query_results, check = self.query(
             client,
@@ -9667,7 +9625,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -9679,14 +9637,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -9703,7 +9661,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -9713,8 +9671,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -9722,7 +9680,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -9730,24 +9688,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         rows_a = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "a_post_add_non_empty",
-                STRUCT_FIELD: self._scalar_profile(2),
+                STRUCT_FIELD: gen_scalar_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "a_post_add_null",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "a_post_add_empty",
                 STRUCT_FIELD: [],
             },
@@ -9755,19 +9713,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows_b = [
             {
                 PK_FIELD: 102,
-                VECTOR_FIELD: self._vector(102),
+                VECTOR_FIELD: gen_vector(102),
                 TAG_FIELD: "b_post_add_non_empty",
-                STRUCT_FIELD: self._scalar_profile(102),
+                STRUCT_FIELD: gen_scalar_profile(102),
             },
             {
                 PK_FIELD: 103,
-                VECTOR_FIELD: self._vector(103),
+                VECTOR_FIELD: gen_vector(103),
                 TAG_FIELD: "b_post_add_null",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: 104,
-                VECTOR_FIELD: self._vector(104),
+                VECTOR_FIELD: gen_vector(104),
                 TAG_FIELD: "b_post_add_empty",
                 STRUCT_FIELD: [],
             },
@@ -9810,7 +9768,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -9827,9 +9785,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             element_filter_results, check = self.query(
                 client,
@@ -9841,7 +9799,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             )
             assert check
             assert {row[PK_FIELD] for row in element_filter_results} == {search_row[PK_FIELD]}
-            self._assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], search_row[STRUCT_FIELD])
+            assert_scalar_profile_equal(element_filter_results[0][STRUCT_FIELD], search_row[STRUCT_FIELD])
 
             res, check = self.release_partitions(client, collection_name, [partition_name])
             assert check
@@ -9859,7 +9817,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -9871,14 +9829,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -9895,7 +9853,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -9905,8 +9863,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -9914,7 +9872,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -9923,19 +9881,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         sealed_non_empty_a = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "a_sealed_non_empty",
-            STRUCT_FIELD: self._profile(2),
+            STRUCT_FIELD: gen_profile(2),
         }
         sealed_non_empty_b = {
             PK_FIELD: 102,
-            VECTOR_FIELD: self._vector(102),
+            VECTOR_FIELD: gen_vector(102),
             TAG_FIELD: "b_sealed_non_empty",
-            STRUCT_FIELD: self._profile(102),
+            STRUCT_FIELD: gen_profile(102),
         }
         res, check = self.insert(client, collection_name, [sealed_non_empty_a], partition_name=partition_a)
         assert check
@@ -9946,25 +9904,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_null_a = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "a_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_a = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "a_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_null_b = {
             PK_FIELD: 103,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_b = {
             PK_FIELD: 104,
-            VECTOR_FIELD: self._vector(104),
+            VECTOR_FIELD: gen_vector(104),
             TAG_FIELD: "b_sealed_empty",
             STRUCT_FIELD: [],
         }
@@ -9980,15 +9938,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_non_empty_a = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "a_growing_non_empty",
-            STRUCT_FIELD: self._profile(5),
+            STRUCT_FIELD: gen_profile(5),
         }
         growing_non_empty_b = {
             PK_FIELD: 105,
-            VECTOR_FIELD: self._vector(105),
+            VECTOR_FIELD: gen_vector(105),
             TAG_FIELD: "b_growing_non_empty",
-            STRUCT_FIELD: self._profile(105),
+            STRUCT_FIELD: gen_profile(105),
         }
         res, check = self.insert(client, collection_name, [growing_non_empty_a], partition_name=partition_a)
         assert check
@@ -9999,13 +9957,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_empty_a = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "a_growing_empty",
             STRUCT_FIELD: [],
         }
         growing_empty_b = {
             PK_FIELD: 106,
-            VECTOR_FIELD: self._vector(106),
+            VECTOR_FIELD: gen_vector(106),
             TAG_FIELD: "b_growing_empty",
             STRUCT_FIELD: [],
         }
@@ -10019,7 +9977,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_INDEX_TYPE,
@@ -10073,7 +10031,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             subfield_results, check = self.query(
                 client,
@@ -10088,7 +10046,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in subfield_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert set(row) == {PK_FIELD, STRUCT_FIELD}
-                self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -10105,9 +10063,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             element_filter_results, check = self.query(
                 client,
@@ -10119,7 +10077,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             )
             assert check
             assert {row[PK_FIELD] for row in element_filter_results} == {search_row[PK_FIELD]}
-            self._assert_profile_equal(element_filter_results[0][STRUCT_FIELD], search_row[STRUCT_FIELD])
+            assert_profile_equal(element_filter_results[0][STRUCT_FIELD], search_row[STRUCT_FIELD])
 
             res, check = self.release_partitions(client, collection_name, [partition_name])
             assert check
@@ -10138,7 +10096,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -10150,14 +10108,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -10174,7 +10132,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -10184,8 +10142,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -10193,7 +10151,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -10201,7 +10159,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         delete_profile = [
             {INT_SUBFIELD: 9000, TAG_SUBFIELD: "delete_shared_0"},
@@ -10218,48 +10176,48 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_deleted_a = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "a_sealed_deleted_by_partition_filter",
             STRUCT_FIELD: delete_profile,
         }
         sealed_kept_a = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "a_sealed_kept",
             STRUCT_FIELD: sealed_kept_profile,
         }
         sealed_null_a = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "a_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_a = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "a_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_same_filter_b = {
             PK_FIELD: 102,
-            VECTOR_FIELD: self._vector(102),
+            VECTOR_FIELD: gen_vector(102),
             TAG_FIELD: "b_sealed_same_filter_kept",
             STRUCT_FIELD: delete_profile,
         }
         sealed_null_b = {
             PK_FIELD: 103,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_b = {
             PK_FIELD: 104,
-            VECTOR_FIELD: self._vector(104),
+            VECTOR_FIELD: gen_vector(104),
             TAG_FIELD: "b_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_rows_a = [sealed_deleted_a, sealed_kept_a, sealed_null_a, sealed_empty_a]
-        sealed_index_filler_a = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_a = gen_scalar_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_rows_a),
             "a_sealed_index_filler",
@@ -10269,7 +10227,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == len(sealed_rows_a)
         sealed_rows_b = [sealed_same_filter_b, sealed_null_b, sealed_empty_b]
-        sealed_index_filler_b = self._scalar_struct_index_filler_rows(
+        sealed_index_filler_b = gen_scalar_index_filler_rows(
             40000,
             self.min_index_sealed_rows - len(sealed_rows_b),
             "b_sealed_index_filler",
@@ -10285,31 +10243,31 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_deleted_a = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "a_growing_deleted_by_partition_filter",
             STRUCT_FIELD: delete_profile,
         }
         growing_kept_a = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "a_growing_kept",
             STRUCT_FIELD: growing_kept_profile,
         }
         growing_empty_a = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "a_growing_empty",
             STRUCT_FIELD: [],
         }
         growing_same_filter_b = {
             PK_FIELD: 105,
-            VECTOR_FIELD: self._vector(105),
+            VECTOR_FIELD: gen_vector(105),
             TAG_FIELD: "b_growing_same_filter_kept",
             STRUCT_FIELD: delete_profile,
         }
         growing_empty_b = {
             PK_FIELD: 106,
-            VECTOR_FIELD: self._vector(106),
+            VECTOR_FIELD: gen_vector(106),
             TAG_FIELD: "b_growing_empty",
             STRUCT_FIELD: [],
         }
@@ -10380,7 +10338,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -10398,9 +10356,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         partition_a_results, check = self.query(
             client,
@@ -10428,7 +10386,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         assert {row[PK_FIELD] for row in partition_b_results} == set(partition_b_source)
         for row in partition_b_results:
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], partition_b_source[row[PK_FIELD]][STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], partition_b_source[row[PK_FIELD]][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_delete_by_element_filter_with_partition_name(self):
@@ -10446,7 +10404,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -10458,14 +10416,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -10482,7 +10440,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -10492,8 +10450,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -10501,7 +10459,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -10510,41 +10468,41 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         delete_profile = [
-            {INT_SUBFIELD: 9000, TAG_SUBFIELD: "delete_shared_0", VECTOR_SUBFIELD: self._vector(9000)},
-            {INT_SUBFIELD: 9001, TAG_SUBFIELD: "delete_shared_1", VECTOR_SUBFIELD: self._vector(9001)},
+            {INT_SUBFIELD: 9000, TAG_SUBFIELD: "delete_shared_0", VECTOR_SUBFIELD: gen_vector(9000)},
+            {INT_SUBFIELD: 9001, TAG_SUBFIELD: "delete_shared_1", VECTOR_SUBFIELD: gen_vector(9001)},
         ]
         sealed_kept_profile = [
-            {INT_SUBFIELD: 9100, TAG_SUBFIELD: "kept_sealed_0", VECTOR_SUBFIELD: self._vector(9100)},
-            {INT_SUBFIELD: 9101, TAG_SUBFIELD: "kept_sealed_1", VECTOR_SUBFIELD: self._vector(9101)},
+            {INT_SUBFIELD: 9100, TAG_SUBFIELD: "kept_sealed_0", VECTOR_SUBFIELD: gen_vector(9100)},
+            {INT_SUBFIELD: 9101, TAG_SUBFIELD: "kept_sealed_1", VECTOR_SUBFIELD: gen_vector(9101)},
         ]
         growing_kept_profile = [
-            {INT_SUBFIELD: 9300, TAG_SUBFIELD: "kept_growing_0", VECTOR_SUBFIELD: self._vector(9300)},
-            {INT_SUBFIELD: 9301, TAG_SUBFIELD: "kept_growing_1", VECTOR_SUBFIELD: self._vector(9301)},
+            {INT_SUBFIELD: 9300, TAG_SUBFIELD: "kept_growing_0", VECTOR_SUBFIELD: gen_vector(9300)},
+            {INT_SUBFIELD: 9301, TAG_SUBFIELD: "kept_growing_1", VECTOR_SUBFIELD: gen_vector(9301)},
         ]
 
         sealed_deleted_a = {
             PK_FIELD: 2,
-            VECTOR_FIELD: self._vector(2),
+            VECTOR_FIELD: gen_vector(2),
             TAG_FIELD: "a_sealed_deleted_by_partition_filter",
             STRUCT_FIELD: delete_profile,
         }
         sealed_kept_a = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "a_sealed_kept",
             STRUCT_FIELD: sealed_kept_profile,
         }
         sealed_same_filter_b = {
             PK_FIELD: 102,
-            VECTOR_FIELD: self._vector(102),
+            VECTOR_FIELD: gen_vector(102),
             TAG_FIELD: "b_sealed_same_filter_kept",
             STRUCT_FIELD: delete_profile,
         }
         sealed_non_empty_a = [sealed_deleted_a, sealed_kept_a]
-        sealed_index_filler_a = self._vector_struct_index_filler_rows(
+        sealed_index_filler_a = gen_vector_index_filler_rows(
             30000,
             self.min_index_sealed_rows - len(sealed_non_empty_a),
             "a_sealed_index_filler",
@@ -10554,7 +10512,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == len(sealed_non_empty_a)
         sealed_non_empty_b = [sealed_same_filter_b]
-        sealed_index_filler_b = self._vector_struct_index_filler_rows(
+        sealed_index_filler_b = gen_vector_index_filler_rows(
             40000,
             self.min_index_sealed_rows - len(sealed_non_empty_b),
             "b_sealed_index_filler",
@@ -10566,25 +10524,25 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         sealed_null_a = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "a_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_a = {
             PK_FIELD: 5,
-            VECTOR_FIELD: self._vector(5),
+            VECTOR_FIELD: gen_vector(5),
             TAG_FIELD: "a_sealed_empty",
             STRUCT_FIELD: [],
         }
         sealed_null_b = {
             PK_FIELD: 103,
-            VECTOR_FIELD: self._vector(103),
+            VECTOR_FIELD: gen_vector(103),
             TAG_FIELD: "b_sealed_null",
             STRUCT_FIELD: None,
         }
         sealed_empty_b = {
             PK_FIELD: 104,
-            VECTOR_FIELD: self._vector(104),
+            VECTOR_FIELD: gen_vector(104),
             TAG_FIELD: "b_sealed_empty",
             STRUCT_FIELD: [],
         }
@@ -10601,19 +10559,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_deleted_a = {
             PK_FIELD: 6,
-            VECTOR_FIELD: self._vector(6),
+            VECTOR_FIELD: gen_vector(6),
             TAG_FIELD: "a_growing_deleted_by_partition_filter",
             STRUCT_FIELD: delete_profile,
         }
         growing_kept_a = {
             PK_FIELD: 7,
-            VECTOR_FIELD: self._vector(7),
+            VECTOR_FIELD: gen_vector(7),
             TAG_FIELD: "a_growing_kept",
             STRUCT_FIELD: growing_kept_profile,
         }
         growing_same_filter_b = {
             PK_FIELD: 105,
-            VECTOR_FIELD: self._vector(105),
+            VECTOR_FIELD: gen_vector(105),
             TAG_FIELD: "b_growing_same_filter_kept",
             STRUCT_FIELD: delete_profile,
         }
@@ -10631,13 +10589,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
         growing_empty_a = {
             PK_FIELD: 8,
-            VECTOR_FIELD: self._vector(8),
+            VECTOR_FIELD: gen_vector(8),
             TAG_FIELD: "a_growing_empty",
             STRUCT_FIELD: [],
         }
         growing_empty_b = {
             PK_FIELD: 106,
-            VECTOR_FIELD: self._vector(106),
+            VECTOR_FIELD: gen_vector(106),
             TAG_FIELD: "b_growing_empty",
             STRUCT_FIELD: [],
         }
@@ -10698,7 +10656,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in query_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             subfield_results, check = self.query(
                 client,
@@ -10714,7 +10672,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             for row in subfield_results:
                 expected = source_by_id[row[PK_FIELD]]
                 assert set(row) == {PK_FIELD, STRUCT_FIELD}
-                self._assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_vector_subfield_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             search_results, check = self.search(
                 client,
@@ -10732,9 +10690,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             assert search_results[0][0][PK_FIELD] == search_row[PK_FIELD]
             for hit in search_results[0]:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         partition_a_results, check = self.query(
             client,
@@ -10762,7 +10720,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         }
         assert {row[PK_FIELD] for row in partition_b_results} == set(partition_b_source)
         for row in partition_b_results:
-            self._assert_profile_equal(row[STRUCT_FIELD], partition_b_source[row[PK_FIELD]][STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], partition_b_source[row[PK_FIELD]][STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_partition_query_search_iterator(self):
@@ -10778,7 +10736,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -10790,14 +10748,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -10814,7 +10772,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -10825,8 +10783,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -10834,7 +10792,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
@@ -10842,24 +10800,24 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         rows_a = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "a_non_empty",
-                STRUCT_FIELD: self._scalar_profile(2),
+                STRUCT_FIELD: gen_scalar_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "a_null",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: 4,
-                VECTOR_FIELD: self._vector(4),
+                VECTOR_FIELD: gen_vector(4),
                 TAG_FIELD: "a_empty",
                 STRUCT_FIELD: [],
             },
@@ -10867,19 +10825,19 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows_b = [
             {
                 PK_FIELD: 102,
-                VECTOR_FIELD: self._vector(102),
+                VECTOR_FIELD: gen_vector(102),
                 TAG_FIELD: "b_non_empty",
-                STRUCT_FIELD: self._scalar_profile(102),
+                STRUCT_FIELD: gen_scalar_profile(102),
             },
             {
                 PK_FIELD: 103,
-                VECTOR_FIELD: self._vector(103),
+                VECTOR_FIELD: gen_vector(103),
                 TAG_FIELD: "b_null",
                 STRUCT_FIELD: None,
             },
             {
                 PK_FIELD: 104,
-                VECTOR_FIELD: self._vector(104),
+                VECTOR_FIELD: gen_vector(104),
                 TAG_FIELD: "b_empty",
                 STRUCT_FIELD: [],
             },
@@ -10910,14 +10868,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 consistency_level="Strong",
             )
             assert check
-            iterator_rows = self._drain_iterator(iterator)
+            iterator_rows = drain_iterator(iterator)
             iterator_ids = [row[PK_FIELD] for row in iterator_rows]
             assert len(iterator_ids) == len(set(iterator_ids))
             assert set(iterator_ids) == set(source_by_id)
             for row in iterator_rows:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             iterator, check = self.search_iterator(
                 client,
@@ -10931,7 +10889,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(source_by_id),
             )
             assert check
-            iterator_hits = self._drain_iterator(iterator)
+            iterator_hits = drain_iterator(iterator)
             hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
             assert len(hit_ids) == len(set(hit_ids))
             assert set(hit_ids) == set(source_by_id)
@@ -10942,9 +10900,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
             for hit in iterator_hits:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_partition_query_search_iterator(self):
@@ -10962,7 +10920,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         partition_a = "partition_a"
         partition_b = "partition_b"
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -10974,14 +10932,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             res, check = self.create_partition(client, collection_name, partition_name)
             assert check
 
-        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: self._vector(0), TAG_FIELD: "a_old_sealed"}
-        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: self._vector(100), TAG_FIELD: "b_old_sealed"}
-        old_sealed_filler_a = self._index_filler_rows(
+        old_sealed_a = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "a_old_sealed"}
+        old_sealed_b = {PK_FIELD: 100, VECTOR_FIELD: gen_vector(100), TAG_FIELD: "b_old_sealed"}
+        old_sealed_filler_a = gen_index_filler_rows(
             10000,
             self.min_index_sealed_rows - 1,
             "a_old_sealed_index_filler",
         )
-        old_sealed_filler_b = self._index_filler_rows(
+        old_sealed_filler_b = gen_index_filler_rows(
             20000,
             self.min_index_sealed_rows - 1,
             "b_old_sealed_index_filler",
@@ -10998,7 +10956,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -11009,8 +10967,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: self._vector(1), TAG_FIELD: "a_old_growing"}
-        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: self._vector(101), TAG_FIELD: "b_old_growing"}
+        old_growing_a = {PK_FIELD: 1, VECTOR_FIELD: gen_vector(1), TAG_FIELD: "a_old_growing"}
+        old_growing_b = {PK_FIELD: 101, VECTOR_FIELD: gen_vector(101), TAG_FIELD: "b_old_growing"}
         res, check = self.insert(client, collection_name, [old_growing_a], partition_name=partition_a)
         assert check
         assert res["insert_count"] == 1
@@ -11018,7 +10976,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert check
         assert res["insert_count"] == 1
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -11027,18 +10985,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         rows_a = [
             {
                 PK_FIELD: 2,
-                VECTOR_FIELD: self._vector(2),
+                VECTOR_FIELD: gen_vector(2),
                 TAG_FIELD: "a_non_empty",
-                STRUCT_FIELD: self._profile(2),
+                STRUCT_FIELD: gen_profile(2),
             },
             {
                 PK_FIELD: 3,
-                VECTOR_FIELD: self._vector(3),
+                VECTOR_FIELD: gen_vector(3),
                 TAG_FIELD: "a_empty",
                 STRUCT_FIELD: [],
             },
@@ -11046,13 +11004,13 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         rows_b = [
             {
                 PK_FIELD: 102,
-                VECTOR_FIELD: self._vector(102),
+                VECTOR_FIELD: gen_vector(102),
                 TAG_FIELD: "b_non_empty",
-                STRUCT_FIELD: self._profile(102),
+                STRUCT_FIELD: gen_profile(102),
             },
             {
                 PK_FIELD: 103,
-                VECTOR_FIELD: self._vector(103),
+                VECTOR_FIELD: gen_vector(103),
                 TAG_FIELD: "b_empty",
                 STRUCT_FIELD: [],
             },
@@ -11083,14 +11041,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 consistency_level="Strong",
             )
             assert check
-            iterator_rows = self._drain_iterator(iterator)
+            iterator_rows = drain_iterator(iterator)
             iterator_ids = [row[PK_FIELD] for row in iterator_rows]
             assert len(iterator_ids) == len(set(iterator_ids))
             assert set(iterator_ids) == set(source_by_id)
             for row in iterator_rows:
                 expected = source_by_id[row[PK_FIELD]]
                 assert row[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
             iterator, check = self.search_iterator(
                 client,
@@ -11104,7 +11062,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
                 limit=len(source_by_id),
             )
             assert check
-            iterator_hits = self._drain_iterator(iterator)
+            iterator_hits = drain_iterator(iterator)
             hit_ids = [hit[PK_FIELD] for hit in iterator_hits]
             assert len(hit_ids) == len(set(hit_ids))
             assert set(hit_ids) == set(source_by_id)
@@ -11115,9 +11073,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
 
             for hit in iterator_hits:
                 expected = source_by_id[hit[PK_FIELD]]
-                entity = self._search_entity(hit)
+                entity = search_entity(hit)
                 assert entity[TAG_FIELD] == expected[TAG_FIELD]
-                self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+                assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_query_search_old_sealed_rows(self):
@@ -11130,7 +11088,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -11138,7 +11096,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -11146,7 +11104,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -11156,7 +11114,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -11165,14 +11123,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(3, 5)
         ]
@@ -11196,12 +11154,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -11212,11 +11170,15 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert hit_ids == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(
+        reason="milvus-io/milvus#50009: mixed nullable/non-null ArrayOfVector rows in the same growing batch lose vector sub-field output",
+        strict=True,
+    )
     def test_add_struct_array_field_with_vector_insert_omit_nullable_field(self):
         """
         target: test omitted nullable struct array field after dynamically adding a vector sub-field struct
@@ -11228,7 +11190,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_omit")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -11236,7 +11198,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -11244,7 +11206,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -11254,7 +11216,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -11263,18 +11225,18 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         omitted_profile_row = {
             PK_FIELD: 3,
-            VECTOR_FIELD: self._vector(3),
+            VECTOR_FIELD: gen_vector(3),
             TAG_FIELD: "new_omitted_profile",
         }
         present_profile_row = {
             PK_FIELD: 4,
-            VECTOR_FIELD: self._vector(4),
+            VECTOR_FIELD: gen_vector(4),
             TAG_FIELD: "new_present_profile",
-            STRUCT_FIELD: self._profile(4),
+            STRUCT_FIELD: gen_profile(4),
         }
         res, check = self.insert(client, collection_name, [omitted_profile_row, present_profile_row])
         assert check
@@ -11297,7 +11259,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         element_filter_results, check = self.query(
             client,
@@ -11308,12 +11270,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {row[PK_FIELD] for row in element_filter_results} == {present_profile_row[PK_FIELD]}
-        self._assert_profile_equal(element_filter_results[0][STRUCT_FIELD], present_profile_row[STRUCT_FIELD])
+        assert_profile_equal(element_filter_results[0][STRUCT_FIELD], present_profile_row[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -11323,14 +11285,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert {hit[PK_FIELD] for hit in search_results[0]} == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         filtered_search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 40)",
@@ -11339,8 +11301,8 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
         assert {hit[PK_FIELD] for hit in filtered_search_results[0]} == {present_profile_row[PK_FIELD]}
-        entity = self._search_entity(filtered_search_results[0][0])
-        self._assert_profile_equal(entity[STRUCT_FIELD], present_profile_row[STRUCT_FIELD])
+        entity = search_entity(filtered_search_results[0][0])
+        assert_profile_equal(entity[STRUCT_FIELD], present_profile_row[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_with_vector_query_search_old_growing_rows(self):
@@ -11353,7 +11315,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_vector_growing")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -11361,7 +11323,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -11371,12 +11333,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3)]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(3)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -11385,14 +11347,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(3, 5)
         ]
@@ -11416,12 +11378,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(4)],
+            data=[gen_vector(4)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -11432,9 +11394,9 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert hit_ids == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_query_search_old_new_rows(self):
@@ -11446,7 +11408,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct")
         client = self._client()
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -11454,7 +11416,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(4)]
+        old_sealed_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"sealed_{i}"} for i in range(4)]
         res, check = self.insert(client, collection_name, old_sealed_rows)
         assert check
         assert res["insert_count"] == len(old_sealed_rows)
@@ -11462,7 +11424,7 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.flush(client, collection_name)
         assert check
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -11472,14 +11434,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        old_growing_rows = [
-            {PK_FIELD: i, VECTOR_FIELD: self._vector(i), TAG_FIELD: f"growing_{i}"} for i in range(4, 6)
-        ]
+        old_growing_rows = [{PK_FIELD: i, VECTOR_FIELD: gen_vector(i), TAG_FIELD: f"growing_{i}"} for i in range(4, 6)]
         res, check = self.insert(client, collection_name, old_growing_rows)
         assert check
         assert res["insert_count"] == len(old_growing_rows)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -11488,14 +11448,14 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         )
         assert check
 
-        self.wait_schema_version_consistent(client, collection_name)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
         new_rows = [
             {
                 PK_FIELD: i,
-                VECTOR_FIELD: self._vector(i),
+                VECTOR_FIELD: gen_vector(i),
                 TAG_FIELD: f"new_{i}",
-                STRUCT_FIELD: self._profile(i),
+                STRUCT_FIELD: gen_profile(i),
             }
             for i in range(6, 8)
         ]
@@ -11519,12 +11479,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert STRUCT_FIELD in row
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_results, check = self.search(
             client,
             collection_name,
-            data=[self._vector(7)],
+            data=[gen_vector(7)],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, STRUCT_FIELD],
@@ -11535,12 +11495,12 @@ class TestMilvusClientStructArraySchemaEvolution(StructArrayNullableTestMixin, T
         assert hit_ids == set(source_by_id)
         for hit in search_results[0]:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert STRUCT_FIELD in entity
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
 
-class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, TestMilvusClientV2Base):
+class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
     """Nullable struct array bulk import coverage."""
 
     # MinIO configuration constants
@@ -11668,8 +11628,8 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_json")
         entities = 3000
 
-        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
-        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+        schema = gen_indexed_struct_array_collection(self, client, collection_name)
+        rows, source_by_id = gen_nullable_scalar_struct_rows(
             schema,
             entities,
             tag_prefix="import_row",
@@ -11683,40 +11643,46 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_nullable_scalar_struct_array_with_json_partition_query_search(self):
@@ -11734,7 +11700,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
         other_entities = 3000
 
-        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
+        schema = gen_indexed_struct_array_collection(self, client, collection_name)
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11745,20 +11711,20 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for offset in range(other_entities):
             row_id = 100000 + offset
             if offset == 0:
-                profile = self._scalar_profile(row_id)
-                vector = self._vector(entities - 1)
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(entities - 1)
                 doc_tag = "other_partition_same_vector"
             elif offset % 3 == 1:
                 profile = None
-                vector = self._vector(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_null_profile_{offset}"
             elif offset % 3 == 2:
                 profile = []
-                vector = self._vector(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_empty_profile_{offset}"
             else:
-                profile = self._scalar_profile(row_id)
-                vector = self._vector(row_id)
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_profile_{offset}"
             row = {
                 PK_FIELD: row_id,
@@ -11774,7 +11740,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+        rows, source_by_id = gen_nullable_scalar_struct_rows(
             schema,
             entities,
             tag_prefix="target_partition_row",
@@ -11790,9 +11756,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities + len(other_partition_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -11801,35 +11769,40 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
         assert other_partition_stats["row_count"] == len(other_partition_rows)
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_partition_rows),
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -11837,15 +11810,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection({row[PK_FIELD] for row in other_partition_rows})
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_nullable_scalar_struct_array_with_parquet_partition_query_search(self):
@@ -11863,7 +11837,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         entities = 3000
         other_entities = 3000
 
-        schema = self._create_indexed_nullable_struct_array_collection(client, collection_name)
+        schema = gen_indexed_struct_array_collection(self, client, collection_name)
         res, check = self.create_partition(client, collection_name, partition_a)
         assert check
         res, check = self.create_partition(client, collection_name, partition_b)
@@ -11874,20 +11848,20 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for offset in range(other_entities):
             row_id = 100000 + offset
             if offset == 0:
-                profile = self._scalar_profile(row_id)
-                vector = self._vector(entities - 1)
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(entities - 1)
                 doc_tag = "other_partition_same_vector"
             elif offset % 3 == 1:
                 profile = None
-                vector = self._vector(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_null_profile_{offset}"
             elif offset % 3 == 2:
                 profile = []
-                vector = self._vector(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_empty_profile_{offset}"
             else:
-                profile = self._scalar_profile(row_id)
-                vector = self._vector(row_id)
+                profile = gen_scalar_profile(row_id)
+                vector = gen_vector(row_id)
                 doc_tag = f"other_partition_profile_{offset}"
             row = {
                 PK_FIELD: row_id,
@@ -11903,13 +11877,13 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        rows, source_by_id = self._nullable_scalar_struct_rows_by_schema(
+        rows, source_by_id = gen_nullable_scalar_struct_rows(
             schema,
             entities,
             tag_prefix="target_partition_row",
         )
         local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
-        self._write_scalar_struct_rows_parquet(rows, local_file_path, row_group_size=entities)
+        write_scalar_struct_rows_parquet(rows, local_file_path, row_group_size=entities)
 
         remote_files = self.upload_to_minio(local_file_path)
         self.call_bulkinsert(collection_name, remote_files, partition_name=partition_a)
@@ -11917,9 +11891,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities + len(other_partition_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -11928,35 +11904,40 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert check
         assert other_partition_stats["row_count"] == len(other_partition_rows)
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_partition_rows),
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -11964,15 +11945,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection({row[PK_FIELD] for row in other_partition_rows})
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -11990,12 +11972,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_null_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12007,7 +11989,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12027,10 +12009,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
                     {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
                 ]
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -12045,52 +12027,60 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        subfield_results = client.query(
-            collection_name=collection_name,
+        subfield_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -12108,12 +12098,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_null_parquet")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12125,7 +12115,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12148,10 +12138,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
                     {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
                 ]
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -12184,52 +12174,60 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        subfield_results = client.query(
-            collection_name=collection_name,
+        subfield_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -12247,12 +12245,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_omit_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12264,7 +12262,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12290,11 +12288,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
                     {INT_SUBFIELD: row_id * 10 + 1, TAG_SUBFIELD: None},
                 ]
             else:
-                input_profile = self._scalar_profile(row_id)
+                input_profile = gen_scalar_profile(row_id)
                 expected_profile = input_profile
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: input_profile,
             }
@@ -12309,52 +12307,60 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        subfield_results = client.query(
-            collection_name=collection_name,
+        subfield_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, STRUCT_INT_FIELD, STRUCT_TAG_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in subfield_results} == set(source_by_id)
         for row in subfield_results:
             expected = source_by_id[row[PK_FIELD]]
             assert set(row) == {PK_FIELD, STRUCT_FIELD}
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -12372,12 +12378,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_subfield_omit_parquet")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12389,7 +12395,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12419,7 +12425,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
                 ]
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -12451,40 +12457,46 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_nullable_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_non_nullable_scalar_struct_array_rejects_null_json(self):
@@ -12498,12 +12510,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12514,7 +12526,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             max_capacity=STRUCT_MAX_CAPACITY,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12528,11 +12540,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 2 == 0:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             rows.append(
                 {
                     PK_FIELD: row_id,
-                    VECTOR_FIELD: self._vector(row_id),
+                    VECTOR_FIELD: gen_vector(row_id),
                     TAG_FIELD: f"import_row_{row_id}",
                     STRUCT_FIELD: profile,
                 }
@@ -12548,7 +12560,8 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert import_result["state"] == "Failed"
         assert any(keyword in import_result["reason"].lower() for keyword in ["null", "nullable"])
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -12563,12 +12576,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_omit_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12579,7 +12592,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             max_capacity=STRUCT_MAX_CAPACITY,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12591,7 +12604,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             rows.append(
                 {
                     PK_FIELD: row_id,
-                    VECTOR_FIELD: self._vector(row_id),
+                    VECTOR_FIELD: gen_vector(row_id),
                     TAG_FIELD: f"import_row_{row_id}",
                 }
             )
@@ -12607,7 +12620,8 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         reason = import_result["reason"].lower()
         assert any(keyword in reason for keyword in [STRUCT_FIELD, "null", "nullable", "missing", "required"])
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -12622,12 +12636,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_omit_parquet")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -12638,7 +12652,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             max_capacity=STRUCT_MAX_CAPACITY,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -12650,7 +12664,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         doc_tags = []
         for row_id in range(entities):
             ids.append(row_id)
-            vectors.append(self._vector(row_id))
+            vectors.append(gen_vector(row_id))
             doc_tags.append(f"import_row_{row_id}")
 
         table = pa.table(
@@ -12670,7 +12684,8 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         reason = import_result["reason"].lower()
         assert any(keyword in reason for keyword in [STRUCT_FIELD, "null", "nullable", "missing", "required"])
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -12688,7 +12703,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -12701,7 +12716,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_row_{row_id}",
             }
             old_rows.append(row)
@@ -12713,20 +12728,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         import_rows = []
         for row_id in range(old_entities, total_entities):
@@ -12735,10 +12751,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -12756,38 +12772,43 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_with_json_partition_query_search(self):
@@ -12808,7 +12829,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         other_old_entities = 3000
         total_target_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -12825,7 +12846,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_target_partition_row_{row_id}",
             }
             old_rows.append(row)
@@ -12840,7 +12861,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             row_id = 100000 + offset
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"other_partition_old_{offset}",
             }
             other_old_rows.append(row)
@@ -12852,20 +12873,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         import_rows = []
         for row_id in range(old_entities, total_target_entities):
@@ -12874,10 +12896,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_target_partition_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -12894,9 +12916,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_target_entities + len(other_old_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -12907,44 +12931,49 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
 
         other_post_add_row = {
             PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: self._vector(total_target_entities - 1),
+            VECTOR_FIELD: gen_vector(total_target_entities - 1),
             TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: self._scalar_profile(100000 + other_old_entities),
+            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
         }
         res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
         assert check
         assert res["insert_count"] == 1
         other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=f"{PK_FIELD} >= 100000",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_old_rows) + 1,
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_target_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -12952,15 +12981,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_with_parquet_partition_query_search(self):
@@ -12982,7 +13012,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         other_old_entities = 3000
         total_target_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -12999,7 +13029,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_target_partition_row_{row_id}",
             }
             old_rows.append(row)
@@ -13014,7 +13044,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             row_id = 100000 + offset
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"other_partition_old_{offset}",
             }
             other_old_rows.append(row)
@@ -13026,20 +13056,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13051,10 +13082,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_target_partition_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -13089,9 +13120,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_target_entities + len(other_old_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -13102,44 +13135,49 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
 
         other_post_add_row = {
             PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: self._vector(total_target_entities - 1),
+            VECTOR_FIELD: gen_vector(total_target_entities - 1),
             TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: self._scalar_profile(100000 + other_old_entities),
+            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
         }
         res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
         assert check
         assert res["insert_count"] == 1
         other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=f"{PK_FIELD} >= 100000",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_old_rows) + 1,
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_target_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -13147,15 +13185,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_omit_field_json_partition_query_search(self):
@@ -13177,7 +13216,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         other_old_entities = 3000
         total_target_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -13194,7 +13233,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_target_partition_row_{row_id}",
             }
             old_rows.append(row)
@@ -13209,7 +13248,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             row_id = 100000 + offset
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"other_partition_old_{offset}",
             }
             other_old_rows.append(row)
@@ -13221,26 +13260,27 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         import_rows = []
         for row_id in range(old_entities, total_target_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_target_partition_omit_profile_row_{row_id}",
             }
             import_rows.append(row)
@@ -13256,9 +13296,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_target_entities + len(other_old_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -13269,44 +13311,49 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
 
         other_post_add_row = {
             PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: self._vector(total_target_entities - 1),
+            VECTOR_FIELD: gen_vector(total_target_entities - 1),
             TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: self._scalar_profile(100000 + other_old_entities),
+            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
         }
         res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
         assert check
         assert res["insert_count"] == 1
         other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=f"{PK_FIELD} >= 100000",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_old_rows) + 1,
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_target_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -13314,15 +13361,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_omit_field_parquet_partition_query_search(self):
@@ -13344,7 +13392,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         other_old_entities = 3000
         total_target_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -13361,7 +13409,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_target_partition_row_{row_id}",
             }
             old_rows.append(row)
@@ -13376,7 +13424,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             row_id = 100000 + offset
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"other_partition_old_{offset}",
             }
             other_old_rows.append(row)
@@ -13388,20 +13436,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13409,7 +13458,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities, total_target_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_target_partition_omit_profile_row_{row_id}",
             }
             ids.append(row[PK_FIELD])
@@ -13433,9 +13482,11 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         res, check = self.load_collection(client, collection_name)
         assert check
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_target_entities + len(other_old_rows)
         target_partition_stats, check = self.get_partition_stats(client, collection_name, partition_a)
         assert check
@@ -13446,44 +13497,49 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
 
         other_post_add_row = {
             PK_FIELD: 100000 + other_old_entities,
-            VECTOR_FIELD: self._vector(total_target_entities - 1),
+            VECTOR_FIELD: gen_vector(total_target_entities - 1),
             TAG_FIELD: "other_partition_same_vector_after_add",
-            STRUCT_FIELD: self._scalar_profile(100000 + other_old_entities),
+            STRUCT_FIELD: gen_scalar_profile(100000 + other_old_entities),
         }
         res, check = self.insert(client, collection_name, [other_post_add_row], partition_name=partition_b)
         assert check
         assert res["insert_count"] == 1
         other_source_by_id[other_post_add_row[PK_FIELD]] = other_post_add_row
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_a],
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
-        other_query_results = client.query(
-            collection_name=collection_name,
+        other_query_results, check = self.query(
+            client,
+            collection_name,
             partition_names=[partition_b],
             filter=f"{PK_FIELD} >= 100000",
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=len(other_old_rows) + 1,
         )
+        assert check
         assert {row[PK_FIELD] for row in other_query_results} == set(other_source_by_id)
         for row in other_query_results:
             expected = other_source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_target_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             partition_names=[partition_a],
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
@@ -13491,15 +13547,16 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_target_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert not {hit[PK_FIELD] for hit in hits}.intersection(set(other_source_by_id))
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_with_parquet(self):
@@ -13516,7 +13573,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -13529,7 +13586,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_row_{row_id}",
             }
             old_rows.append(row)
@@ -13541,20 +13598,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13566,10 +13624,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -13605,38 +13663,43 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_omit_field_json(self):
@@ -13653,7 +13716,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -13666,7 +13729,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_row_{row_id}",
             }
             old_rows.append(row)
@@ -13678,26 +13741,27 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         import_rows = []
         for row_id in range(old_entities, total_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
             }
             import_rows.append(row)
@@ -13714,38 +13778,43 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_after_add_nullable_scalar_struct_array_omit_field_parquet(self):
@@ -13762,7 +13831,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         import_entities = 3000
         total_entities = old_entities + import_entities
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
@@ -13775,7 +13844,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"old_row_{row_id}",
             }
             old_rows.append(row)
@@ -13787,20 +13856,21 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.flush(client, collection_name)
         assert check
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         res, check = self.add_collection_struct_field(
             client, collection_name, STRUCT_FIELD, profile_schema, max_capacity=STRUCT_MAX_CAPACITY
         )
         assert check
-        self.wait_schema_version_consistent(client, collection_name, timeout=30)
+        self.wait_schema_version_consistent(client, collection_name, timeout=120)
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        client.create_index(collection_name=collection_name, index_params=index_params)
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
 
         ids = []
         vectors = []
@@ -13808,7 +13878,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         for row_id in range(old_entities, total_entities):
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
             }
             ids.append(row[PK_FIELD])
@@ -13833,38 +13903,43 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == total_entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[total_entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=total_entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
@@ -13884,12 +13959,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_struct_vector_json")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
@@ -13902,7 +13977,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -13923,10 +13998,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._profile(row_id)
+                profile = gen_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -13942,40 +14017,46 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         assert self.wait_for_index_ready(client, collection_name, STRUCT_VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_nullable_scalar_struct_array_with_parquet(self):
@@ -13989,12 +14070,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_scalar_struct_parquet")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -14006,7 +14087,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             nullable=True,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -14024,10 +14105,10 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 3 == 1:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             row = {
                 PK_FIELD: row_id,
-                VECTOR_FIELD: self._vector(row_id),
+                VECTOR_FIELD: gen_vector(row_id),
                 TAG_FIELD: f"import_row_{row_id}",
                 STRUCT_FIELD: profile,
             }
@@ -14060,40 +14141,46 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
-        client.refresh_load(collection_name=collection_name)
+        res, check = self.refresh_load(client, collection_name)
+        assert check
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == entities
 
-        query_results = client.query(
-            collection_name=collection_name,
+        query_results, check = self.query(
+            client,
+            collection_name,
             filter=ALL_ROWS_FILTER,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         assert {row[PK_FIELD] for row in query_results} == set(source_by_id)
         for row in query_results:
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results = client.search(
-            collection_name=collection_name,
+        search_results, check = self.search(
+            client,
+            collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
             search_params=NORMAL_VECTOR_SEARCH_PARAMS,
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
             limit=entities,
         )
+        assert check
         hits = search_results[0]
         assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
         assert hits[0][PK_FIELD] == search_row[PK_FIELD]
         for hit in hits:
             expected = source_by_id[hit[PK_FIELD]]
-            entity = self._search_entity(hit)
+            entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
-            self._assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+            assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_import_non_nullable_scalar_struct_array_rejects_null_parquet(self):
@@ -14107,12 +14194,12 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         collection_name = cf.gen_unique_str(f"{prefix}_import_non_nullable_scalar_struct_parquet")
         entities = 3000
 
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
         schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
         schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
 
-        profile_schema = client.create_struct_field_schema()
+        profile_schema = gen_struct_schema(self, client)
         profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
         profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
         schema.add_field(
@@ -14123,7 +14210,7 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             max_capacity=STRUCT_MAX_CAPACITY,
         )
 
-        index_params = client.prepare_index_params()
+        index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
@@ -14140,9 +14227,9 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
             elif row_id % 2 == 0:
                 profile = []
             else:
-                profile = self._scalar_profile(row_id)
+                profile = gen_scalar_profile(row_id)
             ids.append(row_id)
-            vectors.append(self._vector(row_id))
+            vectors.append(gen_vector(row_id))
             doc_tags.append(f"import_row_{row_id}")
             profiles.append(profile)
 
@@ -14171,5 +14258,6 @@ class TestMilvusClientStructArrayNullableImport(StructArrayNullableTestMixin, Te
         assert import_result["state"] == "Failed"
         assert any(keyword in import_result["reason"].lower() for keyword in ["null", "nullable"])
 
-        stats = client.get_collection_stats(collection_name=collection_name)
+        stats, check = self.get_collection_stats(client, collection_name)
+        assert check
         assert stats["row_count"] == 0

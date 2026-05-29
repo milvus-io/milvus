@@ -4547,9 +4547,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
         error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"sub-field in non-nullable struct cannot be nullable individually, "
-            f"set nullable on the struct instead: structName=clips, subFieldName={nullable_field}",
+            ct.err_code: 1,
+            ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually",
         }
         self.create_collection(
             client,
@@ -4564,7 +4563,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         """
         target: test embedding list field nullable boundary
         method: create struct array field with nullable=True and insert None
-        expected: create collection succeeds, but None row value is not supported
+        expected: create collection succeeds, but partial struct sub-field payload is rejected
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -4599,8 +4598,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             }
         ]
         error = {
-            ct.err_code: 1,
-            ct.err_msg: "Expected list, got NoneType",
+            ct.err_code: 65535,
+            ct.err_msg: "inconsistent sub-field data in struct 'clips'",
         }
         self.insert(
             client,
@@ -4944,73 +4943,6 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             )
             log.info(f"DeepDiff: {deepdiff}")
             assert False, "Data verification failed: original data and query results do not match"
-
-    @staticmethod
-    def _scalar_profile(row_id: int) -> list[dict[str, Any]]:
-        return [
-            {"p_int": row_id * 10, "p_tag": f"profile_{row_id}_0"},
-            {"p_int": row_id * 10 + 1, "p_tag": f"profile_{row_id}_1"},
-        ]
-
-    def _profile(self, row_id: int) -> list[dict[str, Any]]:
-        return [
-            {
-                "p_int": row_id * 10,
-                "p_tag": f"profile_{row_id}_0",
-                "p_vec": self._vector(row_id * 10),
-            },
-            {
-                "p_int": row_id * 10 + 1,
-                "p_tag": f"profile_{row_id}_1",
-                "p_vec": self._vector(row_id * 10 + 1),
-            },
-        ]
-
-    @staticmethod
-    def _assert_scalar_profile_equal(actual, expected):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-
-    @staticmethod
-    def _assert_nullable_scalar_profile_equal(actual, expected, expected_keys=None):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            keys = expected_keys or expected_item.keys()
-            assert set(actual_item) == set(keys)
-            for key in keys:
-                assert actual_item.get(key) == expected_item.get(key)
-
-    def _assert_profile_equal(self, actual, expected):
-        if expected is None:
-            assert actual is None
-            return
-
-        assert isinstance(actual, list)
-        assert len(actual) == len(expected)
-        for actual_item, expected_item in zip(actual, expected):
-            assert actual_item["p_int"] == expected_item["p_int"]
-            assert actual_item["p_tag"] == expected_item["p_tag"]
-            assert actual_item["p_vec"] == pytest.approx(expected_item["p_vec"])
-
-    @staticmethod
-    def _search_entity(hit):
-        return hit.get("entity", hit)
-
-    @staticmethod
-    def _vector(seed: int, dim: int = default_dim) -> list[float]:
-        return [float(seed) + float(i) / 1000 for i in range(dim)]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [128])
