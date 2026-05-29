@@ -258,6 +258,34 @@ func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *prox
 	return merr.Success(), nil
 }
 
+func (node *Proxy) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	ctx = logutil.WithModule(ctx, moduleName)
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ClearReadTaskQueue")
+	defer sp.End()
+
+	result := node.sched.clearDQLQueue(request.GetTaskType(), request.GetReason())
+	resp.ProxyQueuedCleared = result.queuedCleared
+	resp.Results = append(resp.Results, &internalpb.ClearReadTaskQueueComponentResult{
+		Status:        merr.Success(),
+		Role:          typeutil.ProxyRole,
+		NodeID:        paramtable.GetNodeID(),
+		QueuedCleared: result.queuedCleared,
+	})
+	log.Ctx(ctx).Info("cleared proxy read task queue",
+		zap.String("taskType", request.GetTaskType()),
+		zap.String("reason", request.GetReason()),
+		zap.Int64("queuedCleared", result.queuedCleared))
+	return resp, nil
+}
+
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil

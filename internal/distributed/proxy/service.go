@@ -1230,6 +1230,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.proxy.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.proxy.ClearReadTaskQueue(ctx, req)
+}
+
 // AddFileResource add file resource
 func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	return s.proxy.AddFileResource(ctx, req)

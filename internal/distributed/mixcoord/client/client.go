@@ -1847,6 +1847,17 @@ func (c *Client) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	})
 }
 
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.RootCoordClient.ClearReadTaskQueue(ctx, req)
+	})
+}
+
 func (c *Client) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest, opts ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

@@ -25,6 +25,7 @@ const (
 
 	readTaskQueueOutcomeScheduled = "scheduled"
 	readTaskQueueOutcomeExpired   = "expired"
+	readTaskQueueOutcomeCleared   = "cleared"
 )
 
 // newScheduler create a scheduler with given schedule policy.
@@ -34,6 +35,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 	return &scheduler{
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
+		clearChan:        make(chan clearQueuedReq),
 		execChan:         make(chan Task),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
@@ -47,10 +49,22 @@ type addTaskReq struct {
 	err  chan<- error
 }
 
+type clearQueuedReq struct {
+	filter TaskFilter
+	reason string
+	resp   chan<- clearQueuedResp
+}
+
+type clearQueuedResp struct {
+	result ClearResult
+	err    error
+}
+
 // scheduler is a general concurrent safe scheduler implementation by wrapping a schedule policy.
 type scheduler struct {
 	policy      schedulePolicy
 	receiveChan chan addTaskReq
+	clearChan   chan clearQueuedReq
 	execChan    chan Task
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
@@ -88,6 +102,22 @@ func (s *scheduler) Add(task Task) (err error) {
 	}
 
 	return
+}
+
+func (s *scheduler) ClearQueued(ctx context.Context, filter TaskFilter, reason string) (ClearResult, error) {
+	if err := s.lifetime.Add(lifetime.IsWorking); err != nil {
+		return ClearResult{}, err
+	}
+	defer s.lifetime.Done()
+
+	respCh := make(chan clearQueuedResp, 1)
+	select {
+	case s.clearChan <- clearQueuedReq{filter: filter, reason: reason, resp: respCh}:
+		resp := <-respCh
+		return resp.result, resp.err
+	case <-ctx.Done():
+		return ClearResult{}, ctx.Err()
+	}
 }
 
 // Start schedule the owned task asynchronously and continuously.
@@ -153,6 +183,10 @@ func (s *scheduler) schedule() {
 			// Receive add operation request and return the process result.
 			// And consume recv chan as much as possible.
 			s.consumeRecvChan(req, maxReceiveChanBatchConsumeNum, now)
+		case req := <-s.clearChan:
+			var result ClearResult
+			result, task = s.clearQueuedTasks(req.filter, req.reason, task, now)
+			req.resp <- clearQueuedResp{result: result}
 		case execChan <- execTask:
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
@@ -345,6 +379,36 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
 		task.Done(cleanupTaskError(task))
 	}
+}
+
+func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *queuedTask, now time.Time) (ClearResult, *queuedTask) {
+	removed := s.policy.Remove(filter, now)
+	if task.valid() && (filter == nil || filter(task.Task)) {
+		removed = append(removed, task)
+		task = nil
+	}
+
+	clearErr := clearTaskQueueError(reason)
+	var result ClearResult
+	for _, removedTask := range removed {
+		if !removedTask.valid() {
+			continue
+		}
+		nq := removedTask.NQ()
+		result.QueuedCleared++
+		result.QueuedNQCleared += nq
+		s.updateWaitingTaskCounter(-1, -nq)
+		s.recordReadTaskQueueDuration(removedTask, now, readTaskQueueOutcomeCleared)
+		removedTask.Done(clearErr)
+	}
+	return result, task
+}
+
+func clearTaskQueueError(reason string) error {
+	if reason == "" {
+		return errors.Wrap(context.Canceled, "read task queue cleared by admin")
+	}
+	return errors.Wrap(context.Canceled, fmt.Sprintf("read task queue cleared by admin: %s", reason))
 }
 
 // setupReadyLenMetric update the read task ready len metric.

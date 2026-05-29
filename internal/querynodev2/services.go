@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1772,6 +1773,66 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
+}
+
+func (node *QueryNode) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	defer node.lifetime.Done()
+
+	filter, err := queryNodeReadTaskFilter(req.GetTaskType())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	result, err := node.scheduler.ClearQueued(ctx, filter, req.GetReason())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	resp.QuerynodeQueuedCleared = result.QueuedCleared
+	resp.QueuedNqCleared = result.QueuedNQCleared
+	resp.Results = append(resp.Results, &internalpb.ClearReadTaskQueueComponentResult{
+		Status:          merr.Success(),
+		Role:            typeutil.QueryNodeRole,
+		NodeID:          node.GetNodeID(),
+		QueuedCleared:   result.QueuedCleared,
+		QueuedNqCleared: result.QueuedNQCleared,
+	})
+	log.Ctx(ctx).Info("cleared querynode read task queue",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int64("queuedCleared", result.QueuedCleared),
+		zap.Int64("queuedNQCleared", result.QueuedNQCleared))
+	return resp, nil
+}
+
+func queryNodeReadTaskFilter(taskType string) (scheduler.TaskFilter, error) {
+	switch taskType {
+	case "", "all":
+		return nil, nil
+	case "search":
+		return func(task scheduler.Task) bool {
+			_, ok := task.(*tasks.SearchTask)
+			return ok
+		}, nil
+	case "query":
+		return func(task scheduler.Task) bool {
+			_, ok := task.(*tasks.QueryTask)
+			return ok
+		}, nil
+	case "query_stream":
+		return func(task scheduler.Task) bool {
+			_, ok := task.(*tasks.QueryStreamTask)
+			return ok
+		}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported task_type %q", taskType)
+	}
 }
 
 func (node *QueryNode) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {

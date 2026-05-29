@@ -1260,6 +1260,52 @@ func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.
 	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
 }
 
+func (s *mixCoordImpl) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	var errs []error
+	proxyResp, err := s.rootcoordServer.ClearReadTaskQueue(ctx, req)
+	if err != nil {
+		errs = append(errs, err)
+	} else if proxyResp != nil {
+		resp.Results = append(resp.Results, proxyResp.GetResults()...)
+		resp.ProxyQueuedCleared += proxyResp.GetProxyQueuedCleared()
+		if !merr.Ok(proxyResp.GetStatus()) {
+			errs = append(errs, merr.Error(proxyResp.GetStatus()))
+		}
+	}
+
+	queryNodeResp, err := s.queryCoordServer.ClearReadTaskQueue(ctx, req)
+	if err != nil {
+		errs = append(errs, err)
+	} else if queryNodeResp != nil {
+		resp.Results = append(resp.Results, queryNodeResp.GetResults()...)
+		resp.QuerynodeQueuedCleared += queryNodeResp.GetQuerynodeQueuedCleared()
+		resp.QueuedNqCleared += queryNodeResp.GetQueuedNqCleared()
+		if !merr.Ok(queryNodeResp.GetStatus()) {
+			errs = append(errs, merr.Error(queryNodeResp.GetStatus()))
+		}
+	}
+
+	if err := merr.Combine(errs...); err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	log.Ctx(ctx).Info("cleared cluster read task queues",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
+		zap.Int64("queryNodeQueuedCleared", resp.GetQuerynodeQueuedCleared()),
+		zap.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
+		zap.Int("results", len(resp.GetResults())),
+		zap.Error(merr.Error(resp.GetStatus())))
+	return resp, nil
+}
+
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
 	return s.datacoordServer.FlushAll(ctx, req)
 }

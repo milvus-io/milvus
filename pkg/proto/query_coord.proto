@@ -98,6 +98,7 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+  rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
@@ -183,6 +184,7 @@ service QueryNode {
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
     rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
