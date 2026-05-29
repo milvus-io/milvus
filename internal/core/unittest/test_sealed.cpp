@@ -3090,12 +3090,9 @@ TEST(SealedVectorArrayNullable, BulkSubscriptAllNullVectorArrayFromIndex) {
     ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
     for (int i = 0; i < result->valid_data_size(); ++i) {
         EXPECT_FALSE(result->valid_data(i));
-        EXPECT_EQ(result->vectors()
-                      .vector_array()
-                      .data(i)
-                      .float_vector()
-                      .data_size(),
-                  0);
+        EXPECT_EQ(
+            result->vectors().vector_array().data(i).float_vector().data_size(),
+            0);
     }
 }
 
