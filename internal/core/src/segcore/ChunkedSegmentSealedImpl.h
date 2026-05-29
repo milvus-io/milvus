@@ -562,10 +562,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Converts a combined Arrow array into a proto DataArray using
     // result_mapping for reorder.  Returns nullptr on unsupported type.
     static std::unique_ptr<DataArray>
-    ArrowToDataArray(const std::shared_ptr<arrow::Array>& arr,
-                     const FieldMeta& field_meta,
-                     const std::vector<int64_t>& result_mapping,
-                     int64_t size);
+    ArrowToDataArray(
+        const std::shared_ptr<arrow::Array>& arr,
+        const FieldMeta& field_meta,
+        const std::vector<int64_t>& result_mapping,
+        int64_t size,
+        const std::vector<std::string>* dynamic_field_names = nullptr,
+        const std::string* text_lob_path = nullptr);
 
     // Calls reader_->take() with timing. Returns the table on success,
     // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
@@ -1409,6 +1412,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     SetUseTakeForOutputForTesting(bool val) {
         use_take_for_output_.store(val, std::memory_order_relaxed);
+    }
+
+    // Test-only: inject TEXT LOB base path.
+    void
+    SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
+        text_lob_paths_[field_id] = std::move(lob_base_path);
     }
 
     // Test-only: snapshot access to segment_load_info_ for asserting Reopen

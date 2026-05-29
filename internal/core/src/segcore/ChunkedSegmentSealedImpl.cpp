@@ -2811,6 +2811,27 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
         count);
 }
 
+static std::vector<std::string>
+ReadTextLobBatch(
+    const std::string& lob_base_path,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
+    if (encoded_refs.empty()) {
+        return {};
+    }
+
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+
+    auto& cache = GetGlobalTextColumnCache();
+    return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+}
+
+static milvus_storage::lob_column::EncodedRef
+MakeTextLobEncodedRef(const void* data, size_t size) {
+    return {static_cast<const uint8_t*>(data), size};
+}
+
 void
 ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     milvus::OpContext* op_ctx,
@@ -2841,7 +2862,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
                 return;  // skip null values
             }
             encoded_refs.push_back(
-                {reinterpret_cast<const uint8_t*>(value.data()), value.size()});
+                MakeTextLobEncodedRef(value.data(), value.size()));
             valid_indices.push_back(idx);
         },
         seg_offsets,
@@ -2851,12 +2872,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
         return;
     }
 
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-
-    auto& cache = GetGlobalTextColumnCache();
-    auto texts = cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+    auto texts = ReadTextLobBatch(lob_base_path, encoded_refs);
     for (size_t i = 0; i < valid_indices.size() && i < texts.size(); i++) {
         *dst->Mutable(valid_indices[i]) = std::move(texts[i]);
     }
@@ -5517,6 +5533,18 @@ LogTakeFallback(const char* caller_tag,
         field_count);
 }
 
+static bool
+ShouldProjectInternalTakeDynamicField(
+    const Schema& schema,
+    FieldId field_id,
+    const std::vector<std::string>& target_dynamic_fields) {
+    if (schema.is_external_collection() || target_dynamic_fields.empty()) {
+        return false;
+    }
+    auto dynamic_field_id = schema.get_dynamic_field_id();
+    return dynamic_field_id.has_value() && dynamic_field_id.value() == field_id;
+}
+
 ChunkedSegmentSealedImpl::TakeContext
 ChunkedSegmentSealedImpl::BuildTakeContext(const int64_t* offsets,
                                            int64_t size) {
@@ -5554,7 +5582,9 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
     const std::shared_ptr<arrow::Array>& arr,
     const FieldMeta& field_meta,
     const std::vector<int64_t>& result_mapping,
-    int64_t size) {
+    int64_t size,
+    const std::vector<std::string>* dynamic_field_names,
+    const std::string* text_lob_path) {
     auto data_array = std::make_unique<DataArray>();
     data_array->set_type(
         static_cast<proto::schema::DataType>(field_meta.get_data_type()));
@@ -5618,9 +5648,63 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             }
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::STRING:
         case DataType::TEXT: {
+            auto obj = data_array->mutable_scalars()->mutable_string_data();
+            if (text_lob_path != nullptr) {
+                std::vector<milvus_storage::lob_column::EncodedRef>
+                    encoded_refs;
+                encoded_refs.reserve(size);
+                std::vector<std::string> string_refs;
+                string_refs.reserve(size);
+
+                if (arr->type()->id() == arrow::Type::STRING) {
+                    auto typed =
+                        std::static_pointer_cast<arrow::StringArray>(arr);
+                    for (int64_t i = 0; i < size; i++) {
+                        auto idx = result_mapping[i];
+                        if (typed->IsNull(idx)) {
+                            encoded_refs.push_back(
+                                MakeTextLobEncodedRef(nullptr, 0));
+                            continue;
+                        }
+                        string_refs.emplace_back(typed->GetString(idx));
+                        auto& ref = string_refs.back();
+                        encoded_refs.push_back(
+                            MakeTextLobEncodedRef(ref.data(), ref.size()));
+                    }
+                } else if (arr->type()->id() == arrow::Type::BINARY) {
+                    auto typed =
+                        std::static_pointer_cast<arrow::BinaryArray>(arr);
+                    for (int64_t i = 0; i < size; i++) {
+                        auto idx = result_mapping[i];
+                        if (typed->IsNull(idx)) {
+                            encoded_refs.push_back(
+                                MakeTextLobEncodedRef(nullptr, 0));
+                            continue;
+                        }
+                        auto val = typed->Value(idx);
+                        encoded_refs.push_back(MakeTextLobEncodedRef(
+                            val.data(), static_cast<size_t>(val.size())));
+                    }
+                } else {
+                    return nullptr;
+                }
+
+                auto texts = ReadTextLobBatch(*text_lob_path, encoded_refs);
+                for (auto& text : texts) {
+                    obj->add_data(std::move(text));
+                }
+                break;
+            }
+
+            auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->GetString(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
             auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
             auto obj = data_array->mutable_scalars()->mutable_string_data();
             for (int64_t i = 0; i < size; i++) {
@@ -5634,7 +5718,17 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
                 auto val = typed->Value(result_mapping[i]);
-                obj->add_data(val.data(), val.size());
+                if (dynamic_field_names != nullptr &&
+                    !dynamic_field_names->empty()) {
+                    auto projected = ExtractSubJson(
+                        std::string_view(
+                            reinterpret_cast<const char*>(val.data()),
+                            val.size()),
+                        *dynamic_field_names);
+                    obj->add_data(std::move(projected));
+                } else {
+                    obj->add_data(val.data(), val.size());
+                }
             }
             break;
         }
@@ -6065,8 +6159,36 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             arr = storage::NormalizeExternalArrow(arr, field_meta);
         }
 
-        auto data_array =
-            ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
+        auto dynamic_field_names =
+            ShouldProjectInternalTakeDynamicField(
+                *schema_, field_id, plan->target_dynamic_fields_)
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        const std::string* text_lob_path = nullptr;
+        if (!is_external_collection &&
+            field_meta.get_data_type() == DataType::TEXT) {
+            auto path_it = text_lob_paths_.find(field_id);
+            if (path_it == text_lob_paths_.end()) {
+                LogTakeFallback(
+                    "retrieve",
+                    id_,
+                    size,
+                    ctx.unique_offsets.size(),
+                    take_field_ids.size(),
+                    fmt::format("missing TEXT LOB path for field {}",
+                                field_id.get()));
+                results->clear_fields_data();
+                results->clear_ids();
+                return false;
+            }
+            text_lob_path = &path_it->second;
+        }
+        auto data_array = ArrowToDataArray(arr,
+                                           field_meta,
+                                           ctx.result_mapping,
+                                           size,
+                                           dynamic_field_names,
+                                           text_lob_path);
         if (!data_array) {
             LOG_WARN(
                 "[TakeAPI] unsupported data type {} for field '{}', "
@@ -6226,8 +6348,35 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
             arr = storage::NormalizeExternalArrow(arr, field_meta);
         }
 
-        auto data_array =
-            ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
+        auto dynamic_field_names =
+            ShouldProjectInternalTakeDynamicField(
+                *schema_, field_id, plan->target_dynamic_fields_)
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        const std::string* text_lob_path = nullptr;
+        if (!is_external_collection &&
+            field_meta.get_data_type() == DataType::TEXT) {
+            auto path_it = text_lob_paths_.find(field_id);
+            if (path_it == text_lob_paths_.end()) {
+                LogTakeFallback(
+                    "search",
+                    id_,
+                    size,
+                    ctx.unique_offsets.size(),
+                    take_field_ids.size(),
+                    fmt::format("missing TEXT LOB path for field {}",
+                                field_id.get()));
+                results.output_fields_data_.clear();
+                return false;
+            }
+            text_lob_path = &path_it->second;
+        }
+        auto data_array = ArrowToDataArray(arr,
+                                           field_meta,
+                                           ctx.result_mapping,
+                                           size,
+                                           dynamic_field_names,
+                                           text_lob_path);
         if (!data_array) {
             LOG_WARN(
                 "[TakeAPI] search: unsupported type {} for '{}', "

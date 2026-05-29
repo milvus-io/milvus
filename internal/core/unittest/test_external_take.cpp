@@ -34,6 +34,7 @@
 #include "common/VirtualPK.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "query/PlanImpl.h"
@@ -875,6 +876,67 @@ BuildInternalTakeArrowTable(const ExternalSchemaInfo& info) {
     return arrow::Table::Make(arrow::schema(fields), columns);
 }
 
+struct InternalSchemaWithTextAndDynamicFields {
+    ExternalSchemaInfo base;
+    FieldId text_id;
+    FieldId dynamic_id;
+};
+
+InternalSchemaWithTextAndDynamicFields
+BuildInternalSchemaWithTextAndDynamicFields() {
+    InternalSchemaWithTextAndDynamicFields info;
+    info.base = BuildInternalSchemaForTake();
+    info.text_id = FieldId(109);
+    info.dynamic_id = FieldId(110);
+
+    info.base.schema->AddField(FieldMeta(FieldName("text_col"),
+                                         info.text_id,
+                                         DataType::TEXT,
+                                         65535,
+                                         true,
+                                         std::nullopt));
+    info.base.schema->AddField(FieldMeta(FieldName("$meta"),
+                                         info.dynamic_id,
+                                         DataType::JSON,
+                                         true,
+                                         std::nullopt));
+    info.base.schema->set_dynamic_field_id(info.dynamic_id);
+    return info;
+}
+
+std::shared_ptr<arrow::Table>
+BuildInternalTakeArrowTableWithTextAndDynamicFields(
+    const InternalSchemaWithTextAndDynamicFields& info) {
+    arrow::Int64Builder int64_b;
+    arrow::BinaryBuilder text_b;
+    arrow::BinaryBuilder dynamic_b;
+    for (int i = 0; i < kTestRows; i++) {
+        EXPECT_TRUE(int64_b.Append(i * 10000).ok());
+        auto text = "text_" + std::to_string(i);
+        auto encoded_text = milvus_storage::lob_column::EncodeInlineText(text);
+        EXPECT_TRUE(text_b
+                        .Append(encoded_text.data(),
+                                static_cast<int32_t>(encoded_text.size()))
+                        .ok());
+        auto dynamic = R"({"foo":)" + std::to_string(i) + R"(,"bar":true})";
+        EXPECT_TRUE(
+            dynamic_b
+                .Append(reinterpret_cast<const uint8_t*>(dynamic.data()),
+                        static_cast<int32_t>(dynamic.size()))
+                .ok());
+    }
+
+    auto int64_arr = int64_b.Finish().ValueOrDie();
+    auto text_arr = text_b.Finish().ValueOrDie();
+    auto dynamic_arr = dynamic_b.Finish().ValueOrDie();
+    auto schema = arrow::schema({
+        arrow::field(std::to_string(info.base.int64_id.get()), arrow::int64()),
+        arrow::field(std::to_string(info.text_id.get()), arrow::binary()),
+        arrow::field(std::to_string(info.dynamic_id.get()), arrow::binary()),
+    });
+    return arrow::Table::Make(schema, {int64_arr, text_arr, dynamic_arr});
+}
+
 // Helper: create a ChunkedSegmentSealedImpl with external schema
 // Note: reader_ must be injected via SetReaderForTesting (MILVUS_UNIT_TEST)
 ChunkedSegmentSealedImpl*
@@ -1690,6 +1752,120 @@ TEST(InternalTakeTest, TryTakeForSearch_UsesFieldIdColumns) {
     ASSERT_EQ(varchar_data->scalars().string_data().data_size(), 2);
     EXPECT_EQ(varchar_data->scalars().string_data().data(0), "row_4");
     EXPECT_EQ(varchar_data->scalars().string_data().data(1), "row_0");
+}
+
+TEST(InternalTakeTest, TryTakeForRetrieve_ResolvesTextOutputField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+    segment->SetTextLobPathForTesting(info.text_id, "/tmp/test_lob");
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.base.schema);
+    plan->field_ids_ = {info.base.int64_id, info.text_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {3, 1};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 2);
+
+    auto& text_data = results->fields_data(1);
+    ASSERT_EQ(text_data.field_id(), info.text_id.get());
+    ASSERT_EQ(text_data.scalars().string_data().data_size(), 2);
+    EXPECT_EQ(text_data.scalars().string_data().data(0), "text_3");
+    EXPECT_EQ(text_data.scalars().string_data().data(1), "text_1");
+}
+
+TEST(InternalTakeTest, TryTakeForRetrieve_ProjectsDynamicField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.base.schema);
+    plan->field_ids_ = {info.base.int64_id, info.dynamic_id};
+    plan->target_dynamic_fields_ = {"foo"};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {3, 1};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 2);
+
+    auto& dynamic_data = results->fields_data(1);
+    ASSERT_EQ(dynamic_data.field_id(), info.dynamic_id.get());
+    ASSERT_EQ(dynamic_data.scalars().json_data().data_size(), 2);
+    EXPECT_EQ(dynamic_data.scalars().json_data().data(0), R"({"foo":3})");
+    EXPECT_EQ(dynamic_data.scalars().json_data().data(1), R"({"foo":1})");
+}
+
+TEST(InternalTakeTest, TryTakeForSearch_ResolvesTextOutputField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+    segment->SetTextLobPathForTesting(info.text_id, "/tmp/test_lob");
+
+    auto plan = std::make_unique<query::Plan>(info.base.schema);
+    plan->target_entries_ = {info.base.int64_id, info.text_id};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {4, 0};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 2u);
+
+    auto& int64_data = results.output_fields_data_.at(info.base.int64_id);
+    ASSERT_EQ(int64_data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data->scalars().long_data().data(0), 40000);
+    EXPECT_EQ(int64_data->scalars().long_data().data(1), 0);
+
+    auto& text_data = results.output_fields_data_.at(info.text_id);
+    ASSERT_EQ(text_data->scalars().string_data().data_size(), 2);
+    EXPECT_EQ(text_data->scalars().string_data().data(0), "text_4");
+    EXPECT_EQ(text_data->scalars().string_data().data(1), "text_0");
+}
+
+TEST(InternalTakeTest, TryTakeForSearch_ProjectsDynamicField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.base.schema);
+    plan->target_entries_ = {info.base.int64_id, info.dynamic_id};
+    plan->target_dynamic_fields_ = {"foo"};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {4, 0};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 2u);
+
+    auto& int64_data = results.output_fields_data_.at(info.base.int64_id);
+    ASSERT_EQ(int64_data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data->scalars().long_data().data(0), 40000);
+    EXPECT_EQ(int64_data->scalars().long_data().data(1), 0);
+
+    auto& dynamic_data = results.output_fields_data_.at(info.dynamic_id);
+    ASSERT_EQ(dynamic_data->scalars().json_data().data_size(), 2);
+    EXPECT_EQ(dynamic_data->scalars().json_data().data(0), R"({"foo":4})");
+    EXPECT_EQ(dynamic_data->scalars().json_data().data(1), R"({"foo":0})");
 }
 
 // ---------- TryTakeForRetrieve: error & edge-case paths ----------
