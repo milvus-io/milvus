@@ -85,7 +85,6 @@ class VectorMemIndex : public VectorIndex {
     int64_t
     Count() override {
         if (offset_mapping_.IsEnabled() &&
-            offset_mapping_.GetTotalCount() > 0 &&
             offset_mapping_.GetValidCount() == 0) {
             return 0;
         }

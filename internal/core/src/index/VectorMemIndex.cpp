@@ -233,17 +233,40 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
                                    const milvus::BitsetView& bitset) const {
+    auto make_empty_iterators = [](int64_t num_queries) {
+        std::vector<knowhere::IndexNode::IteratorPtr> iterators;
+        iterators.reserve(num_queries);
+        for (int64_t i = 0; i < num_queries; ++i) {
+            iterators.emplace_back(std::make_shared<EmptyVectorIterator>());
+        }
+        return iterators;
+    };
+
+    if (IsAllNullNullable(offset_mapping_)) {
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        auto num_queries = dataset->GetRows();
+        if (offsets != nullptr) {
+            num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
+            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            auto total_vectors = static_cast<size_t>(dataset->GetRows());
+            AssertInfo(
+                offsets[num_queries] == total_vectors,
+                "embedding list query offsets are inconsistent with flattened "
+                "rows: nq={}, terminal_offset={}, rows={}",
+                num_queries,
+                offsets[num_queries],
+                total_vectors);
+        }
+        return make_empty_iterators(num_queries);
+    }
+
     if (IsEmptyEmbListIndex()) {
         auto metric_type = conf.value(knowhere::meta::METRIC_TYPE,
                                       std::string(GetMetricType()));
         if (!knowhere::get_el_metric_type(metric_type).has_value()) {
             auto num_queries = dataset->GetRows();
-            std::vector<knowhere::IndexNode::IteratorPtr> iterators;
-            iterators.reserve(num_queries);
-            for (int64_t i = 0; i < num_queries; ++i) {
-                iterators.emplace_back(std::make_shared<EmptyVectorIterator>());
-            }
-            return iterators;
+            return make_empty_iterators(num_queries);
         }
     }
     return this->index_.AnnIterator(dataset, conf, bitset, false);
@@ -689,7 +712,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
-    if (IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -774,7 +797,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorMemIndex<T>::HasRawData() const {
-    if (IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());

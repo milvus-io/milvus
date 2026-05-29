@@ -52,6 +52,10 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
+        if (offset_mapping_.IsEnabled() &&
+            offset_mapping_.GetValidCount() == 0) {
+            return 0;
+        }
         return index_.Count();
     }
 

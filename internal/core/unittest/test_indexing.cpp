@@ -902,6 +902,7 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_TRUE(vec_index->HasValidData());
     EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
+    EXPECT_TRUE(vec_index->HasRawData());
 
     auto create_index_result = index->Upload();
     ASSERT_GT(create_index_result->GetSerializedSize(), 0);
@@ -922,6 +923,58 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_TRUE(loaded_vec_index->HasValidData());
     EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
+    EXPECT_TRUE(loaded_vec_index->HasRawData());
+
+    std::vector<float> iterator_queries(2 * dim, 0.1F);
+    auto iterator_dataset =
+        knowhere::GenDataSet(2, dim, iterator_queries.data());
+    auto iterator_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::EF, 10},
+    };
+    auto iterators = loaded_vec_index->VectorIterators(
+        iterator_dataset, iterator_conf, nullptr);
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 2);
+    EXPECT_FALSE(iterators.value()[0]->HasNext());
+    EXPECT_FALSE(iterators.value()[1]->HasNext());
+
+    std::vector<float> emb_list_iterator_queries(3 * dim, 0.1F);
+    auto emb_list_iterator_dataset =
+        knowhere::GenDataSet(3, dim, emb_list_iterator_queries.data());
+    std::vector<size_t> emb_list_iterator_offsets = {0, 2, 3, 3, 3};
+    emb_list_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_OFFSET,
+        const_cast<const size_t*>(emb_list_iterator_offsets.data()));
+    emb_list_iterator_dataset->Set(knowhere::meta::NQ, int64_t{4});
+    auto emb_list_iterators = loaded_vec_index->VectorIterators(
+        emb_list_iterator_dataset, iterator_conf, nullptr);
+    ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
+    ASSERT_EQ(emb_list_iterators.value().size(), 4);
+    EXPECT_TRUE(std::all_of(
+        emb_list_iterators.value().begin(),
+        emb_list_iterators.value().end(),
+        [](const auto& iter) { return !iter->HasNext(); }));
+
+    std::vector<float> query(dim, 0.1F);
+    auto xq_dataset = knowhere::GenDataSet(1, dim, query.data());
+    std::vector<size_t> query_offsets = {0, 1};
+    xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                    const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::NQ, int64_t{1});
+    milvus::SearchInfo search_info;
+    search_info.topk_ = 3;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ =
+        milvus::Config{{knowhere::meta::METRIC_TYPE, metric_type}};
+    SearchResult result;
+    loaded_vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result);
+    EXPECT_EQ(result.total_nq_, 1);
+    EXPECT_EQ(result.seg_offsets_.size(), 3);
+    EXPECT_TRUE(std::all_of(
+        result.seg_offsets_.begin(),
+        result.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 }
 
 TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
@@ -1666,6 +1719,7 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_TRUE(vec_index->HasValidData());
     EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
+    EXPECT_TRUE(vec_index->HasRawData());
 
     auto create_index_result = index->Upload();
     ASSERT_GT(create_index_result->GetSerializedSize(), 0);
@@ -1687,6 +1741,40 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_TRUE(loaded_vec_index->HasValidData());
     EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
+    EXPECT_TRUE(loaded_vec_index->HasRawData());
+
+    std::vector<float> iterator_queries(2 * dim, 0.1F);
+    auto iterator_dataset =
+        knowhere::GenDataSet(2, dim, iterator_queries.data());
+    std::vector<size_t> iterator_offsets = {0, 1, 2};
+    iterator_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                          const_cast<const size_t*>(iterator_offsets.data()));
+    iterator_dataset->Set(knowhere::meta::NQ, int64_t{2});
+    auto iterator_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::indexparam::EF, 10},
+    };
+    auto iterators = loaded_vec_index->VectorIterators(
+        iterator_dataset, iterator_conf, nullptr);
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 2);
+    EXPECT_FALSE(iterators.value()[0]->HasNext());
+    EXPECT_FALSE(iterators.value()[1]->HasNext());
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = 3;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ =
+        milvus::Config{{knowhere::meta::METRIC_TYPE, metric_type}};
+    SearchResult result;
+    loaded_vec_index->Query(
+        iterator_dataset, search_info, nullptr, nullptr, result);
+    EXPECT_EQ(result.total_nq_, 2);
+    EXPECT_EQ(result.seg_offsets_.size(), 2 * search_info.topk_);
+    EXPECT_TRUE(std::all_of(
+        result.seg_offsets_.begin(),
+        result.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 
     loaded_vec_index->CleanLocalData();
 }

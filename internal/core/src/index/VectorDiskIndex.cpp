@@ -73,6 +73,19 @@ struct DiskValidData {
     std::vector<uint8_t> bitmap;
 };
 
+class DiskEmptyVectorIterator : public knowhere::IndexNode::iterator {
+ public:
+    std::pair<int64_t, float>
+    Next() override {
+        throw std::runtime_error("empty vector iterator has no next result");
+    }
+
+    bool
+    HasNext() override {
+        return false;
+    }
+};
+
 template <typename LocalChunkManagerPtr>
 DiskValidData
 ReadDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
@@ -505,6 +518,30 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
+    if (IsAllNullNullable(offset_mapping_)) {
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        auto num_queries = dataset->GetRows();
+        if (offsets != nullptr) {
+            num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
+            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            auto total_vectors = static_cast<size_t>(dataset->GetRows());
+            AssertInfo(
+                offsets[num_queries] == total_vectors,
+                "embedding list query offsets are inconsistent with flattened "
+                "rows: nq={}, terminal_offset={}, rows={}",
+                num_queries,
+                offsets[num_queries],
+                total_vectors);
+        }
+        auto total_num = num_queries * topk;
+        search_result.seg_offsets_.assign(total_num, INVALID_SEG_OFFSET);
+        search_result.distances_.assign(total_num, 0.0F);
+        search_result.total_nq_ = num_queries;
+        search_result.unity_topK_ = topk;
+        return;
+    }
+
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         // set search list size
         if (CheckKeyInConfig(search_info.search_params_, DISK_ANN_QUERY_LIST)) {
@@ -575,12 +612,43 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
+    auto make_empty_iterators = [](int64_t num_queries) {
+        std::vector<knowhere::IndexNode::IteratorPtr> iterators;
+        iterators.reserve(num_queries);
+        for (int64_t i = 0; i < num_queries; ++i) {
+            iterators.emplace_back(
+                std::make_shared<DiskEmptyVectorIterator>());
+        }
+        return iterators;
+    };
+
+    if (IsAllNullNullable(offset_mapping_)) {
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        auto num_queries = dataset->GetRows();
+        if (offsets != nullptr) {
+            num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
+            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            auto total_vectors = static_cast<size_t>(dataset->GetRows());
+            AssertInfo(
+                offsets[num_queries] == total_vectors,
+                "embedding list query offsets are inconsistent with flattened "
+                "rows: nq={}, terminal_offset={}, rows={}",
+                num_queries,
+                offsets[num_queries],
+                total_vectors);
+        }
+        return make_empty_iterators(num_queries);
+    }
     return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
 
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
+    if (IsAllNullNullable(offset_mapping_)) {
+        return true;
+    }
     return index_.HasRawData(GetMetricType());
 }
 
