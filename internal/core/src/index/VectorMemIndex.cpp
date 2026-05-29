@@ -697,8 +697,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void
-VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),
@@ -786,7 +785,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         if (it == deferred_index_data_codecs.end()) {
             return nullptr;
         }
-        return AssembleIndexDataCodec(it->second);
+        return AssembleIndexDataCodec(std::move(it->second));
     };
     // load files in two parts:
     // 1. Emb-list sidecar files: written separately so knowhere can mmap them.

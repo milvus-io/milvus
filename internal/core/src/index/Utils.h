@@ -205,6 +205,9 @@ CompactIndexDatasByKey(
 std::unique_ptr<storage::DataCodec>
 AssembleIndexDataCodec(const IndexDataCodec& index_slices);
 
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(IndexDataCodec&& index_slices);
+
 void
 AssembleIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,

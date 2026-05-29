@@ -404,6 +404,18 @@ AssembleIndexDataCodec(const IndexDataCodec& index_slices) {
     return index_data;
 }
 
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(IndexDataCodec&& index_slices) {
+    AssertInfo(index_slices.size_ >= 0, "index data size is invalid");
+    if (index_slices.codecs_.size() == 1) {
+        auto index_data = std::move(index_slices.codecs_.front());
+        AssertInfo(index_data->PayloadSize() == index_slices.size_,
+                   "index len is inconsistent after disassemble and assemble");
+        return index_data;
+    }
+    return AssembleIndexDataCodec(index_slices);
+}
+
 void
 AssembleIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,
