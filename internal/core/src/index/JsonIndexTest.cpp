@@ -568,5 +568,6 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     auto stats = BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data,
                                                                   &valid_data);
     EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_count, 10);
     EXPECT_EQ(stats.null_count, 20);
 }

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -272,6 +273,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             // Try sliced files
             std::vector<std::string> sliced;
+            std::optional<std::string> slice_meta_file;
             for (auto& f : index_files) {
                 auto name = boost::filesystem::path(f).filename().string();
                 if (name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
@@ -279,10 +281,14 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     sliced.push_back(f);
                 }
                 if (name == INDEX_FILE_SLICE_META) {
-                    sliced.push_back(f);
+                    slice_meta_file = f;
                 }
             }
             if (!sliced.empty()) {
+                AssertInfo(
+                    slice_meta_file.has_value(),
+                    "non_exist_offset slices found but _meta_slice is missing");
+                sliced.push_back(slice_meta_file.value());
                 auto datas = this->file_manager_->LoadIndexToMemory(
                     sliced, load_priority);
                 auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
