@@ -98,6 +98,19 @@ struct ChunkManagerWrapper {
     const storage::ChunkManagerPtr cm_;
     std::unordered_set<std::string> written_;
 };
+
+struct FileSliceSizeGuard {
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+    int64_t old_slice_size_;
+};
 }  // namespace milvus::test
 
 template <typename T,
@@ -925,6 +938,11 @@ TEST(InvertedIndex, Naive) {
     test_run<double, DataType::DOUBLE, DataType::NONE, true>();
 
     test_string<true>();
+}
+
+TEST(InvertedIndex, LoadSlicedNullOffsets) {
+    milvus::test::FileSliceSizeGuard slice_size_guard(64);
+    test_run<int64_t, DataType::INT64, DataType::NONE, true>();
 }
 
 TEST(InvertedIndex, HasLackBinlogRows) {

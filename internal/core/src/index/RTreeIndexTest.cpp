@@ -110,6 +110,19 @@ CreateGeometryFromWkt(const std::string& wkt) {
     return geom;
 }
 
+struct FileSliceSizeGuard {
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(milvus::FILE_SLICE_SIZE.load()) {
+        milvus::FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        milvus::FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+    int64_t old_slice_size_;
+};
+
 // Helper: write an InsertData parquet file to "remote" storage managed by chunk_manager_
 static std::string
 WriteGeometryInsertFile(const milvus::storage::ChunkManagerPtr& cm,
@@ -547,6 +560,52 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
     ASSERT_EQ(rtree_load.Count(), 4);
+}
+
+TEST_F(RTreeIndexTest, LoadSlicedNullOffsets) {
+    FileSliceSizeGuard slice_size_guard(64);
+    field_meta_.field_schema.set_nullable(true);
+
+    constexpr size_t kRows = 24;
+    std::vector<std::string> geometries;
+    geometries.reserve(kRows);
+    for (size_t i = 0; i < kRows; ++i) {
+        if (i % 2 == 0) {
+            geometries.emplace_back();
+            continue;
+        }
+        geometries.emplace_back(CreateWkbFromWkt(
+            "POINT(" + std::to_string(i) + " " + std::to_string(i) + ")"));
+    }
+    constexpr size_t kNullCount = kRows / 2;
+
+    milvus::storage::FileManagerContext ctx(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx);
+
+    rtree.BuildWithStrings(geometries);
+    ASSERT_EQ(rtree.Count(), static_cast<int64_t>(kRows));
+
+    auto stats = rtree.Upload({});
+    auto index_files = stats->GetIndexFiles();
+    ASSERT_TRUE(std::any_of(
+        index_files.begin(), index_files.end(), [](const std::string& file) {
+            return boost::filesystem::path(file).filename().string() ==
+                   milvus::INDEX_FILE_SLICE_META;
+        }));
+
+    milvus::storage::FileManagerContext ctx_load(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    ctx_load.set_for_loading_index(true);
+    milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
+
+    nlohmann::json cfg;
+    cfg["index_files"] = index_files;
+    rtree_load.Load(milvus::tracer::TraceContext{}, cfg);
+
+    ASSERT_EQ(rtree_load.Count(), static_cast<int64_t>(kRows));
+    EXPECT_EQ(rtree_load.IsNull().count(), kNullCount);
+    EXPECT_EQ(rtree_load.IsNotNull().count(), kRows - kNullCount);
 }
 
 // The following two tests only test the coarse query (R-Tree) and not the exact query (GDAL)

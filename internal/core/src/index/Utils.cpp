@@ -42,6 +42,7 @@
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "index/Utils.h"
+#include "storage/IndexData.h"
 #include "knowhere/comp/index_param.h"
 #include "storage/Util.h"
 
@@ -308,7 +309,7 @@ CompactIndexDatas(
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-            auto data_len = 0;
+            size_t data_len = 0;
             index_file_slices.insert({prefix, IndexDataCodec{}});
             auto& index_data_codec = index_file_slices.at(prefix);
             for (auto i = 0; i < slice_num; ++i) {
@@ -380,6 +381,39 @@ CompactIndexDatasByKey(
                "index len is inconsistent after disassemble and assemble");
     index_data_codec.size_ = data_len;
     return index_data_codec;
+}
+
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(const IndexDataCodec& index_slices) {
+    AssertInfo(index_slices.size_ >= 0, "index data size is invalid");
+    auto index_size = index_slices.size_;
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[index_size]);
+    int64_t offset = 0;
+    for (const auto& index_slice : index_slices.codecs_) {
+        std::memcpy(buf.get() + offset,
+                    index_slice->PayloadData(),
+                    index_slice->PayloadSize());
+        offset += index_slice->PayloadSize();
+    }
+    AssertInfo(offset == index_size,
+               "index len is inconsistent after disassemble and assemble");
+
+    auto index_data =
+        std::make_unique<storage::IndexData>(buf.get(), index_size);
+    index_data->SetData(std::move(buf));
+    return index_data;
+}
+
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(IndexDataCodec&& index_slices) {
+    AssertInfo(index_slices.size_ >= 0, "index data size is invalid");
+    if (index_slices.codecs_.size() == 1) {
+        auto index_data = std::move(index_slices.codecs_.front());
+        AssertInfo(index_data->PayloadSize() == index_slices.size_,
+                   "index len is inconsistent after disassemble and assemble");
+        return index_data;
+    }
+    return AssembleIndexDataCodec(index_slices);
 }
 
 void
