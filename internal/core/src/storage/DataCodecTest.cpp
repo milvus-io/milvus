@@ -461,7 +461,7 @@ TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
         storage::NormalizeExternalArrow(list_array, non_nullable_meta));
 }
 
-TEST(storage, ExternalBinaryVectorListNormalizeFails) {
+TEST(storage, ExternalBinaryVectorListNormalizesToFixedSizeBinary) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
     auto& byte_builder =
@@ -476,7 +476,14 @@ TEST(storage, ExternalBinaryVectorListNormalizeFails) {
 
     auto field_meta = MakeExternalFieldMetaForTest(
         DataType::VECTOR_BINARY, DataType::NONE, false, 16);
-    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(list_array, field_meta));
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+
+    auto fsb_array =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(normalized);
+    ASSERT_EQ(fsb_array->byte_width(), 2);
+    const uint8_t expected[] = {0, 1};
+    EXPECT_EQ(memcmp(fsb_array->Value(0), expected, sizeof(expected)), 0);
 }
 
 TEST(storage, ExternalNullableVarCharBinaryPreservesNullCount) {

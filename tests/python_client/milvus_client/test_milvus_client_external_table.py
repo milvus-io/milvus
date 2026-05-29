@@ -58,9 +58,6 @@ from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 from utils.util_log import test_log as log
 
 REFRESH_POLL_INTERVAL_SECONDS = 2
-# Milvus currently rejects Vortex FixedSizeList<UInt8> byte-vector payloads.
-# TODO(https://github.com/milvus-io/milvus/issues/49828): enable these fields.
-VORTEX_FULL_MATRIX_EXCLUDED_FIELDS = ("bf16v", "binv_flat", "binv_ivf")
 
 ALLOWED_EXTERNAL_SOURCE_SCHEMES = (pytest.param("minio", id="minio"),)
 _PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
@@ -3543,7 +3540,6 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
             _full_matrix_arrow_columns(
                 FULL_MATRIX_NB,
                 0,
-                excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS,
                 vortex_compatible=True,
             )
         )
@@ -3553,15 +3549,12 @@ class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
             client,
             ext_url,
             ext_spec=build_external_spec(cfg, fmt="vortex"),
-            excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS,
         )
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        create_full_matrix_indexes(self, client, coll, excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS)
+        create_full_matrix_indexes(self, client, coll)
         self.load_collection(client, coll)
-        _full_matrix_assert_basic(
-            self, client, coll, FULL_MATRIX_NB, excluded_fields=VORTEX_FULL_MATRIX_EXCLUDED_FIELDS
-        )
+        _full_matrix_assert_basic(self, client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_full_matrix_iceberg(self, minio_env, external_prefix):
