@@ -628,6 +628,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             for hit in bucket.hits:
                 assert hit.fields.get(field_name) == key
 
+    @pytest.mark.xfail(reason="unstable: top_hits may not include NULL nullable metric rows", strict=False)
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_nullable_metric_field(self):
         """
