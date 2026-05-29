@@ -248,7 +248,8 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
         auto num_queries = dataset->GetRows();
         if (offsets != nullptr) {
             num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
-            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            AssertInfo(num_queries > 0,
+                       "embedding list query count is missing");
             auto total_vectors = static_cast<size_t>(dataset->GetRows());
             AssertInfo(
                 offsets[num_queries] == total_vectors,
@@ -262,12 +263,23 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
     }
 
     if (IsEmptyEmbListIndex()) {
-        auto metric_type = conf.value(knowhere::meta::METRIC_TYPE,
-                                      std::string(GetMetricType()));
-        if (!knowhere::get_el_metric_type(metric_type).has_value()) {
-            auto num_queries = dataset->GetRows();
-            return make_empty_iterators(num_queries);
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        auto num_queries = dataset->GetRows();
+        if (offsets != nullptr) {
+            num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
+            AssertInfo(num_queries > 0,
+                       "embedding list query count is missing");
+            auto total_vectors = static_cast<size_t>(dataset->GetRows());
+            AssertInfo(
+                offsets[num_queries] == total_vectors,
+                "embedding list query offsets are inconsistent with flattened "
+                "rows: nq={}, terminal_offset={}, rows={}",
+                num_queries,
+                offsets[num_queries],
+                total_vectors);
         }
+        return make_empty_iterators(num_queries);
     }
     return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
@@ -806,6 +818,9 @@ VectorMemIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorMemIndex<T>::IsIndexRefineEnabled() const {
+    if (IsAllNullNullable(offset_mapping_) || IsEmptyEmbListIndex()) {
+        return false;
+    }
     return index_.IsIndexRefineEnabled();
 }
 
@@ -884,8 +899,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void
-VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),

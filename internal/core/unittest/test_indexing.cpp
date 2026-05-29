@@ -42,6 +42,7 @@
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
+#include "exec/operator/Utils.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -60,6 +61,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
@@ -903,6 +905,7 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
+    EXPECT_FALSE(vec_index->IsIndexRefineEnabled());
 
     auto create_index_result = index->Upload();
     ASSERT_GT(create_index_result->GetSerializedSize(), 0);
@@ -924,6 +927,7 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
     EXPECT_TRUE(loaded_vec_index->HasRawData());
+    EXPECT_FALSE(loaded_vec_index->IsIndexRefineEnabled());
 
     std::vector<float> iterator_queries(2 * dim, 0.1F);
     auto iterator_dataset =
@@ -951,10 +955,51 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         emb_list_iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
     ASSERT_EQ(emb_list_iterators.value().size(), 4);
+    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
+                            emb_list_iterators.value().end(),
+                            [](const auto& iter) { return !iter->HasNext(); }));
+
+    milvus::SearchInfo iterator_search_info;
+    iterator_search_info.topk_ = 3;
+    iterator_search_info.metric_type_ = metric_type;
+    iterator_search_info.search_params_ =
+        milvus::Config{{knowhere::meta::METRIC_TYPE, metric_type}};
+    iterator_search_info.iterative_filter_execution = true;
+    SearchResult iterator_search_result;
+    EXPECT_TRUE(
+        milvus::exec::PrepareVectorIteratorsFromIndex(iterator_search_info,
+                                                      4,
+                                                      emb_list_iterator_dataset,
+                                                      iterator_search_result,
+                                                      nullptr,
+                                                      *loaded_vec_index));
+    EXPECT_EQ(iterator_search_result.total_nq_, 4);
+    EXPECT_EQ(iterator_search_result.unity_topK_, iterator_search_info.topk_);
+
+    iterator_search_info.iterative_filter_execution = false;
+    iterator_search_info.iterator_v2_info_ =
+        milvus::SearchIteratorV2Info{"", 2};
+    std::vector<float> cached_iterator_queries(3 * dim, 0.1F);
+    auto cached_iterator_dataset =
+        knowhere::GenDataSet(3, dim, cached_iterator_queries.data());
+    std::vector<size_t> cached_iterator_offsets = {0, 3};
+    cached_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_OFFSET,
+        const_cast<const size_t*>(cached_iterator_offsets.data()));
+    cached_iterator_dataset->Set(knowhere::meta::NQ, int64_t{1});
+    milvus::query::CachedSearchIterator cached_iter(*loaded_vec_index,
+                                                    cached_iterator_dataset,
+                                                    iterator_search_info,
+                                                    nullptr);
+    SearchResult cached_result;
+    ASSERT_NO_THROW(cached_iter.NextBatch(iterator_search_info, cached_result));
+    EXPECT_EQ(cached_result.total_nq_, 1);
+    EXPECT_EQ(cached_result.unity_topK_, 2);
+    EXPECT_EQ(cached_result.seg_offsets_.size(), 2);
     EXPECT_TRUE(std::all_of(
-        emb_list_iterators.value().begin(),
-        emb_list_iterators.value().end(),
-        [](const auto& iter) { return !iter->HasNext(); }));
+        cached_result.seg_offsets_.begin(),
+        cached_result.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 
     std::vector<float> query(dim, 0.1F);
     auto xq_dataset = knowhere::GenDataSet(1, dim, query.data());
@@ -1081,6 +1126,26 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         loaded_vec_index->GetEmbListByIds(ids_ds, metric_type);
     EXPECT_TRUE(raw_data.empty());
     EXPECT_EQ(offsets, std::vector<size_t>({0, 0, 0, 0}));
+
+    std::vector<float> emb_list_iterator_queries(3 * dim, 0.1F);
+    auto emb_list_iterator_dataset =
+        knowhere::GenDataSet(3, dim, emb_list_iterator_queries.data());
+    std::vector<size_t> emb_list_iterator_offsets = {0, 2, 3, 3, 3};
+    emb_list_iterator_dataset->Set(
+        knowhere::meta::EMB_LIST_OFFSET,
+        const_cast<const size_t*>(emb_list_iterator_offsets.data()));
+    emb_list_iterator_dataset->Set(knowhere::meta::NQ, int64_t{4});
+    auto emb_list_iterator_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::indexparam::EF, 10},
+    };
+    auto emb_list_iterators = loaded_vec_index->VectorIterators(
+        emb_list_iterator_dataset, emb_list_iterator_conf, nullptr);
+    ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
+    ASSERT_EQ(emb_list_iterators.value().size(), 4);
+    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
+                            emb_list_iterators.value().end(),
+                            [](const auto& iter) { return !iter->HasNext(); }));
 
     std::vector<float> query(dim, 0.1F);
     auto xq_dataset = knowhere::GenDataSet(1, dim, query.data());
@@ -1720,6 +1785,7 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_EQ(vec_index->GetValidCount(), 0);
     EXPECT_EQ(vec_index->Count(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
+    EXPECT_FALSE(vec_index->IsIndexRefineEnabled());
 
     auto create_index_result = index->Upload();
     ASSERT_GT(create_index_result->GetSerializedSize(), 0);
@@ -1742,6 +1808,7 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
     EXPECT_EQ(loaded_vec_index->GetValidCount(), 0);
     EXPECT_EQ(loaded_vec_index->Count(), 0);
     EXPECT_TRUE(loaded_vec_index->HasRawData());
+    EXPECT_FALSE(loaded_vec_index->IsIndexRefineEnabled());
 
     std::vector<float> iterator_queries(2 * dim, 0.1F);
     auto iterator_dataset =

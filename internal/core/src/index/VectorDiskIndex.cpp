@@ -524,7 +524,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
         auto num_queries = dataset->GetRows();
         if (offsets != nullptr) {
             num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
-            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            AssertInfo(num_queries > 0,
+                       "embedding list query count is missing");
             auto total_vectors = static_cast<size_t>(dataset->GetRows());
             AssertInfo(
                 offsets[num_queries] == total_vectors,
@@ -616,8 +617,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         std::vector<knowhere::IndexNode::IteratorPtr> iterators;
         iterators.reserve(num_queries);
         for (int64_t i = 0; i < num_queries; ++i) {
-            iterators.emplace_back(
-                std::make_shared<DiskEmptyVectorIterator>());
+            iterators.emplace_back(std::make_shared<DiskEmptyVectorIterator>());
         }
         return iterators;
     };
@@ -628,7 +628,8 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         auto num_queries = dataset->GetRows();
         if (offsets != nullptr) {
             num_queries = dataset->Get<int64_t>(knowhere::meta::NQ);
-            AssertInfo(num_queries > 0, "embedding list query count is missing");
+            AssertInfo(num_queries > 0,
+                       "embedding list query count is missing");
             auto total_vectors = static_cast<size_t>(dataset->GetRows());
             AssertInfo(
                 offsets[num_queries] == total_vectors,
@@ -655,6 +656,9 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
+    if (IsAllNullNullable(offset_mapping_)) {
+        return false;
+    }
     return index_.IsIndexRefineEnabled();
 }
 
