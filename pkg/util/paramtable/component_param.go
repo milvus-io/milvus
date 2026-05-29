@@ -7166,8 +7166,8 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALAppendBatchSmallMessageThreshold = ParamItem{
 		Key:          "streaming.walAppendBatch.smallMessageThreshold",
 		Version:      "2.6.18",
-		Doc:          "The max total estimated size of one vchannel DML message group eligible for client-side append batching.",
-		DefaultValue: "64k",
+		Doc:          "The max total estimated size of one vchannel DML message group eligible for client-side append batching. Set to 0 to disable append batching.",
+		DefaultValue: "0",
 		Export:       false,
 	}
 	p.WALAppendBatchSmallMessageThreshold.Init(base.mgr)
@@ -7202,7 +7202,7 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALAppendBatchCooldownThreshold = ParamItem{
 		Key:          "streaming.walAppendBatch.cooldownThreshold",
 		Version:      "2.6.18",
-		Doc:          "The consecutive timer flush count with only one DML message before client-side append batching enters cooldown.",
+		Doc:          "The consecutive flush count with messages from only one AppendMessages request before client-side append batching enters cooldown.",
 		DefaultValue: "3",
 		Export:       false,
 	}

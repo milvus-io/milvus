@@ -103,6 +103,9 @@ func (u *walAccesserImpl) appendVChannelMessages(ctx context.Context, msgs ...me
 	if len(msgs) == 0 {
 		return types.AppendResponse{}
 	}
+	// A merged append batch is committed as one WAL transaction, so all batched
+	// callers share the same commit result. The win is amortizing producer
+	// reservation and scheduling overhead, not reducing the number of WAL entries.
 	resp := u.appendToVChannel(ctx, msgs[0].VChannel(), msgs...)
 	if len(resp.Responses) == 0 {
 		return types.AppendResponse{}

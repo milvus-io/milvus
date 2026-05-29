@@ -14,17 +14,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestNewAppendBatchConfigFromParams(t *testing.T) {
 	cfg := newAppendBatchConfigFromParams()
-	assert.Equal(t, 64*1024, cfg.SmallMessageThreshold)
+	assert.Equal(t, 0, cfg.SmallMessageThreshold)
 	assert.Equal(t, 1024*1024, cfg.MaxBatchSize)
 	assert.Equal(t, 64, cfg.MaxMessageCount)
 	assert.Equal(t, 5*time.Millisecond, cfg.MaxDelay)
 	assert.Equal(t, 3, cfg.CooldownThreshold)
 	assert.Equal(t, 10*time.Second, cfg.CooldownDuration)
-	assert.True(t, cfg.enabled())
+	assert.False(t, cfg.enabled())
 }
 
 func TestAppendBatchConfigProviderCachesLoadedConfig(t *testing.T) {
@@ -76,6 +77,19 @@ func TestAppendBatchConfigProviderLogsOnlyChangedConfig(t *testing.T) {
 	fields := entries[0].ContextMap()
 	assert.Equal(t, oldCfg, fields["oldConfig"])
 	assert.Equal(t, cfg, fields["newConfig"])
+}
+
+func TestAppendBatchConfigProviderCloseUnregistersCallback(t *testing.T) {
+	unregisterCount := 0
+	provider := newAppendBatchConfigProvider(appendBatchTestConfig, func(paramtable.ParamChangeCallback) func() {
+		return func() {
+			unregisterCount++
+		}
+	})
+
+	provider.close()
+	provider.close()
+	assert.Equal(t, 1, unregisterCount)
 }
 
 func TestAppendBatcherSubmitClosedAndCanceled(t *testing.T) {
@@ -156,6 +170,23 @@ func TestAppendBatcherUsesDynamicConfig(t *testing.T) {
 	assert.Equal(t, 2, <-appended)
 	assert.NoError(t, (<-respCh1).Error)
 	assert.NoError(t, (<-respCh2).Error)
+}
+
+func TestAppendBatcherPropagatesFlushErrorToAllRequests(t *testing.T) {
+	batchErr := errors.New("batch failed")
+	cfg := appendBatchTestConfig()
+	cfg.MaxMessageCount = 2
+	batcher := newAppendBatcher(vChannel1, func() appendBatchConfig {
+		return cfg
+	}, func(context.Context, ...message.MutableMessage) types.AppendResponse {
+		return types.AppendResponse{Error: batchErr}
+	})
+
+	respCh1 := batcher.submit(context.Background(), newInsertMessage(vChannel1))
+	respCh2 := batcher.submit(context.Background(), newInsertMessage(vChannel1))
+
+	assert.ErrorIs(t, (<-respCh1).Error, batchErr)
+	assert.ErrorIs(t, (<-respCh2).Error, batchErr)
 }
 
 func TestAppendBatchContextCancelsOnlyWhenAllRequestsDone(t *testing.T) {
