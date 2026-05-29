@@ -1181,6 +1181,10 @@ func (coord *MixCoordMock) CreateRole(ctx context.Context, req *milvuspb.CreateR
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }

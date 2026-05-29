@@ -211,6 +211,86 @@ func TestRbacCreateRole(t *testing.T) {
 	}
 }
 
+func TestRbacAlterRoleDescription(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	roleName := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "old description",
+	})
+	require.NoError(t, err)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "new description",
+	})
+	require.NoError(t, err)
+
+	roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+	require.NoError(t, err)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "new description", roles[0].GetRole().GetDescription())
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        "role_not_exist",
+		Description: "ignored",
+	})
+	require.ErrorIs(t, err, errRoleNotExists)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        util.RoleAdmin,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    util.RolePublic,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestRbacRoleDescriptionLengthLimit(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+	err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc_limit_create",
+			Description: "12345",
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role_desc_limit_alter"})
+	require.NoError(t, err)
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc_limit_alter",
+		Description: "12345",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CheckIfRBACRestorable(context.TODO(), &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{
+				{
+					Name:        "role_desc_limit_restore",
+					Description: "12345",
+				},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
 func TestRbacDropRole(t *testing.T) {
 	mt := generateMetaTable(t)
 

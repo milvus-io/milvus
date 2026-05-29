@@ -165,6 +165,7 @@ service RootCoord {
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
     rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
+    rpc AlterRole(milvus.AlterRoleRequest) returns (common.Status) {}
     rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
     rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
     rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}

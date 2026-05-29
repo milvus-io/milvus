@@ -639,6 +639,10 @@ func (m *mockMixCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleR
 	panic("implement me")
 }
 
+func (m *mockMixCoord) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }

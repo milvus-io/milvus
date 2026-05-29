@@ -1577,6 +1577,17 @@ func ValidateRoleName(entity string) error {
 	return validateNameWithCustomChars(entity, "role name", Params.ProxyCfg.RoleNameValidationAllowedChars.GetValue())
 }
 
+func ValidateRoleDescription(description string) error {
+	maxLength := Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt()
+	if len(description) > maxLength {
+		return merr.WrapErrParameterInvalidRange(0,
+			maxLength,
+			len(description),
+			"the length of role description must be not greater than limit")
+	}
+	return nil
+}
+
 func IsDefaultRole(roleName string) bool {
 	for _, defaultRole := range util.DefaultRoles {
 		if defaultRole == roleName {

@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+
 	federpb "github.com/milvus-io/milvus-proto/go-api/v3/federpb"
 
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -15,7 +17,6 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	proxypb "github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 
 	types "github.com/milvus-io/milvus/internal/types"
@@ -856,6 +857,65 @@ func (_c *MockProxy_AlterIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *Mo
 }
 
 func (_c *MockProxy_AlterIndex_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterIndexRequest) (*commonpb.Status, error)) *MockProxy_AlterIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterRole provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterRole(_a0 context.Context, _a1 *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterRoleRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type MockProxy_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterRoleRequest
+func (_e *MockProxy_Expecter) AlterRole(_a0 interface{}, _a1 interface{}) *MockProxy_AlterRole_Call {
+	return &MockProxy_AlterRole_Call{Call: _e.mock.On("AlterRole", _a0, _a1)}
+}
+
+func (_c *MockProxy_AlterRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterRoleRequest)) *MockProxy_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterRoleRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AlterRole_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AlterRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AlterRole_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)) *MockProxy_AlterRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
