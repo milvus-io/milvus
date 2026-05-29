@@ -158,3 +158,24 @@ TEST(UtilIndex, AssembleIndexDataCodecConcatenatesSlices) {
                     assembled->PayloadSize()),
         "hello world");
 }
+
+TEST(UtilIndex, AssembleIndexDataCodecMovesSingleSlice) {
+    std::string slice = "hello";
+    auto data = std::shared_ptr<uint8_t[]>(new uint8_t[slice.size()]);
+    std::memcpy(data.get(), slice.data(), slice.size());
+    auto index_data =
+        std::make_unique<storage::IndexData>(data.get(), slice.size());
+    index_data->SetData(std::move(data));
+
+    auto* original_codec = index_data.get();
+    IndexDataCodec codec;
+    codec.size_ = slice.size();
+    codec.codecs_.push_back(std::move(index_data));
+
+    auto assembled = AssembleIndexDataCodec(std::move(codec));
+    EXPECT_EQ(assembled.get(), original_codec);
+    EXPECT_EQ(
+        std::string(reinterpret_cast<const char*>(assembled->PayloadData()),
+                    assembled->PayloadSize()),
+        slice);
+}
