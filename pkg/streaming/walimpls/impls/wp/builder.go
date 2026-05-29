@@ -80,7 +80,8 @@ func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
 
 func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
 	// set the rootPath as the prefix for wp object storage
-	wpConfig.Woodpecker.Meta.Prefix = fmt.Sprintf("%s/wp", paramtable.Get().EtcdCfg.RootPath.GetValue())
+	wpConfig.Woodpecker.Meta.Prefix = paramtable.Get().WoodpeckerCfg.MetaPrefix.GetValue()
+	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds())
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
