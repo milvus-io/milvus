@@ -2919,9 +2919,9 @@ type SegmentInfo struct {
 	// and binlog.TimestampFrom/TimestampTo for all temporal decisions (delete
 	// filtering, snapshot visibility, compaction selection, GC).
 	// Zero means normal segment.
-	// Propagated through compaction (max of input segments) because no compaction
-	// type rewrites row timestamps — stale rows always need commit_ts protection
-	// until TTL naturally expires using max(row_ts, commit_ts).
+	// Non-L0 compaction normalizes import/CDC segments by rewriting output row
+	// timestamps to commit_timestamp, then clears this field back to 0. L0 delete
+	// compaction is excluded because it only compacts delete logs.
 	CommitTimestamp uint64 `protobuf:"varint,36,opt,name=commit_timestamp,json=commitTimestamp,proto3" json:"commit_timestamp,omitempty"`
 }
 
